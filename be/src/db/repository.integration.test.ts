@@ -179,4 +179,15 @@ describe('index batch repository', () => {
     await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
     expect(await repository.getObservedBlocks(4663, 100n, 100n)).toEqual([{ number: 100n, hash: blockHash }]);
   });
+
+  it('preserves V3 price rationals larger than uint256 amounts', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const data = batch(4663, 'test-a');
+    data.trades[0].priceNumeratorRaw = 10n ** 100n;
+    data.trades[0].priceDenominatorRaw = 10n ** 90n;
+    await repository.saveIndexBatch('test-a', 100n, 100n, data);
+    const result = await pool.query('SELECT price_numerator_raw, price_denominator_raw FROM trades');
+    expect(result.rows[0].price_numerator_raw).toBe((10n ** 100n).toString());
+    expect(result.rows[0].price_denominator_raw).toBe((10n ** 90n).toString());
+  });
 });

@@ -81,8 +81,8 @@ export const trades = pgTable('trades', {
   quoteAssetAddress: text('quote_asset_address').notNull(),
   sourceEvent: text('source_event').notNull(),
   sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
-  priceNumeratorRaw: numeric('price_numerator_raw', { precision: 78, scale: 0 }),
-  priceDenominatorRaw: numeric('price_denominator_raw', { precision: 78, scale: 0 }),
+  priceNumeratorRaw: text('price_numerator_raw'),
+  priceDenominatorRaw: text('price_denominator_raw'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
   index('trades_token_block_idx').on(table.chainId, table.tokenAddress, table.blockNumber),

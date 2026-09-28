@@ -22,6 +22,13 @@
       "when": 1790600190516,
       "tag": "0002_brief_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790600704981,
+      "tag": "0003_glorious_frank_castle",
+      "breakpoints": true
     }
   ]
 }
