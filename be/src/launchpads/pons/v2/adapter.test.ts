@@ -1,0 +1,157 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { type Address, type Hash } from 'viem';
+import { getPonsFactorySources } from '../sourceRegistry.js';
+import { createRobinhoodPublicClient } from '../../../chains/robinhood.js';
+import type { RpcLog } from '../v1/adapter.js';
+import { decodeV2Launch, hydrateV2Launch, decodeCurveTrade, decodeV2CurveBatch, decodeV2FactoryBatch, resolveV2QuoteAsset, phaseToLifecycle, readV2LaunchRecord, readV2Phase, readV2TokenMetadata, type V2LaunchRecord, type V2ReadClient } from './adapter.js';
+import { replayCurveEvent } from './curve.js';
+
+const sourceFixtures = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-launches.json', import.meta.url), 'utf8')) as Array<Record<string, unknown>>;
+const reference = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-reference.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+const factory = getPonsFactorySources()[2];
+
+function asLog(raw: Record<string, unknown>): RpcLog {
+  return {
+    address: raw.address as Address,
+    topics: raw.topics as Hash[],
+    data: raw.data as Hash,
+    blockNumber: BigInt(raw.blockNumber as number | string),
+    blockHash: raw.blockHash as Hash,
+    transactionHash: (raw.transactionHash ?? raw.txHash) as Hash,
+    logIndex: Number(raw.logIndex),
+  };
+}
+
+const launchLog = asLog(sourceFixtures[2]);
+const record: V2LaunchRecord = {
+  token: reference.tokenAddress as Address,
+  curve: reference.curveAddress as Address,
+  deployer: '0x495c5f25cb41419d504e598801ef078fd9d0480b',
+  pairToken: reference.quoteAddress as Address,
+  phase: 0,
+  exists: true,
+};
+const metadata = { name: reference.tokenName as string, symbol: reference.tokenSymbol as string, decimals: 18 };
+const quote = { address: reference.quoteAddress as Address, symbol: 'NVDA', decimals: 18 };
+
+describe('pons v2 launch and phase', () => {
+  it('decodes a real factory launch and checks its canonical curve record', () => {
+    const event = decodeV2Launch(launchLog, factory);
+    const { launch, venue } = hydrateV2Launch(event, factory, record, metadata, quote);
+    expect(event.curveAddress).toBe(reference.curveAddress);
+    expect(launch.protocolVersion).toBe('v2');
+    expect(launch.quoteAsset.address).toBe(reference.quoteAddress);
+    expect(venue.kind).toBe('curve');
+    expect(venue.ref).toBe(reference.curveAddress);
+  });
+
+  it('rejects a copied token address without the canonical factory log', () => {
+    expect(() => decodeV2Launch({ ...launchLog, address: record.curve }, factory)).toThrow(/factory/i);
+  });
+
+  it('does not invent a pool in the swept phase and distinguishes rescue', () => {
+    const event = decodeV2Launch(launchLog, factory);
+    const swept = hydrateV2Launch(event, factory, { ...record, phase: 1 }, metadata, quote);
+    const rescued = hydrateV2Launch(event, factory, { ...record, phase: 3 }, metadata, quote);
+    expect(swept.launch.lifecycleStatus).toBe('swept');
+    expect(swept.venue.kind).toBe('curve');
+    expect(rescued.launch.lifecycleStatus).toBe('rescued');
+    expect(phaseToLifecycle(2)).toBe('graduated');
+  });
+
+  it('reads a six-decimal ERC-20 quote asset instead of assuming ETH units', async () => {
+    const pairToken = '0x0000000000000000000000000000000000000002' as Address;
+    const asset = await resolveV2QuoteAsset(pairToken, { readContract: async ({ functionName }: { functionName: string }) => functionName === 'symbol' ? 'USDC' : 6 });
+    expect(asset).toEqual({ address: pairToken, symbol: 'USDC', decimals: 6 });
+  });
+
+  it('represents a native quote asset as ETH without a contract read', async () => {
+    const asset = await resolveV2QuoteAsset('0x0000000000000000000000000000000000000000', {
+      readContract: async () => { throw new Error('Native ETH has no ERC-20 contract'); },
+    });
+    expect(asset).toEqual({ address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', decimals: 18 });
+  });
+
+  it('reads launch token metadata from the token contract', async () => {
+    const client = { readContract: async ({ functionName }: { functionName: string }) => ({ name: reference.tokenName, symbol: reference.tokenSymbol, decimals: 18 })[functionName] };
+    expect(await readV2TokenMetadata(client, record.token)).toEqual(metadata);
+  });
+
+  it('accepts the actual Robinhood viem client for factory state reads', () => {
+    const client: V2ReadClient = createRobinhoodPublicClient('https://rpc.mainnet.chain.robinhood.com');
+    expect(client.readContract).toBeTypeOf('function');
+  });
+
+  it('reads the factory record and authoritative phase at a requested block', async () => {
+    const calls: Array<{ functionName: string; blockNumber?: bigint }> = [];
+    const client = { readContract: async (parameters: { functionName: string; blockNumber?: bigint }) => {
+      calls.push(parameters);
+      return { ...record, phase: 1 };
+    } };
+    const fetched = await readV2LaunchRecord(client, factory.factory, record.token, 27027321n);
+    expect(fetched.curve.toLowerCase()).toBe(record.curve.toLowerCase());
+    expect(await readV2Phase(client, factory.factory, record.token, 27027321n)).toBe(1);
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call) => call.functionName === 'getLaunchedToken' && call.blockNumber === 27027321n)).toBe(true);
+  });
+
+  it('emits the real launch, curve and raw-log provenance as one batch', async () => {
+    const batch = await decodeV2FactoryBatch([launchLog], factory, async () => ({ record, metadata, quoteAsset: quote }));
+    expect(batch.launches).toHaveLength(1);
+    expect(batch.venues).toHaveLength(1);
+    expect(batch.rawLogs).toHaveLength(1);
+    expect(batch.launches[0].sourceLogId).toBe(batch.venues[0].sourceLogId);
+    expect(batch.rawLogs[0].sourceId).toBe('pons-v2');
+  });
+});
+
+describe('pons v2 curve trades', () => {
+  const context = () => hydrateV2Launch(decodeV2Launch(launchLog, factory), factory, record, metadata, quote);
+
+  it('uses actual filled amounts from real buy and sell events', () => {
+    const { launch, venue } = context();
+    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000);
+    const sell = decodeCurveTrade(asLog(reference.sell as Record<string, unknown>), launch, venue, 1_700_000_010);
+    expect(buy.side).toBe('buy');
+    expect(buy.quoteAmountRaw).toBe(28_716_771_876_358_226n);
+    expect(buy.tokenAmountRaw).toBeGreaterThan(0n);
+    expect(sell.side).toBe('sell');
+    expect(sell.tokenAmountRaw).toBeGreaterThan(0n);
+    expect(sell.quoteAmountRaw).toBeGreaterThan(0n);
+    expect(buy.priceNumeratorRaw).toBeNull();
+  });
+
+  it('counts a filled buy once and excludes other curve logs from volume', async () => {
+    const { launch, venue } = context();
+    const buyLog = asLog(reference.buy as Record<string, unknown>);
+    const otherLog: RpcLog = {
+      ...buyLog,
+      logIndex: buyLog.logIndex + 1,
+      topics: ['0x9f4cd7c4ed99d08a797804560c9c5d71d2cf7e101f2e3b5e7d1ca8a24c370e4f'],
+      data: '0x',
+    };
+    const batch = await decodeV2CurveBatch([buyLog, otherLog], 'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000);
+    expect(batch.trades).toHaveLength(1);
+    expect(batch.trades[0].quoteAmountRaw).toBe(28_716_771_876_358_226n);
+    expect(batch.rawLogs).toHaveLength(2);
+  });
+
+  it('uses post-trade reserves for price and scales by quote decimals', () => {
+    const { launch, venue } = context();
+    launch.quoteAsset = { address: launch.quoteAsset.address, symbol: 'USDC', decimals: 6 };
+    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000, { quote: 2_000_000n, token: 10n ** 18n });
+    expect(buy.priceNumeratorRaw).toBe(2_000_000n * 10n ** 18n);
+    expect(buy.priceDenominatorRaw).toBe(10n ** 18n * 10n ** 6n);
+  });
+
+  it('replays net reserves after fees rather than gross buyer spend', () => {
+    const next = replayCurveEvent({ quote: 1_000n, token: 10_000n }, { side: 'buy', quoteAmountRaw: 100n, tokenAmountRaw: 500n, feeRaw: 3n, taxRaw: 2n });
+    expect(next).toEqual({ quote: 1_095n, token: 9_500n });
+  });
+
+  it('subtracts gross quote output and fees after a sell', () => {
+    const next = replayCurveEvent({ quote: 1_000n, token: 10_000n }, { side: 'sell', quoteAmountRaw: 90n, tokenAmountRaw: 500n, feeRaw: 5n, taxRaw: 5n });
+    expect(next).toEqual({ quote: 900n, token: 10_500n });
+  });
+});
