@@ -101,3 +101,11 @@ export const candles = pgTable('candles', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart] }),
 ]);
+
+export const observedBlocks = pgTable('observed_blocks', {
+  chainId: integer('chain_id').notNull(),
+  number: bigint('number', { mode: 'bigint' }).notNull(),
+  hash: text('hash').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.number] }),
+]);

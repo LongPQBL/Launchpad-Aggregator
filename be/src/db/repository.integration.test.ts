@@ -83,7 +83,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await pool.query('TRUNCATE TABLE trades, venues, launches, raw_logs, candles, sources RESTART IDENTITY CASCADE');
+  await pool.query('TRUNCATE TABLE trades, venues, launches, raw_logs, candles, observed_blocks, sources RESTART IDENTITY CASCADE');
 });
 
 afterAll(async () => {
@@ -161,5 +161,22 @@ describe('index batch repository', () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await expect(repository.saveIndexBatch('test-a', 100n, 100n, batch(56, 'test-a'))).rejects.toThrow(/chain/i);
     expect((await repository.getCursor('test-a')).scannedToBlock).toBe(99n);
+  });
+
+  it('replaces observed block hashes after a reorg', async () => {
+    const replacement = `0x${'7'.repeat(64)}` as Hash;
+    await repository.recordObservedBlock(4663, 108n, blockHash);
+    await repository.recordObservedBlock(4663, 109n, blockHash);
+    expect((await repository.getObservedBlocks(4663, 108n, 109n)).map((block) => block.hash)).toEqual([blockHash, blockHash]);
+    await repository.retractBlocks(4663, 109n);
+    expect((await repository.getObservedBlocks(4663, 108n, 109n)).map((block) => block.number)).toEqual([108n]);
+    await repository.recordObservedBlock(4663, 109n, replacement);
+    expect((await repository.getObservedBlocks(4663, 109n, 109n))[0].hash).toBe(replacement);
+  });
+
+  it('uses raw log block hashes to find the earliest reorged data block', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
+    expect(await repository.getObservedBlocks(4663, 100n, 100n)).toEqual([{ number: 100n, hash: blockHash }]);
   });
 });

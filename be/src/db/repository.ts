@@ -1,9 +1,10 @@
-import { and, eq, gte, ne, sql } from 'drizzle-orm';
-import type { Address } from 'viem';
+import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import type { Address, Hash } from 'viem';
 import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
+import type { ObservedBlock } from '../indexer/reorg.js';
 import type { Database } from './client.js';
-import { candles, launches, rawLogs, sources, trades, venues } from './schema.js';
+import { candles, launches, observedBlocks, rawLogs, sources, trades, venues } from './schema.js';
 
 export interface SourceRegistration {
   id: string;
@@ -155,6 +156,7 @@ export function createRepository(db: Database) {
         await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
         await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
         await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
+        await tx.delete(observedBlocks).where(and(eq(observedBlocks.chainId, chainId), gte(observedBlocks.number, fromBlock)));
         await tx.delete(candles).where(eq(candles.chainId, chainId));
         await tx.update(sources).set({
           scannedToBlock: sql`LEAST(${sources.scannedToBlock}, ${fromBlock - 1n})`,
@@ -162,6 +164,28 @@ export function createRepository(db: Database) {
           status: 'backfilling',
         }).where(and(eq(sources.chainId, chainId), gte(sources.scannedToBlock, fromBlock)));
       });
+    },
+
+    async recordObservedBlock(chainId: number, number: bigint, hash: Hash): Promise<void> {
+      await db.insert(observedBlocks).values({ chainId, number, hash: hash.toLowerCase() }).onConflictDoNothing();
+    },
+
+    async getObservedBlocks(chainId: number, fromBlock: bigint, toBlock: bigint): Promise<ObservedBlock[]> {
+      const rows = await db.select().from(observedBlocks).where(and(
+        eq(observedBlocks.chainId, chainId),
+        gte(observedBlocks.number, fromBlock),
+        lte(observedBlocks.number, toBlock),
+      )).orderBy(observedBlocks.number);
+      const rawRows = await db.select({ number: rawLogs.blockNumber, hash: rawLogs.blockHash }).from(rawLogs).where(and(
+        eq(rawLogs.chainId, chainId),
+        gte(rawLogs.blockNumber, fromBlock),
+        lte(rawLogs.blockNumber, toBlock),
+      ));
+      const byNumber = new Map<string, ObservedBlock>();
+      for (const row of [...rows, ...rawRows]) {
+        byNumber.set(row.number.toString(), { number: row.number, hash: row.hash as Hash });
+      }
+      return [...byNumber.values()].sort((a, b) => a.number < b.number ? -1 : a.number > b.number ? 1 : 0);
     },
 
     async listPendingSources(): Promise<IndexedSource[]> {
