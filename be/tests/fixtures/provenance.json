@@ -1,0 +1,24 @@
+{
+  "chainId": 4663,
+  "rpcUrl": "https://rpc.mainnet.chain.robinhood.com",
+  "checkedOn": "2026-09-28",
+  "v1LegacyStartBlock": {
+    "blockNumber": 8600612,
+    "source": "https://docs.ponsfamily.com/"
+  },
+  "v1ActiveStartBlock": {
+    "blockNumber": 8991118,
+    "source": "https://docs.ponsfamily.com/"
+  },
+  "v2Deployment": {
+    "blockNumber": 26841846,
+    "transactionHash": "0x3817f297aa7c2ef78789bffac57491ceedc218fef962d47ed36c272699deddeb",
+    "explorerUrl": "https://robinscanner.com/addresses/0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e?tab=contract",
+    "rpcReceiptContractAddress": "0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e",
+    "rpcReceiptStatus": "0x1"
+  },
+  "historicalState": {
+    "publicRpc": "unavailable for eth_getCode at old blocks",
+    "impact": "Archived historical state reads need an archive provider; historical eth_getLogs and transaction receipts were accessible in spot checks."
+  }
+}

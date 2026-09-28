@@ -7,16 +7,19 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "audit:sources": "tsx src/cli/auditSources.ts"
   },
   "dependencies": {
     "viem": "^2.56.9"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
+    "@types/node": "^24.0.0",
     "eslint": "^10.11.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
+    "tsx": "^4.23.15",
     "vitest": "^5.0.2"
   }
 }
