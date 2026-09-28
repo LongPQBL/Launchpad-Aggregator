@@ -21,6 +21,7 @@ export interface Launch {
   platform: 'pons';
   protocolVersion: ProtocolVersion;
   sourceId: string;
+  sourceLogId: string;
   factoryAddress: Address;
   deployerAddress: Address;
   launchBlock: bigint;
@@ -36,6 +37,7 @@ export interface Venue {
   kind: VenueKind;
   ref: string;
   sourceId: string;
+  sourceLogId: string;
   effectiveFromBlock: bigint;
   effectiveToBlock: bigint | null;
   official: boolean;
