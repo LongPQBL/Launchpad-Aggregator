@@ -3,6 +3,7 @@ import type { Address, Hash } from 'viem';
 import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
 import type { ObservedBlock } from '../indexer/reorg.js';
+import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
 import { candles, launches, observedBlocks, rawLogs, sources, trades, venues } from './schema.js';
 
@@ -147,6 +148,25 @@ export function createRepository(db: Database) {
           }))).onConflictDoNothing();
         }
         await tx.update(sources).set({ scannedToBlock: toBlock, confirmedToBlock: toBlock }).where(eq(sources.id, sourceId));
+      });
+    },
+
+    async replaceCandles(chainId: number, tokenAddress: Address, intervalSeconds: number, projection: readonly Candle[]): Promise<void> {
+      if (!Number.isInteger(intervalSeconds) || intervalSeconds <= 0) throw new Error('Invalid candle interval');
+      await db.transaction(async (tx) => {
+        const [launch] = await tx.select().from(launches).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, tokenAddress.toLowerCase()))).limit(1);
+        if (!launch) throw new Error('Cannot project candles for an unknown launch');
+        if (projection.some((candle) => candle.chainId !== chainId || candle.tokenAddress.toLowerCase() !== tokenAddress.toLowerCase()
+          || candle.intervalSeconds !== intervalSeconds || candle.quoteAssetAddress.toLowerCase() !== launch.quoteAssetAddress)) {
+          throw new Error('Candle projection does not match launch identity or quote asset');
+        }
+        await tx.delete(candles).where(and(eq(candles.chainId, chainId), eq(candles.tokenAddress, tokenAddress.toLowerCase()),
+          eq(candles.intervalSeconds, intervalSeconds)));
+        if (projection.length) await tx.insert(candles).values(projection.map((candle) => ({
+          chainId, tokenAddress: tokenAddress.toLowerCase(), intervalSeconds, bucketStart: candle.bucketStart,
+          open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+          quoteVolumeRaw: candle.quoteVolumeRaw.toString(),
+        })));
       });
     },
 

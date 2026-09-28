@@ -190,4 +190,19 @@ describe('index batch repository', () => {
     expect(result.rows[0].price_numerator_raw).toBe((10n ** 100n).toString());
     expect(result.rows[0].price_denominator_raw).toBe((10n ** 90n).toString());
   });
+
+  it('replaces candle projections idempotently after a reorg or price correction', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
+    const candle = { chainId: 4663, tokenAddress: token, quoteAssetAddress: quote, intervalSeconds: 60,
+      bucketStart: 1_699_999_980, open: '0.1', high: '0.1', low: '0.1', close: '0.1', quoteVolumeRaw: 100n };
+    await repository.replaceCandles(4663, token, 60, [candle]);
+    await repository.replaceCandles(4663, token, 60, [candle]);
+    expect((await pool.query('SELECT count(*)::int AS count FROM candles')).rows[0].count).toBe(1);
+    await repository.replaceCandles(4663, token, 60, [{ ...candle, close: '0.2', quoteVolumeRaw: 200n }]);
+    const corrected = await pool.query('SELECT close, quote_volume_raw FROM candles');
+    expect(corrected.rows[0]).toEqual({ close: '0.2', quote_volume_raw: '200' });
+    await repository.replaceCandles(4663, token, 60, []);
+    expect((await pool.query('SELECT count(*)::int AS count FROM candles')).rows[0].count).toBe(0);
+  });
 });
