@@ -5,7 +5,7 @@ import { getPonsFactorySources } from '../sourceRegistry.js';
 import { createRobinhoodPublicClient } from '../../../chains/robinhood.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { decodeV2Launch, hydrateV2Launch, decodeCurveTrade, decodeV2CurveBatch, decodeV2FactoryBatch, resolveV2QuoteAsset, phaseToLifecycle, readV2LaunchRecord, readV2Phase, readV2TokenMetadata, type V2LaunchRecord, type V2ReadClient } from './adapter.js';
-import { replayCurveEvent } from './curve.js';
+import { replayCurveEvent, replayCurveBuyback, rewindCurveEvent, rewindCurveBuyback } from './curve.js';
 
 const sourceFixtures = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-launches.json', import.meta.url), 'utf8')) as Array<Record<string, unknown>>;
 const reference = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-reference.json', import.meta.url), 'utf8')) as Record<string, unknown>;
@@ -157,5 +157,19 @@ describe('pons v2 curve trades', () => {
   it('subtracts gross quote output and fees after a sell', () => {
     const next = replayCurveEvent({ quote: 1_000n, token: 10_000n }, { side: 'sell', quoteAmountRaw: 90n, tokenAmountRaw: 500n, feeRaw: 5n, taxRaw: 5n });
     expect(next).toEqual({ quote: 900n, token: 10_500n });
+  });
+
+  it('reconstructs opening reserves across trades and an internal buyback', () => {
+    const opening = { quote: 1_000n, token: 10_000n };
+    const buy = { side: 'buy' as const, quoteAmountRaw: 100n, tokenAmountRaw: 500n, feeRaw: 3n, taxRaw: 2n };
+    const sell = { side: 'sell' as const, quoteAmountRaw: 90n, tokenAmountRaw: 500n, feeRaw: 5n, taxRaw: 5n };
+    const afterBuy = replayCurveEvent(opening, buy);
+    const afterBuyback = replayCurveBuyback(afterBuy, { quoteSpentRaw: 10n, tokensLockedRaw: 80n });
+    const current = replayCurveEvent(afterBuyback, sell);
+    expect(afterBuyback).toEqual({ quote: 1_105n, token: 9_420n });
+    expect(current).toEqual({ quote: 1_005n, token: 9_920n });
+    const beforeSell = rewindCurveEvent(current, sell);
+    const beforeBuyback = rewindCurveBuyback(beforeSell, { quoteSpentRaw: 10n, tokensLockedRaw: 80n });
+    expect(rewindCurveEvent(beforeBuyback, buy)).toEqual(opening);
   });
 });
