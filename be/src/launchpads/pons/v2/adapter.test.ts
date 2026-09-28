@@ -29,6 +29,8 @@ const record: V2LaunchRecord = {
   curve: reference.curveAddress as Address,
   deployer: '0x495c5f25cb41419d504e598801ef078fd9d0480b',
   pairToken: reference.quoteAddress as Address,
+  poolFee: 0,
+  tickSpacing: 200,
   phase: 0,
   exists: true,
 };
@@ -91,6 +93,8 @@ describe('pons v2 launch and phase', () => {
     } };
     const fetched = await readV2LaunchRecord(client, factory.factory, record.token, 27027321n);
     expect(fetched.curve.toLowerCase()).toBe(record.curve.toLowerCase());
+    expect(fetched.poolFee).toBe(0);
+    expect(fetched.tickSpacing).toBe(200);
     expect(await readV2Phase(client, factory.factory, record.token, 27027321n)).toBe(1);
     expect(calls).toHaveLength(2);
     expect(calls.every((call) => call.functionName === 'getLaunchedToken' && call.blockNumber === 27027321n)).toBe(true);

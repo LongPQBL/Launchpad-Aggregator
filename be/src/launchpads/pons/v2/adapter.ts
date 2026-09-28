@@ -6,7 +6,7 @@ import type { RpcLog } from '../v1/adapter.js';
 import { curveBuyEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
 import type { CurveReserves } from './curve.js';
 
-export interface V2LaunchRecord { token: Address; curve: Address; deployer: Address; pairToken: Address; phase: 0 | 1 | 2 | 3; exists: boolean }
+export interface V2LaunchRecord { token: Address; curve: Address; deployer: Address; pairToken: Address; poolFee: number; tickSpacing: number; phase: 0 | 1 | 2 | 3; exists: boolean }
 export interface V2LaunchEvent { tokenAddress: Address; curveAddress: Address; deployerAddress: Address; pairToken: Address; blockNumber: bigint; transactionHash: Hash; sourceLogId: string }
 export interface V2LaunchWithVenue { launch: Launch; venue: Venue }
 export interface V2QuoteClient { readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string }): Promise<unknown> }
@@ -92,11 +92,13 @@ export async function readV2LaunchRecord(client: V2ReadClient, factory: Address,
   if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Invalid pons v2 factory launch record');
   const value = result as Record<string, unknown>;
   if (typeof value.token !== 'string' || typeof value.curve !== 'string' || typeof value.deployer !== 'string'
-    || typeof value.pairToken !== 'string' || ![0, 1, 2, 3].includes(value.phase as number) || typeof value.exists !== 'boolean') {
+    || typeof value.pairToken !== 'string' || typeof value.poolFee !== 'number' || typeof value.tickSpacing !== 'number'
+    || ![0, 1, 2, 3].includes(value.phase as number) || typeof value.exists !== 'boolean') {
     throw new Error('Invalid pons v2 factory launch record');
   }
   return { token: value.token as Address, curve: value.curve as Address, deployer: value.deployer as Address,
-    pairToken: value.pairToken as Address, phase: value.phase as 0 | 1 | 2 | 3, exists: value.exists };
+    pairToken: value.pairToken as Address, poolFee: value.poolFee, tickSpacing: value.tickSpacing,
+    phase: value.phase as 0 | 1 | 2 | 3, exists: value.exists };
 }
 
 export async function readV2Phase(client: V2ReadClient, factory: Address, token: Address, blockNumber?: bigint): Promise<0 | 1 | 2 | 3> {
