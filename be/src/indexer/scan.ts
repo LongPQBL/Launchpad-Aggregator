@@ -76,7 +76,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
           break;
         }
         if ((isTransient(message) || isRangeLimit(message)) && attempt < deps.maxRetries) {
-          await deps.sleep(Math.min(250 * 2 ** attempt, 2_000));
+          await deps.sleep(Math.min(250 * 2 ** attempt, 8_000));
           attempt++;
           continue;
         }

@@ -89,7 +89,7 @@ async function runOnce(): Promise<void> {
     recordScanReport: repository.recordScanReport,
     setSourceStatus: repository.setSourceStatus,
     scan: (source, target) => scanToHead(source, target, {
-      initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+      initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 6,
       getCursor: repository.getCursor, getLogs, decodeLogs: decoder, saveIndexBatch: repository.saveIndexBatch,
       sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     }),
@@ -105,7 +105,7 @@ async function runOnce(): Promise<void> {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
       scan: (source, head) => scanToHead(source, head, {
-        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 6,
         getCursor: repository.getCursor, getLogs,
         decodeLogs: createLifecycleDecoder({
           loadLaunch: async (token) => {
@@ -146,7 +146,7 @@ async function runOnce(): Promise<void> {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
       scan: (source, target) => scanToHead(source, target, {
-        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 6,
         getCursor: repository.getCursor,
         getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
         decodeLogs: createTradeDecoder(contexts, getTimestamp), saveIndexBatch: repository.saveIndexBatch,
@@ -170,7 +170,7 @@ async function runOnce(): Promise<void> {
         getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
         setSourceStatus: repository.setSourceStatus,
         scan: (poolSource, target) => scanToHead(poolSource, target, {
-          initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+          initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 6,
           getCursor: repository.getCursor,
           getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
           decodeLogs: createV4TradeDecoder(context, getTimestamp, poolManager, hook),

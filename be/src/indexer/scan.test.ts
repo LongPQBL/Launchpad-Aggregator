@@ -85,6 +85,26 @@ describe('bounded HTTP scanner', () => {
     expect(sleeps).toBe(2);
     expect(setup.getCursor()).toBe(10n);
   });
+
+  it('backs off up to 8s (not the old 2s cap) so a real rate-limit window has a chance to clear', async () => {
+    const delays: number[] = [];
+    const setup = depsFor(async () => { throw new Error('429 Too Many Requests'); });
+    setup.deps.maxRetries = 5;
+    setup.deps.sleep = async (ms) => { delays.push(ms); };
+    await scanToHead(source, 10n, setup.deps);
+    expect(delays).toEqual([250, 500, 1000, 2000, 4000]);
+  });
+
+  it('eventually gives up a persistent rate limit as a gap, without advancing the checkpoint', async () => {
+    let attempts = 0;
+    const setup = depsFor(async () => { attempts++; throw new Error('429 Too Many Requests'); });
+    setup.deps.maxRetries = 5;
+    setup.deps.sleep = async () => {};
+    const report = await scanToHead(source, 10n, setup.deps);
+    expect(attempts).toBe(6);
+    expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 10n, reason: '429 Too Many Requests' }]);
+    expect(setup.getCursor()).toBe(9n);
+  });
 });
 
 describe('venue query batching', () => {
