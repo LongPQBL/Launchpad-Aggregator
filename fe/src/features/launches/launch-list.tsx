@@ -1,6 +1,9 @@
 import { chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 export interface LaunchListProps {
   page: LaunchPage | null;
@@ -53,16 +56,22 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
   const chainIds = [...new Set(sources.map((source) => source.chainId))];
 
   return (
-    <div>
-      <form method="get" role="search" aria-label="Tìm và lọc launch" className="mb-4 flex flex-wrap gap-2">
-        <input
+    <div className="flex flex-col gap-4">
+      <form method="get" role="search" aria-label="Tìm và lọc launch" className="flex flex-wrap gap-2">
+        <Input
           type="search"
           name="search"
           defaultValue={search ?? ''}
           placeholder="Tìm theo tên hoặc symbol"
           aria-label="Tìm launch"
+          className="max-w-xs"
         />
-        <select name="status" defaultValue={status ?? ''} aria-label="Lọc theo vòng đời">
+        <select
+          name="status"
+          defaultValue={status ?? ''}
+          aria-label="Lọc theo vòng đời"
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           <option value="">Tất cả trạng thái</option>
           {LIFECYCLE_STATUSES.map((value) => (
             <option key={value} value={value}>
@@ -71,13 +80,13 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
           ))}
         </select>
         {chainId !== undefined && <input type="hidden" name="chainId" value={chainId} />}
-        <button type="submit">Tìm</button>
+        <Button type="submit">Tìm</Button>
       </form>
 
       {chainIds.length > 1 && (
-        <nav aria-label="Lọc theo chain">
+        <nav aria-label="Lọc theo chain" className="flex gap-2">
           {chainIds.map((id) => (
-            <a key={id} href={filterHref(current, { chainId: id })}>
+            <a key={id} href={filterHref(current, { chainId: id })} className="underline">
               Chain {id}
             </a>
           ))}
@@ -87,12 +96,16 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
       <div role="table" aria-label="Danh sách launch" className="w-full md:table">
         <div role="rowgroup" className="hidden md:table-header-group">
           <div role="row" className="md:table-row">
-            <div role="columnheader" className="md:table-cell">Token</div>
-            <div role="columnheader" className="md:table-cell">Sàn</div>
-            <div role="columnheader" className="md:table-cell">Chain</div>
-            <div role="columnheader" className="md:table-cell">Tài sản ghép cặp</div>
-            <div role="columnheader" className="md:table-cell">Vòng đời</div>
-            <div role="columnheader" className="md:table-cell">Volume 24h</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">Token</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">Sàn</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">Chain</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">
+              Tài sản ghép cặp
+            </div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">Vòng đời</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:font-medium">
+              Volume 24h
+            </div>
           </div>
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 md:table-row-group">
@@ -100,20 +113,23 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
             <div
               key={`${launch.chainId}-${launch.tokenAddress}`}
               role="row"
-              className="rounded border border-border p-3 md:table-row md:border-0 md:p-0"
+              className={cn(
+                'rounded-lg border border-border bg-card p-3',
+                'md:table-row md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0',
+              )}
             >
-              <div role="cell" className="md:table-cell">
-                <a href={launchHref(launch.chainId, launch.tokenAddress)}>
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">
+                <a href={launchHref(launch.chainId, launch.tokenAddress)} className="underline">
                   {launch.name} ({launch.symbol})
                 </a>
               </div>
-              <div role="cell" className="md:table-cell">
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">
                 {launch.platform} {launch.protocolVersion}
               </div>
-              <div role="cell" className="md:table-cell">{chainName(launch.chainId)}</div>
-              <div role="cell" className="md:table-cell">{launch.quoteAsset.symbol}</div>
-              <div role="cell" className="md:table-cell">{formatLifecycleStatus(launch.lifecycleStatus)}</div>
-              <div role="cell" className="md:table-cell">
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">{chainName(launch.chainId)}</div>
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">{launch.quoteAsset.symbol}</div>
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">{formatLifecycleStatus(launch.lifecycleStatus)}</div>
+              <div role="cell" className="md:table-cell md:p-2 md:align-middle">
                 {formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
               </div>
             </div>
@@ -121,7 +137,11 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
         </div>
       </div>
 
-      {page.nextCursor && <a href={nextPageHref(page.nextCursor, current)}>Trang sau</a>}
+      {page.nextCursor && (
+        <a href={nextPageHref(page.nextCursor, current)} className="underline">
+          Trang sau
+        </a>
+      )}
     </div>
   );
 }

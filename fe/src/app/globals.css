@@ -3,8 +3,21 @@
 @theme {
   --color-background: #0a0a0b;
   --color-foreground: #f4f4f5;
-  --color-border: #27272a;
+  --color-card: #131316;
+  --color-card-foreground: #f4f4f5;
+  --color-primary: #f4f4f5;
+  --color-primary-foreground: #0a0a0b;
+  --color-secondary: #27272a;
+  --color-secondary-foreground: #f4f4f5;
+  --color-muted: #18181b;
   --color-muted-foreground: #a1a1aa;
+  --color-accent: #27272a;
+  --color-accent-foreground: #f4f4f5;
+  --color-destructive: #ef4444;
+  --color-destructive-foreground: #fafafa;
+  --color-border: #27272a;
+  --color-input: #27272a;
+  --color-ring: #52525b;
 }
 
 body {

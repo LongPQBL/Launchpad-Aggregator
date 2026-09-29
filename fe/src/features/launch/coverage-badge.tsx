@@ -1,13 +1,20 @@
 import { formatCoverageStatus } from '@/api/format';
+import { Badge } from '@/components/ui/badge';
 
 export interface CoverageBadgeProps {
   status: string;
 }
 
+const VARIANT_BY_STATUS: Record<string, 'default' | 'secondary' | 'destructive'> = {
+  caught_up: 'default',
+  backfilling: 'secondary',
+  degraded: 'destructive',
+};
+
 export function CoverageBadge({ status }: CoverageBadgeProps) {
   return (
-    <span data-testid="coverage-badge" data-status={status} className="rounded border border-border px-2 py-0.5 text-xs">
+    <Badge data-testid="coverage-badge" data-status={status} variant={VARIANT_BY_STATUS[status] ?? 'secondary'}>
       {formatCoverageStatus(status)}
-    </span>
+    </Badge>
   );
 }
