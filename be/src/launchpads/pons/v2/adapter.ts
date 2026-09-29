@@ -51,7 +51,7 @@ export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, re
     tokenDecimals: metadata.decimals, platform: 'pons', protocolVersion: 'v2', sourceId: factory.id,
     sourceLogId: event.sourceLogId, factoryAddress: factory.factory, deployerAddress: event.deployerAddress,
     launchBlock: event.blockNumber, launchTxHash: event.transactionHash, quoteAsset,
-    lifecycleStatus: phaseToLifecycle(record.phase),
+    lifecycleStatus: 'trading',
   };
   const venue: Venue = {
     id: venueKey(factory.chainId, 'curve', event.curveAddress), chainId: factory.chainId,

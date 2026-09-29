@@ -54,13 +54,15 @@ describe('pons v2 launch and phase', () => {
     expect(() => decodeV2Launch({ ...launchLog, address: record.curve }, factory)).toThrow(/factory/i);
   });
 
-  it('does not invent a pool in the swept phase and distinguishes rescue', () => {
+  it('keeps the launch at its historical trading phase even when the current factory phase is later', () => {
     const event = decodeV2Launch(launchLog, factory);
     const swept = hydrateV2Launch(event, factory, { ...record, phase: 1 }, metadata, quote);
     const rescued = hydrateV2Launch(event, factory, { ...record, phase: 3 }, metadata, quote);
-    expect(swept.launch.lifecycleStatus).toBe('swept');
+    const graduated = hydrateV2Launch(event, factory, { ...record, phase: 2 }, metadata, quote);
+    expect(swept.launch.lifecycleStatus).toBe('trading');
     expect(swept.venue.kind).toBe('curve');
-    expect(rescued.launch.lifecycleStatus).toBe('rescued');
+    expect(rescued.launch.lifecycleStatus).toBe('trading');
+    expect(graduated.launch.lifecycleStatus).toBe('trading');
     expect(phaseToLifecycle(2)).toBe('graduated');
   });
 
