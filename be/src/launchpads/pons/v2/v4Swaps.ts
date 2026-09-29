@@ -19,7 +19,7 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
     || !venue.official || venue.ref.toLowerCase() !== poolId.toLowerCase() || venue.chainId !== launch.chainId
     || venue.tokenAddress.toLowerCase() !== launch.tokenAddress.toLowerCase()) throw new Error('Not an official graduated pons v2 venue');
   const decoded = decodeEventLog({ abi: [v4SwapEvent], data: log.data, topics: [log.topics[0], ...log.topics.slice(1)], strict: true });
-  if (decoded.args.sender.toLowerCase() === hook.toLowerCase()) return null;
+  const protocolSwap = decoded.args.sender.toLowerCase() === hook.toLowerCase();
   const tokenIsCurrency0 = launch.tokenAddress.toLowerCase() < launch.quoteAsset.address.toLowerCase();
   const tokenSigned = tokenIsCurrency0 ? decoded.args.amount0 : decoded.args.amount1;
   const quoteSigned = tokenIsCurrency0 ? decoded.args.amount1 : decoded.args.amount0;
@@ -35,7 +35,7 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
     tokenAmountRaw: tokenSigned < 0n ? -tokenSigned : tokenSigned,
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
-    activityKind: 'user_trade',
+    activityKind: protocolSwap ? (quoteSigned > 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
     priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
     priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
   };

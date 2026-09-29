@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { encodeEventTopics, type Address, type Hash } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, parseAbiItem, toEventSelector, type Address, type Hash } from 'viem';
 import type { Launch, Venue } from '../../../domain/types.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { derivePonsV4PoolId, verifyPonsV4PoolInitialization, transitionOfficialVenue } from './poolKey.js';
 import { decodePonsV4Swap, verifyPonsV4Graduation } from './v4Swaps.js';
 import { v4SwapEvent } from './v4Swaps.js';
 import { decodeCurveTrade } from './adapter.js';
+import { buildOfficialCandles, sumOfficialQuoteVolume } from '../../../market/aggregate.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-graduated.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 
@@ -74,14 +75,43 @@ describe('pons v2 official V4 pool', () => {
     expect(decodePonsV4Swap({ ...swap, topics: [swap.topics[0], '0x' + '11'.repeat(32) as Hash, ...swap.topics.slice(2)] }, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
   });
 
-  it('excludes hook-internal fee-conversion swaps from user volume', () => {
+  it('keeps a hook-initiated buyback as a protocol trade in pool volume', () => {
     const venue = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log').openedPool!;
     const realSwap = asLog(fixture.swap as Record<string, unknown>);
     const hookSwap: RpcLog = {
       ...realSwap,
       topics: encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: poolId, sender: fixture.hookAddress as Address } }) as Hash[],
     };
-    expect(decodePonsV4Swap(hookSwap, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
+    const trade = decodePonsV4Swap(hookSwap, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
+    expect(trade?.activityKind).toBe('protocol_buyback');
+    expect(trade?.quoteAmountRaw).toBe(5_620_497_268_881_825_819n);
+  });
+
+  it('counts a hook fee-conversion swap and a hook buyback separately when both really execute', () => {
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log').openedPool!;
+    const sixDecimalLaunch = { ...launch, quoteAsset: { address: launch.quoteAsset.address, symbol: 'USDG', decimals: 6 } };
+    const swap = asLog(fixture.swap as Record<string, unknown>);
+    const topics = encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: poolId, sender: fixture.hookAddress as Address } }) as Hash[];
+    const sqrtPriceX96 = 2n ** 96n;
+    const buyback: RpcLog = { ...swap, logIndex: 108, topics,
+      data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' }, { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+        [-1n, 1n, sqrtPriceX96, 1n, 0, 0]) };
+    const conversion: RpcLog = { ...buyback, logIndex: 109,
+      data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' }, { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+        [2n, -2n, sqrtPriceX96, 1n, 0, 0]) };
+    const trades = [buyback, conversion].map((log) => decodePonsV4Swap(log, poolId, sixDecimalLaunch, venue, 1_700_000_000,
+      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!);
+    expect(trades.map((trade) => trade.activityKind)).toEqual(['protocol_buyback', 'protocol_fee_conversion']);
+    const market = { chainId: 4663, tokenAddress: launch.tokenAddress, quoteAssetAddress: launch.quoteAsset.address,
+      venueIds: new Set([venue.id]), complete: true };
+    expect(sumOfficialQuoteVolume(trades, 0, market).amountRaw).toBe(3n);
+    const candle = buildOfficialCandles(trades, 60, market)[0];
+    expect(candle.quoteVolumeRaw).toBe(3n);
+    expect(candle.close).toBe('1000000000000');
+    const sweepNotice: RpcLog = { ...conversion, address: fixture.hookAddress as Address, logIndex: 110,
+      topics: [toEventSelector(parseAbiItem('event PoolFeesSwept(bytes32 indexed poolId, uint256 protocolAmount, uint256 buybackAmount, uint256 creatorAmount, uint256 tokensLocked)'))] };
+    expect(decodePonsV4Swap(sweepNotice, poolId, sixDecimalLaunch, venue, 1_700_000_000,
+      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
   });
 
   it('connects a real pre-graduation curve buy to a later official V4 swap', () => {
