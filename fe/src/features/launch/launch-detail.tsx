@@ -1,3 +1,4 @@
+import { chainExplorerBase, chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatVenueKind } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { CoverageBadge } from './coverage-badge';
@@ -10,14 +11,8 @@ export interface LaunchDetailProps {
   candles: CandlePage | null;
 }
 
-// Only chain known/verified in be/src/chains today (README, be/src/chains/robinhood.ts).
-// A chain-registry that scales beyond this hardcode is a Roadmap-2 concern, not this task's.
-const CHAIN_NAMES: Record<number, string> = { 4663: 'Robinhood Chain' };
-const CHAIN_EXPLORERS: Record<number, string> = { 4663: 'https://robinhoodchain.blockscout.com' };
-
 export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
-  const chainName = CHAIN_NAMES[detail.chainId] ?? `Chain ${detail.chainId}`;
-  const explorerBase = CHAIN_EXPLORERS[detail.chainId];
+  const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
   // be/src/api/store.ts's listTrades orders newest-first; take the earliest V4 trade in the
@@ -39,7 +34,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
           <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener">
             pons
           </a>{' '}
-          · {detail.protocolVersion} · {chainName}
+          · {detail.protocolVersion} · {chainName(detail.chainId)}
         </p>
         <p>Tài sản ghép cặp: {detail.quoteAsset.symbol}</p>
         <p>

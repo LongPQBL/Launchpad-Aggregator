@@ -4,9 +4,11 @@ import type { Candle, LaunchDetail as LaunchDetailData, OfficialVenue, Trade } f
 import { LaunchDetail } from './launch-detail';
 
 const setDataMock = vi.fn();
+const applyOptionsMock = vi.fn();
 const removeMock = vi.fn();
-const addSeriesMock = vi.fn((..._args: unknown[]) => ({ setData: setDataMock }));
-const createSeriesMarkersMock = vi.fn((...args: unknown[]) => args);
+const setMarkersMock = vi.fn();
+const addSeriesMock = vi.fn((..._args: unknown[]) => ({ setData: setDataMock, applyOptions: applyOptionsMock }));
+const createSeriesMarkersMock = vi.fn((..._args: unknown[]) => ({ setMarkers: setMarkersMock }));
 const createChartMock = vi.fn((..._args: unknown[]) => ({ addSeries: addSeriesMock, remove: removeMock }));
 
 vi.mock('lightweight-charts', () => ({
@@ -17,7 +19,9 @@ vi.mock('lightweight-charts', () => ({
 
 beforeEach(() => {
   setDataMock.mockClear();
+  applyOptionsMock.mockClear();
   removeMock.mockClear();
+  setMarkersMock.mockClear();
   addSeriesMock.mockClear();
   createSeriesMarkersMock.mockClear();
   createChartMock.mockClear();
@@ -131,6 +135,27 @@ describe('LaunchDetail', () => {
     expect(within(venueSection).getByText('Pool Uniswap V4')).toBeInTheDocument();
   });
 
+  it('updates data on the existing chart instance instead of recreating it on refresh, so the user\'s zoom/pan is not reset', () => {
+    const { rerender } = render(
+      <LaunchDetail detail={detail()} trades={{ items: [], nextCursor: null }} candles={{ items: [candle()], complete: true }} />,
+    );
+    expect(createChartMock).toHaveBeenCalledTimes(1);
+    expect(removeMock).not.toHaveBeenCalled();
+
+    // Simulate a live-refresh: same component, a freshly-fetched (new-reference) candles array.
+    rerender(
+      <LaunchDetail
+        detail={detail()}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [candle({ close: '0.2' })], complete: true }}
+      />,
+    );
+
+    expect(createChartMock).toHaveBeenCalledTimes(1);
+    expect(removeMock).not.toHaveBeenCalled();
+    expect(setDataMock).toHaveBeenCalledTimes(2);
+  });
+
   it('does not synthesize candles across a data gap — the chart receives exactly the candles it was given', () => {
     const candlesWithGap = [candle({ bucketStart: 1_700_000_000 }), candle({ bucketStart: 1_700_010_000 })];
     render(
@@ -174,8 +199,8 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    const [, seriesOptions] = addSeriesMock.mock.calls[0]!;
-    const priceFormat = (seriesOptions as { priceFormat: { precision: number; minMove: number } }).priceFormat;
+    const [lastOptions] = applyOptionsMock.mock.calls.at(-1)!;
+    const priceFormat = (lastOptions as { priceFormat: { precision: number; minMove: number } }).priceFormat;
     expect(priceFormat.precision).toBeGreaterThanOrEqual(8);
     expect(priceFormat.minMove).toBeLessThanOrEqual(1e-8);
   });
@@ -225,8 +250,8 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(createSeriesMarkersMock).toHaveBeenCalledTimes(1);
-    const [, markers] = createSeriesMarkersMock.mock.calls[0]!;
+    expect(setMarkersMock).toHaveBeenCalled();
+    const [markers] = setMarkersMock.mock.calls.at(-1)!;
     expect(markers).toEqual([expect.objectContaining({ time: 1_700_000_200 })]);
   });
 

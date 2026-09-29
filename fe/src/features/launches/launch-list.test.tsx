@@ -30,6 +30,21 @@ const twoChainsTwoPlatforms: readonly Source[] = [
 ];
 
 describe('LaunchList', () => {
+  it('shows a human-readable lifecycle label and chain name instead of raw enum/id values', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ lifecycleStatus: 'swept', chainId: 4663 })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+
+    const table = screen.getByRole('table', { name: /danh sách launch/i });
+    expect(within(table).getByText(/Swept/)).toBeInTheDocument();
+    expect(within(table).getByText('Robinhood Chain')).toBeInTheDocument();
+    expect(within(table).queryByText('trading')).not.toBeInTheDocument();
+  });
+
   it('renders each launch as a row linking to its detail page', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
 

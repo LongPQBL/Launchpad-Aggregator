@@ -1,4 +1,5 @@
-import { formatQuote } from '@/api/format';
+import { chainName } from '@/api/chains';
+import { formatLifecycleStatus, formatQuote } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
 
 export interface LaunchListProps {
@@ -67,9 +68,9 @@ export function LaunchList({ page, sources, error, chainId }: LaunchListProps) {
               <div role="cell" className="md:table-cell">
                 {launch.platform} {launch.protocolVersion}
               </div>
-              <div role="cell" className="md:table-cell">{launch.chainId}</div>
+              <div role="cell" className="md:table-cell">{chainName(launch.chainId)}</div>
               <div role="cell" className="md:table-cell">{launch.quoteAsset.symbol}</div>
-              <div role="cell" className="md:table-cell">{launch.lifecycleStatus}</div>
+              <div role="cell" className="md:table-cell">{formatLifecycleStatus(launch.lifecycleStatus)}</div>
               <div role="cell" className="md:table-cell">
                 {formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
               </div>
