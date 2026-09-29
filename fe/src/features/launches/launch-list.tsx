@@ -28,7 +28,6 @@ export function LaunchList({ page, sources, error, chainId }: LaunchListProps) {
   }
 
   const chainIds = [...new Set(sources.map((source) => source.chainId))];
-  const platforms = [...new Set(sources.map((source) => source.platform))];
 
   return (
     <div>
@@ -37,16 +36,6 @@ export function LaunchList({ page, sources, error, chainId }: LaunchListProps) {
           {chainIds.map((id) => (
             <a key={id} href={`/?chainId=${id}`}>
               Chain {id}
-            </a>
-          ))}
-        </nav>
-      )}
-
-      {platforms.length > 1 && (
-        <nav aria-label="Lọc theo sàn">
-          {platforms.map((platform) => (
-            <a key={platform} href={`/?platform=${platform}`}>
-              {platform}
             </a>
           ))}
         </nav>

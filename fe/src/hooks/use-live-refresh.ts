@@ -27,6 +27,7 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
   useEffect(() => {
     let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let hadOutage = false;
 
     function scheduleRefresh(): void {
       if (coalesceTimer !== null) return;
@@ -38,6 +39,7 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
 
     function startPolling(): void {
       setStatus('polling');
+      hadOutage = true;
       if (pollTimer !== null) return;
       pollTimer = setInterval(() => refreshRef.current(), POLL_INTERVAL_MS);
     }
@@ -54,6 +56,12 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
     source.onopen = () => {
       setStatus('live');
       stopPolling();
+      // Spec §7: "nếu SSE mất kết nối, FE tải lại dữ liệu" — events published during the outage
+      // were never delivered (no Last-Event-ID replay), so catch up once on reconnect.
+      if (hadOutage) {
+        hadOutage = false;
+        scheduleRefresh();
+      }
     };
     source.onerror = () => {
       startPolling();

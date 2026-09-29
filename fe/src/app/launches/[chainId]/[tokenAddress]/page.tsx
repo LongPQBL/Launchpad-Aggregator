@@ -3,7 +3,7 @@ import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchDetail } from '@/features/launch/launch-detail';
 import { getLaunchCandles, getLaunchDetail, getLaunchTrades } from '@/api/client';
-import { chainResourceKey, launchResourceKey } from '@/hooks/resource-keys';
+import { launchResourceKey } from '@/hooks/resource-keys';
 
 interface LaunchDetailPageProps {
   params: Promise<{ chainId: string; tokenAddress: string }>;
@@ -45,7 +45,10 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
 
   return (
     <AppShell>
-      <LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId), launchResourceKey(chainId, tokenAddress)]} />
+      {/* Launch-only (not chainResourceKey): matchesResourceKeys() already lets a launch key
+          through for chain-wide events with no tokenAddress, so this page won't refetch on
+          every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
+      <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} />
       <LaunchDetail detail={detail} trades={trades} candles={candles} />
     </AppShell>
   );

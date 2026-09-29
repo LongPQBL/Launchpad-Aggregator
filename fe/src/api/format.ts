@@ -57,3 +57,18 @@ export function formatCoverageStatus(status: string): string {
 export function toChartValue(value: string): number {
   return Number(value);
 }
+
+const DEFAULT_CHART_PRICE_FORMAT = { precision: 2, minMove: 0.01 };
+
+// Lightweight Charts' default price format (precision 2) rounds pons-scale prices like
+// 0.000000152 to 0.00, making the chart axis meaningless. Derive enough decimal digits from
+// the actual data instead, at the same render boundary as toChartValue.
+export function computeChartPrecision(values: readonly string[]): { precision: number; minMove: number } {
+  const numbers = values.map(Number).filter((value) => Number.isFinite(value) && value > 0);
+  if (numbers.length === 0) return DEFAULT_CHART_PRICE_FORMAT;
+  const min = Math.min(...numbers);
+  if (min >= 1) return DEFAULT_CHART_PRICE_FORMAT;
+  const magnitude = Math.floor(Math.log10(min));
+  const precision = Math.max(2, -magnitude + 2);
+  return { precision, minMove: 10 ** -precision };
+}

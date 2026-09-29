@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { CHAIN_ID, TOKEN_ADDRESS } from './mock-api';
 
 test.beforeEach(async ({ page }) => {
@@ -20,6 +20,11 @@ test('shows the syncing coverage state honestly instead of hiding it', async ({ 
 
 test('shows the official trade history table', async ({ page }) => {
   await expect(page.getByRole('table', { name: /giao dịch chính thức/i })).toBeVisible();
+});
+
+test('renders the official chart without crashing on the BE\'s real (newest-first) candle order', async ({ page }) => {
+  const chartCanvas = page.locator('[data-testid="official-chart-container"] canvas').first();
+  await expect(chartCanvas).toBeVisible();
 });
 
 test('shows no wallet-connect or trade-execution controls on the detail page', async ({ page }) => {

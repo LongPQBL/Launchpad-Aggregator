@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { CHAIN_ID, TOKEN_ADDRESS } from './mock-api';
 
 test('lists indexed launches and navigates from list to detail', async ({ page }) => {
@@ -21,4 +21,10 @@ test('shows no wallet-connect or trade-execution controls on the list page', asy
   const appContent = page.getByRole('main');
   await expect(appContent.getByRole('button')).toHaveCount(0);
   await expect(appContent.getByText(/wallet|connect wallet|kết nối ví/i)).toHaveCount(0);
+});
+
+test('connects to the SSE realtime feed (proves the BE CORS response actually allows it)', async ({ page }) => {
+  await page.goto('/');
+
+  await expect(page.getByRole('status').filter({ hasText: /realtime/i })).toHaveText('Đang cập nhật realtime');
 });

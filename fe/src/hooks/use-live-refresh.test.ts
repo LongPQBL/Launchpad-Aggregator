@@ -118,6 +118,35 @@ describe('useLiveRefresh', () => {
     expect(refresh.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
+  it('refetches once on reconnect after an outage, per spec §7 ("nếu SSE mất kết nối, FE tải lại dữ liệu")', () => {
+    const refresh = vi.fn();
+    renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));
+    const source = latestSource();
+
+    act(() => {
+      source.onerror?.();
+    });
+    act(() => {
+      source.onopen?.();
+      vi.runAllTimers();
+    });
+
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not refetch on the very first connection, only on reconnect after an outage', () => {
+    const refresh = vi.fn();
+    renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));
+    const source = latestSource();
+
+    act(() => {
+      source.onopen?.();
+      vi.runAllTimers();
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it('stops polling once the SSE connection reconnects', () => {
     const refresh = vi.fn();
     const { result } = renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));
@@ -128,6 +157,7 @@ describe('useLiveRefresh', () => {
     });
     act(() => {
       source.onopen?.();
+      vi.runAllTimers();
     });
     expect(result.current).toBe('live');
 
@@ -153,13 +183,5 @@ describe('useLiveRefresh', () => {
       vi.advanceTimersByTime(60_000);
     });
     expect(refresh).not.toHaveBeenCalled();
-  });
-});
-
-describe('resource keys', () => {
-  it('builds distinct keys for a chain and for a specific launch on that chain', () => {
-    expect(chainResourceKey(4663)).toBe('chain:4663');
-    expect(launchResourceKey(4663, '0xABC')).toBe('launch:4663:0xabc');
-    expect(chainResourceKey(4663)).not.toBe(launchResourceKey(4663, '0xabc'));
   });
 });

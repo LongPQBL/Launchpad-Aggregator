@@ -98,16 +98,10 @@ describe('LaunchList', () => {
     expect(screen.getByRole('navigation', { name: /lọc theo chain/i })).toBeInTheDocument();
   });
 
-  it('hides the source/platform filter when every source is the same platform', () => {
-    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
-
-    expect(screen.queryByRole('navigation', { name: /lọc theo sàn/i })).not.toBeInTheDocument();
-  });
-
-  it('shows the source/platform filter when sources span more than one platform', () => {
+  it('never renders a source/platform filter, since be/src/api/routes/launches.ts has no platform query param to back it', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={twoChainsTwoPlatforms} error={false} />);
 
-    expect(screen.getByRole('navigation', { name: /lọc theo sàn/i })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: /lọc theo sàn/i })).not.toBeInTheDocument();
   });
 
   it('shows a next-page link built from nextCursor when more launches are available', () => {

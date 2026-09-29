@@ -20,7 +20,10 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
   const explorerBase = CHAIN_EXPLORERS[detail.chainId];
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
-  const graduationTime = v4Venue ? (trades?.items.find((trade) => trade.venueId === v4Venue.id)?.timestamp ?? null) : null;
+  // be/src/api/store.ts's listTrades orders newest-first; take the earliest V4 trade in the
+  // loaded page (the one closest to the curve→V4 transition), not the first array element.
+  const v4TradeTimestamps = v4Venue ? trades?.items.filter((trade) => trade.venueId === v4Venue.id).map((trade) => trade.timestamp) : undefined;
+  const graduationTime = v4TradeTimestamps && v4TradeTimestamps.length > 0 ? Math.min(...v4TradeTimestamps) : null;
 
   const chartCoverageStatus =
     detail.coverageStatus !== 'caught_up' ? detail.coverageStatus : candles && !candles.complete ? 'backfilling' : detail.coverageStatus;
@@ -41,6 +44,10 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
         <p>Tài sản ghép cặp: {detail.quoteAsset.symbol}</p>
         <p>
           Vòng đời: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
+        </p>
+        <p>
+          Giá hiện tại: {formatQuote(detail.priceQuote, detail.quoteAsset.symbol)}
+          {detail.priceStale && ' (giá cũ)'}
         </p>
         <p>Volume 24h: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
         {explorerBase && (

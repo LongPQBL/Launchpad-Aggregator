@@ -94,6 +94,23 @@ describe('read-only API', () => {
     await app.close();
   });
 
+  it('sends the configured-origin CORS header on the SSE stream, so a browser EventSource is not blocked', async () => {
+    const events = new ApiEventBus();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data(), events });
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const controller = new AbortController();
+    try {
+      const response = await fetch(`${address}/v1/events`, {
+        signal: controller.signal,
+        headers: { origin: 'http://localhost:3000' },
+      });
+      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:3000');
+    } finally {
+      controller.abort();
+      await app.close();
+    }
+  });
+
   it('streams compact resource-change events that a client can refetch', async () => {
     const events = new ApiEventBus();
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data(), events });

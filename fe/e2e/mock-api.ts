@@ -51,14 +51,22 @@ const trades = {
 };
 
 const candles = {
-  items: [{ intervalSeconds: 60, bucketStart: 1_700_000_000, open: '0.0001', high: '0.00012', low: '0.00009', close: '0.00011', quoteVolume: '0.1' }],
+  // Newest-first, matching be/src/api/store.ts's listCandles (`candles.reverse()`), so the e2e
+  // suite exercises the same ordering the real BE sends instead of the FE's own ascending fixtures.
+  items: [
+    { intervalSeconds: 60, bucketStart: 1_700_000_060, open: '0.00011', high: '0.00015', low: '0.0001', close: '0.00013', quoteVolume: '0.2' },
+    { intervalSeconds: 60, bucketStart: 1_700_000_000, open: '0.0001', high: '0.00012', low: '0.00009', close: '0.00011', quoteVolume: '0.1' },
+  ],
   complete: false,
 };
 
 export function startMockApi(port: number): Server {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
-    res.setHeader('access-control-allow-origin', '*');
+    // Echo the request's own origin, like be/src/api/server.ts's @fastify/cors config does for
+    // the configured FE_ORIGIN, instead of a permissive wildcard that would hide CORS bugs.
+    const origin = req.headers.origin;
+    if (origin) res.setHeader('access-control-allow-origin', origin);
 
     if (url.pathname === '/v1/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });

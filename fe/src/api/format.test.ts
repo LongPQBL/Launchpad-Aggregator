@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { formatActivityKind, formatLifecycleStatus, formatQuote, formatSide, formatVenueKind, toChartValue } from './format';
+import {
+  computeChartPrecision,
+  formatActivityKind,
+  formatLifecycleStatus,
+  formatQuote,
+  formatSide,
+  formatVenueKind,
+  toChartValue,
+} from './format';
 
 describe('formatQuote', () => {
   it('shows the raw decimal string with its symbol when a value is available', () => {
@@ -66,5 +74,22 @@ describe('formatVenueKind', () => {
 describe('toChartValue', () => {
   it('parses a normalized decimal string into the number Lightweight Charts needs, at the render boundary only', () => {
     expect(toChartValue('0.000000152480063034')).toBeCloseTo(0.000000152480063034, 18);
+  });
+});
+
+describe('computeChartPrecision', () => {
+  it('uses enough decimal digits that a pons-scale sub-cent price is not rounded to 0.00', () => {
+    const { precision, minMove } = computeChartPrecision(['0.000000152', '0.000000160', '0.000000140']);
+
+    expect(precision).toBeGreaterThanOrEqual(8);
+    expect(minMove).toBeLessThanOrEqual(1e-8);
+  });
+
+  it('falls back to the default 2-decimal precision for prices at or above 1', () => {
+    expect(computeChartPrecision(['1.5', '2.25'])).toEqual({ precision: 2, minMove: 0.01 });
+  });
+
+  it('falls back to the default precision when given no values', () => {
+    expect(computeChartPrecision([])).toEqual({ precision: 2, minMove: 0.01 });
   });
 });

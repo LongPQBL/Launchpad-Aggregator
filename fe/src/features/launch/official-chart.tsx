@@ -3,7 +3,7 @@
 import { CandlestickSeries, createChart, createSeriesMarkers, type UTCTimestamp } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 import type { Candle } from '@/api/client';
-import { toChartValue } from '@/api/format';
+import { computeChartPrecision, toChartValue } from '@/api/format';
 import { CoverageBadge } from './coverage-badge';
 
 export interface OfficialChartProps {
@@ -31,9 +31,13 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       rightPriceScale: { borderColor: '#27272a' },
       timeScale: { borderColor: '#27272a' },
     });
-    const series = chart.addSeries(CandlestickSeries);
+    const priceFormat = computeChartPrecision(candles.map((candle) => candle.close));
+    const series = chart.addSeries(CandlestickSeries, { priceFormat: { type: 'price', ...priceFormat } });
+    // be/src/api/store.ts's listCandles returns candles newest-first (it reverses an ascending
+    // query); Lightweight Charts requires strictly ascending time and throws otherwise.
+    const ascendingCandles = [...candles].sort((a, b) => a.bucketStart - b.bucketStart);
     series.setData(
-      candles.map((candle) => ({
+      ascendingCandles.map((candle) => ({
         time: candle.bucketStart as UTCTimestamp,
         open: toChartValue(candle.open),
         high: toChartValue(candle.high),
@@ -49,7 +53,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           position: 'aboveBar',
           color: '#22d3ee',
           shape: 'arrowDown',
-          text: 'Chuyển sang V4',
+          text: 'Giao dịch V4 đầu tiên',
         },
       ]);
     }

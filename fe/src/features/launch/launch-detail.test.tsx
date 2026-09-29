@@ -5,7 +5,7 @@ import { LaunchDetail } from './launch-detail';
 
 const setDataMock = vi.fn();
 const removeMock = vi.fn();
-const addSeriesMock = vi.fn(() => ({ setData: setDataMock }));
+const addSeriesMock = vi.fn((..._args: unknown[]) => ({ setData: setDataMock }));
 const createSeriesMarkersMock = vi.fn((...args: unknown[]) => args);
 const createChartMock = vi.fn((..._args: unknown[]) => ({ addSeries: addSeriesMock, remove: removeMock }));
 
@@ -145,6 +145,41 @@ describe('LaunchDetail', () => {
     expect(setDataMock.mock.calls[0]![0]).toHaveLength(2);
   });
 
+  it('sorts candles ascending by time before charting, since the API returns them newest-first', () => {
+    // be/src/api/store.ts's listCandles reverses an ascending query into newest-first order.
+    // Lightweight Charts requires strictly ascending time and throws (crashing the page) otherwise.
+    const newestFirst = [
+      candle({ bucketStart: 1_700_000_120, close: '0.3' }),
+      candle({ bucketStart: 1_700_000_060, close: '0.2' }),
+      candle({ bucketStart: 1_700_000_000, close: '0.1' }),
+    ];
+    render(
+      <LaunchDetail
+        detail={detail()}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: newestFirst, complete: true }}
+      />,
+    );
+
+    const charted = setDataMock.mock.calls[0]![0] as { time: number }[];
+    expect(charted.map((c) => c.time)).toEqual([1_700_000_000, 1_700_000_060, 1_700_000_120]);
+  });
+
+  it('sets a price precision that keeps sub-cent pons-scale prices readable on the chart axis', () => {
+    render(
+      <LaunchDetail
+        detail={detail()}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [candle({ open: '0.000000152', high: '0.000000160', low: '0.000000140', close: '0.000000155' })], complete: true }}
+      />,
+    );
+
+    const [, seriesOptions] = addSeriesMock.mock.calls[0]!;
+    const priceFormat = (seriesOptions as { priceFormat: { precision: number; minMove: number } }).priceFormat;
+    expect(priceFormat.precision).toBeGreaterThanOrEqual(8);
+    expect(priceFormat.minMove).toBeLessThanOrEqual(1e-8);
+  });
+
   it('shows a coverage badge when the launch data is still backfilling', () => {
     render(
       <LaunchDetail
@@ -171,15 +206,18 @@ describe('LaunchDetail', () => {
     expect(badges.some((badge) => badge.textContent === 'Đang đồng bộ')).toBe(true);
   });
 
-  it('places the curve-to-V4 marker at the timestamp of the first trade on the official V4 venue — same venue ID the trade table uses', () => {
+  it('places the curve-to-V4 marker at the earliest V4 trade, not the newest, even though the API returns trades newest-first', () => {
+    // be/src/api/store.ts's listTrades orders `ORDER BY block_number DESC`: the first V4 trade
+    // in the array is the most recent one, not the graduation-adjacent one.
     const v4VenueId = 'pons-v2-v4:0xpool';
     render(
       <LaunchDetail
         detail={detail({ officialVenues: [venue({ kind: 'curve' }), venue({ id: v4VenueId, kind: 'v4_pool' })] })}
         trades={{
           items: [
-            trade({ venueId: 'pons-v2-curve:0xtoken', timestamp: 1_700_000_100 }),
+            trade({ venueId: v4VenueId, timestamp: 1_700_000_300, txHash: '0xtx3' }),
             trade({ venueId: v4VenueId, timestamp: 1_700_000_200, txHash: '0xtx2' }),
+            trade({ venueId: 'pons-v2-curve:0xtoken', timestamp: 1_700_000_100 }),
           ],
           nextCursor: null,
         }}
@@ -226,6 +264,42 @@ describe('LaunchDetail', () => {
     );
 
     expect(screen.getByText('Mua')).toBeInTheDocument();
+  });
+
+  it('shows the current official price', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ priceQuote: '0.000000152480063034', priceStale: false })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    expect(screen.getByText(/0\.000000152480063034 ROBIN/)).toBeInTheDocument();
+  });
+
+  it('labels the price as stale instead of presenting it as the current market price', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ priceQuote: '0.0001', priceStale: true })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    expect(screen.getByText(/giá cũ/i)).toBeInTheDocument();
+  });
+
+  it('shows "Chưa có dữ liệu" for price instead of a fabricated value when the price is not yet available', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ priceQuote: null })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    expect(screen.getByText(/Giá hiện tại/)).toHaveTextContent('Chưa có dữ liệu');
   });
 
   it('keeps the exact decimal string for a 6-decimal token trade amount, without rounding it', () => {
