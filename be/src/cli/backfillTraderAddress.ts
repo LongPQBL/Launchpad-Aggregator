@@ -1,6 +1,7 @@
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../indexer/concurrency.js';
+import { retryDelayMs } from '../indexer/scan.js';
 
 // One-off backfill for the `trader_address` column added after trades already existed. Replays
 // purely from already-saved rows (tx_hash) plus a tx.origin lookup per unique hash — no
@@ -16,8 +17,9 @@ async function getTraderWithRetry(txHash: `0x${string}`, maxRetries = 6): Promis
     try {
       return (await client.getTransaction({ hash: txHash })).from;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       if (attempt >= maxRetries) throw error;
-      await new Promise((resolve) => setTimeout(resolve, Math.min(250 * 2 ** attempt, 8_000)));
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs(message, attempt)));
     }
   }
 }
@@ -31,8 +33,15 @@ async function run(): Promise<void> {
     );
     if (result.rows.length === 0) break;
     const hashes = result.rows.map((row) => row.tx_hash as `0x${string}`);
-    const entries = await mapWithConcurrency(hashes, RPC_FETCH_CONCURRENCY,
-      async (txHash) => [txHash, await getTraderWithRetry(txHash)] as const);
+    let entries: readonly (readonly [`0x${string}`, string])[];
+    try {
+      entries = await mapWithConcurrency(hashes, RPC_FETCH_CONCURRENCY,
+        async (txHash) => [txHash, await getTraderWithRetry(txHash)] as const);
+    } catch (error) {
+      console.error(JSON.stringify({ batchError: error instanceof Error ? error.message : String(error) }));
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+      continue;
+    }
     for (const [txHash, trader] of entries) {
       const updated = await pool.query('UPDATE trades SET trader_address = $1 WHERE tx_hash = $2 AND trader_address IS NULL',
         [trader.toLowerCase(), txHash]);
