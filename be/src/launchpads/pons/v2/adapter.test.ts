@@ -4,11 +4,13 @@ import { type Address, type Hash } from 'viem';
 import { getPonsFactorySources } from '../sourceRegistry.js';
 import { createRobinhoodPublicClient } from '../../../chains/robinhood.js';
 import type { RpcLog } from '../v1/adapter.js';
-import { decodeV2Launch, hydrateV2Launch, decodeCurveTrade, decodeV2CurveBatch, decodeV2FactoryBatch, resolveV2QuoteAsset, phaseToLifecycle, readV2LaunchRecord, readV2Phase, readV2TokenMetadata, type V2LaunchRecord, type V2ReadClient } from './adapter.js';
+import { decodeV2Launch, hydrateV2Launch, decodeCurveTrade, decodeCurveBuyback, decodeV2CurveBatch, decodeV2FactoryBatch, resolveV2QuoteAsset, phaseToLifecycle, readV2LaunchRecord, readV2Phase, readV2TokenMetadata, type V2LaunchRecord, type V2ReadClient } from './adapter.js';
 import { replayCurveEvent, replayCurveBuyback, rewindCurveEvent, rewindCurveBuyback } from './curve.js';
+import { buildOfficialCandles, sumOfficialQuoteVolume } from '../../../market/aggregate.js';
 
 const sourceFixtures = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-launches.json', import.meta.url), 'utf8')) as Array<Record<string, unknown>>;
 const reference = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-reference.json', import.meta.url), 'utf8')) as Record<string, unknown>;
+const buybackFixture = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-buyback.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 const factory = getPonsFactorySources()[2];
 
 function asLog(raw: Record<string, unknown>): RpcLog {
@@ -112,6 +114,51 @@ describe('pons v2 launch and phase', () => {
 
 describe('pons v2 curve trades', () => {
   const context = () => hydrateV2Launch(decodeV2Launch(launchLog, factory), factory, record, metadata, quote);
+
+  it('decodes the real curve buyback as a protocol buy with the actual USDG quote amount', () => {
+    const { launch, venue } = context();
+    launch.tokenAddress = buybackFixture.tokenAddress as Address;
+    launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
+    venue.tokenAddress = launch.tokenAddress;
+    venue.ref = buybackFixture.curveAddress as string;
+    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000);
+    expect(buyback.activityKind).toBe('protocol_buyback');
+    expect(buyback.sourceEvent).toBe('BuybackLocked');
+    expect(buyback.side).toBe('buy');
+    expect(buyback.quoteAmountRaw).toBe(22_028_506n);
+    expect(buyback.tokenAmountRaw).toBe(4_800_278_083_646_296_645_657_066n);
+  });
+
+  it('counts the buyback once even when the same transaction sweeps fees and locks tokens', async () => {
+    const { launch, venue } = context();
+    launch.tokenAddress = buybackFixture.tokenAddress as Address;
+    launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
+    venue.tokenAddress = launch.tokenAddress;
+    venue.ref = buybackFixture.curveAddress as string;
+    const batch = await decodeV2CurveBatch(
+      [asLog(buybackFixture.buyback as Record<string, unknown>), asLog(buybackFixture.feesSwept as Record<string, unknown>)],
+      'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000,
+    );
+    expect(batch.trades).toHaveLength(1);
+    expect(batch.trades[0].activityKind).toBe('protocol_buyback');
+    expect(sumOfficialQuoteVolume(batch.trades, 0, { chainId: 4663, tokenAddress: launch.tokenAddress,
+      quoteAssetAddress: launch.quoteAsset.address, venueIds: new Set([venue.id]), complete: true }).amountRaw).toBe(22_028_506n);
+    expect((buybackFixture.vaultLock as Record<string, unknown>).address).not.toBe(venue.ref);
+  });
+
+  it('uses verified post-buyback reserves for a six-decimal quote chart point', () => {
+    const { launch, venue } = context();
+    launch.tokenAddress = buybackFixture.tokenAddress as Address;
+    launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
+    venue.tokenAddress = launch.tokenAddress;
+    venue.ref = buybackFixture.curveAddress as string;
+    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000,
+      { quote: 100_000_000n, token: 10_000_000n * 10n ** 18n });
+    const candle = buildOfficialCandles([buyback], 60, { chainId: 4663, tokenAddress: launch.tokenAddress,
+      quoteAssetAddress: launch.quoteAsset.address, venueIds: new Set([venue.id]), complete: true })[0];
+    expect(candle.close).toBe('0.00001');
+    expect(candle.quoteVolumeRaw).toBe(22_028_506n);
+  });
 
   it('uses actual filled amounts from real buy and sell events', () => {
     const { launch, venue } = context();

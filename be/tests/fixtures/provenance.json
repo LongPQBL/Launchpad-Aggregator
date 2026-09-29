@@ -20,5 +20,12 @@
   "historicalState": {
     "publicRpc": "unavailable for eth_getCode at old blocks",
     "impact": "Archived historical state reads need an archive provider; historical eth_getLogs and transaction receipts were accessible in spot checks."
+  },
+  "v2BuybackSample": {
+    "checkedOn": "2026-09-29",
+    "transactionHash": "0xe27fe1e892b749d2ef81c5e7d715b2a6eeb6646b071ce8ef82f12d5741e9f5fb",
+    "blockNumber": 74955360,
+    "source": "eth_getTransactionReceipt and latest ERC-20 metadata via https://rpc.mainnet.chain.robinhood.com",
+    "historicalReserves": "unavailable from public RPC; do not treat example candle price as on-chain verified"
   }
 }

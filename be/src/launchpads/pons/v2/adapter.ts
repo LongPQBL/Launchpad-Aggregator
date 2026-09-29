@@ -3,7 +3,7 @@ import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, LifecycleStatus, QuoteAsset, RawLog, Trade, Venue } from '../../../domain/types.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
-import { curveBuyEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
+import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
 import type { CurveReserves } from './curve.js';
 
 export interface V2LaunchRecord { token: Address; curve: Address; deployer: Address; pairToken: Address; poolFee: number; tickSpacing: number; phase: 0 | 1 | 2 | 3; exists: boolean }
@@ -136,6 +136,27 @@ export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, time
   };
 }
 
+export function decodeCurveBuyback(log: RpcLog, launch: Launch, venue: Venue, timestamp: number, verifiedPostTradeReserves?: CurveReserves): Trade {
+  if (launch.protocolVersion !== 'v2' || venue.kind !== 'curve' || !venue.official || !same(log.address, venue.ref as Address)
+    || venue.chainId !== launch.chainId || !same(venue.tokenAddress, launch.tokenAddress)
+    || log.topics[0] !== toEventSelector(curveBuybackEvent)) {
+    throw new Error('Log is not from the official pons v2 curve buyback');
+  }
+  const decoded = decodeEventLog({ abi: [curveBuybackEvent], data: log.data, topics: [log.topics[0], ...log.topics.slice(1)], strict: true });
+  if (decoded.args.quoteSpent <= 0n || decoded.args.tokensLocked <= 0n) throw new Error('Invalid pons v2 curve buyback amounts');
+  if (verifiedPostTradeReserves && (verifiedPostTradeReserves.quote <= 0n || verifiedPostTradeReserves.token <= 0n)) {
+    throw new Error('Invalid verified curve reserves');
+  }
+  return {
+    chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id, blockNumber: log.blockNumber,
+    blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp, side: 'buy',
+    tokenAmountRaw: decoded.args.tokensLocked, quoteAmountRaw: decoded.args.quoteSpent,
+    quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'BuybackLocked', activityKind: 'protocol_buyback',
+    priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
+    priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
+  };
+}
+
 function toRawLog(log: RpcLog, chainId: number, sourceId: string): RawLog {
   return { chainId, sourceId, blockNumber: log.blockNumber, blockHash: log.blockHash, txHash: log.transactionHash,
     logIndex: log.logIndex, address: log.address, topics: log.topics, data: log.data };
@@ -166,10 +187,13 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown pons v2 curve: ${log.address}`);
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
-    if (log.topics[0] !== toEventSelector(curveBuyEvent) && log.topics[0] !== toEventSelector(curveSellEvent)) continue;
+    if (log.topics[0] !== toEventSelector(curveBuyEvent) && log.topics[0] !== toEventSelector(curveSellEvent)
+      && log.topics[0] !== toEventSelector(curveBuybackEvent)) continue;
     let timestamp = timestamps.get(log.blockNumber);
     if (timestamp === undefined) { timestamp = await getTimestamp(log.blockNumber); timestamps.set(log.blockNumber, timestamp); }
-    trades.push(decodeCurveTrade(log, context.launch, context.venue, timestamp));
+    trades.push(log.topics[0] === toEventSelector(curveBuybackEvent)
+      ? decodeCurveBuyback(log, context.launch, context.venue, timestamp)
+      : decodeCurveTrade(log, context.launch, context.venue, timestamp));
   }
   return { rawLogs, launches: [], venues: [], trades };
 }
