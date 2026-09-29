@@ -31,11 +31,11 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
   return {
     chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id, blockNumber: log.blockNumber,
     blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp,
-    side: quoteSigned > 0n ? 'buy' : 'sell',
+    side: quoteSigned < 0n ? 'buy' : 'sell',
     tokenAmountRaw: tokenSigned < 0n ? -tokenSigned : tokenSigned,
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
-    activityKind: protocolSwap ? (quoteSigned > 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
+    activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
     priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
     priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
   };
