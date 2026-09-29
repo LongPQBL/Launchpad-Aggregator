@@ -23,13 +23,15 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const params = await searchParams;
   const cursor = first(params.cursor);
   const chainId = parseChainId(params.chainId);
+  const search = first(params.search) || undefined;
+  const status = first(params.status) || undefined;
 
   let page: LaunchPage | null = null;
   let sources: readonly Source[] = [];
   let error = false;
 
   try {
-    const [launchesResult, sourcesResult] = await Promise.all([getLaunches({ cursor, chainId }), getSources()]);
+    const [launchesResult, sourcesResult] = await Promise.all([getLaunches({ cursor, chainId, search, status }), getSources()]);
     page = launchesResult;
     sources = sourcesResult.items;
   } catch {
@@ -41,7 +43,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   return (
     <AppShell>
       {!error && <LiveRefreshIndicator resourceKeys={resourceKeys} />}
-      <LaunchList page={page} sources={sources} error={error} chainId={chainId} />
+      <LaunchList page={page} sources={sources} error={error} chainId={chainId} search={search} status={status} />
     </AppShell>
   );
 }

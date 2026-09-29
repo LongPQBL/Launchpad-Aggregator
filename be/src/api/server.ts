@@ -26,6 +26,7 @@ export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
+export interface LaunchListQuery extends ListQuery { search?: string; status?: string }
 
 export interface ApiDeps {
   feOrigin: string;
@@ -33,7 +34,7 @@ export interface ApiDeps {
   data: {
     listSources(): Promise<readonly { id: string; chainId: number; platform: string; protocolVersion: string }[]>;
     getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[] }>;
-    listLaunches(query: ListQuery): Promise<Page<LaunchSummary>>;
+    listLaunches(query: LaunchListQuery): Promise<Page<LaunchSummary>>;
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
     listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;

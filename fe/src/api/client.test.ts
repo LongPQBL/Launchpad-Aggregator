@@ -31,6 +31,18 @@ describe('client', () => {
     expect(requested.searchParams.get('chainId')).toBe('4663');
   });
 
+  it('requests launches with search and status query params when provided', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
+
+    await getLaunches({ search: 'demo', status: 'swept' });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    const requested = new URL(String(url));
+    expect(requested.searchParams.get('search')).toBe('demo');
+    expect(requested.searchParams.get('status')).toBe('swept');
+  });
+
   it('requests launches without cursor/chainId params when omitted, relying on BE default newest-first order', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));

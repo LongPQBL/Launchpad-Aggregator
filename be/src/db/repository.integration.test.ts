@@ -538,6 +538,19 @@ describe('PostgreSQL API store', () => {
     expect(new Set([...first.items, ...second.items].map((trade) => `${trade.txHash}:${trade.logIndex}`)).size).toBe(2);
     expect([...first.items, ...second.items].map((trade) => trade.activityKind)).toContain('protocol_buyback');
   });
+
+  it('filters launches by search term (name/symbol) and by lifecycle status', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
+    const store = createApiStore(pool);
+
+    expect((await store.listLaunches({ limit: 10, search: 'exam' })).items).toHaveLength(1);
+    expect((await store.listLaunches({ limit: 10, search: 'EX' })).items).toHaveLength(1);
+    expect((await store.listLaunches({ limit: 10, search: 'nonexistent' })).items).toEqual([]);
+
+    expect((await store.listLaunches({ limit: 10, status: 'trading' })).items).toHaveLength(1);
+    expect((await store.listLaunches({ limit: 10, status: 'swept' })).items).toEqual([]);
+  });
 });
 
 describe('venue discovery for trade indexing', () => {

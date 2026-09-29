@@ -126,6 +126,41 @@ describe('LaunchList', () => {
     expect(nextLink).toHaveAttribute('href', expect.stringContaining('cursor=cursor-2'));
   });
 
+  it('keeps the current search and status filters on the next-page link', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch()], nextCursor: 'cursor-2' }}
+        sources={oneChainOneSource}
+        error={false}
+        search="demo"
+        status="swept"
+      />,
+    );
+
+    const nextLink = screen.getByRole('link', { name: /trang sau/i });
+    expect(nextLink).toHaveAttribute('href', expect.stringContaining('search=demo'));
+    expect(nextLink).toHaveAttribute('href', expect.stringContaining('status=swept'));
+  });
+
+  it('shows a search box and status filter that submit as a GET form, preserving the current values', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch()], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+        search="demo"
+        status="swept"
+      />,
+    );
+
+    const form = screen.getByRole('search', { name: /tìm.*lọc launch/i });
+    expect(form).toHaveAttribute('method', 'get');
+    const searchBox = within(form).getByRole('searchbox');
+    expect(searchBox).toHaveValue('demo');
+    const statusSelect = within(form).getByRole('combobox', { name: /lọc theo vòng đời/i });
+    expect(statusSelect).toHaveValue('swept');
+  });
+
   it('hides the next-page link when there is no further cursor', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
 

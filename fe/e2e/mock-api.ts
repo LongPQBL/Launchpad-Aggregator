@@ -77,7 +77,12 @@ export function startMockApi(port: number): Server {
 
     res.setHeader('content-type', 'application/json');
     if (url.pathname === '/v1/launches') {
-      res.end(JSON.stringify({ items: [launchSummary], nextCursor: null }));
+      const search = url.searchParams.get('search')?.toLowerCase();
+      const status = url.searchParams.get('status');
+      const matches =
+        (!search || launchSummary.name.toLowerCase().includes(search) || launchSummary.symbol.toLowerCase().includes(search)) &&
+        (!status || launchSummary.lifecycleStatus === status);
+      res.end(JSON.stringify({ items: matches ? [launchSummary] : [], nextCursor: null }));
     } else if (url.pathname === '/v1/sources') {
       res.end(JSON.stringify({ items: [{ id: 'pons-v2', chainId: CHAIN_ID, platform: 'pons', protocolVersion: 'v2' }] }));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`) {

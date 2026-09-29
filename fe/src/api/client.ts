@@ -11,12 +11,12 @@ export interface LaunchPage {
   nextCursor: string | null;
 }
 
-// be/src/api/routes/launches.ts only parses limit/cursor/chainId today; there is no
-// server-side search or lifecycle-status filter to type against (see Task 2 ruling in the ledger).
 export interface LaunchQuery {
   cursor?: string;
   chainId?: number;
   limit?: number;
+  search?: string;
+  status?: string;
 }
 
 // be/src/api/routes/sources.ts registers no Fastify response schema, so this shape is absent
@@ -64,7 +64,13 @@ async function request<T>(path: string, searchParams?: Record<string, string | n
 }
 
 export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
-  return request<LaunchPage>('/v1/launches', { cursor: query.cursor, chainId: query.chainId, limit: query.limit });
+  return request<LaunchPage>('/v1/launches', {
+    cursor: query.cursor,
+    chainId: query.chainId,
+    limit: query.limit,
+    search: query.search,
+    status: query.status,
+  });
 }
 
 export async function getSources(): Promise<SourceList> {

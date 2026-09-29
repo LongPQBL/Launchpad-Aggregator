@@ -5,7 +5,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles } from '../market/aggregate.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
-import type { ApiDeps, CandleResponse, LaunchDetail, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
+import type { ApiDeps, CandleResponse, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -66,7 +66,7 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         .map((row: Row) => ({ id: string(row.id), chainId: number(row.chain_id), platform: 'pons', protocolVersion: string(row.version) }));
     },
     getCoverage: coverage,
-    async listLaunches(query: ListQuery) {
+    async listLaunches(query: LaunchListQuery) {
       const status = await coverage();
       const coverageStatus = status.complete ? 'caught_up' : 'backfilling';
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
@@ -79,8 +79,11 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         FROM launches l JOIN sources s ON s.id = l.source_id JOIN raw_logs r ON r.id = l.source_log_id
         WHERE ($1::integer IS NULL OR l.chain_id = $1)
           AND ($2::bigint IS NULL OR (r.block_number, r.tx_hash, r.log_index) < ($2::bigint, $3::text, $4::integer))
+          AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
+          AND ($8::text IS NULL OR l.lifecycle_status = $8)
         ORDER BY r.block_number DESC, r.tx_hash DESC, r.log_index DESC LIMIT $5`,
-      [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since]);
+      [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
+        query.search ?? null, query.status ?? null]);
       return page(result.rows as Row[], query.limit, (row) => summary(row, coverageStatus));
     },
     async getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {

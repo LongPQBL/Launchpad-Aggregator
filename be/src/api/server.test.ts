@@ -55,6 +55,22 @@ describe('read-only API', () => {
     await app.close();
   });
 
+  it('passes search and lifecycle-status filters through to the launch list, and rejects an unknown status', async () => {
+    const calls: Array<{ limit: number; search?: string; status?: string }> = [];
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async (query) => { calls.push(query); return { items: [launch], nextCursor: null }; },
+    } });
+    const withSearch = await app.inject({ method: 'GET', url: '/v1/launches?search=demo' });
+    expect(withSearch.statusCode).toBe(200);
+    const withStatus = await app.inject({ method: 'GET', url: '/v1/launches?status=swept' });
+    expect(withStatus.statusCode).toBe(200);
+    expect(calls).toEqual([{ limit: 50, search: 'demo' }, { limit: 50, status: 'swept' }]);
+    const withUnknownStatus = await app.inject({ method: 'GET', url: '/v1/launches?status=not-a-status' });
+    expect(withUnknownStatus.statusCode).toBe(400);
+    await app.close();
+  });
+
   it('serves token trades and candles without converting missing history to zero', async () => {
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
     const trades = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/trades?limit=2` });

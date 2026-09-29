@@ -2,7 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
 import { candle, launchDetail, launchSummary, pageSchema, trade } from '../schemas.js';
-import type { ApiDeps } from '../server.js';
+import type { ApiDeps, LaunchListQuery } from '../server.js';
+
+const LIFECYCLE_STATUSES = new Set(['trading', 'swept', 'graduated', 'rescued']);
 
 function chainId(value: string): number | null {
   const parsed = Number(value);
@@ -20,6 +22,14 @@ function listQuery(value: Record<string, string | undefined>): { limit: number; 
   return { limit: Math.min(requested, 100), ...(value.cursor ? { cursor: value.cursor } : {}), ...(id ? { chainId: id } : {}) };
 }
 
+function launchListQuery(value: Record<string, string | undefined>): LaunchListQuery | null {
+  const base = listQuery(value);
+  if (!base) return null;
+  const search = value.search?.trim();
+  if (value.status !== undefined && !LIFECYCLE_STATUSES.has(value.status)) return null;
+  return { ...base, ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}) };
+}
+
 function tokenParams(value: { chainId: string; tokenAddress: string }): { chainId: number; tokenAddress: string } | null {
   const id = chainId(value.chainId);
   if (id === null || !isAddress(value.tokenAddress)) return null;
@@ -28,7 +38,7 @@ function tokenParams(value: { chainId: string; tokenAddress: string }): { chainI
 
 export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Querystring: Record<string, string | undefined> }>('/v1/launches', { schema: { response: { 200: pageSchema(launchSummary) } } }, async (request, reply) => {
-    const query = listQuery(request.query);
+    const query = launchListQuery(request.query);
     if (!query) return reply.code(400).send({ error: 'Invalid launch query' });
     return deps.data.listLaunches(query);
   });
