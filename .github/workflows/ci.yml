@@ -37,3 +37,6 @@ jobs:
           TEST_DATABASE_URL: postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test
       - run: npm run build
       - run: npm run openapi:check -w be
+      - run: npm run check:schema -w fe
+      - run: npm run e2e:install -w fe
+      - run: npm run test:e2e -w fe

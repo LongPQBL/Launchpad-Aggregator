@@ -1,6 +1,8 @@
 import { AppShell } from '@/components/app-shell';
+import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchList } from '@/features/launches/launch-list';
 import { getLaunches, getSources, type LaunchPage, type Source } from '@/api/client';
+import { chainResourceKey } from '@/hooks/resource-keys';
 
 interface HomePageProps {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -34,8 +36,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     error = true;
   }
 
+  const resourceKeys = [...new Set(sources.map((source) => source.chainId))].map(chainResourceKey);
+
   return (
     <AppShell>
+      {!error && <LiveRefreshIndicator resourceKeys={resourceKeys} />}
       <LaunchList page={page} sources={sources} error={error} chainId={chainId} />
     </AppShell>
   );

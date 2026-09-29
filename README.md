@@ -1,6 +1,6 @@
 # Launchpad Aggregator
 
-Ứng dụng tổng hợp launchpad đa chain đang được xây dựng theo từng adapter. Giai đoạn hiện tại chỉ đọc dữ liệu Pons trên Robinhood Chain (`4663`); **chưa có giao diện, kết nối ví hoặc giao dịch mua/bán**.
+Ứng dụng tổng hợp launchpad đa chain đang được xây dựng theo từng adapter. Giai đoạn hiện tại chỉ đọc dữ liệu Pons trên Robinhood Chain (`4663`), có giao diện web tối để duyệt launch/chi tiết/chart/giao dịch; **chưa có kết nối ví hoặc giao dịch mua/bán**.
 
 ## Trạng thái hiện tại
 
@@ -43,6 +43,19 @@ curl 'http://127.0.0.1:3001/v1/launches?chainId=4663'
 
 OpenAPI ở `/openapi.json`; bản snapshot là `be/openapi.json`. SSE ở `/v1/events`, chỉ báo loại sự kiện và ID token để frontend gọi lại API. CORS chỉ cho phép `FE_ORIGIN`.
 
+## Chạy FE
+
+Cần backend API (`dev:api`) đang chạy trước. Sao chép biến môi trường rồi khởi động FE ở terminal riêng:
+
+```sh
+cp fe/.env.example fe/.env.local
+npm run dev -w fe
+```
+
+Mở `http://localhost:3000`. `BE_API_URL` (đọc phía server, cho các trang Next.js render dữ liệu launch) và `NEXT_PUBLIC_BE_API_URL` (đọc phía trình duyệt, cho kết nối SSE realtime ở `fe/src/hooks/use-live-refresh.ts`) trong `fe/.env.local` phải trỏ cùng một instance API. Khi API tắt hoặc mất kết nối SSE, giao diện hiện lỗi có nút thử lại hoặc chuyển sang polling định kỳ, không hiện trang trắng.
+
+**Giới hạn coverage hiện tại:** vì backend chưa backfill toàn chain (xem phần Trạng thái hiện tại), FE sẽ hiện huy hiệu “Đang đồng bộ” cho hầu hết launch và “Chưa có dữ liệu” cho volume/giá còn thiếu, thay vì số 0 hay dữ liệu giả. Đây là hành vi đúng theo thiết kế, không phải lỗi.
+
 ## Kiểm thử
 
 ```sh
@@ -56,6 +69,20 @@ npm run openapi:check -w be
 
 Các test tích hợp chỉ được phép dùng DB có tên kết thúc bằng `_test`. CI tự khởi tạo PostgreSQL riêng, không cần RPC thật.
 
+FE có bộ test riêng, không cần backend hay PostgreSQL thật đang chạy (test dùng schema/kiểu sinh sẵn và mock fetch):
+
+```sh
+npm run lint -w fe
+npm run typecheck -w fe
+npm test -w fe
+npm run check:schema -w fe
+npm run build -w fe
+npm run e2e:install -w fe   # tải trình duyệt Chromium cho Playwright, chỉ cần chạy một lần
+npm run test:e2e -w fe
+```
+
+`npm run test:e2e -w fe` tự khởi động một BE giả (`fe/e2e/mock-api.ts`, dữ liệu cố định, không gọi RPC/PostgreSQL thật) và `next dev` trước khi chạy, nên chạy được trên máy sạch hoặc CI mà không cần backend thật. Test chạy trên cả viewport desktop và mobile, xác nhận luồng danh sách → chi tiết, huy hiệu coverage thiếu hiển thị trung thực, và không có nút ví/giao dịch nào trên giao diện.
+
 ## Bước còn lại trước khi coi backend đạt yêu cầu
 
-Kiểm chứng giá curve lịch sử bằng RPC lưu state cũ, đối chiếu số launch với nguồn độc lập, chạy backfill cả ba factory và mọi nguồn trade/lifecycle đến safe head, rồi đo độ trễ khi head mới xuất hiện. Chỉ khi đối chiếu phase và coverage qua cửa sổ yêu cầu thành công mới kết luận volume/chart đầy đủ. FE, ví và mua/bán thật là giai đoạn sau, chưa nằm trong backend chỉ đọc này. Kế hoạch Pons V2 ở [lifecycle plan](docs/superpowers/plans/2026-09-29-pons-v2-lifecycle.md).
+Kiểm chứng giá curve lịch sử bằng RPC lưu state cũ, đối chiếu số launch với nguồn độc lập, chạy backfill cả ba factory và mọi nguồn trade/lifecycle đến safe head, rồi đo độ trễ khi head mới xuất hiện. Chỉ khi đối chiếu phase và coverage qua cửa sổ yêu cầu thành công mới kết luận volume/chart đầy đủ. Ví và mua/bán thật là giai đoạn sau, chưa nằm trong lát cắt chỉ đọc này. Kế hoạch Pons V2 ở [lifecycle plan](docs/superpowers/plans/2026-09-29-pons-v2-lifecycle.md).

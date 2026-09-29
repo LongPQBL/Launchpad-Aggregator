@@ -19,6 +19,9 @@ export function LaunchList({ page, sources, error, chainId }: LaunchListProps) {
     return (
       <div role="alert">
         <p>Không tải được danh sách launch từ máy chủ. Vui lòng thử lại.</p>
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
+            component router-context-free for unit tests (see Task 2 ruling in the plan ledger);
+            clicking it still does a real navigation/refetch since fetches use cache: 'no-store'. */}
         <a href="/">Thử lại</a>
       </div>
     );
