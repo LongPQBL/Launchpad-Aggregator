@@ -130,6 +130,7 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         quoteAmount: formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)),
         priceQuote: row.price_numerator_raw === null || row.price_denominator_raw === null ? null
           : formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18),
+        traderAddress: string(row.trader_address),
       })) as Page<TradeResponse>;
     },
     async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
@@ -152,6 +153,7 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         sourceEvent: string(row.source_event), activityKind: string(row.activity_kind) as Trade['activityKind'],
         priceNumeratorRaw: row.price_numerator_raw === null ? null : BigInt(string(row.price_numerator_raw)),
         priceDenominatorRaw: row.price_denominator_raw === null ? null : BigInt(string(row.price_denominator_raw)),
+        traderAddress: string(row.trader_address) as Address,
       }));
       const candles = buildOfficialCandles(mapped, intervalSeconds, { chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
         quoteAssetAddress: string(launch.quote_asset_address) as Address,

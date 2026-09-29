@@ -21,6 +21,7 @@ const token = '0x1111111111111111111111111111111111111111' as Address;
 const factory = '0x2222222222222222222222222222222222222222' as Address;
 const poolAddress = '0x3333333333333333333333333333333333333333' as Address;
 const quote = '0x4444444444444444444444444444444444444444' as Address;
+const trader = '0x7777777777777777777777777777777777777777' as Address;
 const txHash = `0x${'5'.repeat(64)}` as Hash;
 const blockHash = `0x${'6'.repeat(64)}` as Hash;
 
@@ -71,6 +72,7 @@ function batch(chainId: number, sourceId: string, tokenAmountRaw = 1_000_000_000
     activityKind: 'user_trade',
     priceNumeratorRaw: 1n,
     priceDenominatorRaw: 10n,
+    traderAddress: trader,
   };
   return {
     rawLogs: [
@@ -537,6 +539,7 @@ describe('PostgreSQL API store', () => {
     expect(second.nextCursor).toBeNull();
     expect(new Set([...first.items, ...second.items].map((trade) => `${trade.txHash}:${trade.logIndex}`)).size).toBe(2);
     expect([...first.items, ...second.items].map((trade) => trade.activityKind)).toContain('protocol_buyback');
+    expect([...first.items, ...second.items].every((trade) => trade.traderAddress === trader.toLowerCase())).toBe(true);
   });
 
   it('filters launches by search term (name/symbol) and by lifecycle status', async () => {

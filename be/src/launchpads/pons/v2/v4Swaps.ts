@@ -12,7 +12,7 @@ export function verifyPonsV4Graduation(log: RpcLog, launch: Launch): boolean {
   return decoded.args.token.toLowerCase() === launch.tokenAddress.toLowerCase();
 }
 
-export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venue: Venue, timestamp: number, poolManager: Address, hook: Address): Trade | null {
+export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venue: Venue, timestamp: number, traderAddress: Address, poolManager: Address, hook: Address): Trade | null {
   if (log.address.toLowerCase() !== poolManager.toLowerCase() || log.topics[0] !== toEventSelector(v4SwapEvent)
     || log.topics[1]?.toLowerCase() !== poolId.toLowerCase()) return null;
   if (launch.protocolVersion !== 'v2' || launch.lifecycleStatus !== 'graduated' || venue.kind !== 'v4_pool'
@@ -38,5 +38,6 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
     activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
     priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
     priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
+    traderAddress: traderAddress.toLowerCase() as Address,
   };
 }

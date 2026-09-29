@@ -98,7 +98,7 @@ export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, me
 // Returns null for a dust swap (one leg rounds to exactly zero on a very small trade — real on-chain
 // data, not corrupt input; see README.md's "Hai vấn đề khiến nguồn trade v1 kẹt vĩnh viễn" entry for
 // verified examples). Callers must skip it as a non-trade rather than treat a null return as an error.
-export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestamp: number): Trade | null {
+export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestamp: number, traderAddress: Address): Trade | null {
   if (venue.kind !== 'v3_pool' || !venue.official || log.address.toLowerCase() !== venue.ref.toLowerCase()) {
     throw new Error('Swap is not from the official V3 pool');
   }
@@ -134,6 +134,7 @@ export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestam
     activityKind: 'user_trade',
     priceNumeratorRaw: tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
     priceDenominatorRaw: tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
+    traderAddress: traderAddress.toLowerCase() as Address,
   };
 }
 
@@ -175,6 +176,7 @@ export async function decodeV1SwapBatch(
   sourceId: string,
   contexts: ReadonlyMap<string, LaunchWithVenue>,
   getTimestamp: (blockNumber: bigint) => Promise<number>,
+  getTrader: (txHash: Hash) => Promise<Address>,
 ): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
@@ -182,13 +184,19 @@ export async function decodeV1SwapBatch(
     return { log, context };
   });
   const uniqueBlocks = [...new Set(resolved.map(({ log }) => log.blockNumber))];
-  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-    async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+  const uniqueTxHashes = [...new Set(resolved.map(({ log }) => log.transactionHash))];
+  const [timestamps, traders] = await Promise.all([
+    mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
+    mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
+      async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
+  ]);
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context } of resolved) {
     const timestamp = timestamps.get(log.blockNumber)!;
-    const trade = decodeV1Swap(log, context.venue, context.launch, timestamp);
+    const trader = traders.get(log.transactionHash)!;
+    const trade = decodeV1Swap(log, context.venue, context.launch, timestamp, trader);
     if (trade) trades.push(trade);
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
   }

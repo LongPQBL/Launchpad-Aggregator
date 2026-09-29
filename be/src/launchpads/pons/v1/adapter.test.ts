@@ -12,6 +12,7 @@ const reference = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/po
 const legacy = getPonsFactorySources()[0];
 const active = getPonsFactorySources()[1];
 const quote = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as Address;
+const trader = '0x1234567890123456789012345678901234567890' as Address;
 
 function asLog(raw: Record<string, unknown>): RpcLog {
   return {
@@ -68,13 +69,14 @@ describe('pons v1 V3 trades', () => {
       name: 'Pons', symbol: 'PONS', decimals: 18,
       liquidityPool: reference.poolAddress as Address,
     }, true);
-    const trade = decodeV1Swap(asLog(reference.swap as Record<string, unknown>), venue, launch, 1_700_000_000);
+    const trade = decodeV1Swap(asLog(reference.swap as Record<string, unknown>), venue, launch, 1_700_000_000, trader);
     expect(trade).not.toBeNull();
     expect(trade!.side).toBe('buy');
     expect(trade!.quoteAmountRaw).toBe(100_000_000_000_000_000n);
     expect(trade!.tokenAmountRaw).toBeGreaterThan(0n);
     expect(trade!.priceNumeratorRaw).toBeGreaterThan(0n);
     expect(trade!.priceDenominatorRaw).toBeGreaterThan(0n);
+    expect(trade!.traderAddress).toBe(trader.toLowerCase());
   });
 
   it('uses the opposite signed leg when the launch token is token0', () => {
@@ -90,7 +92,7 @@ describe('pons v1 V3 trades', () => {
       topics: encodeEventTopics({ abi: [v3SwapEvent], eventName: 'Swap', args: { sender: quote, recipient: quote } }) as unknown as Hash[],
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [-2n, 5n, 2n ** 96n, 100n, 0]),
     };
-    const trade = decodeV1Swap(log, venue, launch, 1_700_000_000);
+    const trade = decodeV1Swap(log, venue, launch, 1_700_000_000, trader);
     expect(trade).not.toBeNull();
     expect(trade!.side).toBe('buy');
     expect(trade!.tokenAmountRaw).toBe(2n);
@@ -108,7 +110,7 @@ describe('pons v1 V3 trades', () => {
       ...asLog(reference.swap as Record<string, unknown>),
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [-5n, 2n, 2n ** 96n, 100n, 0]),
     };
-    const trade = decodeV1Swap(log, venue, launch, 1_700_000_000);
+    const trade = decodeV1Swap(log, venue, launch, 1_700_000_000, trader);
     expect(trade).not.toBeNull();
     expect(trade!.side).toBe('sell');
     expect(trade!.tokenAmountRaw).toBe(2n);
@@ -128,7 +130,7 @@ describe('pons v1 V3 trades', () => {
       ...asLog(reference.swap as Record<string, unknown>),
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [0n, 25654359n, 2n ** 96n, 100n, 0]),
     };
-    expect(decodeV1Swap(log, venue, launch, 1_700_000_000)).toBeNull();
+    expect(decodeV1Swap(log, venue, launch, 1_700_000_000, trader)).toBeNull();
   });
 
   it('still rejects genuinely malformed amounts (both legs nonzero and same sign)', () => {
@@ -141,7 +143,7 @@ describe('pons v1 V3 trades', () => {
       ...asLog(reference.swap as Record<string, unknown>),
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [5n, 2n, 2n ** 96n, 100n, 0]),
     };
-    expect(() => decodeV1Swap(log, venue, launch, 1_700_000_000)).toThrow(/Invalid V3 swap amounts/);
+    expect(() => decodeV1Swap(log, venue, launch, 1_700_000_000, trader)).toThrow(/Invalid V3 swap amounts/);
   });
 });
 
@@ -192,10 +194,12 @@ describe('pons v1 normalized batches', () => {
       'pons-v1-pool-cohort-0',
       new Map([[context.venue.ref.toLowerCase(), context]]),
       async () => 1_700_000_000,
+      async () => trader,
     );
     expect(result.trades).toHaveLength(1);
     expect(result.rawLogs).toHaveLength(1);
     expect(result.trades[0].venueId).toBe(context.venue.id);
+    expect(result.trades[0].traderAddress).toBe(trader.toLowerCase());
     expect(result.rawLogs[0].sourceId).toBe('pons-v1-pool-cohort-0');
   });
 
@@ -216,6 +220,7 @@ describe('pons v1 normalized batches', () => {
       'pons-v1-pool-cohort-0',
       new Map([[context.venue.ref.toLowerCase(), context]]),
       async () => 1_700_000_000,
+      async () => trader,
     );
     expect(result.rawLogs).toHaveLength(2);
     expect(result.trades).toHaveLength(1);
@@ -239,10 +244,34 @@ describe('pons v1 normalized batches', () => {
       return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
     };
     const resultPromise = decodeV1SwapBatch(logs, 'pons-v1-pool-cohort-0',
-      new Map([[context.venue.ref.toLowerCase(), context]]), getTimestamp);
+      new Map([[context.venue.ref.toLowerCase(), context]]), getTimestamp, async () => trader);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestedBlocks).toHaveLength(3);
     for (const release of releases.values()) release(1_700_000_000);
+    const result = await resultPromise;
+    expect(result.trades).toHaveLength(3);
+  });
+
+  it('fetches distinct transaction traders concurrently instead of one round trip at a time', async () => {
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const context = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address,
+    }, true);
+    const base = asLog(reference.swap as Record<string, unknown>);
+    const logs: RpcLog[] = [1, 2, 3].map((index) => ({
+      ...base, transactionHash: `0x${index.toString().repeat(64)}`.slice(0, 66) as Hash,
+    }));
+    const requestedHashes: Hash[] = [];
+    const releases = new Map<Hash, (value: Address) => void>();
+    const getTrader = (txHash: Hash) => {
+      requestedHashes.push(txHash);
+      return new Promise<Address>((resolve) => { releases.set(txHash, resolve); });
+    };
+    const resultPromise = decodeV1SwapBatch(logs, 'pons-v1-pool-cohort-0',
+      new Map([[context.venue.ref.toLowerCase(), context]]), async () => 1_700_000_000, getTrader);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedHashes).toHaveLength(3);
+    for (const release of releases.values()) release(trader);
     const result = await resultPromise;
     expect(result.trades).toHaveLength(3);
   });

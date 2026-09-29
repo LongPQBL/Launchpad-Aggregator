@@ -123,10 +123,14 @@ export const trades = pgTable('trades', {
   sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
   priceNumeratorRaw: text('price_numerator_raw'),
   priceDenominatorRaw: text('price_denominator_raw'),
+  // Nullable only because rows saved before this field existed haven't been backfilled yet
+  // (see be/src/cli/backfillTraderAddress.ts) — every row decoded by current code populates it.
+  traderAddress: text('trader_address'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
   index('trades_token_block_idx').on(table.chainId, table.tokenAddress, table.blockNumber),
   index('trades_token_timestamp_idx').on(table.chainId, table.tokenAddress, table.timestamp),
+  index('trades_trader_idx').on(table.chainId, table.traderAddress),
 ]);
 
 export const candles = pgTable('candles', {

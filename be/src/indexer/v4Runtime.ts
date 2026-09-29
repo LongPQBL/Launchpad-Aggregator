@@ -40,7 +40,7 @@ function verifiedLog(log: Log): RpcLog {
 }
 
 export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block: bigint) => Promise<number>,
-  poolManager: Address, hook: Address): ScanDeps['decodeLogs'] {
+  getTrader: (txHash: Hash) => Promise<Address>, poolManager: Address, hook: Address): ScanDeps['decodeLogs'] {
   const poolId = context.venue.ref.toLowerCase() as Hash;
   const sourceId = `pons-v2-v4:${poolId}`;
   return async (logs, source): Promise<IndexBatch> => {
@@ -55,13 +55,19 @@ export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block
       return log;
     });
     const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
-    const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+    const uniqueTxHashes = [...new Set(verifiedLogs.map((log) => log.transactionHash))];
+    const [timestamps, traders] = await Promise.all([
+      mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+        async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
+      mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
+        async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
+    ]);
     const rawLogs: RawLog[] = [];
     const trades: IndexBatch['trades'][number][] = [];
     for (const log of verifiedLogs) {
       const timestamp = timestamps.get(log.blockNumber)!;
-      const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, timestamp, poolManager, hook);
+      const trader = traders.get(log.transactionHash)!;
+      const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, timestamp, trader, poolManager, hook);
       if (!trade) continue;
       trades.push(trade);
       rawLogs.push({ chainId: source.chainId, sourceId, blockNumber: log.blockNumber, blockHash: log.blockHash,

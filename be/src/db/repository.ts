@@ -254,6 +254,7 @@ export function createRepository(db: Database) {
             sourceLogId: logKey(trade.chainId, trade.blockHash, trade.txHash, trade.logIndex),
             priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
             priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
+            traderAddress: trade.traderAddress.toLowerCase(),
           }))).onConflictDoNothing();
         }
         if (batch.transitions.length) {

@@ -1,3 +1,4 @@
+import type { Hash } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
@@ -142,6 +143,7 @@ async function runOnce(): Promise<void> {
       .filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
     const tradeSource = withVenueAddresses(definition, contexts);
     const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
+    const getTrader = async (txHash: Hash) => (await client.getTransaction({ hash: txHash })).from;
     const tradeReports = await runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
@@ -149,7 +151,7 @@ async function runOnce(): Promise<void> {
         initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
         getCursor: repository.getCursor,
         getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
-        decodeLogs: createTradeDecoder(contexts, getTimestamp), saveIndexBatch: repository.saveIndexBatch,
+        decodeLogs: createTradeDecoder(contexts, getTimestamp, getTrader), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
     });
@@ -166,6 +168,7 @@ async function runOnce(): Promise<void> {
         factoryAddress: poolManager, startBlock: source.startBlock });
       const context = bySourceId.get(source.id)!;
       const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
+      const getTrader = async (txHash: Hash) => (await client.getTransaction({ hash: txHash })).from;
       reports.push(...await runFactoryCycle([source], safeHead, maxBlocksPerSource, {
         getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
         setSourceStatus: repository.setSourceStatus,
@@ -173,7 +176,7 @@ async function runOnce(): Promise<void> {
           initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
           getCursor: repository.getCursor,
           getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
-          decodeLogs: createV4TradeDecoder(context, getTimestamp, poolManager, hook),
+          decodeLogs: createV4TradeDecoder(context, getTimestamp, getTrader, poolManager, hook),
           saveIndexBatch: repository.saveIndexBatch,
           sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
         }),

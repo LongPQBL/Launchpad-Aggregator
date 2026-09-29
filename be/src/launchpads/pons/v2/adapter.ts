@@ -107,7 +107,7 @@ export async function readV2Phase(client: V2ReadClient, factory: Address, token:
   return (await readV2LaunchRecord(client, factory, token, blockNumber)).phase;
 }
 
-export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, timestamp: number, verifiedPostTradeReserves?: CurveReserves): Trade {
+export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, timestamp: number, traderAddress: Address, verifiedPostTradeReserves?: CurveReserves): Trade {
   if (launch.protocolVersion !== 'v2' || venue.kind !== 'curve' || !venue.official || !same(log.address, venue.ref as Address)
     || venue.chainId !== launch.chainId || !same(venue.tokenAddress, launch.tokenAddress)) {
     throw new Error('Log is not from the official pons v2 curve');
@@ -135,10 +135,11 @@ export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, time
     activityKind: 'user_trade',
     priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
     priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
+    traderAddress: traderAddress.toLowerCase() as Address,
   };
 }
 
-export function decodeCurveBuyback(log: RpcLog, launch: Launch, venue: Venue, timestamp: number, verifiedPostTradeReserves?: CurveReserves): Trade {
+export function decodeCurveBuyback(log: RpcLog, launch: Launch, venue: Venue, timestamp: number, traderAddress: Address, verifiedPostTradeReserves?: CurveReserves): Trade {
   if (launch.protocolVersion !== 'v2' || venue.kind !== 'curve' || !venue.official || !same(log.address, venue.ref as Address)
     || venue.chainId !== launch.chainId || !same(venue.tokenAddress, launch.tokenAddress)
     || log.topics[0] !== toEventSelector(curveBuybackEvent)) {
@@ -156,6 +157,7 @@ export function decodeCurveBuyback(log: RpcLog, launch: Launch, venue: Venue, ti
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'BuybackLocked', activityKind: 'protocol_buyback',
     priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
     priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
+    traderAddress: traderAddress.toLowerCase() as Address,
   };
 }
 
@@ -181,7 +183,8 @@ export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: Fac
 }
 
 export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: string,
-  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getTimestamp: (block: bigint) => Promise<number>): Promise<IndexBatch> {
+  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getTimestamp: (block: bigint) => Promise<number>,
+  getTrader: (txHash: Hash) => Promise<Address>): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown pons v2 curve: ${log.address}`);
@@ -189,18 +192,25 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
       || log.topics[0] === toEventSelector(curveBuybackEvent);
     return { log, context, isTradeEvent };
   });
-  const uniqueBlocks = [...new Set(resolved.filter((item) => item.isTradeEvent).map((item) => item.log.blockNumber))];
-  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-    async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+  const tradeItems = resolved.filter((item) => item.isTradeEvent);
+  const uniqueBlocks = [...new Set(tradeItems.map((item) => item.log.blockNumber))];
+  const uniqueTxHashes = [...new Set(tradeItems.map((item) => item.log.transactionHash))];
+  const [timestamps, traders] = await Promise.all([
+    mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
+    mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
+      async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
+  ]);
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context, isTradeEvent } of resolved) {
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
     if (!isTradeEvent) continue;
     const timestamp = timestamps.get(log.blockNumber)!;
+    const trader = traders.get(log.transactionHash)!;
     trades.push(log.topics[0] === toEventSelector(curveBuybackEvent)
-      ? decodeCurveBuyback(log, context.launch, context.venue, timestamp)
-      : decodeCurveTrade(log, context.launch, context.venue, timestamp));
+      ? decodeCurveBuyback(log, context.launch, context.venue, timestamp, trader)
+      : decodeCurveTrade(log, context.launch, context.venue, timestamp, trader));
   }
   return { rawLogs, launches: [], venues: [], trades, transitions: [] };
 }

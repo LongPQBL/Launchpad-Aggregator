@@ -78,6 +78,9 @@ export interface Trade {
   activityKind: TradeActivityKind;
   priceNumeratorRaw: bigint | null;
   priceDenominatorRaw: bigint | null;
+  // The transaction's originating EOA (tx.origin), not the log's `sender`/`buyer` arg — on a V4
+  // swap `sender` is typically the router contract, not the wallet that actually traded.
+  traderAddress: Address;
 }
 
 export interface RawLog {

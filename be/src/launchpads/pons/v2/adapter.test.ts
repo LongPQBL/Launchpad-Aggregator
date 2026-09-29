@@ -12,6 +12,7 @@ const sourceFixtures = JSON.parse(readFileSync(new URL('../../../../tests/fixtur
 const reference = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-reference.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 const buybackFixture = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-buyback.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 const factory = getPonsFactorySources()[2];
+const trader = '0x1234567890123456789012345678901234567890' as Address;
 
 function asLog(raw: Record<string, unknown>): RpcLog {
   return {
@@ -142,12 +143,13 @@ describe('pons v2 curve trades', () => {
     launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
     venue.tokenAddress = launch.tokenAddress;
     venue.ref = buybackFixture.curveAddress as string;
-    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000);
+    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000, trader);
     expect(buyback.activityKind).toBe('protocol_buyback');
     expect(buyback.sourceEvent).toBe('BuybackLocked');
     expect(buyback.side).toBe('buy');
     expect(buyback.quoteAmountRaw).toBe(22_028_506n);
     expect(buyback.tokenAmountRaw).toBe(4_800_278_083_646_296_645_657_066n);
+    expect(buyback.traderAddress).toBe(trader.toLowerCase());
   });
 
   it('counts the buyback once even when the same transaction sweeps fees and locks tokens', async () => {
@@ -158,7 +160,7 @@ describe('pons v2 curve trades', () => {
     venue.ref = buybackFixture.curveAddress as string;
     const batch = await decodeV2CurveBatch(
       [asLog(buybackFixture.buyback as Record<string, unknown>), asLog(buybackFixture.feesSwept as Record<string, unknown>)],
-      'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000,
+      'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, async () => trader,
     );
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].activityKind).toBe('protocol_buyback');
@@ -173,7 +175,7 @@ describe('pons v2 curve trades', () => {
     launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
     venue.tokenAddress = launch.tokenAddress;
     venue.ref = buybackFixture.curveAddress as string;
-    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000,
+    const buyback = decodeCurveBuyback(asLog(buybackFixture.buyback as Record<string, unknown>), launch, venue, 1_700_000_000, trader,
       { quote: 100_000_000n, token: 10_000_000n * 10n ** 18n });
     const candle = buildOfficialCandles([buyback], 60, { chainId: 4663, tokenAddress: launch.tokenAddress,
       quoteAssetAddress: launch.quoteAsset.address, venueIds: new Set([venue.id]), complete: true })[0];
@@ -183,8 +185,8 @@ describe('pons v2 curve trades', () => {
 
   it('uses actual filled amounts from real buy and sell events', () => {
     const { launch, venue } = context();
-    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000);
-    const sell = decodeCurveTrade(asLog(reference.sell as Record<string, unknown>), launch, venue, 1_700_000_010);
+    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000, trader);
+    const sell = decodeCurveTrade(asLog(reference.sell as Record<string, unknown>), launch, venue, 1_700_000_010, trader);
     expect(buy.side).toBe('buy');
     expect(buy.quoteAmountRaw).toBe(28_716_771_876_358_226n);
     expect(buy.tokenAmountRaw).toBeGreaterThan(0n);
@@ -192,6 +194,7 @@ describe('pons v2 curve trades', () => {
     expect(sell.tokenAmountRaw).toBeGreaterThan(0n);
     expect(sell.quoteAmountRaw).toBeGreaterThan(0n);
     expect(buy.priceNumeratorRaw).toBeNull();
+    expect(buy.traderAddress).toBe(trader.toLowerCase());
   });
 
   it('counts a filled buy once and excludes other curve logs from volume', async () => {
@@ -203,7 +206,7 @@ describe('pons v2 curve trades', () => {
       topics: ['0x9f4cd7c4ed99d08a797804560c9c5d71d2cf7e101f2e3b5e7d1ca8a24c370e4f'],
       data: '0x',
     };
-    const batch = await decodeV2CurveBatch([buyLog, otherLog], 'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000);
+    const batch = await decodeV2CurveBatch([buyLog, otherLog], 'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, async () => trader);
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].quoteAmountRaw).toBe(28_716_771_876_358_226n);
     expect(batch.rawLogs).toHaveLength(2);
@@ -220,7 +223,7 @@ describe('pons v2 curve trades', () => {
       return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
     };
     const resultPromise = decodeV2CurveBatch([buyLog, sellLog], 'pons-v2-curve-cohort',
-      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), getTimestamp);
+      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), getTimestamp, async () => trader);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestedBlocks).toHaveLength(2);
     for (const release of releases.values()) release(1_700_000_000);
@@ -228,10 +231,29 @@ describe('pons v2 curve trades', () => {
     expect(batch.trades).toHaveLength(2);
   });
 
+  it('fetches distinct transaction traders concurrently instead of one round trip at a time', async () => {
+    const { launch, venue } = context();
+    const buyLog = asLog(reference.buy as Record<string, unknown>);
+    const sellLog = { ...asLog(reference.sell as Record<string, unknown>), transactionHash: `0x${'9'.repeat(64)}` as Hash };
+    const requestedHashes: Hash[] = [];
+    const releases = new Map<Hash, (value: Address) => void>();
+    const getTrader = (txHash: Hash) => {
+      requestedHashes.push(txHash);
+      return new Promise<Address>((resolve) => { releases.set(txHash, resolve); });
+    };
+    const resultPromise = decodeV2CurveBatch([buyLog, sellLog], 'pons-v2-curve-cohort',
+      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, getTrader);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedHashes).toHaveLength(2);
+    for (const release of releases.values()) release(trader);
+    const batch = await resultPromise;
+    expect(batch.trades).toHaveLength(2);
+  });
+
   it('uses post-trade reserves for price and scales by quote decimals', () => {
     const { launch, venue } = context();
     launch.quoteAsset = { address: launch.quoteAsset.address, symbol: 'USDC', decimals: 6 };
-    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000, { quote: 2_000_000n, token: 10n ** 18n });
+    const buy = decodeCurveTrade(asLog(reference.buy as Record<string, unknown>), launch, venue, 1_700_000_000, trader, { quote: 2_000_000n, token: 10n ** 18n });
     expect(buy.priceNumeratorRaw).toBe(2_000_000n * 10n ** 18n);
     expect(buy.priceDenominatorRaw).toBe(10n ** 18n * 10n ** 6n);
   });

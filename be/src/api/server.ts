@@ -20,7 +20,7 @@ export interface LaunchDetail extends LaunchSummary {
 }
 export interface TradeResponse {
   venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;
-  activityKind: string; tokenAmount: string; quoteAmount: string; priceQuote: string | null;
+  activityKind: string; tokenAmount: string; quoteAmount: string; priceQuote: string | null; traderAddress: string;
 }
 export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;

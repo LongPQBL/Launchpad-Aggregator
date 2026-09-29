@@ -16,6 +16,7 @@ function trade(overrides: Partial<Trade> = {}): Trade {
     chainId: 4663, tokenAddress: token, venueId: 'curve', blockNumber: 100n, blockHash, txHash: tx,
     logIndex: 1, timestamp: 10, side: 'buy', tokenAmountRaw: 10n, quoteAmountRaw: 100n,
     quoteAssetAddress: quote, sourceEvent: 'CurveBuy', activityKind: 'user_trade', priceNumeratorRaw: 1n, priceDenominatorRaw: 1n,
+    traderAddress: '0x4444444444444444444444444444444444444444' as Address,
     ...overrides,
   };
 }

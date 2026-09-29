@@ -22,6 +22,7 @@ export const trade = { type: 'object', properties: {
   venueId: { type: 'string' }, blockNumber: { type: 'string' }, txHash: { type: 'string' },
   logIndex: { type: 'integer' }, timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
   tokenAmount: { type: 'string' }, quoteAmount: { type: 'string' }, priceQuote: { type: 'string', nullable: true },
+  traderAddress: { type: 'string' },
 } } as const;
 
 export const candle = { type: 'object', properties: {

@@ -38,6 +38,7 @@ const curveVenue: Venue = {
 };
 const terms = { fee: fixture.poolFee as number, tickSpacing: fixture.tickSpacing as number };
 const poolId = fixture.poolId as Hash;
+const trader = '0x1234567890123456789012345678901234567890' as Address;
 
 describe('pons v2 official V4 pool', () => {
   it('replays real launch, sweep, graduation and priced V4 swap in provenance order', () => {
@@ -57,11 +58,12 @@ describe('pons v2 official V4 pool', () => {
     const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: initialized.blockNumber,
       logIndex: initialized.logIndex }, { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
     const trade = decodePonsV4Swap(asLog(fixture.swap as Record<string, unknown>), poolId, launch, venue,
-      1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!;
+      1_700_000_000, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!;
     expect(trade.blockNumber).toBe(27_828_165n);
     expect(trade.logIndex).toBe(108);
     expect(trade.quoteAmountRaw).toBe(5_620_497_268_881_825_819n);
     expect(formatRational(trade.priceNumeratorRaw!, trade.priceDenominatorRaw!, 18)).toBe('0.000000152480063034');
+    expect(trade.traderAddress).toBe(trader.toLowerCase());
   });
 
   it('derives the known pool ID with sorted currencies, fee, tick spacing and hook', () => {
@@ -103,12 +105,12 @@ describe('pons v2 official V4 pool', () => {
       { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' });
     const venue = transition.openedPool!;
     const swap = asLog(fixture.swap as Record<string, unknown>);
-    const trade = decodePonsV4Swap(swap, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
+    const trade = decodePonsV4Swap(swap, poolId, launch, venue, 1_700_000_000, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
     expect(trade?.side).toBe('sell');
     expect(trade?.quoteAmountRaw).toBe(5_620_497_268_881_825_819n);
     expect(trade?.tokenAmountRaw).toBe(31_880_381_102_749_799_957_318_148n);
     expect(trade?.venueId).toBe(venue.id);
-    expect(decodePonsV4Swap({ ...swap, topics: [swap.topics[0], '0x' + '11'.repeat(32) as Hash, ...swap.topics.slice(2)] }, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
+    expect(decodePonsV4Swap({ ...swap, topics: [swap.topics[0], '0x' + '11'.repeat(32) as Hash, ...swap.topics.slice(2)] }, poolId, launch, venue, 1_700_000_000, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
   });
 
   it('keeps a hook-initiated fee conversion as a protocol trade in pool volume', () => {
@@ -119,7 +121,7 @@ describe('pons v2 official V4 pool', () => {
       ...realSwap,
       topics: encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: poolId, sender: fixture.hookAddress as Address } }) as Hash[],
     };
-    const trade = decodePonsV4Swap(hookSwap, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
+    const trade = decodePonsV4Swap(hookSwap, poolId, launch, venue, 1_700_000_000, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
     expect(trade?.activityKind).toBe('protocol_fee_conversion');
     expect(trade?.side).toBe('sell');
     expect(trade?.quoteAmountRaw).toBe(5_620_497_268_881_825_819n);
@@ -139,7 +141,7 @@ describe('pons v2 official V4 pool', () => {
       data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' }, { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
         [-2n, 2n, sqrtPriceX96, 1n, 0, 0]) };
     const trades = [buyback, conversion].map((log) => decodePonsV4Swap(log, poolId, sixDecimalLaunch, venue, 1_700_000_000,
-      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!);
+      trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!);
     expect(trades.map((trade) => trade.activityKind)).toEqual(['protocol_buyback', 'protocol_fee_conversion']);
     expect(trades.map((trade) => trade.side)).toEqual(['buy', 'sell']);
     const market = { chainId: 4663, tokenAddress: launch.tokenAddress, quoteAssetAddress: launch.quoteAsset.address,
@@ -151,15 +153,15 @@ describe('pons v2 official V4 pool', () => {
     const sweepNotice: RpcLog = { ...conversion, address: fixture.hookAddress as Address, logIndex: 110,
       topics: [toEventSelector(parseAbiItem('event PoolFeesSwept(bytes32 indexed poolId, uint256 protocolAmount, uint256 buybackAmount, uint256 creatorAmount, uint256 tokensLocked)'))] };
     expect(decodePonsV4Swap(sweepNotice, poolId, sixDecimalLaunch, venue, 1_700_000_000,
-      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
+      trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
   });
 
   it('connects a real pre-graduation curve buy to a later official V4 swap', () => {
-    const curveBuy = decodeCurveTrade(asLog(fixture.curveBuy as Record<string, unknown>), launch, curveVenue, 1_700_000_000);
+    const curveBuy = decodeCurveTrade(asLog(fixture.curveBuy as Record<string, unknown>), launch, curveVenue, 1_700_000_000, trader);
     const poolVenue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
       { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
     const v4Swap = decodePonsV4Swap(asLog(fixture.swap as Record<string, unknown>), poolId, launch, poolVenue,
-      1_700_000_100, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
+      1_700_000_100, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
     expect(curveBuy.tokenAddress).toBe(v4Swap?.tokenAddress);
     expect(curveBuy.quoteAssetAddress).toBe(v4Swap?.quoteAssetAddress);
     expect(curveBuy.venueId).not.toBe(v4Swap?.venueId);
