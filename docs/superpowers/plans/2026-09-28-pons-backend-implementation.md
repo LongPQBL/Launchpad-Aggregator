@@ -10,6 +10,8 @@
 
 **Spec:** `docs/superpowers/specs/2026-09-28-pons-readonly-design.md` — đọc toàn bộ trước khi thực hiện.
 
+**Bổ sung ngày 29/09/2026:** Thực hiện `docs/superpowers/plans/2026-09-29-pons-protocol-volume-implementation.md` trước Task 10. Buyback curve và swap nội bộ V4 thực sự khớp phải nằm trong volume/chart; mọi chỗ diễn đạt cũ về loại buyback khỏi volume được thay bởi kế hoạch bổ sung này.
+
 ## Global Constraints
 
 - Scope chỉ gồm Robinhood Chain ID `4663`, pons v1 legacy/active và pons v2; không viết giao dịch tiền thật hay kết nối ví.
@@ -145,7 +147,7 @@
 
 **Interfaces:** `buildOfficialCandles(trades: readonly Trade[], intervalSeconds: number): Candle[]`; `sumOfficialQuoteVolume(trades: readonly Trade[], since: number): QuoteVolume`; `getCoverage(sourceIds: readonly string[]): Coverage`; `reconcileLaunchCounts(factory: FactorySource, indexedCount: number, independentCount: number): ReconciliationResult`.
 
-- [ ] **Step 1 — Test đỏ:** V1 một pool trước/sau tốt nghiệp và v2 curve→V4 tạo cùng chuỗi nến theo thời gian; pool khác không được cộng; fee sweep và refund không tạo trade; hai quote asset khác nhau không cộng chung; thiếu range trả `complete=false`, metric thiếu là `null`, không phải 0.
+- [ ] **Step 1 — Test đỏ:** V1 một pool trước/sau tốt nghiệp và v2 curve→V4 tạo cùng chuỗi nến theo thời gian; pool khác không được cộng; event chuyển/phân bổ phí và refund không tạo trade mới, nhưng buyback curve và swap đổi phí/buyback V4 thực khớp vẫn tạo trade và volume; hai quote asset khác nhau không cộng chung; thiếu range trả `complete=false`, metric thiếu là `null`, không phải 0.
 - [ ] **Step 2 — Chạy đỏ:** `npm test -w be -- aggregate.test.ts reconcile.test.ts`; mong đợi FAIL.
 - [ ] **Step 3 — Code:** Tính theo bigint/rational, lưu candles/projections có thể tái tính sau reorg; 24h volume lấy quote leg thực khớp. Đối chiếu số launch bằng scan độc lập/overlap hoặc on-chain total nếu có; giữ báo cáo range thiếu khi provider chặn.
 - [ ] **Step 4 — Chạy xanh:** Test market/reconcile, integration test idempotency và typecheck xanh.

@@ -2,7 +2,7 @@
 
 **Ngày:** 28/09/2026
 
-**Trạng thái:** Đã dùng để triển khai; cập nhật định nghĩa buyback ngày 29/09/2026, chờ duyệt phần sửa đổi
+**Trạng thái:** Đã duyệt; cập nhật định nghĩa buyback ngày 29/09/2026
 
 **Bối cảnh:** Một lập trình viên, ưu tiên chạy local trước
 

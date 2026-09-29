@@ -69,7 +69,7 @@
 
 **Interfaces:** `getLaunchDetail(chainId: number, tokenAddress: string)`, `getLaunchTrades(...)`, `getLaunchCandles(...)`; `OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus })` dùng Lightweight Charts và series markers cho chuyển curve→V4.
 
-- [ ] **Step 1 — Test đỏ:** Detail hiện pons, v1/v2, Robinhood, quote asset, phase `swept`/`rescued`, official venues, volume 24h; chart không tự sinh nến ở khoảng trống; dữ liệu thiếu có badge; trade và chart dùng cùng venue ID; ERC-20 6 decimals giữ decimal string từ API; route/token sai hiện not-found.
+- [ ] **Step 1 — Test đỏ:** Detail hiện pons, v1/v2, Robinhood, quote asset, phase `swept`/`rescued`, official venues, volume 24h; chart không tự sinh nến ở khoảng trống; dữ liệu thiếu có badge; trade và chart dùng cùng venue ID; `activityKind` gắn nhãn “Buyback bởi Pons”, “Đổi phí bởi Pons” hoặc “Giao dịch nội bộ Pons” mà không giả làm ví người dùng; ERC-20 6 decimals giữ decimal string từ API; route/token sai hiện not-found.
 - [ ] **Step 2 — Chạy đỏ:** `npm test -w fe -- launch-detail.test.tsx format.test.ts`; mong đợi FAIL.
 - [ ] **Step 3 — Code:** Server fetch chi tiết; client chart/bảng giao dịch; attribution TradingView theo yêu cầu thư viện; link pons/explorer có nhãn nguồn, không ngụ ý quan hệ đối tác. Không dùng `Number` để tính giá/volume; chỉ chuyển giá đã chuẩn hóa sang giá trị biểu đồ tại biên render và gắn nhãn xấp xỉ nếu cần.
 - [ ] **Step 4 — Chạy xanh:** Component/unit tests, typecheck, build exit 0; kiểm tra thủ công viewport desktop/mobile.
