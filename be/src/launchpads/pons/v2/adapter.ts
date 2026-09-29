@@ -130,6 +130,7 @@ export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, time
     chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id, blockNumber: log.blockNumber,
     blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp, side, tokenAmountRaw,
     quoteAmountRaw, quoteAssetAddress: launch.quoteAsset.address, sourceEvent,
+    activityKind: 'user_trade',
     priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
     priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
   };

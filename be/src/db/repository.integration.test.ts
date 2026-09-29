@@ -64,6 +64,7 @@ function batch(chainId: number, sourceId: string, tokenAmountRaw = 1_000_000_000
     quoteAmountRaw: 100_000_000_000_000_000n,
     quoteAssetAddress: quote,
     sourceEvent: 'Swap',
+    activityKind: 'user_trade',
     priceNumeratorRaw: 1n,
     priceDenominatorRaw: 10n,
   };
@@ -91,6 +92,20 @@ afterAll(async () => {
 });
 
 describe('index batch repository', () => {
+  it('persists protocol activity while defaulting an unclassified legacy trade to user activity', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const data = batch(4663, 'test-a');
+    await repository.saveIndexBatch('test-a', 100n, 100n, {
+      ...data,
+      trades: data.trades.map((trade) => ({ ...trade, activityKind: 'protocol_buyback' as const })),
+    });
+    const classified = await pool.query('SELECT activity_kind FROM trades WHERE chain_id = 4663');
+    expect(classified.rows).toEqual([{ activity_kind: 'protocol_buyback' }]);
+    await pool.query('UPDATE trades SET activity_kind = DEFAULT WHERE chain_id = 4663');
+    const legacy = await pool.query('SELECT activity_kind FROM trades WHERE chain_id = 4663');
+    expect(legacy.rows).toEqual([{ activity_kind: 'user_trade' }]);
+  });
+
   it('does not duplicate a trade when the same block is replayed', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const data = batch(4663, 'test-a');

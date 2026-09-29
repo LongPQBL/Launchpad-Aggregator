@@ -142,6 +142,7 @@ export function createRepository(db: Database) {
             quoteAmountRaw: trade.quoteAmountRaw.toString(),
             quoteAssetAddress: trade.quoteAssetAddress.toLowerCase(),
             sourceEvent: trade.sourceEvent,
+            activityKind: trade.activityKind,
             sourceLogId: logKey(trade.chainId, trade.blockHash, trade.txHash, trade.logIndex),
             priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
             priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,

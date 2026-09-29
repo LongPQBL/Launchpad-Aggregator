@@ -80,6 +80,7 @@ export const trades = pgTable('trades', {
   quoteAmountRaw: numeric('quote_amount_raw', { precision: 78, scale: 0 }).notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
   sourceEvent: text('source_event').notNull(),
+  activityKind: text('activity_kind').notNull().default('user_trade'),
   sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
   priceNumeratorRaw: text('price_numerator_raw'),
   priceDenominatorRaw: text('price_denominator_raw'),

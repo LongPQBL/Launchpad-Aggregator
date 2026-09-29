@@ -1,0 +1,1 @@
+ALTER TABLE "trades" ADD COLUMN "activity_kind" text DEFAULT 'user_trade' NOT NULL;

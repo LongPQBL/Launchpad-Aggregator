@@ -126,6 +126,7 @@ export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestam
     quoteAmountRaw: pairSigned < 0n ? -pairSigned : pairSigned,
     quoteAssetAddress: launch.quoteAsset.address,
     sourceEvent: 'Swap',
+    activityKind: 'user_trade',
     priceNumeratorRaw: tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
     priceDenominatorRaw: tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
   };

@@ -35,6 +35,7 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
     tokenAmountRaw: tokenSigned < 0n ? -tokenSigned : tokenSigned,
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
+    activityKind: 'user_trade',
     priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
     priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
   };

@@ -4,6 +4,7 @@ export type VenueKind = 'v3_pool' | 'curve' | 'v4_pool';
 export type LifecycleStatus = 'trading' | 'swept' | 'graduated' | 'rescued';
 export type ProtocolVersion = 'v1' | 'v2';
 export type TradeSide = 'buy' | 'sell';
+export type TradeActivityKind = 'user_trade' | 'protocol_buyback' | 'protocol_fee_conversion' | 'protocol_internal';
 export type CoverageStatus = 'backfilling' | 'caught_up' | 'degraded';
 
 export interface QuoteAsset {
@@ -57,6 +58,7 @@ export interface Trade {
   quoteAmountRaw: bigint;
   quoteAssetAddress: Address;
   sourceEvent: string;
+  activityKind: TradeActivityKind;
   priceNumeratorRaw: bigint | null;
   priceDenominatorRaw: bigint | null;
 }
