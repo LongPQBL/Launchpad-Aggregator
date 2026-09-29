@@ -52,6 +52,7 @@ export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, re
     sourceLogId: event.sourceLogId, factoryAddress: factory.factory, deployerAddress: event.deployerAddress,
     launchBlock: event.blockNumber, launchTxHash: event.transactionHash, quoteAsset,
     lifecycleStatus: 'trading',
+    v4PoolFee: record.poolFee, v4TickSpacing: record.tickSpacing,
   };
   const venue: Venue = {
     id: venueKey(factory.chainId, 'curve', event.curveAddress), chainId: factory.chainId,
@@ -175,7 +176,7 @@ export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: Fac
     launches.push(result.launch);
     venues.push(result.venue);
   }
-  return { rawLogs, launches, venues, trades: [] };
+  return { rawLogs, launches, venues, trades: [], transitions: [] };
 }
 
 export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: string,
@@ -195,5 +196,5 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
       ? decodeCurveBuyback(log, context.launch, context.venue, timestamp)
       : decodeCurveTrade(log, context.launch, context.venue, timestamp));
   }
-  return { rawLogs, launches: [], venues: [], trades };
+  return { rawLogs, launches: [], venues: [], trades, transitions: [] };
 }

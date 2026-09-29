@@ -1,4 +1,4 @@
-import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
 import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
@@ -6,7 +6,7 @@ import type { ObservedBlock } from '../indexer/reorg.js';
 import type { ScanReport } from '../indexer/scan.js';
 import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
-import { candles, launches, observedBlocks, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
+import { candles, launches, lifecycleTransitions, observedBlocks, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
 
 export interface SourceRegistration {
   id: string;
@@ -104,14 +104,15 @@ export function createRepository(db: Database) {
       await db.transaction(async (tx) => {
         const [source] = await tx.select().from(sources).where(eq(sources.id, sourceId)).for('update');
         if (!source) throw new Error(`Unknown source: ${sourceId}`);
-        const records = [...batch.rawLogs, ...batch.launches, ...batch.venues, ...batch.trades];
+        const records = [...batch.rawLogs, ...batch.launches, ...batch.venues, ...batch.trades, ...batch.transitions];
         if (records.some((record) => record.chainId !== source.chainId)) {
           throw new Error(`Batch chain does not match source ${sourceId}`);
         }
         if (
           batch.rawLogs.some((log) => log.sourceId !== sourceId) ||
           batch.launches.some((launch) => launch.sourceId !== sourceId) ||
-          batch.venues.some((venue) => venue.sourceId !== sourceId)
+          batch.venues.some((venue) => venue.sourceId !== sourceId) ||
+          batch.transitions.some((transition) => transition.sourceId !== sourceId)
         ) {
           throw new Error(`Batch source ID does not match ${sourceId}`);
         }
@@ -152,6 +153,8 @@ export function createRepository(db: Database) {
             quoteAssetSymbol: launch.quoteAsset.symbol,
             quoteAssetDecimals: launch.quoteAsset.decimals,
             lifecycleStatus: launch.lifecycleStatus,
+            v4PoolFee: launch.v4PoolFee ?? null,
+            v4TickSpacing: launch.v4TickSpacing ?? null,
           }))).onConflictDoNothing();
         }
         if (batch.venues.length) {
@@ -164,11 +167,26 @@ export function createRepository(db: Database) {
             sourceId: venue.sourceId,
             sourceLogId: venue.sourceLogId,
             effectiveFromBlock: venue.effectiveFromBlock,
+            effectiveFromLogIndex: venue.effectiveFromLogIndex ?? 0,
             effectiveToBlock: venue.effectiveToBlock,
+            effectiveToLogIndex: venue.effectiveToLogIndex ?? null,
             official: venue.official,
           }))).onConflictDoNothing();
         }
         if (batch.trades.length) {
+          const ids = [...new Set(batch.trades.map((trade) => trade.venueId.toLowerCase()))];
+          const venueRows = await tx.select().from(venues).where(inArray(venues.id, ids));
+          const byId = new Map(venueRows.map((venue) => [venue.id, venue]));
+          for (const trade of batch.trades) {
+            const venue = byId.get(trade.venueId.toLowerCase());
+            if (!venue || venue.chainId !== trade.chainId || venue.tokenAddress !== trade.tokenAddress.toLowerCase()
+              || trade.blockNumber < venue.effectiveFromBlock
+              || (trade.blockNumber === venue.effectiveFromBlock && trade.logIndex < venue.effectiveFromLogIndex)
+              || (venue.effectiveToBlock !== null && (trade.blockNumber > venue.effectiveToBlock
+                || (trade.blockNumber === venue.effectiveToBlock && trade.logIndex >= (venue.effectiveToLogIndex ?? 0))))) {
+              throw new Error('Trade is outside official venue position');
+            }
+          }
           await tx.insert(trades).values(batch.trades.map((trade) => ({
             chainId: trade.chainId,
             tokenAddress: trade.tokenAddress.toLowerCase(),
@@ -188,6 +206,44 @@ export function createRepository(db: Database) {
             priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
             priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
           }))).onConflictDoNothing();
+        }
+        if (batch.transitions.length) {
+          const logsById = new Map(batch.rawLogs.map((log) => [logKey(log.chainId, log.blockHash, log.txHash, log.logIndex), log]));
+          for (const transition of batch.transitions) {
+            const log = logsById.get(transition.sourceLogId);
+            if (!log || log.chainId !== transition.chainId || log.sourceId !== transition.sourceId
+              || log.blockNumber !== transition.blockNumber || log.blockHash.toLowerCase() !== transition.blockHash.toLowerCase()
+              || log.txHash.toLowerCase() !== transition.txHash.toLowerCase() || log.logIndex !== transition.logIndex) {
+              throw new Error('Transition does not match its source log');
+            }
+          }
+          await tx.insert(lifecycleTransitions).values(batch.transitions.map((transition) => ({
+            sourceLogId: transition.sourceLogId,
+            chainId: transition.chainId,
+            tokenAddress: transition.tokenAddress.toLowerCase(),
+            sourceId: transition.sourceId,
+            phase: transition.phase,
+            kind: transition.kind,
+            blockNumber: transition.blockNumber,
+            blockHash: transition.blockHash.toLowerCase(),
+            txHash: transition.txHash.toLowerCase(),
+            logIndex: transition.logIndex,
+          }))).onConflictDoNothing();
+          for (const tokenAddress of new Set(batch.transitions.map((transition) => transition.tokenAddress.toLowerCase()))) {
+            await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
+              SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
+              FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
+              ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
+            ), 'trading') WHERE l.chain_id = ${source.chainId} AND l.token_address = ${tokenAddress} AND l.protocol_version = 'v2'`);
+            await tx.execute(sql`UPDATE venues AS v SET
+              effective_to_block = (SELECT t.block_number FROM lifecycle_transitions AS t
+                WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+                ORDER BY t.block_number, t.log_index LIMIT 1),
+              effective_to_log_index = (SELECT t.log_index FROM lifecycle_transitions AS t
+                WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+                ORDER BY t.block_number, t.log_index LIMIT 1)
+              WHERE v.chain_id = ${source.chainId} AND v.token_address = ${tokenAddress} AND v.kind = 'curve'`);
+          }
         }
         const repairedGaps = await tx.select().from(sourceGaps).where(and(
           eq(sourceGaps.sourceId, sourceId), lte(sourceGaps.fromBlock, toBlock), gte(sourceGaps.toBlock, fromBlock),
@@ -233,10 +289,27 @@ export function createRepository(db: Database) {
 
     async retractBlocks(chainId: number, fromBlock: bigint): Promise<void> {
       await db.transaction(async (tx) => {
+        const affected = await tx.select({ tokenAddress: lifecycleTransitions.tokenAddress }).from(lifecycleTransitions)
+          .where(and(eq(lifecycleTransitions.chainId, chainId), gte(lifecycleTransitions.blockNumber, fromBlock)));
         await tx.delete(trades).where(and(eq(trades.chainId, chainId), gte(trades.blockNumber, fromBlock)));
         await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
         await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
         await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
+        for (const tokenAddress of new Set(affected.map((row) => row.tokenAddress))) {
+          await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
+            SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
+            FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
+            ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
+          ), 'trading') WHERE l.chain_id = ${chainId} AND l.token_address = ${tokenAddress} AND l.protocol_version = 'v2'`);
+          await tx.execute(sql`UPDATE venues AS v SET
+            effective_to_block = (SELECT t.block_number FROM lifecycle_transitions AS t
+              WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+              ORDER BY t.block_number, t.log_index LIMIT 1),
+            effective_to_log_index = (SELECT t.log_index FROM lifecycle_transitions AS t
+              WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+              ORDER BY t.block_number, t.log_index LIMIT 1)
+            WHERE v.chain_id = ${chainId} AND v.token_address = ${tokenAddress} AND v.kind = 'curve'`);
+        }
         await tx.delete(observedBlocks).where(and(eq(observedBlocks.chainId, chainId), gte(observedBlocks.number, fromBlock)));
         await tx.delete(candles).where(eq(candles.chainId, chainId));
         await tx.update(sources).set({

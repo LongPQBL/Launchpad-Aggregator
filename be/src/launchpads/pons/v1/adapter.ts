@@ -162,7 +162,7 @@ export async function decodeV1FactoryBatch(
     launches.push(result.launch);
     venues.push(result.venue);
   }
-  return { rawLogs, launches, venues, trades: [] };
+  return { rawLogs, launches, venues, trades: [], transitions: [] };
 }
 
 export async function decodeV1SwapBatch(
@@ -185,5 +185,5 @@ export async function decodeV1SwapBatch(
     trades.push(decodeV1Swap(log, context.venue, context.launch, timestamp));
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
   }
-  return { rawLogs, launches: [], venues: [], trades };
+  return { rawLogs, launches: [], venues: [], trades, transitions: [] };
 }

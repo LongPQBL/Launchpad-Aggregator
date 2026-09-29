@@ -29,6 +29,8 @@ export interface Launch {
   launchTxHash: Hash;
   quoteAsset: QuoteAsset;
   lifecycleStatus: LifecycleStatus;
+  v4PoolFee?: number | null;
+  v4TickSpacing?: number | null;
 }
 
 export interface Venue {
@@ -40,8 +42,23 @@ export interface Venue {
   sourceId: string;
   sourceLogId: string;
   effectiveFromBlock: bigint;
+  effectiveFromLogIndex?: number;
   effectiveToBlock: bigint | null;
+  effectiveToLogIndex?: number | null;
   official: boolean;
+}
+
+export interface LifecycleTransition {
+  chainId: number;
+  tokenAddress: Address;
+  sourceId: string;
+  sourceLogId: string;
+  phase: 1 | 2 | 3;
+  kind: 'swept' | 'graduated' | 'rescued';
+  blockNumber: bigint;
+  blockHash: Hash;
+  txHash: Hash;
+  logIndex: number;
 }
 
 export interface Trade {
@@ -80,6 +97,7 @@ export interface IndexBatch {
   launches: readonly Launch[];
   venues: readonly Venue[];
   trades: readonly Trade[];
+  transitions: readonly LifecycleTransition[];
 }
 
 export interface SourceCursor {

@@ -80,6 +80,7 @@ function batch(chainId: number, sourceId: string, tokenAmountRaw = 1_000_000_000
     launches: [launch],
     venues: [venue],
     trades: [trade],
+    transitions: [],
   };
 }
 
@@ -151,7 +152,7 @@ describe('index batch repository', () => {
   it('sets a source caught up only after its checkpoint reaches the observed safe head', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await expect(repository.setSourceStatus('test-a', 'caught_up', 100n)).rejects.toThrow(/checkpoint/i);
-    await repository.saveIndexBatch('test-a', 100n, 100n, { rawLogs: [], launches: [], venues: [], trades: [] });
+    await repository.saveIndexBatch('test-a', 100n, 100n, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
     await repository.setSourceStatus('test-a', 'caught_up', 100n);
     expect((await repository.getCursor('test-a')).status).toBe('caught_up');
   });
@@ -165,6 +166,100 @@ describe('index batch repository', () => {
     expect((await repository.getCursor('test-a')).scannedToBlock).toBe(99n);
     await repository.saveIndexBatch('test-a', 100n, 100n, data);
     expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(1);
+  });
+
+  it('projects V2 status and exact venue boundaries from lifecycle logs, then restores them on reorg', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    await repository.registerSource({ id: 'pons-v2-lifecycle', chainId: 4663, version: 'v2-lifecycle', factoryAddress: factory, startBlock: 101n });
+    const initial = batch(4663, 'pons-v2');
+    initial.launches[0].protocolVersion = 'v2';
+    initial.launches[0].v4PoolFee = 0;
+    initial.launches[0].v4TickSpacing = 200;
+    initial.venues[0].kind = 'curve';
+    initial.venues[0].id = '4663:curve:0x3333333333333333333333333333333333333333';
+    initial.trades = [];
+    initial.rawLogs = [initial.rawLogs[0]];
+    await repository.saveIndexBatch('pons-v2', 100n, 100n, initial);
+
+    const sweepTx = `0x${'7'.repeat(64)}` as Hash;
+    const gradTx = `0x${'8'.repeat(64)}` as Hash;
+    const initLogId = logKey(4663, blockHash, gradTx, 2);
+    const sweepLog = { chainId: 4663, sourceId: 'pons-v2-lifecycle', blockNumber: 101n, blockHash,
+      txHash: sweepTx, logIndex: 4, address: factory, topics: [], data: '0x' as Hash };
+    const gradLog = { ...sweepLog, blockNumber: 102n, txHash: gradTx, logIndex: 5 };
+    const initLog = { ...gradLog, logIndex: 2, address: poolAddress };
+    await repository.saveIndexBatch('pons-v2-lifecycle', 101n, 101n, {
+      rawLogs: [sweepLog], launches: [], venues: [], trades: [],
+      transitions: [{ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle',
+        sourceLogId: logKey(4663, blockHash, sweepTx, 4), phase: 1, kind: 'swept',
+        blockNumber: 101n, blockHash, txHash: sweepTx, logIndex: 4 }],
+    });
+    const v4Venue = { id: `4663:v4_pool:0x${'9'.repeat(64)}`, chainId: 4663, tokenAddress: token,
+      kind: 'v4_pool' as const, ref: `0x${'9'.repeat(64)}`, sourceId: 'pons-v2-lifecycle',
+      sourceLogId: initLogId, effectiveFromBlock: 102n, effectiveFromLogIndex: 2,
+      effectiveToBlock: null, effectiveToLogIndex: null, official: true };
+    await repository.saveIndexBatch('pons-v2-lifecycle', 102n, 102n, {
+      rawLogs: [initLog, gradLog], launches: [], venues: [v4Venue], trades: [],
+      transitions: [{ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle',
+        sourceLogId: logKey(4663, blockHash, gradTx, 5), phase: 2, kind: 'graduated',
+        blockNumber: 102n, blockHash, txHash: gradTx, logIndex: 5 }],
+    });
+    await repository.saveIndexBatch('pons-v2-lifecycle', 102n, 102n, {
+      rawLogs: [initLog, gradLog], launches: [], venues: [v4Venue], trades: [], transitions: [],
+    });
+    const projected = await pool.query('SELECT lifecycle_status, v4_pool_fee, v4_tick_spacing FROM launches WHERE chain_id = 4663');
+    expect(projected.rows[0]).toEqual({ lifecycle_status: 'graduated', v4_pool_fee: 0, v4_tick_spacing: 200 });
+    expect((await pool.query('SELECT count(*)::int AS count FROM lifecycle_transitions')).rows[0].count).toBe(2);
+    expect((await pool.query("SELECT effective_to_block, effective_to_log_index FROM venues WHERE kind = 'curve'")).rows[0])
+      .toEqual({ effective_to_block: '101', effective_to_log_index: 4 });
+    expect((await pool.query("SELECT effective_from_log_index FROM venues WHERE kind = 'v4_pool'")).rows[0].effective_from_log_index).toBe(2);
+
+    await repository.registerSource({ id: 'pons-v2-v4-pool', chainId: 4663, version: 'v4-trades', factoryAddress: poolAddress, startBlock: 102n });
+    const swap: Trade = { ...batch(4663, 'pons-v2').trades[0], venueId: v4Venue.id,
+      blockNumber: 102n, txHash: gradTx, logIndex: 1 };
+    const swapLog = { ...initLog, sourceId: 'pons-v2-v4-pool', logIndex: 1 };
+    await expect(repository.saveIndexBatch('pons-v2-v4-pool', 102n, 102n, {
+      rawLogs: [swapLog], launches: [], venues: [], trades: [swap], transitions: [],
+    })).rejects.toThrow(/venue.*position/i);
+    expect((await repository.getCursor('pons-v2-v4-pool')).scannedToBlock).toBe(101n);
+    await repository.saveIndexBatch('pons-v2-v4-pool', 102n, 102n, {
+      rawLogs: [{ ...swapLog, logIndex: 3 }], launches: [], venues: [],
+      trades: [{ ...swap, logIndex: 3 }], transitions: [],
+    });
+    expect((await pool.query("SELECT count(*)::int AS count FROM trades WHERE venue_id = $1", [v4Venue.id])).rows[0].count).toBe(1);
+
+    await repository.retractBlocks(4663, 102n);
+    expect((await pool.query('SELECT lifecycle_status FROM launches WHERE chain_id = 4663')).rows[0].lifecycle_status).toBe('swept');
+    expect((await pool.query("SELECT count(*)::int AS count FROM venues WHERE kind = 'v4_pool'")).rows[0].count).toBe(0);
+    await repository.retractBlocks(4663, 101n);
+    expect((await pool.query('SELECT lifecycle_status FROM launches WHERE chain_id = 4663')).rows[0].lifecycle_status).toBe('trading');
+    expect((await pool.query("SELECT effective_to_block, effective_to_log_index FROM venues WHERE kind = 'curve'")).rows[0])
+      .toEqual({ effective_to_block: null, effective_to_log_index: null });
+  });
+
+  it('keeps the lifecycle cursor unchanged if a transition has no raw-log provenance', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    const initial = batch(4663, 'pons-v2');
+    initial.launches[0].protocolVersion = 'v2';
+    initial.venues[0].kind = 'curve';
+    initial.trades = [];
+    initial.rawLogs = [initial.rawLogs[0]];
+    await repository.saveIndexBatch('pons-v2', 100n, 100n, initial);
+    await repository.registerSource({ id: 'pons-v2-lifecycle', chainId: 4663, version: 'v2-lifecycle', factoryAddress: factory, startBlock: 101n });
+    await expect(repository.saveIndexBatch('pons-v2-lifecycle', 101n, 101n, {
+      rawLogs: [], launches: [], venues: [], trades: [],
+      transitions: [{ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle', sourceLogId: 'missing',
+        phase: 1, kind: 'swept', blockNumber: 101n, blockHash, txHash, logIndex: 4 }],
+    })).rejects.toThrow();
+    expect((await repository.getCursor('pons-v2-lifecycle')).scannedToBlock).toBe(100n);
+    expect((await pool.query('SELECT lifecycle_status FROM launches WHERE chain_id = 4663')).rows[0].lifecycle_status).toBe('trading');
+    await expect(repository.saveIndexBatch('pons-v2-lifecycle', 101n, 101n, {
+      rawLogs: [], launches: [], venues: [], trades: [],
+      transitions: [{ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle',
+        sourceLogId: initial.launches[0].sourceLogId,
+        phase: 1, kind: 'swept', blockNumber: 101n, blockHash, txHash, logIndex: 4 }],
+    })).rejects.toThrow(/transition.*log/i);
+    expect((await repository.getCursor('pons-v2-lifecycle')).scannedToBlock).toBe(100n);
   });
 
   it('keeps launch, venue and trade provenance linked to raw logs', async () => {
@@ -255,7 +350,7 @@ describe('PostgreSQL API store', () => {
     await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
     await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [],
       missingRanges: [{ fromBlock: 100n, toBlock: 120n, reason: 'archive required' }] });
-    const empty = { rawLogs: [], launches: [], venues: [], trades: [] };
+    const empty = { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
     await repository.saveIndexBatch('pons-v2', 100n, 109n, empty);
     expect((await createApiStore(pool).getCoverage()).missingRanges).toEqual([
       { sourceId: 'pons-v2', fromBlock: '110', toBlock: '120', reason: 'archive required' },

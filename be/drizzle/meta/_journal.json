@@ -43,6 +43,13 @@
       "when": 1790653353832,
       "tag": "0005_flashy_jamie_braddock",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790670464017,
+      "tag": "0006_opposite_the_leader",
+      "breakpoints": true
     }
   ]
 }

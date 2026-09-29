@@ -7,7 +7,7 @@ import { getFactoryLogSources, runIndexerOnce } from '../cli/indexer.js';
 
 const address = '0x1111111111111111111111111111111111111111' as Address;
 const source: LogSource = { id: 'pons-v1-active', chainId: 4663, startBlock: 10n, addresses: [address], events: [] };
-const emptyBatch: IndexBatch = { rawLogs: [], launches: [], venues: [], trades: [] };
+const emptyBatch: IndexBatch = { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
 
 function depsFor(getLogs: ScanDeps['getLogs']) {
   let cursor = 9n;

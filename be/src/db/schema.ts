@@ -52,6 +52,8 @@ export const launches = pgTable('launches', {
   quoteAssetSymbol: text('quote_asset_symbol').notNull(),
   quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
   lifecycleStatus: text('lifecycle_status').notNull(),
+  v4PoolFee: integer('v4_pool_fee'),
+  v4TickSpacing: integer('v4_tick_spacing'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
@@ -66,11 +68,29 @@ export const venues = pgTable('venues', {
   sourceId: text('source_id').notNull().references(() => sources.id),
   sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
   effectiveFromBlock: bigint('effective_from_block', { mode: 'bigint' }).notNull(),
+  effectiveFromLogIndex: integer('effective_from_log_index').notNull().default(0),
   effectiveToBlock: bigint('effective_to_block', { mode: 'bigint' }),
+  effectiveToLogIndex: integer('effective_to_log_index'),
   official: boolean('official').notNull(),
 }, (table) => [
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
   index('venues_token_idx').on(table.chainId, table.tokenAddress),
+]);
+
+export const lifecycleTransitions = pgTable('lifecycle_transitions', {
+  sourceLogId: text('source_log_id').primaryKey().references(() => rawLogs.id, { onDelete: 'cascade' }),
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  sourceId: text('source_id').notNull().references(() => sources.id),
+  phase: integer('phase').notNull(),
+  kind: text('kind').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  blockHash: text('block_hash').notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+}, (table) => [
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+  index('lifecycle_transitions_token_position_idx').on(table.chainId, table.tokenAddress, table.blockNumber, table.logIndex),
 ]);
 
 export const trades = pgTable('trades', {
