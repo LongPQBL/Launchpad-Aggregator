@@ -69,11 +69,12 @@ describe('pons v1 V3 trades', () => {
       liquidityPool: reference.poolAddress as Address,
     }, true);
     const trade = decodeV1Swap(asLog(reference.swap as Record<string, unknown>), venue, launch, 1_700_000_000);
-    expect(trade.side).toBe('buy');
-    expect(trade.quoteAmountRaw).toBe(100_000_000_000_000_000n);
-    expect(trade.tokenAmountRaw).toBeGreaterThan(0n);
-    expect(trade.priceNumeratorRaw).toBeGreaterThan(0n);
-    expect(trade.priceDenominatorRaw).toBeGreaterThan(0n);
+    expect(trade).not.toBeNull();
+    expect(trade!.side).toBe('buy');
+    expect(trade!.quoteAmountRaw).toBe(100_000_000_000_000_000n);
+    expect(trade!.tokenAmountRaw).toBeGreaterThan(0n);
+    expect(trade!.priceNumeratorRaw).toBeGreaterThan(0n);
+    expect(trade!.priceDenominatorRaw).toBeGreaterThan(0n);
   });
 
   it('uses the opposite signed leg when the launch token is token0', () => {
@@ -90,10 +91,11 @@ describe('pons v1 V3 trades', () => {
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [-2n, 5n, 2n ** 96n, 100n, 0]),
     };
     const trade = decodeV1Swap(log, venue, launch, 1_700_000_000);
-    expect(trade.side).toBe('buy');
-    expect(trade.tokenAmountRaw).toBe(2n);
-    expect(trade.quoteAmountRaw).toBe(5n);
-    expect(trade.priceNumeratorRaw).toBe(trade.priceDenominatorRaw);
+    expect(trade).not.toBeNull();
+    expect(trade!.side).toBe('buy');
+    expect(trade!.tokenAmountRaw).toBe(2n);
+    expect(trade!.quoteAmountRaw).toBe(5n);
+    expect(trade!.priceNumeratorRaw).toBe(trade!.priceDenominatorRaw);
   });
 
   it('classifies a token1-to-quote swap as a sell', () => {
@@ -107,9 +109,39 @@ describe('pons v1 V3 trades', () => {
       data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [-5n, 2n, 2n ** 96n, 100n, 0]),
     };
     const trade = decodeV1Swap(log, venue, launch, 1_700_000_000);
-    expect(trade.side).toBe('sell');
-    expect(trade.tokenAmountRaw).toBe(2n);
-    expect(trade.quoteAmountRaw).toBe(5n);
+    expect(trade).not.toBeNull();
+    expect(trade!.side).toBe('sell');
+    expect(trade!.tokenAmountRaw).toBe(2n);
+    expect(trade!.quoteAmountRaw).toBe(5n);
+  });
+
+  it('skips a real dust swap whose token leg rounds to exactly zero, instead of treating it as corrupt data', () => {
+    // Real on-chain evidence: pool 0x7da3d775b803eeb44079f1a658b4dea116da1343, tx
+    // 0xba1e0cde96648343c22aea642b45fccbd4a8d3fdcea940fdc770ad5835b4348f, block 9265305, log 1
+    // (amount0=0, amount1=25654359) — a genuine V3 Swap, not malformed data. See README.md.
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const { launch, venue } = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18,
+      liquidityPool: reference.poolAddress as Address,
+    }, false);
+    const log: RpcLog = {
+      ...asLog(reference.swap as Record<string, unknown>),
+      data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [0n, 25654359n, 2n ** 96n, 100n, 0]),
+    };
+    expect(decodeV1Swap(log, venue, launch, 1_700_000_000)).toBeNull();
+  });
+
+  it('still rejects genuinely malformed amounts (both legs nonzero and same sign)', () => {
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const { launch, venue } = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18,
+      liquidityPool: reference.poolAddress as Address,
+    }, false);
+    const log: RpcLog = {
+      ...asLog(reference.swap as Record<string, unknown>),
+      data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [5n, 2n, 2n ** 96n, 100n, 0]),
+    };
+    expect(() => decodeV1Swap(log, venue, launch, 1_700_000_000)).toThrow(/Invalid V3 swap amounts/);
   });
 });
 
@@ -142,6 +174,29 @@ describe('pons v1 normalized batches', () => {
     expect(result.rawLogs).toHaveLength(1);
     expect(result.trades[0].venueId).toBe(context.venue.id);
     expect(result.rawLogs[0].sourceId).toBe('pons-v1-pool-cohort-0');
+  });
+
+  it('keeps scanning past a dust swap in the same batch instead of dropping the whole chunk', async () => {
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const context = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address,
+    }, true);
+    const dustLog: RpcLog = {
+      ...asLog(reference.swap as Record<string, unknown>),
+      transactionHash: `0x${'1'.repeat(64)}` as Hash,
+      logIndex: 0,
+      data: encodeAbiParameters(parseAbiParameters('int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick'), [0n, 25654359n, 2n ** 96n, 100n, 0]),
+    };
+    const realLog = asLog(reference.swap as Record<string, unknown>);
+    const result = await decodeV1SwapBatch(
+      [dustLog, realLog],
+      'pons-v1-pool-cohort-0',
+      new Map([[context.venue.ref.toLowerCase(), context]]),
+      async () => 1_700_000_000,
+    );
+    expect(result.rawLogs).toHaveLength(2);
+    expect(result.trades).toHaveLength(1);
+    expect(result.trades[0].txHash).toBe(realLog.transactionHash);
   });
 });
 

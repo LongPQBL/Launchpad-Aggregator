@@ -94,7 +94,10 @@ export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, me
   return { launch, venue };
 }
 
-export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestamp: number): Trade {
+// Returns null for a dust swap (one leg rounds to exactly zero on a very small trade — real on-chain
+// data, not corrupt input; see README.md's "Hai vấn đề khiến nguồn trade v1 kẹt vĩnh viễn" entry for
+// verified examples). Callers must skip it as a non-trade rather than treat a null return as an error.
+export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestamp: number): Trade | null {
   if (venue.kind !== 'v3_pool' || !venue.official || log.address.toLowerCase() !== venue.ref.toLowerCase()) {
     throw new Error('Swap is not from the official V3 pool');
   }
@@ -106,7 +109,8 @@ export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestam
   const tokenIsToken0 = launch.tokenAddress.toLowerCase() < launch.quoteAsset.address.toLowerCase();
   const tokenSigned = tokenIsToken0 ? decoded.args.amount0 : decoded.args.amount1;
   const pairSigned = tokenIsToken0 ? decoded.args.amount1 : decoded.args.amount0;
-  if (tokenSigned === 0n || pairSigned === 0n || tokenSigned * pairSigned >= 0n) throw new Error('Invalid V3 swap amounts');
+  if (tokenSigned === 0n || pairSigned === 0n) return null;
+  if (tokenSigned * pairSigned > 0n) throw new Error('Invalid V3 swap amounts');
   const q192 = 2n ** 192n;
   const sqrtSquared = decoded.args.sqrtPriceX96 * decoded.args.sqrtPriceX96;
   if (sqrtSquared === 0n) throw new Error('Invalid V3 sqrt price');
@@ -182,7 +186,8 @@ export async function decodeV1SwapBatch(
       timestamp = await getTimestamp(log.blockNumber);
       timestamps.set(log.blockNumber, timestamp);
     }
-    trades.push(decodeV1Swap(log, context.venue, context.launch, timestamp));
+    const trade = decodeV1Swap(log, context.venue, context.launch, timestamp);
+    if (trade) trades.push(trade);
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
   }
   return { rawLogs, launches: [], venues: [], trades, transitions: [] };
