@@ -108,7 +108,7 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
       })), priceQuote: status.complete && priced
         ? formatRational(BigInt(string(priced.price_numerator_raw)), BigInt(string(priced.price_denominator_raw)), 18) : null,
       priceStale: row.protocol_version === 'v2' && row.lifecycle_status !== 'trading'
-        && (row.lifecycle_status !== 'pool_created' || priced?.venue_kind !== 'v4_pool') };
+        && (row.lifecycle_status !== 'graduated' || priced?.venue_kind !== 'v4_pool') };
     },
     async listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>> {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;

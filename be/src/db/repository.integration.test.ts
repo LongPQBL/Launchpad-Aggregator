@@ -417,6 +417,11 @@ describe('PostgreSQL API store', () => {
     expect(await store.listCandles(4663, token, 60)).toEqual({ items: [], complete: false });
     await pool.query("UPDATE launches SET protocol_version = 'v2', lifecycle_status = 'swept' WHERE chain_id = 4663");
     expect((await store.getLaunch(4663, token))?.priceStale).toBe(true);
+    await pool.query("UPDATE trades SET price_numerator_raw = 1 WHERE chain_id = 4663");
+    await pool.query("UPDATE launches SET lifecycle_status = 'graduated' WHERE chain_id = 4663");
+    expect((await store.getLaunch(4663, token))?.priceStale).toBe(true);
+    await pool.query("UPDATE venues SET kind = 'v4_pool' WHERE chain_id = 4663");
+    expect((await store.getLaunch(4663, token))?.priceStale).toBe(false);
   });
 
   it('requires lifecycle and discovered V4 sources without requiring a nonexistent V4 umbrella', async () => {
