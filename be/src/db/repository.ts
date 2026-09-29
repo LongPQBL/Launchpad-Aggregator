@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, like, lte, ne, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
 import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
@@ -312,6 +312,8 @@ export function createRepository(db: Database) {
         await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
         await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
         await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
+        await tx.delete(sources).where(and(eq(sources.chainId, chainId), eq(sources.version, 'v2-v4'),
+          like(sources.id, 'pons-v2-v4:%'), gte(sources.startBlock, fromBlock)));
         for (const tokenAddress of new Set(affected.map((row) => row.tokenAddress))) {
           await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
             SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END

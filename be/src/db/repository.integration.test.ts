@@ -262,6 +262,15 @@ describe('index batch repository', () => {
     expect((await repository.getCursor('pons-v2-lifecycle')).scannedToBlock).toBe(100n);
   });
 
+  it('allows an official V4 pool source to be registered again if its Initialize block reorgs', async () => {
+    const id = `pons-v2-v4:0x${'9'.repeat(64)}`;
+    await repository.registerSource({ id, chainId: 4663, version: 'v2-v4', factoryAddress: poolAddress, startBlock: 102n });
+    await repository.saveIndexBatch(id, 102n, 102n, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
+    await repository.retractBlocks(4663, 102n);
+    await repository.registerSource({ id, chainId: 4663, version: 'v2-v4', factoryAddress: poolAddress, startBlock: 103n });
+    expect((await repository.getCursor(id)).scannedToBlock).toBe(102n);
+  });
+
   it('fills immutable V2 pool terms for an older indexed launch without changing its origin', async () => {
     await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
     const initial = batch(4663, 'pons-v2');

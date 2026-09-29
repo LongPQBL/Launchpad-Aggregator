@@ -8,6 +8,7 @@ import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { scanToHead } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
 import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { createV4GetLogs, createV4TradeDecoder, getV4PoolSources } from '../indexer/v4Runtime.js';
 import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
 import { readV2LaunchRecord, readV2TokenMetadata, resolveV2QuoteAsset, type V2ReadClient } from '../launchpads/pons/v2/adapter.js';
@@ -24,13 +25,20 @@ const repository = createRepository(db);
 const client = createRobinhoodPublicClient(rpcUrl);
 const sources = getFactoryLogSources();
 const lifecycleSource = getV2LifecycleSource();
+const v4SelectionId = 'pons-v2-v4';
 const tradeDefinitions = getTradeSourceDefinitions();
-const selectedIds = selectIndexerSourceIds([...sources.map((source) => source.id), lifecycleSource.id, ...tradeDefinitions.map((definition) => definition.source.id)],
+const selectedIds = selectIndexerSourceIds([...sources.map((source) => source.id), lifecycleSource.id, v4SelectionId,
+  ...tradeDefinitions.map((definition) => definition.source.id)],
   process.env.INDEXER_SOURCE_IDS);
 const venueStore = createVenueStore(pool);
 const factories = getPonsFactorySources();
 const v1Reader = client as unknown as V1ReadClient;
 const v2Reader = client as unknown as V2ReadClient;
+let poolConfigPromise: ReturnType<typeof readV2FactoryPoolConfig> | undefined;
+function getPoolConfig() {
+  poolConfigPromise ??= readV2FactoryPoolConfig(client as unknown as Parameters<typeof readV2FactoryPoolConfig>[0]);
+  return poolConfigPromise;
+}
 const decoder = createFactoryDecoder({
   loadV1: async (event, sourceId) => {
     const factory = factories.find((item) => item.id === sourceId);
@@ -90,7 +98,7 @@ async function runOnce(): Promise<void> {
     const curveContexts = (await venueStore.listOfficial('curve', lifecycleSource.chainId))
       .filter((context) => context.launch.sourceId === 'pons-v2');
     const byToken = new Map(curveContexts.map((context) => [context.launch.tokenAddress.toLowerCase(), context]));
-    const poolConfig = await readV2FactoryPoolConfig(client as unknown as Parameters<typeof readV2FactoryPoolConfig>[0]);
+    const poolConfig = await getPoolConfig();
     const target = lifecycleTarget(factoryCursors.get('pons-v2')!, safeHead);
     reports.push(...await runFactoryCycle([lifecycleSource], target, maxBlocksPerSource, {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
@@ -145,6 +153,31 @@ async function runOnce(): Promise<void> {
       }),
     });
     reports.push(...tradeReports);
+  }
+  if (selectedIds.includes(v4SelectionId)) {
+    const { poolManager, hook } = await getPoolConfig();
+    const contexts = (await venueStore.listOfficial('v4_pool', lifecycleSource.chainId))
+      .filter((context) => context.launch.sourceId === 'pons-v2');
+    const poolSources = getV4PoolSources(contexts, poolManager);
+    const bySourceId = new Map(poolSources.map((source, index) => [source.id, contexts[index]]));
+    for (const source of poolSources) {
+      await repository.registerSource({ id: source.id, chainId: source.chainId, version: 'v2-v4',
+        factoryAddress: poolManager, startBlock: source.startBlock });
+      const context = bySourceId.get(source.id)!;
+      const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
+      reports.push(...await runFactoryCycle([source], safeHead, maxBlocksPerSource, {
+        getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
+        setSourceStatus: repository.setSourceStatus,
+        scan: (poolSource, target) => scanToHead(poolSource, target, {
+          initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+          getCursor: repository.getCursor,
+          getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
+          decodeLogs: createV4TradeDecoder(context, getTimestamp, poolManager, hook),
+          saveIndexBatch: repository.saveIndexBatch,
+          sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+        }),
+      }));
+    }
   }
   for (const report of reports) {
     const cursor = await repository.getCursor(report.sourceId);
