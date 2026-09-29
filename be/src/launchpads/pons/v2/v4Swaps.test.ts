@@ -7,6 +7,10 @@ import { derivePonsV4PoolId, verifyPonsV4PoolInitialization, transitionOfficialV
 import { decodePonsV4Swap, verifyPonsV4Graduation } from './v4Swaps.js';
 import { v4SwapEvent } from './v4Swaps.js';
 import { decodeCurveTrade } from './adapter.js';
+import { decodeV2Launch } from './adapter.js';
+import { decodeV2LifecycleLog } from './lifecycle.js';
+import { getPonsFactorySources } from '../sourceRegistry.js';
+import { formatRational } from '../../../market/price.js';
 import { buildOfficialCandles, sumOfficialQuoteVolume } from '../../../market/aggregate.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../../../tests/fixtures/pons-v2-graduated.json', import.meta.url), 'utf8')) as Record<string, unknown>;
@@ -36,6 +40,30 @@ const terms = { fee: fixture.poolFee as number, tickSpacing: fixture.tickSpacing
 const poolId = fixture.poolId as Hash;
 
 describe('pons v2 official V4 pool', () => {
+  it('replays real launch, sweep, graduation and priced V4 swap in provenance order', () => {
+    const factory = getPonsFactorySources().find((source) => source.id === 'pons-v2')!;
+    const origin = decodeV2Launch(asLog(fixture.launch as Record<string, unknown>), factory);
+    const swept = decodeV2LifecycleLog(asLog(fixture.sweep as Record<string, unknown>), factory)!;
+    const graduated = decodeV2LifecycleLog(asLog(fixture.graduation as Record<string, unknown>), factory)!;
+    expect(origin).toMatchObject({ tokenAddress: launch.tokenAddress, curveAddress: curveVenue.ref,
+      blockNumber: 27_823_666n, transactionHash: fixture.launch && (fixture.launch as Record<string, unknown>).transactionHash });
+    expect(swept).toMatchObject({ phase: 1, kind: 'swept', blockNumber: 27_823_772n, logIndex: 52 });
+    expect(graduated).toMatchObject({ phase: 2, kind: 'graduated', blockNumber: 27_828_161n, logIndex: 36 });
+    expect(origin.blockNumber).toBeLessThan(swept.blockNumber);
+    expect(swept.blockNumber).toBeLessThan(graduated.blockNumber);
+    const initialized = asLog(fixture.initialize as Record<string, unknown>);
+    expect(initialized.transactionHash).toBe(graduated.txHash);
+    expect(initialized.logIndex).toBeLessThan(graduated.logIndex);
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: initialized.blockNumber,
+      logIndex: initialized.logIndex }, { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
+    const trade = decodePonsV4Swap(asLog(fixture.swap as Record<string, unknown>), poolId, launch, venue,
+      1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)!;
+    expect(trade.blockNumber).toBe(27_828_165n);
+    expect(trade.logIndex).toBe(108);
+    expect(trade.quoteAmountRaw).toBe(5_620_497_268_881_825_819n);
+    expect(formatRational(trade.priceNumeratorRaw!, trade.priceDenominatorRaw!, 18)).toBe('0.000000152480063034');
+  });
+
   it('derives the known pool ID with sorted currencies, fee, tick spacing and hook', () => {
     expect(derivePonsV4PoolId(launch, terms, fixture.hookAddress as Address)).toBe(poolId);
     expect(derivePonsV4PoolId(launch, { ...terms, tickSpacing: 100 }, fixture.hookAddress as Address)).not.toBe(poolId);

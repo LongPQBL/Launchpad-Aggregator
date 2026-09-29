@@ -2,7 +2,7 @@
 
 **Ngày:** 29/09/2026
 
-**Trạng thái:** Chờ người dùng duyệt tài liệu
+**Trạng thái:** Đã duyệt; backend đã triển khai, lịch sử toàn chain và giá curve cũ chưa xác minh đủ
 
 **Phụ thuộc:** [Đặc tả Pons chỉ đọc](2026-09-28-pons-readonly-design.md). Tài liệu này cụ thể hóa phần backend còn thiếu; không mở rộng sang mua/bán hoặc sàn/chain khác.
 
@@ -33,7 +33,7 @@ Lưu sự kiện chuyển trạng thái bất biến gắn với raw log, rồi 
 2. `CurveBuy`, `CurveSell`, `BuybackLocked`: ghi giao dịch curve nếu khớp thật; phân loại buyback Pons; không biến event phí/refund thành trade. Giao dịch cuối có thể trước `LaunchSwept` khá lâu khi curve đã đạt ngưỡng.
 3. `LaunchSwept`: ghi mốc phase 1. Không tạo V4 venue hoặc nến. `LaunchForceSwept` cùng transaction không cộng thêm một transition.
 4. `PoolGraduated` + `Initialize` xác thực: ghi mốc phase 2, mở V4 venue tại Initialize. `LaunchGraduationRescued` thay vào đó ghi phase 3 và không mở pool.
-5. `Swap` đúng pool ID sau Initialize: ghi trade; swap nội bộ thực khớp của Pons vẫn tăng volume một lần, nhưng nhãn nguyên nhân chỉ được dùng khi có bằng chứng. Swap pool khác bị loại. Nến từ giá sau giao dịch, không từ giá seed pool. Chart không có nến trong khoảng chưa có trade.
+5. `Swap` đúng pool ID sau Initialize: ghi trade; swap nội bộ thực khớp của Pons vẫn tăng volume một lần, nhưng nhãn nguyên nhân chỉ được dùng khi có bằng chứng. Swap pool khác bị loại. Nến từ giá sau giao dịch, không từ giá seed pool. Chart không có nến trong khoảng chưa có trade. Giai đoạn hiện tại dựng trang nến trực tiếp từ trade đã lập chỉ mục, có chỉ mục `(chain, token, timestamp)`; chưa materialize nến vì cần cơ chế làm bẩn bucket an toàn khi reorg. Nếu một bucket có trade chưa xác minh giá, bỏ bucket đó và báo chart chưa đầy đủ.
 6. Mọi truy vấn chart/volume cần biết nguồn curve, lifecycle và V4 liên quan đã quét đủ khoảng yêu cầu. Nếu thiếu, trả `complete=false`/metric `null` hoặc trạng thái đang đồng bộ; không trình bày tổng tạm thời như kết quả đầy đủ.
 
 Khi reorg, xoá raw log của block bị thay và các transition/trade phụ thuộc; nếu `Initialize` bị rút thì V4 venue và swap của pool đó cũng phải bị rút hoặc đánh dấu chưa xác thực. Dựng lại projection trạng thái, ranh giới venue và nến từ log còn hợp lệ rồi quét bù. Reorg qua cùng block chứa curve trade, sweep và pool creation phải cho kết quả giống một lượt quét sạch.

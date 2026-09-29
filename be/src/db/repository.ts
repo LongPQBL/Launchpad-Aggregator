@@ -34,7 +34,8 @@ export function createRepository(db: Database) {
         eq(phaseObservations.chainId, launches.chainId), eq(phaseObservations.tokenAddress, launches.tokenAddress),
       )).where(and(eq(launches.chainId, chainId), eq(launches.protocolVersion, 'v2'),
         or(isNull(phaseObservations.status), ne(phaseObservations.status, 'verified'))))
-        .orderBy(launches.launchBlock, launches.tokenAddress).limit(limit);
+        .orderBy(sql`CASE WHEN ${phaseObservations.status} IS NULL THEN 0 ELSE 1 END`,
+          phaseObservations.blockNumber, launches.launchBlock, launches.tokenAddress).limit(limit);
       return rows.map((row) => ({ tokenAddress: row.tokenAddress as Address,
         factoryAddress: row.factoryAddress as Address, lifecycleStatus: row.lifecycleStatus as LifecycleStatus }));
     },
