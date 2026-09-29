@@ -52,12 +52,16 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
   );
 
   app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
-    '/v1/launches/:chainId/:tokenAddress/candles', { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: candle } } } } } }, async (request, reply) => {
+    '/v1/launches/:chainId/:tokenAddress/candles', { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: candle }, complete: { type: 'boolean' } } } } } }, async (request, reply) => {
       const identity = tokenParams(request.params);
       const interval = request.query.intervalSeconds === undefined ? 60 : Number(request.query.intervalSeconds);
+      const before = request.query.before === undefined ? undefined : Number(request.query.before);
       if (!identity) return reply.code(404).send({ error: 'Launch not found' });
       if (![60, 300, 900, 3600, 86400].includes(interval)) return reply.code(400).send({ error: 'Invalid candle interval' });
-      return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval);
+      if (before !== undefined && (!/^\d+$/.test(request.query.before!) || !Number.isSafeInteger(before) || before < 1)) {
+        return reply.code(400).send({ error: 'Invalid candle boundary' });
+      }
+      return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before);
     },
   );
 }

@@ -14,9 +14,9 @@ function data() {
     listSources: async () => [{ id: 'pons-v2', chainId: 4663, platform: 'pons', protocolVersion: 'v2' }],
     getCoverage: async () => ({ complete: false, pendingSourceIds: ['pons-v2-curve'], missingRanges: [] }),
     listLaunches: async () => ({ items: [launch], nextCursor: null }),
-    getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null }),
+    getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false }),
     listTrades: async () => ({ items: [], nextCursor: null }),
-    listCandles: async () => ({ items: [] }),
+    listCandles: async () => ({ items: [], complete: false }),
   };
 }
 
@@ -47,7 +47,7 @@ describe('read-only API', () => {
     expect(calls).toEqual([{ chainId: 4663, limit: 100 }]);
     const detail = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}` });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toEqual({ ...launch, officialVenues: [], priceQuote: null });
+    expect(detail.json()).toEqual({ ...launch, officialVenues: [], priceQuote: null, priceStale: false });
     const invalid = await app.inject({ method: 'GET', url: '/v1/launches/4663/not-an-address' });
     expect(invalid.statusCode).toBe(404);
     const badCursor = await app.inject({ method: 'GET', url: '/v1/launches?cursor=bad' });
@@ -62,7 +62,26 @@ describe('read-only API', () => {
     expect(trades.json()).toEqual({ items: [], nextCursor: null });
     const candles = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?intervalSeconds=60` });
     expect(candles.statusCode).toBe(200);
-    expect(candles.json()).toEqual({ items: [] });
+    expect(candles.json()).toEqual({ items: [], complete: false });
+    await app.close();
+  });
+
+  it('accepts an exclusive candle page boundary and rejects malformed boundaries', async () => {
+    const beforeValues: Array<number | undefined> = [];
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...source,
+      listCandles: async (_chainId, _tokenAddress, _interval, before) => {
+        beforeValues.push(before);
+        return { items: [], complete: false };
+      },
+    } });
+    const valid = await app.inject({ method: 'GET',
+      url: `/v1/launches/4663/${address}/candles?intervalSeconds=60&before=1700000000` });
+    expect(valid.statusCode).toBe(200);
+    expect(beforeValues).toEqual([1_700_000_000]);
+    const invalid = await app.inject({ method: 'GET',
+      url: `/v1/launches/4663/${address}/candles?before=not-a-time` });
+    expect(invalid.statusCode).toBe(400);
     await app.close();
   });
 

@@ -50,6 +50,20 @@
       "when": 1790670464017,
       "tag": "0006_opposite_the_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1790671764430,
+      "tag": "0007_uneven_whistler",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790672128326,
+      "tag": "0008_quiet_chameleon",
+      "breakpoints": true
     }
   ]
 }

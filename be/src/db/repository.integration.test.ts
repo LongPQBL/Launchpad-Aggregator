@@ -287,6 +287,35 @@ describe('index batch repository', () => {
     await expect(repository.setV2PoolTerms(4663, token, 0, 100)).rejects.toThrow(/terms.*conflict/i);
   });
 
+  it('invalidates an authoritative phase observation after a new transition or reorg', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    const initial = batch(4663, 'pons-v2');
+    initial.launches[0].protocolVersion = 'v2';
+    initial.venues[0].kind = 'curve';
+    initial.trades = [];
+    initial.rawLogs = [initial.rawLogs[0]];
+    await repository.saveIndexBatch('pons-v2', 100n, 100n, initial);
+    expect((await repository.listV2PhaseAuditCandidates(4663, 10)).map((row) => row.tokenAddress)).toEqual([token]);
+    await repository.recordV2PhaseObservation(4663, token, 'trading', {
+      status: 'verified', observedPhase: 0, blockNumber: 105n, reason: null,
+    });
+    expect(await repository.listV2PhaseAuditCandidates(4663, 10)).toEqual([]);
+    await repository.registerSource({ id: 'pons-v2-lifecycle', chainId: 4663, version: 'v2-lifecycle', factoryAddress: factory, startBlock: 106n });
+    const sweepTx = `0x${'7'.repeat(64)}` as Hash;
+    const sweepLog = { chainId: 4663, sourceId: 'pons-v2-lifecycle', blockNumber: 106n, blockHash,
+      txHash: sweepTx, logIndex: 4, address: factory, topics: [], data: '0x' as Hash };
+    await repository.saveIndexBatch('pons-v2-lifecycle', 106n, 106n, { rawLogs: [sweepLog], launches: [], venues: [], trades: [],
+      transitions: [{ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle',
+        sourceLogId: logKey(4663, blockHash, sweepTx, 4), phase: 1, kind: 'swept',
+        blockNumber: 106n, blockHash, txHash: sweepTx, logIndex: 4 }] });
+    expect((await repository.listV2PhaseAuditCandidates(4663, 10)).map((row) => row.lifecycleStatus)).toEqual(['swept']);
+    await repository.recordV2PhaseObservation(4663, token, 'swept', {
+      status: 'verified', observedPhase: 1, blockNumber: 106n, reason: null,
+    });
+    await repository.retractBlocks(4663, 106n);
+    expect((await repository.listV2PhaseAuditCandidates(4663, 10)).map((row) => row.lifecycleStatus)).toEqual(['trading']);
+  });
+
   it('keeps launch, venue and trade provenance linked to raw logs', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
@@ -355,6 +384,65 @@ describe('index batch repository', () => {
 });
 
 describe('PostgreSQL API store', () => {
+  it('has a token-time index for bounded historical candle pages', async () => {
+    const result = await pool.query("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = 'trades'");
+    expect(result.rows.map((row) => row.indexname)).toContain('trades_token_timestamp_idx');
+  });
+
+  it('shows a complete launch volume and last verified trade price, but not an unrelated pool', async () => {
+    const tradeTime = Math.floor(Date.now() / 1000) - 60;
+    const ids = ['pons-v1-legacy', 'pons-v1-active', 'pons-v2', 'pons-v1-legacy-trades',
+      'pons-v1-active-trades', 'pons-v2-curve', 'pons-v2-lifecycle'];
+    for (const id of ids) {
+      await repository.registerSource({ id, chainId: 4663, version: 'test', factoryAddress: factory, startBlock: 100n });
+      const data = id === 'pons-v1-active' ? batch(4663, id) : { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
+      if (id === 'pons-v1-active') data.trades[0].timestamp = tradeTime;
+      await repository.saveIndexBatch(id, 100n, 100n, data);
+      await repository.setSourceStatus(id, 'caught_up', 100n);
+    }
+    await repository.recordObservedBlock(4663, 100n, blockHash);
+    const store = createApiStore(pool);
+    expect((await store.getCoverage()).complete).toBe(true);
+    expect((await store.listLaunches({ limit: 10 })).items[0].officialVolume24h).toBe('0.1');
+    const detail = await store.getLaunch(4663, token);
+    expect(detail?.officialVolume24h).toBe('0.1');
+    expect(detail?.priceQuote).toBe('0.1');
+    expect(detail?.priceStale).toBe(false);
+    expect((await store.listCandles(4663, token, 60)).items).toEqual([{
+      intervalSeconds: 60, bucketStart: Math.floor(tradeTime / 60) * 60,
+      open: '0.1', high: '0.1', low: '0.1', close: '0.1', quoteVolume: '0.1',
+    }]);
+    expect((await store.listCandles(4663, token, 60)).complete).toBe(true);
+    await pool.query('UPDATE trades SET price_numerator_raw = NULL WHERE chain_id = 4663');
+    expect(await store.listCandles(4663, token, 60)).toEqual({ items: [], complete: false });
+    await pool.query("UPDATE launches SET protocol_version = 'v2', lifecycle_status = 'swept' WHERE chain_id = 4663");
+    expect((await store.getLaunch(4663, token))?.priceStale).toBe(true);
+  });
+
+  it('requires lifecycle and discovered V4 sources without requiring a nonexistent V4 umbrella', async () => {
+    const ids = ['pons-v1-legacy', 'pons-v1-active', 'pons-v2', 'pons-v1-legacy-trades',
+      'pons-v1-active-trades', 'pons-v2-curve', 'pons-v2-lifecycle'];
+    for (const id of ids) {
+      await repository.registerSource({ id, chainId: 4663, version: 'test', factoryAddress: factory, startBlock: 100n });
+      const data = id === 'pons-v2' ? batch(4663, id) : { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
+      if (id === 'pons-v2') {
+        data.launches[0].protocolVersion = 'v2';
+        data.venues[0].kind = 'curve';
+        data.trades = [];
+        data.rawLogs = [data.rawLogs[0]];
+      }
+      await repository.saveIndexBatch(id, 100n, 100n, data);
+      await repository.setSourceStatus(id, 'caught_up', 100n);
+    }
+    await repository.recordObservedBlock(4663, 100n, blockHash);
+    const store = createApiStore(pool);
+    expect((await store.getCoverage()).complete).toBe(false);
+    await repository.recordV2PhaseObservation(4663, token, 'trading', {
+      status: 'verified', observedPhase: 0, blockNumber: 100n, reason: null,
+    });
+    expect(await store.getCoverage()).toEqual({ complete: true, pendingSourceIds: [], missingRanges: [] });
+  });
+
   it('persists missing block ranges and removes them only after successful repair', async () => {
     await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
     await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [],

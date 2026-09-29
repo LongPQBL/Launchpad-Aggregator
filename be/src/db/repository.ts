@@ -1,12 +1,13 @@
-import { and, eq, gte, inArray, like, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, isNull, like, lte, ne, or, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
-import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
+import type { CoverageStatus, IndexBatch, LifecycleStatus, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
 import type { ObservedBlock } from '../indexer/reorg.js';
 import type { ScanReport } from '../indexer/scan.js';
+import type { PhaseReconciliation } from '../indexer/phaseReconcile.js';
 import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
-import { candles, launches, lifecycleTransitions, observedBlocks, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
+import { candles, launches, lifecycleTransitions, observedBlocks, phaseObservations, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
 
 export interface SourceRegistration {
   id: string;
@@ -24,6 +25,36 @@ export interface IndexedSource extends SourceCursor {
 
 export function createRepository(db: Database) {
   return {
+    async listV2PhaseAuditCandidates(chainId: number, limit: number): Promise<Array<{
+      tokenAddress: Address; factoryAddress: Address; lifecycleStatus: LifecycleStatus;
+    }>> {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1_000) throw new Error('Invalid phase audit limit');
+      const rows = await db.select({ tokenAddress: launches.tokenAddress, factoryAddress: launches.factoryAddress,
+        lifecycleStatus: launches.lifecycleStatus }).from(launches).leftJoin(phaseObservations, and(
+        eq(phaseObservations.chainId, launches.chainId), eq(phaseObservations.tokenAddress, launches.tokenAddress),
+      )).where(and(eq(launches.chainId, chainId), eq(launches.protocolVersion, 'v2'),
+        or(isNull(phaseObservations.status), ne(phaseObservations.status, 'verified'))))
+        .orderBy(launches.launchBlock, launches.tokenAddress).limit(limit);
+      return rows.map((row) => ({ tokenAddress: row.tokenAddress as Address,
+        factoryAddress: row.factoryAddress as Address, lifecycleStatus: row.lifecycleStatus as LifecycleStatus }));
+    },
+
+    async recordV2PhaseObservation(chainId: number, tokenAddress: Address, expected: LifecycleStatus,
+      observation: PhaseReconciliation): Promise<void> {
+      await db.transaction(async (tx) => {
+        const [launch] = await tx.select().from(launches).where(and(eq(launches.chainId, chainId),
+          eq(launches.tokenAddress, tokenAddress.toLowerCase()))).for('update');
+        if (!launch || launch.protocolVersion !== 'v2' || launch.lifecycleStatus !== expected) {
+          throw new Error('Pons V2 phase projection changed during observation');
+        }
+        await tx.insert(phaseObservations).values({ chainId, tokenAddress: tokenAddress.toLowerCase(),
+          blockNumber: observation.blockNumber, status: observation.status, observedPhase: observation.observedPhase,
+          reason: observation.reason }).onConflictDoUpdate({ target: [phaseObservations.chainId, phaseObservations.tokenAddress],
+          set: { blockNumber: observation.blockNumber, status: observation.status,
+            observedPhase: observation.observedPhase, reason: observation.reason } });
+      });
+    },
+
     async setV2PoolTerms(chainId: number, tokenAddress: Address, fee: number, tickSpacing: number): Promise<void> {
       if (fee !== 0 || !Number.isInteger(tickSpacing) || tickSpacing <= 0 || tickSpacing > 32767) {
         throw new Error('Invalid Pons V2 pool terms');
@@ -247,6 +278,8 @@ export function createRepository(db: Database) {
             logIndex: transition.logIndex,
           }))).onConflictDoNothing();
           for (const tokenAddress of new Set(batch.transitions.map((transition) => transition.tokenAddress.toLowerCase()))) {
+            await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, source.chainId),
+              eq(phaseObservations.tokenAddress, tokenAddress)));
             await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
               SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
               FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
@@ -312,9 +345,13 @@ export function createRepository(db: Database) {
         await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
         await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
         await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
+        await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
+          gte(phaseObservations.blockNumber, fromBlock)));
         await tx.delete(sources).where(and(eq(sources.chainId, chainId), eq(sources.version, 'v2-v4'),
           like(sources.id, 'pons-v2-v4:%'), gte(sources.startBlock, fromBlock)));
         for (const tokenAddress of new Set(affected.map((row) => row.tokenAddress))) {
+          await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
+            eq(phaseObservations.tokenAddress, tokenAddress)));
           await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
             SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
             FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address

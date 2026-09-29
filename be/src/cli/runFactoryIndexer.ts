@@ -4,6 +4,7 @@ import { createRepository } from '../db/repository.js';
 import { runFactoryCycle } from '../indexer/factoryCycle.js';
 import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
 import { createLifecycleDecoder, getV2LifecycleSource, lifecycleTarget, readV2FactoryPoolConfig } from '../indexer/lifecycleRuntime.js';
+import { reconcileV2Phase } from '../indexer/phaseReconcile.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { scanToHead } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
@@ -11,7 +12,7 @@ import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tra
 import { createV4GetLogs, createV4TradeDecoder, getV4PoolSources } from '../indexer/v4Runtime.js';
 import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
-import { readV2LaunchRecord, readV2TokenMetadata, resolveV2QuoteAsset, type V2ReadClient } from '../launchpads/pons/v2/adapter.js';
+import { readV2LaunchRecord, readV2Phase, readV2TokenMetadata, resolveV2QuoteAsset, type V2ReadClient } from '../launchpads/pons/v2/adapter.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { createViemGetLogs, getFactoryLogSources } from './indexer.js';
 
@@ -177,6 +178,22 @@ async function runOnce(): Promise<void> {
           sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
         }),
       }));
+    }
+  }
+  if (selectedIds.includes(lifecycleSource.id)) {
+    const [factoryCursor, lifecycleCursor] = await Promise.all([
+      repository.getCursor('pons-v2'), repository.getCursor(lifecycleSource.id),
+    ]);
+    if (factoryCursor.status === 'caught_up' && lifecycleCursor.status === 'caught_up'
+      && factoryCursor.confirmedToBlock >= safeHead && lifecycleCursor.confirmedToBlock >= safeHead) {
+      const candidates = await repository.listV2PhaseAuditCandidates(4663, 1);
+      for (const candidate of candidates) {
+        const result = await reconcileV2Phase(candidate.lifecycleStatus, safeHead,
+          (blockNumber) => readV2Phase(v2Reader, candidate.factoryAddress, candidate.tokenAddress, blockNumber));
+        await repository.recordV2PhaseObservation(4663, candidate.tokenAddress, candidate.lifecycleStatus, result);
+        console.log(JSON.stringify({ phaseAudit: candidate.tokenAddress, blockNumber: safeHead.toString(),
+          status: result.status, reason: result.reason }));
+      }
     }
   }
   for (const report of reports) {

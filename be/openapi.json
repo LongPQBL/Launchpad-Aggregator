@@ -195,6 +195,9 @@
                     "priceQuote": {
                       "type": "string",
                       "nullable": true
+                    },
+                    "priceStale": {
+                      "type": "boolean"
                     }
                   }
                 }
@@ -339,6 +342,9 @@
                           }
                         }
                       }
+                    },
+                    "complete": {
+                      "type": "boolean"
                     }
                   }
                 }

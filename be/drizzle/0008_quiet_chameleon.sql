@@ -1,0 +1,1 @@
+CREATE INDEX "trades_token_timestamp_idx" ON "trades" USING btree ("chain_id","token_address","timestamp");

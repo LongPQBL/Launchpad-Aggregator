@@ -15,6 +15,7 @@ export const launchDetail = { type: 'object', properties: {
     effectiveFromBlock: { type: 'string' }, effectiveToBlock: { type: 'string', nullable: true },
   } } },
   priceQuote: { type: 'string', nullable: true },
+  priceStale: { type: 'boolean' },
 } } as const;
 
 export const trade = { type: 'object', properties: {

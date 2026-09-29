@@ -16,6 +16,7 @@ export interface LaunchSummary {
 export interface LaunchDetail extends LaunchSummary {
   officialVenues: readonly { id: string; kind: string; ref: string; effectiveFromBlock: string; effectiveToBlock: string | null }[];
   priceQuote: string | null;
+  priceStale: boolean;
 }
 export interface TradeResponse {
   venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;
@@ -35,7 +36,7 @@ export interface ApiDeps {
     listLaunches(query: ListQuery): Promise<Page<LaunchSummary>>;
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
-    listCandles(chainId: number, tokenAddress: string, intervalSeconds: number): Promise<{ items: readonly CandleResponse[] }>;
+    listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
   };
 }
 

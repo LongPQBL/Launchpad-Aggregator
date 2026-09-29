@@ -93,6 +93,18 @@ export const lifecycleTransitions = pgTable('lifecycle_transitions', {
   index('lifecycle_transitions_token_position_idx').on(table.chainId, table.tokenAddress, table.blockNumber, table.logIndex),
 ]);
 
+export const phaseObservations = pgTable('phase_observations', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  status: text('status').notNull(),
+  observedPhase: integer('observed_phase'),
+  reason: text('reason'),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+]);
+
 export const trades = pgTable('trades', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
@@ -114,6 +126,7 @@ export const trades = pgTable('trades', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
   index('trades_token_block_idx').on(table.chainId, table.tokenAddress, table.blockNumber),
+  index('trades_token_timestamp_idx').on(table.chainId, table.tokenAddress, table.timestamp),
 ]);
 
 export const candles = pgTable('candles', {
