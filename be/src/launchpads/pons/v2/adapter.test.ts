@@ -190,6 +190,25 @@ describe('pons v2 curve trades', () => {
     expect(batch.rawLogs).toHaveLength(2);
   });
 
+  it('fetches distinct block timestamps concurrently instead of one round trip at a time', async () => {
+    const { launch, venue } = context();
+    const buyLog = asLog(reference.buy as Record<string, unknown>);
+    const sellLog = { ...asLog(reference.sell as Record<string, unknown>), blockNumber: buyLog.blockNumber + 1n };
+    const requestedBlocks: bigint[] = [];
+    const releases = new Map<bigint, (value: number) => void>();
+    const getTimestamp = (blockNumber: bigint) => {
+      requestedBlocks.push(blockNumber);
+      return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
+    };
+    const resultPromise = decodeV2CurveBatch([buyLog, sellLog], 'pons-v2-curve-cohort',
+      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), getTimestamp);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedBlocks).toHaveLength(2);
+    for (const release of releases.values()) release(1_700_000_000);
+    const batch = await resultPromise;
+    expect(batch.trades).toHaveLength(2);
+  });
+
   it('uses post-trade reserves for price and scales by quote decimals', () => {
     const { launch, venue } = context();
     launch.quoteAsset = { address: launch.quoteAsset.address, symbol: 'USDC', decimals: 6 };

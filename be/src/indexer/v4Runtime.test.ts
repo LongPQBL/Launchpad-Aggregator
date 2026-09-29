@@ -86,4 +86,25 @@ describe('official Pons V4 swap runtime', () => {
     expect(batch.trades[0].activityKind).toBe('protocol_fee_conversion');
     expect(batch.rawLogs).toHaveLength(1);
   });
+
+  it('fetches distinct block timestamps concurrently instead of one round trip at a time', async () => {
+    const { createV4TradeDecoder, getV4PoolSources } = await import('./v4Runtime.js');
+    const [source] = getV4PoolSources([context], poolManager);
+    const first = asLog(swap) as Log;
+    const second = { ...asLog(swap), blockNumber: first.blockNumber! + 1n,
+      transactionHash: `0x${'2'.repeat(64)}` as Hash } as Log;
+    const requestedBlocks: bigint[] = [];
+    const releases = new Map<bigint, (value: number) => void>();
+    const getTimestamp = (blockNumber: bigint) => {
+      requestedBlocks.push(blockNumber);
+      return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
+    };
+    const decoder = createV4TradeDecoder(context, getTimestamp, poolManager, hook);
+    const resultPromise = decoder([first, second], source);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedBlocks).toHaveLength(2);
+    for (const release of releases.values()) release(1_700_000_000);
+    const batch = await resultPromise;
+    expect(batch.trades).toHaveLength(2);
+  });
 });

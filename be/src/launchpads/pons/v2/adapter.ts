@@ -1,6 +1,7 @@
 import { decodeEventLog, parseAbi, toEventSelector, zeroAddress, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, LifecycleStatus, QuoteAsset, RawLog, Trade, Venue } from '../../../domain/types.js';
+import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
@@ -181,17 +182,22 @@ export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: Fac
 
 export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: string,
   contexts: ReadonlyMap<string, V2LaunchWithVenue>, getTimestamp: (block: bigint) => Promise<number>): Promise<IndexBatch> {
-  const rawLogs: RawLog[] = [];
-  const trades: Trade[] = [];
-  const timestamps = new Map<bigint, number>();
-  for (const log of logs) {
+  const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown pons v2 curve: ${log.address}`);
+    const isTradeEvent = log.topics[0] === toEventSelector(curveBuyEvent) || log.topics[0] === toEventSelector(curveSellEvent)
+      || log.topics[0] === toEventSelector(curveBuybackEvent);
+    return { log, context, isTradeEvent };
+  });
+  const uniqueBlocks = [...new Set(resolved.filter((item) => item.isTradeEvent).map((item) => item.log.blockNumber))];
+  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+    async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+  const rawLogs: RawLog[] = [];
+  const trades: Trade[] = [];
+  for (const { log, context, isTradeEvent } of resolved) {
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
-    if (log.topics[0] !== toEventSelector(curveBuyEvent) && log.topics[0] !== toEventSelector(curveSellEvent)
-      && log.topics[0] !== toEventSelector(curveBuybackEvent)) continue;
-    let timestamp = timestamps.get(log.blockNumber);
-    if (timestamp === undefined) { timestamp = await getTimestamp(log.blockNumber); timestamps.set(log.blockNumber, timestamp); }
+    if (!isTradeEvent) continue;
+    const timestamp = timestamps.get(log.blockNumber)!;
     trades.push(log.topics[0] === toEventSelector(curveBuybackEvent)
       ? decodeCurveBuyback(log, context.launch, context.venue, timestamp)
       : decodeCurveTrade(log, context.launch, context.venue, timestamp));

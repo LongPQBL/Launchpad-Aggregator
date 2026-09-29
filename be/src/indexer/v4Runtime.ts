@@ -2,6 +2,7 @@ import { isHash, type Address, type Hash, type Log } from 'viem';
 import type { IndexBatch, RawLog } from '../domain/types.js';
 import type { RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { decodePonsV4Swap, v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
+import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from './concurrency.js';
 import type { LogSource, ScanDeps } from './scan.js';
 import type { VenueContext } from './venueStore.js';
 
@@ -44,21 +45,22 @@ export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block
   const sourceId = `pons-v2-v4:${poolId}`;
   return async (logs, source): Promise<IndexBatch> => {
     if (source.id !== sourceId || source.chainId !== context.launch.chainId) throw new Error('Wrong Pons V4 source');
-    const rawLogs: RawLog[] = [];
-    const trades: IndexBatch['trades'][number][] = [];
-    const timestamps = new Map<bigint, number>();
-    for (const input of logs) {
+    const verifiedLogs = logs.map((input) => {
       const log = verifiedLog(input);
       if (log.blockNumber < context.venue.effectiveFromBlock
         || (log.blockNumber === context.venue.effectiveFromBlock
           && log.logIndex < (context.venue.effectiveFromLogIndex ?? 0))) {
         throw new Error('V4 swap precedes official venue Initialize position');
       }
-      let timestamp = timestamps.get(log.blockNumber);
-      if (timestamp === undefined) {
-        timestamp = await getTimestamp(log.blockNumber);
-        timestamps.set(log.blockNumber, timestamp);
-      }
+      return log;
+    });
+    const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
+    const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+    const rawLogs: RawLog[] = [];
+    const trades: IndexBatch['trades'][number][] = [];
+    for (const log of verifiedLogs) {
+      const timestamp = timestamps.get(log.blockNumber)!;
       const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, timestamp, poolManager, hook);
       if (!trade) continue;
       trades.push(trade);

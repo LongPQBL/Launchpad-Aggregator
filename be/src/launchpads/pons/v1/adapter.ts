@@ -1,6 +1,7 @@
 import { decodeEventLog, toEventSelector, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, RawLog, Venue, Trade } from '../../../domain/types.js';
+import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import { v1LaunchEvent, v3SwapEvent } from './abi.js';
 
@@ -175,17 +176,18 @@ export async function decodeV1SwapBatch(
   contexts: ReadonlyMap<string, LaunchWithVenue>,
   getTimestamp: (blockNumber: bigint) => Promise<number>,
 ): Promise<IndexBatch> {
-  const rawLogs: RawLog[] = [];
-  const trades: Trade[] = [];
-  const timestamps = new Map<bigint, number>();
-  for (const log of logs) {
+  const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown official V3 pool: ${log.address}`);
-    let timestamp = timestamps.get(log.blockNumber);
-    if (timestamp === undefined) {
-      timestamp = await getTimestamp(log.blockNumber);
-      timestamps.set(log.blockNumber, timestamp);
-    }
+    return { log, context };
+  });
+  const uniqueBlocks = [...new Set(resolved.map(({ log }) => log.blockNumber))];
+  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+    async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
+  const rawLogs: RawLog[] = [];
+  const trades: Trade[] = [];
+  for (const { log, context } of resolved) {
+    const timestamp = timestamps.get(log.blockNumber)!;
     const trade = decodeV1Swap(log, context.venue, context.launch, timestamp);
     if (trade) trades.push(trade);
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
