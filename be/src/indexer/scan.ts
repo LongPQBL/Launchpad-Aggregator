@@ -85,8 +85,13 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
       }
     }
     if (!logs) continue;
-    const batch = await deps.decodeLogs(logs, source);
-    await deps.saveIndexBatch(source.id, fromBlock, toBlock, batch);
+    try {
+      const batch = await deps.decodeLogs(logs, source);
+      await deps.saveIndexBatch(source.id, fromBlock, toBlock, batch);
+    } catch (error) {
+      report.missingRanges.push({ fromBlock, toBlock, reason: errorMessage(error) });
+      return report;
+    }
     report.committedRanges.push({ fromBlock, toBlock });
     fromBlock = toBlock + 1n;
     if (chunk < deps.maxChunk) {

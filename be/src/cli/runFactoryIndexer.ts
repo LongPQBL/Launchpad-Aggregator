@@ -3,6 +3,7 @@ import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
 import { runFactoryCycle } from '../indexer/factoryCycle.js';
 import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
+import { createLifecycleDecoder, getV2LifecycleSource, lifecycleTarget, readV2FactoryPoolConfig } from '../indexer/lifecycleRuntime.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { scanToHead } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
@@ -22,8 +23,9 @@ const { db, pool } = createDatabase(databaseUrl);
 const repository = createRepository(db);
 const client = createRobinhoodPublicClient(rpcUrl);
 const sources = getFactoryLogSources();
+const lifecycleSource = getV2LifecycleSource();
 const tradeDefinitions = getTradeSourceDefinitions();
-const selectedIds = selectIndexerSourceIds([...sources.map((source) => source.id), ...tradeDefinitions.map((definition) => definition.source.id)],
+const selectedIds = selectIndexerSourceIds([...sources.map((source) => source.id), lifecycleSource.id, ...tradeDefinitions.map((definition) => definition.source.id)],
   process.env.INDEXER_SOURCE_IDS);
 const venueStore = createVenueStore(pool);
 const factories = getPonsFactorySources();
@@ -59,6 +61,8 @@ for (const definition of tradeDefinitions) {
   await repository.registerSource({ id: definition.source.id, chainId: definition.source.chainId,
     version: definition.version, factoryAddress: definition.factoryAddress, startBlock: definition.source.startBlock });
 }
+await repository.registerSource({ id: lifecycleSource.id, chainId: lifecycleSource.chainId, version: 'v2-lifecycle',
+  factoryAddress: lifecycleSource.addresses[0], startBlock: lifecycleSource.startBlock });
 
 async function runOnce(): Promise<void> {
   const head = await client.getBlockNumber();
@@ -82,6 +86,47 @@ async function runOnce(): Promise<void> {
     }),
   });
   const factoryCursors = new Map(await Promise.all(sources.map(async (source) => [source.id, (await repository.getCursor(source.id)).scannedToBlock] as const)));
+  if (selectedIds.includes(lifecycleSource.id)) {
+    const curveContexts = (await venueStore.listOfficial('curve', lifecycleSource.chainId))
+      .filter((context) => context.launch.sourceId === 'pons-v2');
+    const byToken = new Map(curveContexts.map((context) => [context.launch.tokenAddress.toLowerCase(), context]));
+    const poolConfig = await readV2FactoryPoolConfig(client as unknown as Parameters<typeof readV2FactoryPoolConfig>[0]);
+    const target = lifecycleTarget(factoryCursors.get('pons-v2')!, safeHead);
+    reports.push(...await runFactoryCycle([lifecycleSource], target, maxBlocksPerSource, {
+      getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
+      setSourceStatus: repository.setSourceStatus,
+      scan: (source, head) => scanToHead(source, head, {
+        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+        getCursor: repository.getCursor, getLogs,
+        decodeLogs: createLifecycleDecoder({
+          loadLaunch: async (token) => {
+            const context = byToken.get(token.toLowerCase());
+            if (!context) return null;
+            if (context.launch.v4PoolFee !== null && context.launch.v4PoolFee !== undefined
+              && context.launch.v4TickSpacing !== null && context.launch.v4TickSpacing !== undefined) return context;
+            const factory = factories.find((item) => item.version === 'v2')!;
+            const record = await readV2LaunchRecord(v2Reader, factory.factory, token);
+            if (!record.exists || record.token.toLowerCase() !== token.toLowerCase()
+              || record.curve.toLowerCase() !== context.venue.ref.toLowerCase()
+              || record.pairToken.toLowerCase() !== context.launch.quoteAsset.address.toLowerCase()) {
+              throw new Error(`Pons V2 historical pool terms do not match launch ${token}`);
+            }
+            await repository.setV2PoolTerms(context.launch.chainId, token, record.poolFee, record.tickSpacing);
+            context.launch.v4PoolFee = record.poolFee;
+            context.launch.v4TickSpacing = record.tickSpacing;
+            return context;
+          },
+          getReceiptLogs: async (txHash) => (await client.getTransactionReceipt({ hash: txHash })).logs.map((log) => ({
+            address: log.address, topics: log.topics, data: log.data, blockNumber: log.blockNumber,
+            blockHash: log.blockHash, transactionHash: log.transactionHash, logIndex: log.logIndex,
+          })),
+          ...poolConfig,
+        }),
+        saveIndexBatch: repository.saveIndexBatch,
+        sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+      }),
+    }));
+  }
   for (const definition of tradeDefinitions.filter((item) => selectedIds.includes(item.source.id))) {
     const frontier = tradeFrontier(definition.source.id, factoryCursors);
     const contexts = (await venueStore.listOfficial(definition.venueKind, definition.source.chainId))

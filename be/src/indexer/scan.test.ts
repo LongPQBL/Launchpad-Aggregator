@@ -45,14 +45,23 @@ describe('bounded HTTP scanner', () => {
     expect(setup.getCursor()).toBe(18n);
   });
 
-  it('restarts at the uncommitted block after a database failure', async () => {
+  it('reports a database failure without moving the checkpoint, then restarts at that block', async () => {
     const setup = depsFor(async () => []);
     setup.deps.saveIndexBatch = async () => { throw new Error('database unavailable'); };
-    await expect(scanToHead(source, 12n, setup.deps)).rejects.toThrow('database unavailable');
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 12n, reason: 'database unavailable' }]);
     expect(setup.getCursor()).toBe(9n);
     const resumed = depsFor(async () => []);
     await scanToHead(source, 12n, resumed.deps);
     expect(resumed.committed).toEqual([[10n, 12n]]);
+  });
+
+  it('reports an invalid lifecycle receipt as a gap without advancing the cursor', async () => {
+    const setup = depsFor(async () => []);
+    setup.deps.decodeLogs = async () => { throw new Error('No matching Pons V4 Initialize'); };
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 12n, reason: 'No matching Pons V4 Initialize' }]);
+    expect(setup.getCursor()).toBe(9n);
   });
 
   it('reports unavailable historical logs without advancing the checkpoint', async () => {

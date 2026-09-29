@@ -262,6 +262,22 @@ describe('index batch repository', () => {
     expect((await repository.getCursor('pons-v2-lifecycle')).scannedToBlock).toBe(100n);
   });
 
+  it('fills immutable V2 pool terms for an older indexed launch without changing its origin', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    const initial = batch(4663, 'pons-v2');
+    initial.launches[0].protocolVersion = 'v2';
+    initial.venues[0].kind = 'curve';
+    initial.trades = [];
+    initial.rawLogs = [initial.rawLogs[0]];
+    await repository.saveIndexBatch('pons-v2', 100n, 100n, initial);
+    await repository.setV2PoolTerms(4663, token, 0, 200);
+    await repository.setV2PoolTerms(4663, token, 0, 200);
+    const result = await pool.query('SELECT v4_pool_fee, v4_tick_spacing, lifecycle_status, source_log_id FROM launches');
+    expect(result.rows[0]).toEqual({ v4_pool_fee: 0, v4_tick_spacing: 200,
+      lifecycle_status: 'trading', source_log_id: initial.launches[0].sourceLogId });
+    await expect(repository.setV2PoolTerms(4663, token, 0, 100)).rejects.toThrow(/terms.*conflict/i);
+  });
+
   it('keeps launch, venue and trade provenance linked to raw logs', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
@@ -423,6 +439,21 @@ describe('PostgreSQL API store', () => {
 });
 
 describe('venue discovery for trade indexing', () => {
+  it('provides persisted V2 pool terms to lifecycle verification', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    const initial = batch(4663, 'pons-v2');
+    initial.launches[0].protocolVersion = 'v2';
+    initial.launches[0].v4PoolFee = 0;
+    initial.launches[0].v4TickSpacing = 200;
+    initial.venues[0].kind = 'curve';
+    initial.trades = [];
+    initial.rawLogs = [initial.rawLogs[0]];
+    await repository.saveIndexBatch('pons-v2', 100n, 100n, initial);
+    const [context] = await createVenueStore(pool).listOfficial('curve', 4663);
+    expect(context.launch.v4PoolFee).toBe(0);
+    expect(context.launch.v4TickSpacing).toBe(200);
+  });
+
   it('loads only official venues with their chain-scoped launch context', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));

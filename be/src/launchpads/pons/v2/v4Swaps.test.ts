@@ -49,22 +49,30 @@ describe('pons v2 official V4 pool', () => {
     expect(verifyPonsV4PoolInitialization(initialization, graduation, launch, terms, fixture.hookAddress as Address, fixture.poolManagerAddress as Address)).toBe(true);
   });
 
-  it('closes the curve and opens exactly the derived V4 venue on phase 2', () => {
-    const transition = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log');
-    expect(transition.closedCurve?.effectiveToBlock).toBe(27_828_161n);
+  it('closes the curve on sweep and opens V4 at the verified Initialize log position', () => {
+    const swept = transitionOfficialVenue(launch, curveVenue, 1, { blockNumber: 27_828_150n, logIndex: 9 });
+    expect(swept.closedCurve?.effectiveToBlock).toBe(27_828_150n);
+    expect(swept.closedCurve?.effectiveToLogIndex).toBe(9);
+    const transition = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' });
+    expect(transition.closedCurve).toBeNull();
     expect(transition.openedPool?.kind).toBe('v4_pool');
     expect(transition.openedPool?.ref).toBe(poolId);
     expect(transition.openedPool?.effectiveFromBlock).toBe(27_828_161n);
-    expect(transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log')).toEqual(transition);
+    expect(transition.openedPool?.effectiveFromLogIndex).toBe(16);
+    expect(transition.openedPool?.sourceId).toBe('pons-v2-lifecycle');
+    expect(transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' })).toEqual(transition);
   });
 
   it('does not invent a V4 venue in swept or rescued phases', () => {
-    expect(transitionOfficialVenue(launch, curveVenue, 1, 27_828_161n).openedPool).toBeNull();
-    expect(transitionOfficialVenue(launch, curveVenue, 3, 27_828_161n).openedPool).toBeNull();
+    expect(transitionOfficialVenue(launch, curveVenue, 1, { blockNumber: 27_828_161n, logIndex: 1 }).openedPool).toBeNull();
+    expect(transitionOfficialVenue(launch, curveVenue, 3, { blockNumber: 27_828_161n, logIndex: 2 }).openedPool).toBeNull();
   });
 
   it('decodes a real V4 swap only for the official pool ID', () => {
-    const transition = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log');
+    const transition = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' });
     const venue = transition.openedPool!;
     const swap = asLog(fixture.swap as Record<string, unknown>);
     const trade = decodePonsV4Swap(swap, poolId, launch, venue, 1_700_000_000, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
@@ -76,7 +84,8 @@ describe('pons v2 official V4 pool', () => {
   });
 
   it('keeps a hook-initiated fee conversion as a protocol trade in pool volume', () => {
-    const venue = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log').openedPool!;
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
     const realSwap = asLog(fixture.swap as Record<string, unknown>);
     const hookSwap: RpcLog = {
       ...realSwap,
@@ -89,7 +98,8 @@ describe('pons v2 official V4 pool', () => {
   });
 
   it('counts a hook fee-conversion swap and a hook buyback separately when both really execute', () => {
-    const venue = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log').openedPool!;
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
     const sixDecimalLaunch = { ...launch, quoteAsset: { address: launch.quoteAsset.address, symbol: 'USDG', decimals: 6 } };
     const swap = asLog(fixture.swap as Record<string, unknown>);
     const topics = encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: poolId, sender: fixture.hookAddress as Address } }) as Hash[];
@@ -118,7 +128,8 @@ describe('pons v2 official V4 pool', () => {
 
   it('connects a real pre-graduation curve buy to a later official V4 swap', () => {
     const curveBuy = decodeCurveTrade(asLog(fixture.curveBuy as Record<string, unknown>), launch, curveVenue, 1_700_000_000);
-    const poolVenue = transitionOfficialVenue(launch, curveVenue, 2, 27_828_161n, poolId, 'graduation-log').openedPool!;
+    const poolVenue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
     const v4Swap = decodePonsV4Swap(asLog(fixture.swap as Record<string, unknown>), poolId, launch, poolVenue,
       1_700_000_100, fixture.poolManagerAddress as Address, fixture.hookAddress as Address);
     expect(curveBuy.tokenAddress).toBe(v4Swap?.tokenAddress);

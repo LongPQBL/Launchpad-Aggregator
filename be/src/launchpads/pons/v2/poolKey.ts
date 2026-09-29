@@ -5,6 +5,8 @@ import type { RpcLog } from '../v1/adapter.js';
 
 export interface V4PoolTerms { fee: number; tickSpacing: number }
 export interface VenueTransition { closedCurve: Venue | null; openedPool: Venue | null }
+export interface EventPosition { blockNumber: bigint; logIndex: number }
+export interface GraduatedPoolEvidence { poolId: Hash; sourceLogId: string; sourceId: string }
 
 const initializeEvent = parseAbiItem('event Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)');
 
@@ -39,18 +41,21 @@ export function verifyPonsV4PoolInitialization(log: RpcLog, graduation: RpcLog, 
 }
 
 export function transitionOfficialVenue(launch: Launch, curveVenue: Venue, phase: 0 | 1 | 2 | 3,
-  block: bigint, poolId?: Hash, sourceLogId?: string): VenueTransition {
+  position: EventPosition, pool?: GraduatedPoolEvidence): VenueTransition {
   if (launch.protocolVersion !== 'v2' || curveVenue.kind !== 'curve' || curveVenue.chainId !== launch.chainId
     || curveVenue.tokenAddress.toLowerCase() !== launch.tokenAddress.toLowerCase()) throw new Error('Invalid pons v2 curve venue');
-  if (phase === 0) return { closedCurve: null, openedPool: null };
-  if (block < curveVenue.effectiveFromBlock) throw new Error('Venue transition precedes launch');
-  const closedCurve = { ...curveVenue, effectiveToBlock: block };
-  if (phase !== 2) return { closedCurve, openedPool: null };
-  if (!poolId || !sourceLogId) throw new Error('Graduated venue requires verified pool and source log');
+  if (position.blockNumber < curveVenue.effectiveFromBlock || !Number.isSafeInteger(position.logIndex) || position.logIndex < 0) {
+    throw new Error('Invalid venue transition position');
+  }
+  if (phase === 1) return { closedCurve: { ...curveVenue, effectiveToBlock: position.blockNumber,
+    effectiveToLogIndex: position.logIndex }, openedPool: null };
+  if (phase !== 2) return { closedCurve: null, openedPool: null };
+  if (!pool) throw new Error('Graduated venue requires verified pool and source log');
   const openedPool: Venue = {
-    id: venueKey(launch.chainId, 'v4_pool', poolId), chainId: launch.chainId, tokenAddress: launch.tokenAddress,
-    kind: 'v4_pool', ref: poolId, sourceId: launch.sourceId, sourceLogId, effectiveFromBlock: block,
-    effectiveToBlock: null, official: true,
+    id: venueKey(launch.chainId, 'v4_pool', pool.poolId), chainId: launch.chainId, tokenAddress: launch.tokenAddress,
+    kind: 'v4_pool', ref: pool.poolId, sourceId: pool.sourceId, sourceLogId: pool.sourceLogId,
+    effectiveFromBlock: position.blockNumber, effectiveFromLogIndex: position.logIndex,
+    effectiveToBlock: null, effectiveToLogIndex: null, official: true,
   };
-  return { closedCurve, openedPool };
+  return { closedCurve: null, openedPool };
 }

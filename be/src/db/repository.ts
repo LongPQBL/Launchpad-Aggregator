@@ -24,6 +24,23 @@ export interface IndexedSource extends SourceCursor {
 
 export function createRepository(db: Database) {
   return {
+    async setV2PoolTerms(chainId: number, tokenAddress: Address, fee: number, tickSpacing: number): Promise<void> {
+      if (fee !== 0 || !Number.isInteger(tickSpacing) || tickSpacing <= 0 || tickSpacing > 32767) {
+        throw new Error('Invalid Pons V2 pool terms');
+      }
+      await db.transaction(async (tx) => {
+        const [launch] = await tx.select().from(launches).where(and(eq(launches.chainId, chainId),
+          eq(launches.tokenAddress, tokenAddress.toLowerCase()))).for('update');
+        if (!launch || launch.protocolVersion !== 'v2') throw new Error('Unknown Pons V2 launch');
+        if ((launch.v4PoolFee !== null && launch.v4PoolFee !== fee)
+          || (launch.v4TickSpacing !== null && launch.v4TickSpacing !== tickSpacing)) {
+          throw new Error('Pons V2 pool terms conflict');
+        }
+        await tx.update(launches).set({ v4PoolFee: fee, v4TickSpacing: tickSpacing }).where(and(
+          eq(launches.chainId, chainId), eq(launches.tokenAddress, tokenAddress.toLowerCase()),
+        ));
+      });
+    },
     async recordScanReport(report: ScanReport): Promise<void> {
       type Gap = { fromBlock: bigint; toBlock: bigint; reason: string };
       const subtract = (gaps: Gap[], fromBlock: bigint, toBlock: bigint): Gap[] => gaps.flatMap((gap) => {
