@@ -3,9 +3,10 @@ import type { Address, Hash } from 'viem';
 import type { CoverageStatus, IndexBatch, SourceCursor } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
 import type { ObservedBlock } from '../indexer/reorg.js';
+import type { ScanReport } from '../indexer/scan.js';
 import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
-import { candles, launches, observedBlocks, rawLogs, sources, trades, venues } from './schema.js';
+import { candles, launches, observedBlocks, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
 
 export interface SourceRegistration {
   id: string;
@@ -23,6 +24,34 @@ export interface IndexedSource extends SourceCursor {
 
 export function createRepository(db: Database) {
   return {
+    async recordScanReport(report: ScanReport): Promise<void> {
+      type Gap = { fromBlock: bigint; toBlock: bigint; reason: string };
+      const subtract = (gaps: Gap[], fromBlock: bigint, toBlock: bigint): Gap[] => gaps.flatMap((gap) => {
+        if (toBlock < gap.fromBlock || fromBlock > gap.toBlock) return [gap];
+        return [
+          ...(gap.fromBlock < fromBlock ? [{ ...gap, toBlock: fromBlock - 1n }] : []),
+          ...(gap.toBlock > toBlock ? [{ ...gap, fromBlock: toBlock + 1n }] : []),
+        ];
+      });
+      await db.transaction(async (tx) => {
+        const [source] = await tx.select().from(sources).where(eq(sources.id, report.sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${report.sourceId}`);
+        let gaps: Gap[] = (await tx.select().from(sourceGaps).where(eq(sourceGaps.sourceId, report.sourceId)))
+          .map((row) => ({ fromBlock: row.fromBlock, toBlock: row.toBlock, reason: row.reason }));
+        for (const range of report.committedRanges) {
+          if (range.fromBlock > range.toBlock) throw new Error('Invalid committed range');
+          gaps = subtract(gaps, range.fromBlock, range.toBlock);
+        }
+        for (const range of report.missingRanges) {
+          if (range.fromBlock > range.toBlock) throw new Error('Invalid missing range');
+          gaps = subtract(gaps, range.fromBlock, range.toBlock);
+          gaps.push({ fromBlock: range.fromBlock, toBlock: range.toBlock, reason: range.reason });
+        }
+        await tx.delete(sourceGaps).where(eq(sourceGaps.sourceId, report.sourceId));
+        if (gaps.length) await tx.insert(sourceGaps).values(gaps.map((gap) => ({ ...gap, sourceId: report.sourceId })));
+        if (report.missingRanges.length) await tx.update(sources).set({ status: 'degraded' }).where(eq(sources.id, report.sourceId));
+      });
+    },
     async registerSource(source: SourceRegistration): Promise<void> {
       await db.insert(sources).values({
         id: source.id,
@@ -159,6 +188,18 @@ export function createRepository(db: Database) {
             priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
             priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
           }))).onConflictDoNothing();
+        }
+        const repairedGaps = await tx.select().from(sourceGaps).where(and(
+          eq(sourceGaps.sourceId, sourceId), lte(sourceGaps.fromBlock, toBlock), gte(sourceGaps.toBlock, fromBlock),
+        ));
+        for (const gap of repairedGaps) {
+          await tx.delete(sourceGaps).where(and(eq(sourceGaps.sourceId, sourceId),
+            eq(sourceGaps.fromBlock, gap.fromBlock), eq(sourceGaps.toBlock, gap.toBlock)));
+          const remainders = [
+            ...(gap.fromBlock < fromBlock ? [{ sourceId, fromBlock: gap.fromBlock, toBlock: fromBlock - 1n, reason: gap.reason }] : []),
+            ...(gap.toBlock > toBlock ? [{ sourceId, fromBlock: toBlock + 1n, toBlock: gap.toBlock, reason: gap.reason }] : []),
+          ];
+          if (remainders.length) await tx.insert(sourceGaps).values(remainders);
         }
         await tx.update(sources).set({ scannedToBlock: toBlock, confirmedToBlock: toBlock }).where(eq(sources.id, sourceId));
         for (const tokenAddress of new Set(batch.launches.map((launch) => launch.tokenAddress.toLowerCase()))) {

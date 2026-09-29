@@ -8,6 +8,7 @@ import { createRepository } from './repository.js';
 import { createApiStore } from '../api/store.js';
 import { ApiEventBus } from '../api/events.js';
 import { listenForDatabaseEvents } from '../api/pgEvents.js';
+import { createVenueStore } from '../indexer/venueStore.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) {
@@ -234,6 +235,42 @@ describe('index batch repository', () => {
 });
 
 describe('PostgreSQL API store', () => {
+  it('persists missing block ranges and removes them only after successful repair', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [],
+      missingRanges: [{ fromBlock: 100n, toBlock: 120n, reason: 'archive required' }] });
+    const store = createApiStore(pool);
+    expect((await store.getCoverage()).missingRanges).toEqual([
+      { sourceId: 'pons-v2', fromBlock: '100', toBlock: '120', reason: 'archive required' },
+    ]);
+    await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [{ fromBlock: 100n, toBlock: 109n }], missingRanges: [] });
+    expect((await store.getCoverage()).missingRanges).toEqual([
+      { sourceId: 'pons-v2', fromBlock: '110', toBlock: '120', reason: 'archive required' },
+    ]);
+    await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [{ fromBlock: 110n, toBlock: 120n }], missingRanges: [] });
+    expect((await store.getCoverage()).missingRanges).toEqual([]);
+  });
+
+  it('repairs a gap atomically with checkpoint advancement even if report persistence never runs', async () => {
+    await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    await repository.recordScanReport({ sourceId: 'pons-v2', committedRanges: [],
+      missingRanges: [{ fromBlock: 100n, toBlock: 120n, reason: 'archive required' }] });
+    const empty = { rawLogs: [], launches: [], venues: [], trades: [] };
+    await repository.saveIndexBatch('pons-v2', 100n, 109n, empty);
+    expect((await createApiStore(pool).getCoverage()).missingRanges).toEqual([
+      { sourceId: 'pons-v2', fromBlock: '110', toBlock: '120', reason: 'archive required' },
+    ]);
+    await repository.saveIndexBatch('pons-v2', 110n, 120n, empty);
+    expect((await createApiStore(pool).getCoverage()).missingRanges).toEqual([]);
+  });
+
+  it('does not mix an unrelated source gap into Pons coverage', async () => {
+    await repository.registerSource({ id: 'unrelated', chainId: 56, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.recordScanReport({ sourceId: 'unrelated', committedRanges: [],
+      missingRanges: [{ fromBlock: 100n, toBlock: 101n, reason: 'other chain' }] });
+    expect((await createApiStore(pool).getCoverage()).missingRanges).toEqual([]);
+  });
+
   it('notifies the API after a committed launch and trade batch', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const bus = new ApiEventBus();
@@ -287,5 +324,19 @@ describe('PostgreSQL API store', () => {
     expect(second.nextCursor).toBeNull();
     expect(new Set([...first.items, ...second.items].map((trade) => `${trade.txHash}:${trade.logIndex}`)).size).toBe(2);
     expect([...first.items, ...second.items].map((trade) => trade.activityKind)).toContain('protocol_buyback');
+  });
+});
+
+describe('venue discovery for trade indexing', () => {
+  it('loads only official venues with their chain-scoped launch context', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
+    const store = createVenueStore(pool);
+    const contexts = await store.listOfficial('v3_pool', 4663);
+    expect(contexts).toHaveLength(1);
+    expect(contexts[0].launch.tokenAddress).toBe(token);
+    expect(contexts[0].venue.ref).toBe(poolAddress);
+    expect(await store.listOfficial('curve', 4663)).toEqual([]);
+    expect(await store.listOfficial('v3_pool', 56)).toEqual([]);
   });
 });

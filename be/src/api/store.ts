@@ -6,7 +6,8 @@ import { decodeCursor, encodeCursor } from './cursor.js';
 import type { ApiDeps, CandleResponse, LaunchDetail, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
 type Row = Record<string, unknown>;
-const requiredSourceIds = [...getPonsFactorySources().map((source) => source.id), 'pons-v1-trades', 'pons-v2-curve', 'pons-v2-v4'];
+const requiredSourceIds = [...getPonsFactorySources().map((source) => source.id),
+  'pons-v1-legacy-trades', 'pons-v1-active-trades', 'pons-v2-curve', 'pons-v2-v4'];
 
 function string(value: unknown): string { return String(value); }
 function number(value: unknown): number { return Number(value); }
@@ -31,9 +32,10 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row) => T): Pag
 
 export function createApiStore(pool: Pool): ApiDeps['data'] {
   async function coverage() {
-    const [sourceResult, headResult] = await Promise.all([
+    const [sourceResult, headResult, gapResult] = await Promise.all([
       pool.query('SELECT id, status, confirmed_to_block, start_block FROM sources'),
       pool.query('SELECT max(number) AS safe_head FROM observed_blocks WHERE chain_id = 4663'),
+      pool.query('SELECT source_id, from_block, to_block, reason FROM source_gaps ORDER BY source_id, from_block'),
     ]);
     const head = headResult.rows[0]?.safe_head === null ? null : BigInt(string(headResult.rows[0].safe_head));
     const byId = new Map(sourceResult.rows.map((row: Row) => [string(row.id), row]));
@@ -42,12 +44,16 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
       return !row || head === null || row.status !== 'caught_up'
         || (BigInt(string(row.start_block)) <= head && BigInt(string(row.confirmed_to_block)) < head);
     });
-    return { complete: pendingSourceIds.length === 0, pendingSourceIds, missingRanges: [] };
+    const missingRanges = gapResult.rows.filter((row: Row) => requiredSourceIds.includes(string(row.source_id)))
+      .map((row: Row) => ({ sourceId: string(row.source_id),
+      fromBlock: string(row.from_block), toBlock: string(row.to_block), reason: string(row.reason) }));
+    return { complete: pendingSourceIds.length === 0 && missingRanges.length === 0, pendingSourceIds, missingRanges };
   }
   return {
     async listSources() {
       const result = await pool.query('SELECT id, chain_id, version FROM sources ORDER BY id');
-      return result.rows.map((row: Row) => ({ id: string(row.id), chainId: number(row.chain_id), platform: 'pons', protocolVersion: string(row.version) }));
+      return result.rows.filter((row: Row) => requiredSourceIds.includes(string(row.id)))
+        .map((row: Row) => ({ id: string(row.id), chainId: number(row.chain_id), platform: 'pons', protocolVersion: string(row.version) }));
     },
     getCoverage: coverage,
     async listLaunches(query: ListQuery) {

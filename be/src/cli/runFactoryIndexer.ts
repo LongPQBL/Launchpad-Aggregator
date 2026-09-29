@@ -5,6 +5,9 @@ import { runFactoryCycle } from '../indexer/factoryCycle.js';
 import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { scanToHead } from '../indexer/scan.js';
+import { createVenueStore } from '../indexer/venueStore.js';
+import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
 import { readV2LaunchRecord, readV2TokenMetadata, resolveV2QuoteAsset, type V2ReadClient } from '../launchpads/pons/v2/adapter.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
@@ -19,6 +22,10 @@ const { db, pool } = createDatabase(databaseUrl);
 const repository = createRepository(db);
 const client = createRobinhoodPublicClient(rpcUrl);
 const sources = getFactoryLogSources();
+const tradeDefinitions = getTradeSourceDefinitions();
+const selectedIds = selectIndexerSourceIds([...sources.map((source) => source.id), ...tradeDefinitions.map((definition) => definition.source.id)],
+  process.env.INDEXER_SOURCE_IDS);
+const venueStore = createVenueStore(pool);
 const factories = getPonsFactorySources();
 const v1Reader = client as unknown as V1ReadClient;
 const v2Reader = client as unknown as V2ReadClient;
@@ -48,6 +55,10 @@ for (const factory of factories) {
   await repository.registerSource({ id: factory.id, chainId: factory.chainId, version: factory.version,
     factoryAddress: factory.factory, startBlock: factory.startBlock });
 }
+for (const definition of tradeDefinitions) {
+  await repository.registerSource({ id: definition.source.id, chainId: definition.source.chainId,
+    version: definition.version, factoryAddress: definition.factoryAddress, startBlock: definition.source.startBlock });
+}
 
 async function runOnce(): Promise<void> {
   const head = await client.getBlockNumber();
@@ -60,8 +71,9 @@ async function runOnce(): Promise<void> {
     scanToSafeHead: async () => { /* The bounded factory cycle below resumes from the retracted checkpoint. */ },
   });
   await repository.recordObservedBlock(4663, safeHead, (await client.getBlock({ blockNumber: safeHead })).hash);
-  const reports = await runFactoryCycle(sources, safeHead, maxBlocksPerSource, {
+  const reports = await runFactoryCycle(sources.filter((source) => selectedIds.includes(source.id)), safeHead, maxBlocksPerSource, {
     getCursor: repository.getCursor,
+    recordScanReport: repository.recordScanReport,
     setSourceStatus: repository.setSourceStatus,
     scan: (source, target) => scanToHead(source, target, {
       initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
@@ -69,6 +81,26 @@ async function runOnce(): Promise<void> {
       sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     }),
   });
+  const factoryCursors = new Map(await Promise.all(sources.map(async (source) => [source.id, (await repository.getCursor(source.id)).scannedToBlock] as const)));
+  for (const definition of tradeDefinitions.filter((item) => selectedIds.includes(item.source.id))) {
+    const frontier = tradeFrontier(definition.source.id, factoryCursors);
+    const contexts = (await venueStore.listOfficial(definition.venueKind, definition.source.chainId))
+      .filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
+    const tradeSource = withVenueAddresses(definition, contexts);
+    const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
+    const tradeReports = await runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
+      getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
+      setSourceStatus: repository.setSourceStatus,
+      scan: (source, target) => scanToHead(source, target, {
+        initialChunk: 1_000n, minChunk: 1n, maxChunk: 5_000n, maxRetries: 3,
+        getCursor: repository.getCursor,
+        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
+        decodeLogs: createTradeDecoder(contexts, getTimestamp), saveIndexBatch: repository.saveIndexBatch,
+        sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+      }),
+    });
+    reports.push(...tradeReports);
+  }
   for (const report of reports) {
     const cursor = await repository.getCursor(report.sourceId);
     console.log(JSON.stringify({ sourceId: report.sourceId, scannedToBlock: cursor.scannedToBlock.toString(),

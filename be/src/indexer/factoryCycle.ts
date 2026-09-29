@@ -4,6 +4,7 @@ import type { LogSource, ScanReport } from './scan.js';
 export interface FactoryCycleDeps {
   getCursor(id: string): Promise<SourceCursor>;
   scan(source: LogSource, target: bigint): Promise<ScanReport>;
+  recordScanReport(report: ScanReport): Promise<void>;
   setSourceStatus(id: string, status: CoverageStatus, safeHead: bigint): Promise<void>;
 }
 
@@ -15,6 +16,7 @@ export async function runFactoryCycle(sources: readonly LogSource[], safeHead: b
     const cursor = await deps.getCursor(source.id);
     const target = cursor.scannedToBlock + maxBlocksPerSource < safeHead ? cursor.scannedToBlock + maxBlocksPerSource : safeHead;
     const report = await deps.scan(source, target);
+    await deps.recordScanReport(report);
     reports.push(report);
     const updated = await deps.getCursor(source.id);
     if (report.missingRanges.length) await deps.setSourceStatus(source.id, 'degraded', safeHead);

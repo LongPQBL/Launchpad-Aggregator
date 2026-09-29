@@ -11,6 +11,13 @@ export const sources = pgTable('sources', {
   status: text('status').notNull(),
 });
 
+export const sourceGaps = pgTable('source_gaps', {
+  sourceId: text('source_id').notNull().references(() => sources.id, { onDelete: 'cascade' }),
+  fromBlock: bigint('from_block', { mode: 'bigint' }).notNull(),
+  toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
+  reason: text('reason').notNull(),
+}, (table) => [primaryKey({ columns: [table.sourceId, table.fromBlock, table.toBlock] })]);
+
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),
