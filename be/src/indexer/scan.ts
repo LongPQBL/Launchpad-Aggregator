@@ -49,6 +49,15 @@ function isTransient(message: string): boolean {
   return /429|rate limit|too many requests|503|502|network|econnreset|temporarily unavailable/i.test(message);
 }
 
+// Some rate-limit responses report exactly how long the window has left (e.g. "limit will
+// reset in 60 seconds") — honor that instead of the short exponential backoff, which gives up
+// long before a real reset window clears and leaves a gap that only a later manual rescan fills.
+function retryDelayMs(message: string, attempt: number): number {
+  const resetMatch = message.match(/reset in (\d+)\s*seconds?/i);
+  if (resetMatch) return Number(resetMatch[1]) * 1000 + 1_000;
+  return Math.min(250 * 2 ** attempt, 8_000);
+}
+
 export async function scanToHead(source: LogSource, safeHead: bigint, deps: ScanDeps): Promise<ScanReport> {
   if (deps.minChunk < 1n || deps.initialChunk < deps.minChunk || deps.maxChunk < deps.initialChunk || deps.maxRetries < 0) {
     throw new Error('Invalid scan configuration');
@@ -76,7 +85,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
           break;
         }
         if ((isTransient(message) || isRangeLimit(message)) && attempt < deps.maxRetries) {
-          await deps.sleep(Math.min(250 * 2 ** attempt, 8_000));
+          await deps.sleep(retryDelayMs(message, attempt));
           attempt++;
           continue;
         }
@@ -98,7 +107,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
         // discovered launch), so a transient failure here needs the same retry as getLogs above —
         // a genuine decode error (bad data, unknown pool, etc.) still fails immediately.
         if ((isTransient(message) || isRangeLimit(message)) && saveAttempt < deps.maxRetries) {
-          await deps.sleep(Math.min(250 * 2 ** saveAttempt, 8_000));
+          await deps.sleep(retryDelayMs(message, saveAttempt));
           saveAttempt++;
           continue;
         }

@@ -132,6 +132,37 @@ describe('bounded HTTP scanner', () => {
     expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 10n, reason: '429 Too Many Requests' }]);
     expect(setup.getCursor()).toBe(9n);
   });
+
+  it('waits out the RPC-reported reset window while fetching logs, instead of giving up inside the short exponential cap', async () => {
+    const delays: number[] = [];
+    let attempts = 0;
+    const setup = depsFor(async () => {
+      attempts++;
+      if (attempts === 1) throw new Error('Rate Limit Hit, limit will reset in 60 seconds');
+      return [];
+    });
+    setup.deps.sleep = async (ms) => { delays.push(ms); };
+    const report = await scanToHead(source, 10n, setup.deps);
+    expect(delays).toEqual([61_000]);
+    expect(report.missingRanges).toEqual([]);
+    expect(setup.getCursor()).toBe(10n);
+  });
+
+  it('waits out the RPC-reported reset window while decoding, instead of giving up inside the short exponential cap', async () => {
+    const setup = depsFor(async () => []);
+    const delays: number[] = [];
+    let decodeAttempts = 0;
+    setup.deps.decodeLogs = async () => {
+      decodeAttempts++;
+      if (decodeAttempts === 1) throw new Error('Rate Limit Hit, limit will reset in 60 seconds');
+      return emptyBatch;
+    };
+    setup.deps.sleep = async (ms) => { delays.push(ms); };
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(delays).toEqual([61_000]);
+    expect(report.missingRanges).toEqual([]);
+    expect(setup.getCursor()).toBe(12n);
+  });
 });
 
 describe('venue query batching', () => {

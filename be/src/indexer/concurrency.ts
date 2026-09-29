@@ -1,6 +1,8 @@
-// Bounds how many eth_getBlock timestamp lookups run at once per decode batch, trading
-// round-trip latency for a burst of concurrent requests without risking a rate-limit storm.
-export const TIMESTAMP_FETCH_CONCURRENCY = 25;
+// Bounds how many eth_getBlock timestamp lookups run at once per decode batch. Kept modest
+// (rather than e.g. 25+) because this RPC's rate limit is tight enough that a large burst can
+// trip it on its own — scan.ts now waits out a reported reset window when that happens, but
+// it is still cheaper to avoid tripping it in the first place.
+export const TIMESTAMP_FETCH_CONCURRENCY = 5;
 
 export async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = new Array(items.length);
