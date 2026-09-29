@@ -2,7 +2,9 @@
   "name": "be",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
@@ -11,10 +13,17 @@
     "audit:sources": "tsx src/cli/auditSources.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx src/cli/migrate.ts"
+    "db:migrate": "tsx src/cli/migrate.ts",
+    "dev:api": "tsx src/cli/api.ts",
+    "dev:indexer": "tsx src/cli/runFactoryIndexer.ts",
+    "openapi:write": "tsx src/cli/openapi.ts --write",
+    "openapi:check": "tsx src/cli/openapi.ts --check"
   },
   "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "@fastify/swagger": "^9.9.0",
     "drizzle-orm": "^0.45.3",
+    "fastify": "^5.12.5",
     "pg": "^8.23.0",
     "viem": "^2.56.9"
   },
@@ -24,9 +33,9 @@
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "eslint": "^10.11.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.70.1",
-    "tsx": "^4.23.15",
     "vitest": "^5.0.2"
   }
 }

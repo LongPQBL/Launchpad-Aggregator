@@ -8,6 +8,20 @@ on:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: launchpad
+          POSTGRES_PASSWORD: launchpad_local
+          POSTGRES_DB: launchpad_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U launchpad -d launchpad_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,4 +32,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:integration -w be
+        env:
+          TEST_DATABASE_URL: postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test
       - run: npm run build
+      - run: npm run openapi:check -w be

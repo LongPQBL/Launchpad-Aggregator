@@ -1,0 +1,53 @@
+import Fastify, { type FastifyInstance } from 'fastify';
+import cors from '@fastify/cors';
+import swagger from '@fastify/swagger';
+import { registerSourcesRoutes } from './routes/sources.js';
+import { registerCoverageRoutes } from './routes/coverage.js';
+import { registerLaunchRoutes } from './routes/launches.js';
+import { registerEventsRoute } from './routes/events.js';
+import { ApiEventBus } from './events.js';
+
+export interface Page<T> { items: readonly T[]; nextCursor: string | null }
+export interface LaunchSummary {
+  chainId: number; tokenAddress: string; name: string; symbol: string; platform: string; protocolVersion: string;
+  quoteAsset: { address: string; symbol: string; decimals: number }; lifecycleStatus: string;
+  officialVolume24h: string | null; coverageStatus: string;
+}
+export interface LaunchDetail extends LaunchSummary {
+  officialVenues: readonly { id: string; kind: string; ref: string; effectiveFromBlock: string; effectiveToBlock: string | null }[];
+  priceQuote: string | null;
+}
+export interface TradeResponse {
+  venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;
+  activityKind: string; tokenAmount: string; quoteAmount: string; priceQuote: string | null;
+}
+export interface CandleResponse {
+  intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
+}
+export interface ListQuery { limit: number; cursor?: string; chainId?: number }
+
+export interface ApiDeps {
+  feOrigin: string;
+  events?: ApiEventBus;
+  data: {
+    listSources(): Promise<readonly { id: string; chainId: number; platform: string; protocolVersion: string }[]>;
+    getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[] }>;
+    listLaunches(query: ListQuery): Promise<Page<LaunchSummary>>;
+    getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
+    listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
+    listCandles(chainId: number, tokenAddress: string, intervalSeconds: number): Promise<{ items: readonly CandleResponse[] }>;
+  };
+}
+
+export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
+  const app = Fastify();
+  await app.register(cors, { origin: (origin, callback) => callback(null, origin === deps.feOrigin), credentials: false });
+  await app.register(swagger, { openapi: { info: { title: 'Launchpad Aggregator API', version: '0.1.0' } } });
+  registerSourcesRoutes(app, deps);
+  registerCoverageRoutes(app, deps);
+  registerLaunchRoutes(app, deps);
+  registerEventsRoute(app, deps.events ?? new ApiEventBus());
+  app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
+  await app.ready();
+  return app;
+}

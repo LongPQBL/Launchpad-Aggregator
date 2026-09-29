@@ -58,6 +58,18 @@ export function createRepository(db: Database) {
       };
     },
 
+    async setSourceStatus(sourceId: string, status: CoverageStatus, safeHead: bigint): Promise<void> {
+      await db.transaction(async (tx) => {
+        const [source] = await tx.select().from(sources).where(eq(sources.id, sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${sourceId}`);
+        if (status === 'caught_up' && source.confirmedToBlock < safeHead && source.startBlock <= safeHead) {
+          throw new Error(`Source checkpoint is behind safe head: ${sourceId}`);
+        }
+        await tx.update(sources).set({ status }).where(eq(sources.id, sourceId));
+        await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'coverage.changed', chainId: source.chainId })})`);
+      });
+    },
+
     async saveIndexBatch(sourceId: string, fromBlock: bigint, toBlock: bigint, batch: IndexBatch): Promise<void> {
       if (fromBlock > toBlock) throw new Error('Invalid block range');
       await db.transaction(async (tx) => {
@@ -149,6 +161,13 @@ export function createRepository(db: Database) {
           }))).onConflictDoNothing();
         }
         await tx.update(sources).set({ scannedToBlock: toBlock, confirmedToBlock: toBlock }).where(eq(sources.id, sourceId));
+        for (const tokenAddress of new Set(batch.launches.map((launch) => launch.tokenAddress.toLowerCase()))) {
+          await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'launch.changed', chainId: source.chainId, tokenAddress })})`);
+        }
+        for (const tokenAddress of new Set(batch.trades.map((trade) => trade.tokenAddress.toLowerCase()))) {
+          await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'trade.created', chainId: source.chainId, tokenAddress })})`);
+        }
+        await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'coverage.changed', chainId: source.chainId })})`);
       });
     },
 

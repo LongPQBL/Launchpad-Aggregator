@@ -4,13 +4,14 @@ services:
     environment:
       POSTGRES_USER: launchpad
       POSTGRES_PASSWORD: launchpad_local
-      POSTGRES_DB: launchpad_test
+      POSTGRES_DB: launchpad
     ports:
       - "127.0.0.1:55432:5432"
     volumes:
       - pons_pg_data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U launchpad -d launchpad_test"]
+      test: ["CMD-SHELL", "pg_isready -U launchpad -d launchpad"]
       interval: 2s
       timeout: 2s
       retries: 20

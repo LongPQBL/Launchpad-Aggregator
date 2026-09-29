@@ -5,6 +5,9 @@ import type { IndexBatch, Launch, Trade, Venue } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
 import { createDatabase } from './client.js';
 import { createRepository } from './repository.js';
+import { createApiStore } from '../api/store.js';
+import { ApiEventBus } from '../api/events.js';
+import { listenForDatabaseEvents } from '../api/pgEvents.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) {
@@ -144,6 +147,14 @@ describe('index batch repository', () => {
     expect(pending.map((source) => source.sourceId).sort()).toEqual(['backfilling', 'degraded']);
   });
 
+  it('sets a source caught up only after its checkpoint reaches the observed safe head', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await expect(repository.setSourceStatus('test-a', 'caught_up', 100n)).rejects.toThrow(/checkpoint/i);
+    await repository.saveIndexBatch('test-a', 100n, 100n, { rawLogs: [], launches: [], venues: [], trades: [] });
+    await repository.setSourceStatus('test-a', 'caught_up', 100n);
+    expect((await repository.getCursor('test-a')).status).toBe('caught_up');
+  });
+
   it('retracts a reorged block and allows it to be replayed', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const data = batch(4663, 'test-a');
@@ -219,5 +230,62 @@ describe('index batch repository', () => {
     expect(corrected.rows[0]).toEqual({ close: '0.2', quote_volume_raw: '200' });
     await repository.replaceCandles(4663, token, 60, []);
     expect((await pool.query('SELECT count(*)::int AS count FROM candles')).rows[0].count).toBe(0);
+  });
+});
+
+describe('PostgreSQL API store', () => {
+  it('notifies the API after a committed launch and trade batch', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const bus = new ApiEventBus();
+    const seen: string[] = [];
+    const unsubscribe = bus.subscribe((event) => seen.push(event.type));
+    const stop = await listenForDatabaseEvents(pool, bus);
+    try {
+      await repository.saveIndexBatch('test-a', 100n, 100n, batch(4663, 'test-a'));
+      for (let i = 0; i < 20 && seen.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(seen).toContain('launch.changed');
+      expect(seen).toContain('trade.created');
+      expect(seen).toContain('coverage.changed');
+    } finally {
+      unsubscribe();
+      await stop();
+    }
+  });
+
+  it('does not claim complete coverage without an observed safe head', async () => {
+    for (const id of ['pons-v1-legacy', 'pons-v1-active', 'pons-v2', 'pons-v1-trades', 'pons-v2-curve', 'pons-v2-v4']) {
+      await repository.registerSource({ id, chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
+    }
+    await pool.query("UPDATE sources SET status = 'caught_up'");
+    expect((await createApiStore(pool).getCoverage()).complete).toBe(false);
+  });
+
+  it('returns chain-scoped launches and stable, exact trade pages without pretending coverage is complete', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const data = batch(4663, 'test-a');
+    const secondTx = `0x${'7'.repeat(64)}` as Hash;
+    const secondTrade = { ...data.trades[0], txHash: secondTx, logIndex: 2, activityKind: 'protocol_buyback' as const };
+    await repository.saveIndexBatch('test-a', 100n, 100n, {
+      ...data,
+      rawLogs: [...data.rawLogs, { ...data.rawLogs[1], txHash: secondTx, logIndex: 2 }],
+      trades: [...data.trades, secondTrade],
+    });
+    const store = createApiStore(pool);
+    const listed = await store.listLaunches({ limit: 10, chainId: 4663 });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({ tokenAddress: token, officialVolume24h: null, coverageStatus: 'backfilling' });
+    expect((await store.listLaunches({ limit: 10, chainId: 56 })).items).toEqual([]);
+    expect(await store.getLaunch(56, token)).toBeNull();
+    const detail = await store.getLaunch(4663, token);
+    expect(detail?.officialVenues).toHaveLength(1);
+    expect(detail?.priceQuote).toBeNull();
+    const first = await store.listTrades(4663, token, { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.nextCursor).toBeTruthy();
+    const second = await store.listTrades(4663, token, { limit: 1, cursor: first.nextCursor! });
+    expect(second.items).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.items, ...second.items].map((trade) => `${trade.txHash}:${trade.logIndex}`)).size).toBe(2);
+    expect([...first.items, ...second.items].map((trade) => trade.activityKind)).toContain('protocol_buyback');
   });
 });
