@@ -159,6 +159,29 @@ describe('pons v1 normalized batches', () => {
     expect(result.rawLogs[0].sourceId).toBe('pons-v1-legacy');
   });
 
+  it('loads per-launch metadata concurrently instead of one round trip at a time', async () => {
+    const base = asLog(reference.launch as Record<string, unknown>);
+    const logs: RpcLog[] = [1, 2, 3].map((index) => ({
+      ...base, transactionHash: `0x${index.toString().repeat(64)}`.slice(0, 66) as Hash, logIndex: index,
+    }));
+    const requestedLogIndexes: number[] = [];
+    const releases: Array<(value: { metadata: { name: string; symbol: string; decimals: number; liquidityPool: Address }; graduated: boolean }) => void> = [];
+    const loadState = (event: { logIndex: number }) => {
+      requestedLogIndexes.push(event.logIndex);
+      return new Promise<{ metadata: { name: string; symbol: string; decimals: number; liquidityPool: Address }; graduated: boolean }>((resolve) => {
+        releases.push(resolve);
+      });
+    };
+    const resultPromise = decodeV1FactoryBatch(logs, legacy, loadState);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedLogIndexes).toEqual([1, 2, 3]);
+    for (const release of releases) {
+      release({ metadata: { name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address }, graduated: true });
+    }
+    const result = await resultPromise;
+    expect(result.launches).toHaveLength(3);
+  });
+
   it('emits an official pool trade using the pool cohort source', async () => {
     const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
     const context = hydrateV1Launch(event, legacy, {

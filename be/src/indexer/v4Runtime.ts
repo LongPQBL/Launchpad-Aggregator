@@ -2,7 +2,7 @@ import { isHash, type Address, type Hash, type Log } from 'viem';
 import type { IndexBatch, RawLog } from '../domain/types.js';
 import type { RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { decodePonsV4Swap, v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
-import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from './concurrency.js';
+import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from './concurrency.js';
 import type { LogSource, ScanDeps } from './scan.js';
 import type { VenueContext } from './venueStore.js';
 
@@ -55,7 +55,7 @@ export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block
       return log;
     });
     const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
-    const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+    const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
       async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
     const rawLogs: RawLog[] = [];
     const trades: IndexBatch['trades'][number][] = [];

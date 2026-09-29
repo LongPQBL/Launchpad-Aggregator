@@ -1,7 +1,7 @@
 import { decodeEventLog, toEventSelector, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, RawLog, Venue, Trade } from '../../../domain/types.js';
-import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
+import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import { v1LaunchEvent, v3SwapEvent } from './abi.js';
 
@@ -156,14 +156,14 @@ export async function decodeV1FactoryBatch(
   factory: FactorySource,
   loadState: (event: V1LaunchEvent) => Promise<{ metadata: V1TokenMetadata; graduated: boolean }>,
 ): Promise<IndexBatch> {
+  const events = logs.map((log) => decodeV1Launch(log, factory));
+  const states = await mapWithConcurrency(events, RPC_FETCH_CONCURRENCY, loadState);
   const rawLogs: RawLog[] = [];
   const launches: Launch[] = [];
   const venues: Venue[] = [];
-  for (const log of logs) {
-    const event = decodeV1Launch(log, factory);
-    const { metadata, graduated } = await loadState(event);
-    const result = hydrateV1Launch(event, factory, metadata, graduated);
-    rawLogs.push(toRawLog(log, factory.chainId, factory.id));
+  for (let i = 0; i < logs.length; i++) {
+    const result = hydrateV1Launch(events[i], factory, states[i].metadata, states[i].graduated);
+    rawLogs.push(toRawLog(logs[i], factory.chainId, factory.id));
     launches.push(result.launch);
     venues.push(result.venue);
   }
@@ -182,7 +182,7 @@ export async function decodeV1SwapBatch(
     return { log, context };
   });
   const uniqueBlocks = [...new Set(resolved.map(({ log }) => log.blockNumber))];
-  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
     async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];

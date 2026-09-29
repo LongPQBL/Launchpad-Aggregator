@@ -1,7 +1,7 @@
 import { decodeEventLog, parseAbi, toEventSelector, zeroAddress, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, LifecycleStatus, QuoteAsset, RawLog, Trade, Venue } from '../../../domain/types.js';
-import { mapWithConcurrency, TIMESTAMP_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
+import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
@@ -166,14 +166,14 @@ function toRawLog(log: RpcLog, chainId: number, sourceId: string): RawLog {
 
 export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: FactorySource,
   loadState: (event: V2LaunchEvent) => Promise<{ record: V2LaunchRecord; metadata: { name: string; symbol: string; decimals: number }; quoteAsset: QuoteAsset }>): Promise<IndexBatch> {
+  const events = logs.map((log) => decodeV2Launch(log, factory));
+  const states = await mapWithConcurrency(events, RPC_FETCH_CONCURRENCY, loadState);
   const rawLogs: RawLog[] = [];
   const launches: Launch[] = [];
   const venues: Venue[] = [];
-  for (const log of logs) {
-    const event = decodeV2Launch(log, factory);
-    const state = await loadState(event);
-    const result = hydrateV2Launch(event, factory, state.record, state.metadata, state.quoteAsset);
-    rawLogs.push(toRawLog(log, factory.chainId, factory.id));
+  for (let i = 0; i < logs.length; i++) {
+    const result = hydrateV2Launch(events[i], factory, states[i].record, states[i].metadata, states[i].quoteAsset);
+    rawLogs.push(toRawLog(logs[i], factory.chainId, factory.id));
     launches.push(result.launch);
     venues.push(result.venue);
   }
@@ -190,7 +190,7 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
     return { log, context, isTradeEvent };
   });
   const uniqueBlocks = [...new Set(resolved.filter((item) => item.isTradeEvent).map((item) => item.log.blockNumber))];
-  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, TIMESTAMP_FETCH_CONCURRENCY,
+  const timestamps = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
     async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const));
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];

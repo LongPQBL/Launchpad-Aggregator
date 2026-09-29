@@ -112,6 +112,25 @@ describe('pons v2 launch and phase', () => {
     expect(batch.launches[0].sourceLogId).toBe(batch.venues[0].sourceLogId);
     expect(batch.rawLogs[0].sourceId).toBe('pons-v2');
   });
+
+  it('loads per-launch metadata concurrently instead of one round trip at a time', async () => {
+    const hashes = [1, 2, 3].map((index) => `0x${index.toString().repeat(64)}`.slice(0, 66) as Hash);
+    const logs: RpcLog[] = hashes.map((transactionHash) => ({ ...launchLog, transactionHash }));
+    const requestedHashes: Hash[] = [];
+    const releases: Array<(value: { record: V2LaunchRecord; metadata: typeof metadata; quoteAsset: typeof quote }) => void> = [];
+    const loadState = (event: { transactionHash: Hash }) => {
+      requestedHashes.push(event.transactionHash);
+      return new Promise<{ record: V2LaunchRecord; metadata: typeof metadata; quoteAsset: typeof quote }>((resolve) => {
+        releases.push(resolve);
+      });
+    };
+    const resultPromise = decodeV2FactoryBatch(logs, factory, loadState);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestedHashes).toEqual(hashes);
+    for (const release of releases) release({ record, metadata, quoteAsset: quote });
+    const batch = await resultPromise;
+    expect(batch.launches).toHaveLength(3);
+  });
 });
 
 describe('pons v2 curve trades', () => {
