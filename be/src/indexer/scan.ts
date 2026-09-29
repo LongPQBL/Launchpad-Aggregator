@@ -85,12 +85,26 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
       }
     }
     if (!logs) continue;
-    try {
-      const batch = await deps.decodeLogs(logs, source);
-      await deps.saveIndexBatch(source.id, fromBlock, toBlock, batch);
-    } catch (error) {
-      report.missingRanges.push({ fromBlock, toBlock, reason: errorMessage(error) });
-      return report;
+    let saved = false;
+    let saveAttempt = 0;
+    while (!saved) {
+      try {
+        const batch = await deps.decodeLogs(logs, source);
+        await deps.saveIndexBatch(source.id, fromBlock, toBlock, batch);
+        saved = true;
+      } catch (error) {
+        const message = errorMessage(error);
+        // decodeLogs can make its own RPC calls (e.g. per-token metadata eth_call for a newly
+        // discovered launch), so a transient failure here needs the same retry as getLogs above —
+        // a genuine decode error (bad data, unknown pool, etc.) still fails immediately.
+        if ((isTransient(message) || isRangeLimit(message)) && saveAttempt < deps.maxRetries) {
+          await deps.sleep(Math.min(250 * 2 ** saveAttempt, 8_000));
+          saveAttempt++;
+          continue;
+        }
+        report.missingRanges.push({ fromBlock, toBlock, reason: message });
+        return report;
+      }
     }
     report.committedRanges.push({ fromBlock, toBlock });
     fromBlock = toBlock + 1n;

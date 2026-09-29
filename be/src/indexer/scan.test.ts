@@ -64,6 +64,33 @@ describe('bounded HTTP scanner', () => {
     expect(setup.getCursor()).toBe(9n);
   });
 
+  it('retries a transient rate limit hit while decoding (e.g. a per-token metadata eth_call), not just while fetching logs', async () => {
+    const setup = depsFor(async () => []);
+    let decodeAttempts = 0;
+    setup.deps.decodeLogs = async () => {
+      decodeAttempts++;
+      if (decodeAttempts < 3) throw new Error('429 Too Many Requests');
+      return emptyBatch;
+    };
+    let sleeps = 0;
+    setup.deps.sleep = async () => { sleeps++; };
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(decodeAttempts).toBe(3);
+    expect(sleeps).toBe(2);
+    expect(report.missingRanges).toEqual([]);
+    expect(setup.getCursor()).toBe(12n);
+  });
+
+  it('still reports a genuine decode error immediately, without retrying it as if it were transient', async () => {
+    const setup = depsFor(async () => []);
+    let decodeAttempts = 0;
+    setup.deps.decodeLogs = async () => { decodeAttempts++; throw new Error('Unknown official V3 pool'); };
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(decodeAttempts).toBe(1);
+    expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 12n, reason: 'Unknown official V3 pool' }]);
+    expect(setup.getCursor()).toBe(9n);
+  });
+
   it('reports unavailable historical logs without advancing the checkpoint', async () => {
     const setup = depsFor(async () => { throw new Error('historical state is not available'); });
     const report = await scanToHead(source, 18n, setup.deps);

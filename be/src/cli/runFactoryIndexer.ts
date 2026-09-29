@@ -205,11 +205,19 @@ async function runOnce(): Promise<void> {
   }
 }
 
+// A single cycle can still throw outside scanToHead's own retry/backoff (e.g. the safe-head
+// getBlockNumber/getBlock calls above aren't wrapped). For a long unattended run, one such
+// hiccup must not kill the whole process — log it and keep cycling; the next cycle resumes
+// from the last saved checkpoint, so nothing is lost besides this cycle's attempt.
 try {
-  await runOnce();
-  while (process.env.INDEXER_ONCE !== 'true') {
+  for (;;) {
+    try {
+      await runOnce();
+    } catch (error) {
+      console.error(JSON.stringify({ cycleError: error instanceof Error ? error.message : String(error) }));
+    }
+    if (process.env.INDEXER_ONCE === 'true') break;
     await new Promise((resolve) => setTimeout(resolve, 5_000));
-    await runOnce();
   }
 } finally {
   await pool.end();
