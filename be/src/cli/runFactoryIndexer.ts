@@ -371,7 +371,25 @@ async function runJobsMode(): Promise<void> {
     once: process.env.INDEXER_ONCE === 'true',
     endpointLimits,
     endpointFor: (sourceId) => jobTradeDefinition(sourceId) ? sourceId : 'shared',
-    getSafeHead: async () => { const head = await client.getBlockNumber(); return head > 12n ? head - 12n : 0n; },
+    // Reorg check runs once per scheduler pass, piggybacking on the existing safe-head lookup (mirrors
+    // runOnce()'s per-cycle check above). invalidateJobsFrom replaces retractBlocks here specifically so a
+    // detected fork also deletes any now-invalid scan_jobs rows, not just the canonical-dependent data —
+    // see invalidateJobsFrom's own comment in repository.ts for why deletion (not a reset-in-place) is
+    // required for the job-queue scheduler. The scheduler's own next pass replans from the rolled-back
+    // certified frontier, so scanToSafeHead has nothing to do here (unlike the sequential runner's).
+    getSafeHead: async () => {
+      const head = await client.getBlockNumber();
+      const safeHead = head > 12n ? head - 12n : 0n;
+      await reconcileCanonicalHead(4663, safeHead, {
+        reorgWindow: 64n,
+        getStoredBlocks: repository.getObservedBlocks,
+        getCanonicalBlockHash: async (_chainId, blockNumber) => (await client.getBlock({ blockNumber })).hash,
+        retractBlocks: (chainId, fromBlock) => repository.invalidateJobsFrom(chainId, fromBlock),
+        scanToSafeHead: async () => { /* the next scheduler pass replans from the rolled-back frontier */ },
+      });
+      await repository.recordObservedBlock(4663, safeHead, (await client.getBlock({ blockNumber: safeHead })).hash);
+      return safeHead;
+    },
     listSources: listJobSources,
     getFrontiers: getJobFrontiers,
     estimatePoolCount: estimateJobPoolCount,

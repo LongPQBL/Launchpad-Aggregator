@@ -147,6 +147,14 @@ describe('bounded parallel job scheduler', () => {
     expect(enqueued).toEqual([]);
   });
 
+  it('does not crash the pass when a reorg-invalidated job also rejects failJob', async () => {
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async () => {
+      throw new Error('some execution error');
+    });
+    setup.deps.failJob = async () => { throw new Error('Scan job lease is no longer valid'); };
+    await expect(runJobScheduler(setup.deps, new AbortController().signal)).resolves.toBeUndefined();
+  });
+
   it('lets a dedicated trade endpoint progress while the shared endpoint is busy', async () => {
     let release!: () => void;
     const slow = new Promise<void>((resolve) => { release = resolve; });

@@ -14,6 +14,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/cli/migrate.ts",
+    "db:seed-certified-coverage": "tsx src/cli/seedCertifiedCoverage.ts",
     "dev:api": "tsx src/cli/api.ts",
     "dev:indexer": "tsx src/cli/runFactoryIndexer.ts",
     "openapi:write": "tsx src/cli/openapi.ts --write",

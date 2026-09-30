@@ -19,6 +19,43 @@ function scanJob(row: typeof scanJobs.$inferSelect): ScanJob {
     status: row.status as ScanJob['status'], leaseOwner: row.leaseOwner, leaseUntil: row.leaseUntil };
 }
 
+async function retractBlocksInTransaction(tx: DbTransaction, chainId: number, fromBlock: bigint): Promise<void> {
+  const affected = await tx.select({ tokenAddress: lifecycleTransitions.tokenAddress }).from(lifecycleTransitions)
+    .where(and(eq(lifecycleTransitions.chainId, chainId), gte(lifecycleTransitions.blockNumber, fromBlock)));
+  await tx.delete(trades).where(and(eq(trades.chainId, chainId), gte(trades.blockNumber, fromBlock)));
+  await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
+  await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
+  await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
+  await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
+    gte(phaseObservations.blockNumber, fromBlock)));
+  await tx.delete(sources).where(and(eq(sources.chainId, chainId), eq(sources.version, 'v2-v4'),
+    like(sources.id, 'pons-v2-v4:%'), gte(sources.startBlock, fromBlock)));
+  for (const tokenAddress of new Set(affected.map((row) => row.tokenAddress))) {
+    await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
+      eq(phaseObservations.tokenAddress, tokenAddress)));
+    await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
+      SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
+      FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
+      ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
+    ), 'trading') WHERE l.chain_id = ${chainId} AND l.token_address = ${tokenAddress} AND l.protocol_version = 'v2'`);
+    await tx.execute(sql`UPDATE venues AS v SET
+      effective_to_block = (SELECT t.block_number FROM lifecycle_transitions AS t
+        WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+        ORDER BY t.block_number, t.log_index LIMIT 1),
+      effective_to_log_index = (SELECT t.log_index FROM lifecycle_transitions AS t
+        WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
+        ORDER BY t.block_number, t.log_index LIMIT 1)
+      WHERE v.chain_id = ${chainId} AND v.token_address = ${tokenAddress} AND v.kind = 'curve'`);
+  }
+  await tx.delete(observedBlocks).where(and(eq(observedBlocks.chainId, chainId), gte(observedBlocks.number, fromBlock)));
+  await tx.delete(candles).where(eq(candles.chainId, chainId));
+  await tx.update(sources).set({
+    scannedToBlock: sql`LEAST(${sources.scannedToBlock}, ${fromBlock - 1n})`,
+    confirmedToBlock: sql`LEAST(${sources.confirmedToBlock}, ${fromBlock - 1n})`,
+    status: 'backfilling',
+  }).where(and(eq(sources.chainId, chainId), gte(sources.scannedToBlock, fromBlock)));
+}
+
 export interface SourceRegistration {
   id: string;
   chainId: number;
@@ -518,41 +555,26 @@ export function createRepository(db: Database) {
     },
 
     async retractBlocks(chainId: number, fromBlock: bigint): Promise<void> {
+      await db.transaction(async (tx) => retractBlocksInTransaction(tx, chainId, fromBlock));
+    },
+
+    // Reorg fencing for the job-queue scheduler (docs/superpowers/specs/2026-09-30-parallel-indexer-design.md
+    // §5): deletes rather than resets-in-place any certified/provisional job whose range intersects or
+    // follows the fork block, in the SAME transaction as retracting the canonical-dependent data. Deletion
+    // (not a generation bump left in place) is deliberate: it makes a stale worker's eventual commitScanJob/
+    // failScanJob fail cleanly via the existing "Unknown scan job" check, AND — unlike resetting the job to
+    // 'pending' with its old range intact — it does not block the scheduler from planning a freshly-sized
+    // certified window over the same range once the source's certified frontier rolls back (enqueueScanJob's
+    // overlap check would otherwise reject that fresh window against the stale row).
+    async invalidateJobsFrom(chainId: number, forkBlock: bigint): Promise<void> {
+      if (forkBlock < 0n) throw new Error('Invalid fork block');
       await db.transaction(async (tx) => {
-        const affected = await tx.select({ tokenAddress: lifecycleTransitions.tokenAddress }).from(lifecycleTransitions)
-          .where(and(eq(lifecycleTransitions.chainId, chainId), gte(lifecycleTransitions.blockNumber, fromBlock)));
-        await tx.delete(trades).where(and(eq(trades.chainId, chainId), gte(trades.blockNumber, fromBlock)));
-        await tx.delete(venues).where(and(eq(venues.chainId, chainId), gte(venues.effectiveFromBlock, fromBlock)));
-        await tx.delete(launches).where(and(eq(launches.chainId, chainId), gte(launches.launchBlock, fromBlock)));
-        await tx.delete(rawLogs).where(and(eq(rawLogs.chainId, chainId), gte(rawLogs.blockNumber, fromBlock)));
-        await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
-          gte(phaseObservations.blockNumber, fromBlock)));
-        await tx.delete(sources).where(and(eq(sources.chainId, chainId), eq(sources.version, 'v2-v4'),
-          like(sources.id, 'pons-v2-v4:%'), gte(sources.startBlock, fromBlock)));
-        for (const tokenAddress of new Set(affected.map((row) => row.tokenAddress))) {
-          await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, chainId),
-            eq(phaseObservations.tokenAddress, tokenAddress)));
-          await tx.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
-            SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
-            FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
-            ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
-          ), 'trading') WHERE l.chain_id = ${chainId} AND l.token_address = ${tokenAddress} AND l.protocol_version = 'v2'`);
-          await tx.execute(sql`UPDATE venues AS v SET
-            effective_to_block = (SELECT t.block_number FROM lifecycle_transitions AS t
-              WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
-              ORDER BY t.block_number, t.log_index LIMIT 1),
-            effective_to_log_index = (SELECT t.log_index FROM lifecycle_transitions AS t
-              WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.phase = 1
-              ORDER BY t.block_number, t.log_index LIMIT 1)
-            WHERE v.chain_id = ${chainId} AND v.token_address = ${tokenAddress} AND v.kind = 'curve'`);
+        const chainSources = await tx.select({ id: sources.id }).from(sources).where(eq(sources.chainId, chainId));
+        const sourceIds = chainSources.map((row) => row.id);
+        if (sourceIds.length) {
+          await tx.delete(scanJobs).where(and(inArray(scanJobs.sourceId, sourceIds), gte(scanJobs.toBlock, forkBlock)));
         }
-        await tx.delete(observedBlocks).where(and(eq(observedBlocks.chainId, chainId), gte(observedBlocks.number, fromBlock)));
-        await tx.delete(candles).where(eq(candles.chainId, chainId));
-        await tx.update(sources).set({
-          scannedToBlock: sql`LEAST(${sources.scannedToBlock}, ${fromBlock - 1n})`,
-          confirmedToBlock: sql`LEAST(${sources.confirmedToBlock}, ${fromBlock - 1n})`,
-          status: 'backfilling',
-        }).where(and(eq(sources.chainId, chainId), gte(sources.scannedToBlock, fromBlock)));
+        await retractBlocksInTransaction(tx, chainId, forkBlock);
       });
     },
 

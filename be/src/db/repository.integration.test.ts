@@ -309,6 +309,41 @@ describe('index batch repository', () => {
     expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(1);
   });
 
+  it('invalidates intersecting/downstream jobs and rejects a stale leased job before retracting data', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const before = await repository.claimScanJob('worker', new Date(), 10_000);
+    await repository.commitScanJob(before!.id, 'worker', before!.generation, batch(4663, 'test-a'));
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 101n, toBlock: 101n });
+    const stale = await repository.claimScanJob('stale-worker', new Date(), 10_000);
+    await repository.replaceProvisionalWindow('test-a', 200n, 200n);
+
+    await repository.invalidateJobsFrom(4663, 101n);
+
+    await expect(repository.commitScanJob(stale!.id, 'stale-worker', stale!.generation,
+      { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] })).rejects.toThrow(/unknown scan job/i);
+    const remaining = await pool.query("SELECT from_block, to_block, lane FROM scan_jobs WHERE source_id = 'test-a' ORDER BY from_block");
+    expect(remaining.rows).toEqual([{ from_block: '100', to_block: '100', lane: 'certified' }]);
+    expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(1);
+    expect((await repository.getCursor('test-a')).scannedToBlock).toBe(100n);
+  });
+
+  it('does not touch jobs entirely before the fork block', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    await repository.invalidateJobsFrom(4663, 200n);
+    const remaining = await pool.query("SELECT status FROM scan_jobs WHERE source_id = 'test-a'");
+    expect(remaining.rows).toEqual([{ status: 'pending' }]);
+  });
+
+  it('lets a new certified job be planned for the range a rejected stale job used to occupy', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 105n });
+    await repository.invalidateJobsFrom(4663, 100n);
+    await expect(repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 102n }))
+      .resolves.toBeDefined();
+  });
+
   it('projects V2 status and exact venue boundaries from lifecycle logs, then restores them on reorg', async () => {
     await repository.registerSource({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: factory, startBlock: 100n });
     await repository.registerSource({ id: 'pons-v2-lifecycle', chainId: 4663, version: 'v2-lifecycle', factoryAddress: factory, startBlock: 101n });

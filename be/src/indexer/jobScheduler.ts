@@ -87,7 +87,17 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
       } catch (error) {
         if (signal.aborted) return;
         const message = safeErrorMessage(error);
-        await deps.failJob(job.id, workerId, job.generation, message);
+        // A reorg (repository.invalidateJobsFrom) can delete this job out from under an in-flight
+        // worker; failJob then rejects the same way a stale/superseded lease does. That is the fence
+        // working as intended, not a scheduler failure — report and move on, never let it escape and
+        // take down the whole pass's Promise.all.
+        try {
+          await deps.failJob(job.id, workerId, job.generation, message);
+        } catch (failError) {
+          deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'failed',
+            durationMs: Math.max(0, deps.now().getTime() - started), error: safeErrorMessage(failError) });
+          return;
+        }
         if (/429|rate limit|too many requests|503|502/i.test(message)) {
           cooldowns.set(endpoint, deps.now().getTime() + retryDelayMs(message, 0));
         }

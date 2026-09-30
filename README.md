@@ -46,6 +46,22 @@ Khi dùng RPC riêng có giới hạn `eth_getLogs` là 2.000 block, đặt `RH_
 
 Với volume PostgreSQL cũ từng chỉ chứa `launchpad_test`, hãy **tạo thêm** DB phát triển `launchpad` trước khi migrate. Không chạy indexer trên `launchpad_test`: test tích hợp sẽ `TRUNCATE` các bảng của DB đó. Volume mới do Compose tạo sẽ có cả `launchpad` và `launchpad_test`.
 
+### Bộ lập lịch song song (job-queue) và rollback
+
+Mặc định `dev:indexer` vẫn chạy vòng lặp tuần tự cũ (`runOnce()`). Đặt `INDEXER_SCHEDULER=jobs` để chuyển sang bộ lập lịch job-queue song song có giới hạn (`be/src/indexer/jobScheduler.ts`, thiết kế ở [đặc tả indexer song song](docs/superpowers/specs/2026-09-30-parallel-indexer-design.md)): backfill các nguồn factory/trade/lifecycle/V4 chạy song song có giới hạn theo từng RPC endpoint, cộng thêm 1 luồng "gần đầu chuỗi" tạm thời (provisional) để launch mới hiện sớm mà không đợi backfill lịch sử xong.
+
+**Trước lần đầu chuyển một DB đã có cursor tuần tự sang `INDEXER_SCHEDULER=jobs`:**
+
+```sh
+DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad npm run db:seed-certified-coverage -w be
+```
+
+Lệnh này chuyển cursor `sources.scanned_to_block`/`confirmed_to_block` hiện có thành các khoảng `scan_jobs` đã chứng nhận (`lane = certified`), lùi frontier về trước bất kỳ `source_gaps` chưa giải quyết nào (không âm thầm coi khoảng trống là đã quét). Idempotent — chạy lại không tạo trùng lặp (`onConflictDoNothing`).
+
+**Rollback:** bỏ biến `INDEXER_SCHEDULER` (hoặc đặt giá trị khác `jobs`) rồi khởi động lại tiến trình — vòng lặp tuần tự cũ hoạt động lại ngay, đọc cùng cursor `sources`. Không cần reset DB; `scan_jobs` chỉ được job-queue scheduler dùng, vòng lặp tuần tự bỏ qua bảng đó hoàn toàn.
+
+**Trước khi chuyển tiến trình đang chạy thật sang scheduler mới:** chạy đủ bộ kiểm thử ở mục Kiểm thử bên dưới, dừng tiến trình indexer cũ, chạy `db:seed-certified-coverage`, khởi động lại với `INDEXER_SCHEDULER=jobs`, rồi đối chiếu cursor, số khoảng `scan_jobs` lỗi/rỗng, số launch/trade, tỷ lệ lỗi 429 và độ trễ giữa bản chạy cũ và mới trên cùng một khoảng thời gian quan sát trước khi coi là ổn định. Không chạy đồng thời hai tiến trình ghi cùng một DB.
+
 Kiểm tra API:
 
 ```sh
