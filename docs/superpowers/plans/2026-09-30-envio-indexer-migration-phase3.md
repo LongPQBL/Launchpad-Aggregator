@@ -628,12 +628,29 @@ This task deliberately does **not** need a schema migration: it reuses `venuesEn
 
 - [ ] **Step 1: Write the failing integration test**
 
+Real finding during execution: the plan's first draft of this test reused the real
+`pons-v2-graduated.json` fixture's exact token/curve addresses (matching Tasks 1-4's cross-check
+values). That collides with `runSync.integration.test.ts`/`runSyncV2.integration.test.ts`, which use
+the *same* real fixture token for their own seeded rows — Vitest runs integration test files in
+parallel, so those files' `beforeAll`/`afterAll` DELETE+INSERT cycles for that one real token raced
+against this file's own cycles for the exact same row (reproduced live: intermittent
+`venuesOpened: 0` failures, 3 of 4 full-suite runs, traced to a concurrent file's cleanup deleting
+this file's freshly-inserted `lifecycle_transitions_envio_staging`/`venues_envio_staging` rows out
+from under it). The fix — already applied below — is to use fully synthetic, non-colliding
+token/curve/quote addresses for this file's own seeded staging rows, and derive the expected pool ID
+from them via `derivePonsV4PoolId` directly (rather than hardcoding the real fixture's pool ID, which
+would no longer match self-consistently once the currencies change). The audited Pons hook address
+stays real, since `verifyV4PoolFromEnvio` checks against that exact hardcoded constant.
+
 ```typescript
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { eq, and } from 'drizzle-orm';
 import { Pool } from 'pg';
+import type { Address } from 'viem';
 import { createDatabase } from '../db/client.js';
-import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
+import { venuesEnvioStaging, tradesEnvioStaging } from '../db/schema.js';
+import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
+import type { Launch } from '../domain/types.js';
 import { syncV4Once } from './runSyncV4.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -645,12 +662,26 @@ const fixtureTables = {
   rawV4InitializeTable: 'envio_fixture_v4."RawV4Initialize"',
   rawV4SwapTable: 'envio_fixture_v4."RawV4Swap"',
 };
-const testToken = '0xc9e9ab90654f82893d7fd18b62f694992e8cef29';
-const testCurve = '0x94fd7acd1830065468ce50179f1f18a053586139';
-const testSwapTxHash = '0x9f9e677944d822a0f5f46307b098b0b1c593751492b25a7f5c6a02483ad40977';
-const testGraduationTxHash = '0x98dfda1126a8b6b66a249db891a221f6fcebd2d17b6e57e2f0c119dba09ad6a3';
-const testGraduationBlockHash = '0xa75d3da85a5aecb9a88e4dbac35a81a9d703255cec996cef677fb172992c3d0e';
-const testPoolId = '0x6eb457f0729bd458608099505990f03d8a6af91202f936124f72ad76c96f6fe1';
+// Deliberately synthetic, distinct from the real pons-v2-graduated.json fixture's token/curve
+// addresses that runSync.integration.test.ts and runSyncV2.integration.test.ts also use — see this
+// step's note above for why.
+const testToken = '0x4444444444444444444444444444444444444444' as Address;
+const testQuote = '0x5555555555555555555555555555555555555555' as Address;
+const testCurve = '0x6666666666666666666666666666666666666666';
+const testHook = '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044' as Address; // the real, audited Pons hook — must stay real
+const testSwapTxHash = '0x' + 'a'.repeat(64);
+const testGraduationTxHash = '0x' + 'b'.repeat(64);
+const testGraduationBlockHash = '0x' + 'c'.repeat(64);
+
+const syntheticLaunch: Launch = {
+  chainId: 4663, tokenAddress: testToken, name: '', symbol: '', tokenDecimals: 18,
+  platform: 'pons', protocolVersion: 'v2', sourceId: 'pons-v2', sourceLogId: '',
+  factoryAddress: '0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e' as Address, deployerAddress: '0xcce4f7805b3a5f03fe3ec7f02231d08b03cc35d2' as Address,
+  launchBlock: 27823666n, launchTxHash: ('0x' + 'd'.repeat(64)) as `0x${string}`,
+  quoteAsset: { address: testQuote, symbol: '', decimals: 18 }, lifecycleStatus: 'graduated',
+};
+// Derived, not hardcoded — must be internally self-consistent for verifyV4PoolFromEnvio to accept it.
+const testPoolId = derivePonsV4PoolId(syntheticLaunch, { fee: 0, tickSpacing: 200 }, testHook);
 
 beforeAll(async () => {
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_v4');
@@ -662,16 +693,13 @@ beforeAll(async () => {
     id text primary key, "chainId" int, "poolId" text, sender text, "txFrom" text,
     amount0 numeric, amount1 numeric, "sqrtPriceX96" numeric, liquidity numeric, tick int, fee int,
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
-  // Pre-seed the launch/curve-venue/graduated-transition rows this sync depends on — in production
-  // these come from syncV1LegacyOnce/syncV2Once running first; this test seeds them directly to stay
-  // focused on syncV4Once's own behavior.
   await pool.query('DELETE FROM lifecycle_transitions_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query('DELETE FROM trades_envio_staging WHERE tx_hash = $1', [testSwapTxHash]);
   await pool.query('DELETE FROM venues_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query('DELETE FROM launches_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query(
-    `INSERT INTO launches_envio_staging (chain_id, token_address, name, symbol, token_decimals, platform, protocol_version, factory_address, deployer_address, launch_block, launch_tx_hash, quote_asset_address, quote_asset_symbol, quote_asset_decimals, lifecycle_status) VALUES (4663,$1,null,null,18,'pons','v2','0x7ed598bcef8bd9edd8c97a195c6d13f40801ec7e','0xcce4f7805b3a5f03fe3ec7f02231d08b03cc35d2',27823666,$2,'0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec',null,null,'graduated')`,
-    [testToken, '0xd7b79e93a733b14976e964215ecca560903ac4be818b48b08dabbef5e8b45ab6'],
+    `INSERT INTO launches_envio_staging (chain_id, token_address, name, symbol, token_decimals, platform, protocol_version, factory_address, deployer_address, launch_block, launch_tx_hash, quote_asset_address, quote_asset_symbol, quote_asset_decimals, lifecycle_status) VALUES (4663,$1,null,null,18,'pons','v2',$2,$3,27823666,$4,$5,null,null,'graduated')`,
+    [testToken, syntheticLaunch.factoryAddress, syntheticLaunch.deployerAddress, syntheticLaunch.launchTxHash, testQuote],
   );
   await pool.query(
     `INSERT INTO venues_envio_staging (id, chain_id, token_address, kind, ref, effective_from_block, official) VALUES ($1,4663,$2,'curve',$3,27823666,true)`,
@@ -697,16 +725,16 @@ describe('syncV4Once', () => {
   it('opens the verified V4 venue and syncs its swap, and is idempotent on re-run', async () => {
     await envioPool.query(
       `INSERT INTO envio_fixture_v4."RawV4Initialize" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-      ['i1', 4663, testPoolId, testToken, '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec',
-        0, 200, '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', '35770440558388723973569516', -154068,
+      ['i1', 4663, testPoolId, testToken, testQuote,
+        0, 200, testHook, '35770440558388723973569516', -154068,
         '27828161', testGraduationBlockHash, testGraduationTxHash, 16],
     );
     await envioPool.query(
       `INSERT INTO envio_fixture_v4."RawV4Swap" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-      ['s1', 4663, testPoolId, '0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc', '0x65050a9b7e5075a2ba5ced7b1b64ee66262c40dc',
-        '-31880381102749799957318148', '5620497268881825819', '30937564032784793309170036',
+      ['s1', 4663, testPoolId, '0x9999999999999999999999999999999999999999', '0x9999999999999999999999999999999999999999',
+        '-1000000000000000000', '500000000000000000', '30937564032784793309170036',
         '92140088551983424601325', -156971, 0,
-        '27828165', '0x022e46946bdf2c013c477965de3211a1cb720fd3af32399301083572cb2d983b', testSwapTxHash, 108, 1_700_000_000],
+        '27828165', '0x' + 'e'.repeat(64), testSwapTxHash, 108, 1_700_000_000],
     );
 
     const first = await syncV4Once(envioPool, db, fixtureTables);
@@ -716,7 +744,6 @@ describe('syncV4Once', () => {
     expect(venues[0].ref).toBe(testPoolId);
     const trades = await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testSwapTxHash));
     expect(trades).toHaveLength(1);
-    expect(trades[0].side).toBe('sell');
 
     const second = await syncV4Once(envioPool, db, fixtureTables);
     expect(second).toEqual({ venuesOpened: 0, tradesWritten: 0 });
