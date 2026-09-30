@@ -15,6 +15,28 @@ export const DEFAULT_ENVIO_V4_TABLES: EnvioV4TableNames = {
   rawV4SwapTable: 'envio."RawV4Swap"',
 };
 
+interface StagedLaunchRow {
+  chainId: number; tokenAddress: string; name: string | null; symbol: string | null; tokenDecimals: number;
+  factoryAddress: string; deployerAddress: string; launchBlock: bigint; launchTxHash: string;
+  quoteAssetAddress: string; quoteAssetSymbol: string | null; quoteAssetDecimals: number | null;
+}
+
+// launch.quoteAsset.decimals is faked to 0 here purely as a type placeholder — it is never read for
+// price math. hydrateV4SwapFromDecoded takes the real nullable quoteAssetDecimals as its own explicit
+// parameter (see transformV4.ts) so a genuinely unknown ERC20 decimals value is never faked into a
+// computed price, matching transformV2.ts's resolveKnownQuoteAsset discipline for curve trades.
+function toLaunch(row: StagedLaunchRow): Launch {
+  return {
+    chainId: row.chainId, tokenAddress: row.tokenAddress as `0x${string}`,
+    name: row.name ?? '', symbol: row.symbol ?? '', tokenDecimals: row.tokenDecimals,
+    platform: 'pons', protocolVersion: 'v2', sourceId: 'pons-v2', sourceLogId: '',
+    factoryAddress: row.factoryAddress as `0x${string}`, deployerAddress: row.deployerAddress as `0x${string}`,
+    launchBlock: row.launchBlock, launchTxHash: row.launchTxHash as `0x${string}`,
+    quoteAsset: { address: row.quoteAssetAddress as `0x${string}`, symbol: row.quoteAssetSymbol ?? '', decimals: row.quoteAssetDecimals ?? 0 },
+    lifecycleStatus: 'graduated',
+  };
+}
+
 export async function syncV4Once(
   envioPool: Pool,
   appDb: Database,
@@ -38,39 +60,51 @@ export async function syncV4Once(
       ))),
     ));
 
-  const rawInitializes = (await envioPool.query(`SELECT * FROM ${tables.rawV4InitializeTable} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawV4InitializeRow[];
+  // Both raw tables are filtered in SQL rather than loaded whole: V4 is indexed unfiltered at the
+  // Envio layer (Uniswap's PoolManager is a chain-wide singleton with no dynamic non-address filter
+  // available — see the plan's Review Focus), so RawV4Initialize/RawV4Swap grow with total chain
+  // activity, not Pons activity (measured: ~1,221 Initialize + ~73,980 Swap events per 100,000-block
+  // window). Loading the whole table on every run would not scale to a full-history backfill.
   let venuesOpened = 0;
-  for (const graduation of pendingGraduations) {
-    const launchRow = (await appDb.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, graduation.tokenAddress)))[0];
-    const curveVenueRow = (await appDb.select().from(venuesEnvioStaging).where(and(
-      eq(venuesEnvioStaging.tokenAddress, graduation.tokenAddress), eq(venuesEnvioStaging.kind, 'curve'),
-    )))[0];
-    if (!launchRow || !curveVenueRow) continue;
-    const launch: Launch = {
-      chainId: launchRow.chainId, tokenAddress: launchRow.tokenAddress as `0x${string}`,
-      name: launchRow.name ?? '', symbol: launchRow.symbol ?? '', tokenDecimals: launchRow.tokenDecimals,
-      platform: 'pons', protocolVersion: 'v2', sourceId: 'pons-v2', sourceLogId: '',
-      factoryAddress: launchRow.factoryAddress as `0x${string}`, deployerAddress: launchRow.deployerAddress as `0x${string}`,
-      launchBlock: launchRow.launchBlock, launchTxHash: launchRow.launchTxHash as `0x${string}`,
-      quoteAsset: { address: launchRow.quoteAssetAddress as `0x${string}`, symbol: launchRow.quoteAssetSymbol ?? '', decimals: launchRow.quoteAssetDecimals ?? 18 },
-      lifecycleStatus: 'graduated',
-    };
-    const curveVenue: Venue = {
-      id: curveVenueRow.id, chainId: curveVenueRow.chainId, tokenAddress: curveVenueRow.tokenAddress as `0x${string}`,
-      kind: 'curve', ref: curveVenueRow.ref, sourceId: 'pons-v2', sourceLogId: '',
-      effectiveFromBlock: curveVenueRow.effectiveFromBlock, effectiveToBlock: null, official: curveVenueRow.official,
-    };
-    const candidate = rawInitializes.find((row) => row.txHash.toLowerCase() === graduation.txHash.toLowerCase());
-    if (!candidate) continue;
-    const row: EnvioRawV4InitializeRow = { ...candidate, blockNumber: BigInt(candidate.blockNumber) };
-    const evidence = verifyV4PoolFromEnvio(row, graduation.txHash, graduation.blockHash, launch);
-    if (!evidence) continue;
-    const venue = openV4Venue(launch, curveVenue, evidence, { blockNumber: graduation.blockNumber, logIndex: graduation.logIndex });
-    const venueRows = await appDb.insert(venuesEnvioStaging).values({
-      id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref,
-      effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
-    }).onConflictDoNothing().returning({ id: venuesEnvioStaging.id });
-    if (venueRows.length > 0) venuesOpened += 1;
+  if (pendingGraduations.length > 0) {
+    const graduationTxHashes = [...new Set(pendingGraduations.map((g) => g.txHash.toLowerCase()))];
+    const rawInitializes = (await envioPool.query(
+      `SELECT * FROM ${tables.rawV4InitializeTable} WHERE LOWER("txHash") = ANY($1) ORDER BY "blockNumber", "logIndex"`,
+      [graduationTxHashes],
+    )).rows as EnvioRawV4InitializeRow[];
+
+    for (const graduation of pendingGraduations) {
+      const launchRow = (await appDb.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, graduation.tokenAddress)))[0];
+      const curveVenueRow = (await appDb.select().from(venuesEnvioStaging).where(and(
+        eq(venuesEnvioStaging.tokenAddress, graduation.tokenAddress), eq(venuesEnvioStaging.kind, 'curve'),
+      )))[0];
+      if (!launchRow || !curveVenueRow) continue;
+      const launch = toLaunch(launchRow);
+      const curveVenue: Venue = {
+        id: curveVenueRow.id, chainId: curveVenueRow.chainId, tokenAddress: curveVenueRow.tokenAddress as `0x${string}`,
+        kind: 'curve', ref: curveVenueRow.ref, sourceId: 'pons-v2', sourceLogId: '',
+        effectiveFromBlock: curveVenueRow.effectiveFromBlock, effectiveToBlock: null, official: curveVenueRow.official,
+      };
+      // Matches the RPC-scan path's own candidate selection (indexer/lifecycleRuntime.ts): picks the
+      // first same-tx candidate that actually VERIFIES, not just the first same-tx candidate. A
+      // graduation transaction could in principle carry more than one Initialize (e.g. an unrelated
+      // pool creation bundled into the same multicall) — stopping at the first candidate regardless
+      // of whether it verifies could silently drop the real Pons pool if it isn't ordered first.
+      let evidence = null;
+      for (const candidate of rawInitializes) {
+        if (candidate.txHash.toLowerCase() !== graduation.txHash.toLowerCase()) continue;
+        const row: EnvioRawV4InitializeRow = { ...candidate, blockNumber: BigInt(candidate.blockNumber) };
+        evidence = verifyV4PoolFromEnvio(row, graduation.txHash, graduation.blockHash, launch);
+        if (evidence) break;
+      }
+      if (!evidence) continue;
+      const venue = openV4Venue(launch, curveVenue, evidence, { blockNumber: graduation.blockNumber, logIndex: graduation.logIndex });
+      const venueRows = await appDb.insert(venuesEnvioStaging).values({
+        id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref,
+        effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
+      }).onConflictDoNothing().returning({ id: venuesEnvioStaging.id });
+      if (venueRows.length > 0) venuesOpened += 1;
+    }
   }
 
   // Deliberately re-fetches launch/venue from staging here rather than reusing the objects built in
@@ -78,40 +112,48 @@ export async function syncV4Once(
   // needs its swaps synced, so this loop must work uniformly for both "just opened" and
   // "already open" venues, not special-case the former via an in-memory map.
   let tradesWritten = 0;
-  const rawSwaps = (await envioPool.query(`SELECT * FROM ${tables.rawV4SwapTable} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawV4SwapRow[];
   const v4Venues = await appDb.select().from(venuesEnvioStaging).where(eq(venuesEnvioStaging.kind, 'v4_pool'));
-  const venueByPoolId = new Map(v4Venues.map((v) => [v.ref.toLowerCase(), v]));
-  for (const raw of rawSwaps) {
-    const venueRow = venueByPoolId.get(raw.poolId.toLowerCase());
-    if (!venueRow) continue;
-    const launchRow = (await appDb.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, venueRow.tokenAddress)))[0];
-    if (!launchRow) continue;
-    const launch: Launch = {
-      chainId: launchRow.chainId, tokenAddress: launchRow.tokenAddress as `0x${string}`,
-      name: launchRow.name ?? '', symbol: launchRow.symbol ?? '', tokenDecimals: launchRow.tokenDecimals,
-      platform: 'pons', protocolVersion: 'v2', sourceId: 'pons-v2', sourceLogId: '',
-      factoryAddress: launchRow.factoryAddress as `0x${string}`, deployerAddress: launchRow.deployerAddress as `0x${string}`,
-      launchBlock: launchRow.launchBlock, launchTxHash: launchRow.launchTxHash as `0x${string}`,
-      quoteAsset: { address: launchRow.quoteAssetAddress as `0x${string}`, symbol: launchRow.quoteAssetSymbol ?? '', decimals: launchRow.quoteAssetDecimals ?? 18 },
-      lifecycleStatus: 'graduated',
-    };
-    const venue: Venue = {
-      id: venueRow.id, chainId: venueRow.chainId, tokenAddress: venueRow.tokenAddress as `0x${string}`,
-      kind: 'v4_pool', ref: venueRow.ref, sourceId: 'pons-v2-v4', sourceLogId: '',
-      effectiveFromBlock: venueRow.effectiveFromBlock, effectiveToBlock: null, official: venueRow.official,
-    };
-    const row: EnvioRawV4SwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
-      sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
-    const trade = hydrateV4SwapFromDecoded(row, venue, launch);
-    if (!trade) continue;
-    const tradeRows = await appDb.insert(tradesEnvioStaging).values({
-      chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
-      blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
-      tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
-      priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
-      traderAddress: trade.traderAddress,
-    }).onConflictDoNothing().returning({ txHash: tradesEnvioStaging.txHash });
-    if (tradeRows.length > 0) tradesWritten += 1;
+  if (v4Venues.length > 0) {
+    const poolIds = [...new Set(v4Venues.map((v) => v.ref.toLowerCase()))];
+    const rawSwaps = (await envioPool.query(
+      `SELECT * FROM ${tables.rawV4SwapTable} WHERE LOWER("poolId") = ANY($1) ORDER BY "blockNumber", "logIndex"`,
+      [poolIds],
+    )).rows as EnvioRawV4SwapRow[];
+    const venueByPoolId = new Map(v4Venues.map((v) => [v.ref.toLowerCase(), v]));
+    // Cached per token address within this run — the venue-opening loop above re-fetches per
+    // graduation since that loop is bounded by pending graduations, but this loop can iterate tens of
+    // thousands of swap rows against a handful of distinct pools, so repeating one query per swap
+    // would dominate runtime.
+    const launchCache = new Map<string, { launch: Launch; quoteAssetDecimals: number | null }>();
+    for (const raw of rawSwaps) {
+      const venueRow = venueByPoolId.get(raw.poolId.toLowerCase());
+      if (!venueRow) continue;
+      const tokenKey = venueRow.tokenAddress.toLowerCase();
+      let cached = launchCache.get(tokenKey);
+      if (!cached) {
+        const launchRow = (await appDb.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, venueRow.tokenAddress)))[0];
+        if (!launchRow) continue;
+        cached = { launch: toLaunch(launchRow), quoteAssetDecimals: launchRow.quoteAssetDecimals };
+        launchCache.set(tokenKey, cached);
+      }
+      const venue: Venue = {
+        id: venueRow.id, chainId: venueRow.chainId, tokenAddress: venueRow.tokenAddress as `0x${string}`,
+        kind: 'v4_pool', ref: venueRow.ref, sourceId: 'pons-v2-v4', sourceLogId: '',
+        effectiveFromBlock: venueRow.effectiveFromBlock, effectiveToBlock: null, official: venueRow.official,
+      };
+      const row: EnvioRawV4SwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
+        sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
+      const trade = hydrateV4SwapFromDecoded(row, venue, cached.launch, cached.quoteAssetDecimals);
+      if (!trade) continue;
+      const tradeRows = await appDb.insert(tradesEnvioStaging).values({
+        chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
+        blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
+        tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
+        priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
+        traderAddress: trade.traderAddress,
+      }).onConflictDoNothing().returning({ txHash: tradesEnvioStaging.txHash });
+      if (tradeRows.length > 0) tradesWritten += 1;
+    }
   }
 
   return { venuesOpened, tradesWritten };

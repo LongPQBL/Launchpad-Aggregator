@@ -78,7 +78,11 @@ export interface EnvioRawV4SwapRow {
 // decoded the event, so there is no raw log to re-decode — same pattern as Phase 2's curve trade
 // transform. `sender` classifies protocol-vs-user activity (hook-initiated); `txFrom` (tx.from, not
 // `sender`) is the real trader.
-export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, launch: Launch): Trade | null {
+// quoteAssetDecimals is the raw nullable staging column (be/src/db/schema.ts), not launch.quoteAsset's
+// always-numeric field — this phase's sync layer has no RPC access to a real ERC20's decimals, so
+// unlike the RPC-scan path (which always knows them), price must be left null rather than computed
+// from a faked value, matching transformV2.ts's resolveKnownQuoteAsset discipline for curve trades.
+export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, launch: Launch, quoteAssetDecimals: number | null): Trade | null {
   if (venue.kind !== 'v4_pool' || !venue.official || row.poolId.toLowerCase() !== venue.ref.toLowerCase()) {
     throw new Error('Swap is not from the official V4 pool');
   }
@@ -99,8 +103,8 @@ export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, l
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
     activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
-    priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
-    priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
+    priceNumeratorRaw: quoteAssetDecimals === null ? null : (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
+    priceDenominatorRaw: quoteAssetDecimals === null ? null : (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(quoteAssetDecimals),
     traderAddress: row.txFrom.toLowerCase() as Address,
   };
 }

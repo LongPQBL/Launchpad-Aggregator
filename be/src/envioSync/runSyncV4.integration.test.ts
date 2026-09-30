@@ -43,6 +43,20 @@ const syntheticLaunch: Launch = {
 // verifyV4PoolFromEnvio to accept it, exactly like the real pipeline would require.
 const testPoolId = derivePonsV4PoolId(syntheticLaunch, { fee: 0, tickSpacing: 200 }, testHook);
 
+// A second, independent launch/graduation used to test that candidate selection picks the first
+// SAME-TX Initialize that actually VERIFIES, not just the first same-tx Initialize — see
+// runSyncV4.ts's candidate-selection loop.
+const testToken2 = '0x7777777777777777777777777777777777777777' as Address;
+const testQuote2 = '0x8888888888888888888888888888888888888888' as Address;
+const testCurve2 = '0x1010101010101010101010101010101010101010';
+const testSwapTxHash2 = '0x' + '1'.repeat(64);
+const testGraduationTxHash2 = '0x' + '2'.repeat(64);
+const testGraduationBlockHash2 = '0x' + '3'.repeat(64);
+const syntheticLaunch2: Launch = {
+  ...syntheticLaunch, tokenAddress: testToken2, quoteAsset: { address: testQuote2, symbol: '', decimals: 18 },
+};
+const testPoolId2 = derivePonsV4PoolId(syntheticLaunch2, { fee: 0, tickSpacing: 200 }, testHook);
+
 beforeAll(async () => {
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_v4');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v4."RawV4Initialize" (
@@ -72,6 +86,23 @@ beforeAll(async () => {
     `INSERT INTO lifecycle_transitions_envio_staging (source_log_id, chain_id, token_address, phase, kind, block_number, block_hash, tx_hash, log_index) VALUES ($1,4663,$2,2,'graduated',27828161,$3,$4,36)`,
     [`4663:${testGraduationBlockHash}:${testGraduationTxHash}:36`, testToken, testGraduationBlockHash, testGraduationTxHash],
   );
+
+  await pool.query('DELETE FROM lifecycle_transitions_envio_staging WHERE token_address = $1', [testToken2]);
+  await pool.query('DELETE FROM trades_envio_staging WHERE tx_hash = $1', [testSwapTxHash2]);
+  await pool.query('DELETE FROM venues_envio_staging WHERE token_address = $1', [testToken2]);
+  await pool.query('DELETE FROM launches_envio_staging WHERE token_address = $1', [testToken2]);
+  await pool.query(
+    `INSERT INTO launches_envio_staging (chain_id, token_address, name, symbol, token_decimals, platform, protocol_version, factory_address, deployer_address, launch_block, launch_tx_hash, quote_asset_address, quote_asset_symbol, quote_asset_decimals, lifecycle_status) VALUES (4663,$1,null,null,18,'pons','v2',$2,$3,27823666,$4,$5,null,null,'graduated')`,
+    [testToken2, syntheticLaunch2.factoryAddress, syntheticLaunch2.deployerAddress, syntheticLaunch2.launchTxHash, testQuote2],
+  );
+  await pool.query(
+    `INSERT INTO venues_envio_staging (id, chain_id, token_address, kind, ref, effective_from_block, official) VALUES ($1,4663,$2,'curve',$3,27823666,true)`,
+    [`4663:curve:${testCurve2}`, testToken2, testCurve2],
+  );
+  await pool.query(
+    `INSERT INTO lifecycle_transitions_envio_staging (source_log_id, chain_id, token_address, phase, kind, block_number, block_hash, tx_hash, log_index) VALUES ($1,4663,$2,2,'graduated',27828161,$3,$4,36)`,
+    [`4663:${testGraduationBlockHash2}:${testGraduationTxHash2}:36`, testToken2, testGraduationBlockHash2, testGraduationTxHash2],
+  );
 });
 
 afterAll(async () => {
@@ -80,6 +111,10 @@ afterAll(async () => {
   await pool.query('DELETE FROM venues_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query('DELETE FROM lifecycle_transitions_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query('DELETE FROM launches_envio_staging WHERE token_address = $1', [testToken]);
+  await pool.query('DELETE FROM trades_envio_staging WHERE tx_hash = $1', [testSwapTxHash2]);
+  await pool.query('DELETE FROM venues_envio_staging WHERE token_address = $1', [testToken2]);
+  await pool.query('DELETE FROM lifecycle_transitions_envio_staging WHERE token_address = $1', [testToken2]);
+  await pool.query('DELETE FROM launches_envio_staging WHERE token_address = $1', [testToken2]);
   await pool.end();
   await envioPool.end();
 });
@@ -110,5 +145,36 @@ describe('syncV4Once', () => {
 
     const second = await syncV4Once(envioPool, db, fixtureTables);
     expect(second).toEqual({ venuesOpened: 0, tradesWritten: 0 });
+  });
+
+  it('skips a non-verifying same-tx Initialize candidate and still opens the real pool that follows it', async () => {
+    // An unrelated Initialize bundled into the same graduation transaction, ordered BEFORE the real
+    // Pons pool's own Initialize (different hook, so verifyV4PoolFromEnvio rejects it) — candidate
+    // selection must not stop at this first same-tx row.
+    await envioPool.query(
+      `INSERT INTO envio_fixture_v4."RawV4Initialize" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      ['i2-decoy', 4663, '0x' + '9'.repeat(64), testToken2, testQuote2,
+        0, 200, '0x2222222222222222222222222222222222222222', '35770440558388723973569516', -154068,
+        '27828161', testGraduationBlockHash2, testGraduationTxHash2, 15],
+    );
+    await envioPool.query(
+      `INSERT INTO envio_fixture_v4."RawV4Initialize" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      ['i2-real', 4663, testPoolId2, testToken2, testQuote2,
+        0, 200, testHook, '35770440558388723973569516', -154068,
+        '27828161', testGraduationBlockHash2, testGraduationTxHash2, 16],
+    );
+    await envioPool.query(
+      `INSERT INTO envio_fixture_v4."RawV4Swap" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      ['s2', 4663, testPoolId2, '0x9999999999999999999999999999999999999999', '0x9999999999999999999999999999999999999999',
+        '-1000000000000000000', '500000000000000000', '30937564032784793309170036',
+        '92140088551983424601325', -156971, 0,
+        '27828165', '0x' + 'e'.repeat(64), testSwapTxHash2, 108, 1_700_000_000],
+    );
+
+    const result = await syncV4Once(envioPool, db, fixtureTables);
+    expect(result).toEqual({ venuesOpened: 1, tradesWritten: 1 });
+    const venues = await db.select().from(venuesEnvioStaging).where(and(eq(venuesEnvioStaging.tokenAddress, testToken2), eq(venuesEnvioStaging.kind, 'v4_pool')));
+    expect(venues).toHaveLength(1);
+    expect(venues[0].ref).toBe(testPoolId2);
   });
 });
