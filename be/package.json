@@ -18,6 +18,7 @@
     "dev:api": "tsx src/cli/api.ts",
     "dev:indexer": "tsx src/cli/runFactoryIndexer.ts",
     "indexer:status": "tsx src/cli/indexerStatus.ts",
+    "compare:envio-staging": "tsx src/cli/compareEnvioStaging.ts",
     "openapi:write": "tsx src/cli/openapi.ts --write",
     "openapi:check": "tsx src/cli/openapi.ts --check"
   },
