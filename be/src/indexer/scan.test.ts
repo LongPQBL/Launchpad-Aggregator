@@ -59,6 +59,22 @@ describe('bounded HTTP scanner', () => {
     expect(setup.getCursor()).toBe(18n);
   });
 
+  it('shrinks a range whose eth_getLogs response was too large, not just a timeout', async () => {
+    // Found live 2026-09-30: a busy V4 pool's 2,000-block window failed "response too large" every
+    // retry, at the same width, forever — isRangeLimit's regex matched "response size" but not this
+    // provider's actual wording, so the adaptive shrink below never triggered.
+    const calls: Array<[bigint, bigint]> = [];
+    const setup = depsFor(async (_source, from, to) => {
+      calls.push([from, to]);
+      if (to - from + 1n > 3n) throw new Error('response too large');
+      return [];
+    });
+    const report = await scanToHead(source, 18n, setup.deps);
+    expect(calls[0]).toEqual([10n, 17n]);
+    expect(report.missingRanges).toEqual([]);
+    expect(setup.getCursor()).toBe(18n);
+  });
+
   it('reports a database failure without moving the checkpoint, then restarts at that block', async () => {
     const setup = depsFor(async () => []);
     setup.deps.saveIndexBatch = async () => { throw new Error('database unavailable'); };

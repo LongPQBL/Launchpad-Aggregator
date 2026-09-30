@@ -65,7 +65,7 @@ function isHistoricalGap(message: string): boolean {
 }
 
 function isRangeLimit(message: string): boolean {
-  return /timed out|timeout|too many logs|block range|response size|query limit/i.test(message);
+  return /timed out|timeout|too many logs|block range|response (size|too large)|payload too large|query limit/i.test(message);
 }
 
 function isTransient(message: string): boolean {
