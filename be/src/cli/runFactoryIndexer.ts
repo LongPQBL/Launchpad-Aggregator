@@ -94,7 +94,7 @@ async function runOnce(): Promise<void> {
       getCursor: repository.getCursor, getLogs, decodeLogs: decoder, saveIndexBatch: repository.saveIndexBatch,
       sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     }),
-  });
+  }, { parallel: true });
   const factoryCursors = new Map(await Promise.all(sources.map(async (source) => [source.id, (await repository.getCursor(source.id)).scannedToBlock] as const)));
   if (selectedIds.includes(lifecycleSource.id)) {
     const curveContexts = (await venueStore.listOfficial('curve', lifecycleSource.chainId))

@@ -19,4 +19,27 @@ describe('factory indexing cycle', () => {
     expect(seen[0].target).toBe(sources[0].startBlock + 99n);
     expect(report.every((item) => item.missingRanges.length === 0)).toBe(true);
   });
+
+  it('scans all sources concurrently when parallel is requested, instead of one at a time', async () => {
+    const sources = getFactoryLogSources();
+    const started: string[] = [];
+    const releases = new Map<string, (value: { sourceId: string; committedRanges: never[]; missingRanges: never[] }) => void>();
+    const cursors = new Map(sources.map((source) => [source.id, source.startBlock - 1n]));
+    const resultPromise = runFactoryCycle(sources, 100_000_000n, 100n, {
+      getCursor: async (id) => ({ sourceId: id, chainId: 4663, scannedToBlock: cursors.get(id)!, confirmedToBlock: cursors.get(id)!, status: 'backfilling' }),
+      scan: (source, target) => {
+        started.push(source.id);
+        return new Promise((resolve) => {
+          releases.set(source.id, () => resolve({ sourceId: source.id, committedRanges: [], missingRanges: [] }));
+        }).then((result) => { cursors.set(source.id, target); return result as never; });
+      },
+      recordScanReport: async () => {},
+      setSourceStatus: async () => {},
+    }, { parallel: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toHaveLength(3);
+    for (const release of releases.values()) release(undefined as never);
+    const report = await resultPromise;
+    expect(report).toHaveLength(3);
+  });
 });
