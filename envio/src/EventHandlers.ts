@@ -193,3 +193,25 @@ indexer.onEvent(
     });
   },
 );
+
+indexer.onEvent(
+  { contract: "UniswapV4PoolManager", event: "Initialize" },
+  async ({ event, context }) => {
+    context.RawV4Initialize.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      poolId: event.params.id.toLowerCase(),
+      currency0: event.params.currency0.toLowerCase(),
+      currency1: event.params.currency1.toLowerCase(),
+      fee: Number(event.params.fee),
+      tickSpacing: Number(event.params.tickSpacing),
+      hooks: event.params.hooks.toLowerCase(),
+      sqrtPriceX96: event.params.sqrtPriceX96,
+      tick: Number(event.params.tick),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);

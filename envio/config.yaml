@@ -27,6 +27,12 @@ contracts:
       - event: "CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut, uint256 fee, uint256 tax)"
       - event: "CurveSell(address indexed seller, address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax)"
       - event: "BuybackLocked(uint256 quoteSpent, uint256 tokensLocked)"
+  - name: UniswapV4PoolManager
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)"
+      - event: "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
+        name: V4Swap
 chains:
   - id: 4663
     hypersync_config:
@@ -41,3 +47,6 @@ chains:
         address:
           - "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
       - name: PonsV2Curve
+      - name: UniswapV4PoolManager
+        address:
+          - "0x8366a39cC670b4001a1121b8f6A443A643E40951"

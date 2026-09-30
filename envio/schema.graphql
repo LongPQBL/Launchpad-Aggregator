@@ -90,3 +90,20 @@ type RawCurveBuyback {
   logIndex: Int!
   timestamp: Int!
 }
+
+type RawV4Initialize {
+  id: ID!
+  chainId: Int!
+  poolId: String!
+  currency0: String!
+  currency1: String!
+  fee: Int!
+  tickSpacing: Int!
+  hooks: String!
+  sqrtPriceX96: BigInt!
+  tick: Int!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}
