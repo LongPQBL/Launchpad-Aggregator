@@ -71,6 +71,13 @@
       "when": 1790701893605,
       "tag": "0009_smart_vertigo",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1790741352065,
+      "tag": "0010_clammy_sersi",
+      "breakpoints": true
     }
   ]
 }

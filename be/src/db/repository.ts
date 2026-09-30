@@ -5,9 +5,19 @@ import { logKey } from '../domain/ids.js';
 import type { ObservedBlock } from '../indexer/reorg.js';
 import type { ScanReport } from '../indexer/scan.js';
 import type { PhaseReconciliation } from '../indexer/phaseReconcile.js';
+import type { NewScanJob, ScanJob } from '../indexer/jobTypes.js';
+import { safeErrorMessage } from '../indexer/scan.js';
 import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
-import { candles, launches, lifecycleTransitions, observedBlocks, phaseObservations, rawLogs, sourceGaps, sources, trades, venues } from './schema.js';
+import { candles, launches, lifecycleTransitions, observedBlocks, phaseObservations, rawLogs, scanJobs, sourceGaps, sources, trades, venues } from './schema.js';
+
+type DbTransaction = Parameters<Parameters<Database['transaction']>[0]>[0];
+
+function scanJob(row: typeof scanJobs.$inferSelect): ScanJob {
+  return { id: row.id, sourceId: row.sourceId, lane: row.lane as ScanJob['lane'],
+    fromBlock: row.fromBlock, toBlock: row.toBlock, generation: row.generation,
+    status: row.status as ScanJob['status'], leaseOwner: row.leaseOwner, leaseUntil: row.leaseUntil };
+}
 
 export interface SourceRegistration {
   id: string;
@@ -148,11 +158,10 @@ export function createRepository(db: Database) {
       });
     },
 
-    async saveIndexBatch(sourceId: string, fromBlock: bigint, toBlock: bigint, batch: IndexBatch): Promise<void> {
+    async persistBatchInTransaction(tx: DbTransaction, source: typeof sources.$inferSelect,
+      sourceId: string, fromBlock: bigint, toBlock: bigint, batch: IndexBatch,
+      mode: 'legacy' | 'certified' | 'provisional'): Promise<void> {
       if (fromBlock > toBlock) throw new Error('Invalid block range');
-      await db.transaction(async (tx) => {
-        const [source] = await tx.select().from(sources).where(eq(sources.id, sourceId)).for('update');
-        if (!source) throw new Error(`Unknown source: ${sourceId}`);
         const records = [...batch.rawLogs, ...batch.launches, ...batch.venues, ...batch.trades, ...batch.transitions];
         if (records.some((record) => record.chainId !== source.chainId)) {
           throw new Error(`Batch chain does not match source ${sourceId}`);
@@ -165,8 +174,20 @@ export function createRepository(db: Database) {
         ) {
           throw new Error(`Batch source ID does not match ${sourceId}`);
         }
-        if (toBlock <= source.scannedToBlock) return;
-        if (fromBlock !== source.scannedToBlock + 1n) {
+        if (mode !== 'legacy') {
+          const positions = [
+            ...batch.rawLogs.map((log) => log.blockNumber),
+            ...batch.launches.map((launch) => launch.launchBlock),
+            ...batch.venues.map((venue) => venue.effectiveFromBlock),
+            ...batch.trades.map((trade) => trade.blockNumber),
+            ...batch.transitions.map((transition) => transition.blockNumber),
+          ];
+          if (positions.some((block) => block < fromBlock || block > toBlock)) {
+            throw new Error('Batch record is outside scan job range');
+          }
+        }
+        if (mode === 'legacy' && toBlock <= source.scannedToBlock) return;
+        if (mode === 'legacy' && fromBlock !== source.scannedToBlock + 1n) {
           throw new Error(`Non-contiguous range for ${sourceId}: expected ${source.scannedToBlock + 1n}, got ${fromBlock}`);
         }
         if (batch.rawLogs.length) {
@@ -297,6 +318,7 @@ export function createRepository(db: Database) {
               WHERE v.chain_id = ${source.chainId} AND v.token_address = ${tokenAddress} AND v.kind = 'curve'`);
           }
         }
+        if (mode !== 'provisional') {
         const repairedGaps = await tx.select().from(sourceGaps).where(and(
           eq(sourceGaps.sourceId, sourceId), lte(sourceGaps.fromBlock, toBlock), gte(sourceGaps.toBlock, fromBlock),
         ));
@@ -309,7 +331,10 @@ export function createRepository(db: Database) {
           ];
           if (remainders.length) await tx.insert(sourceGaps).values(remainders);
         }
-        await tx.update(sources).set({ scannedToBlock: toBlock, confirmedToBlock: toBlock }).where(eq(sources.id, sourceId));
+        }
+        if (mode === 'legacy') {
+          await tx.update(sources).set({ scannedToBlock: toBlock, confirmedToBlock: toBlock }).where(eq(sources.id, sourceId));
+        }
         for (const tokenAddress of new Set(batch.launches.map((launch) => launch.tokenAddress.toLowerCase()))) {
           await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'launch.changed', chainId: source.chainId, tokenAddress })})`);
         }
@@ -317,6 +342,132 @@ export function createRepository(db: Database) {
           await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'trade.created', chainId: source.chainId, tokenAddress })})`);
         }
         await tx.execute(sql`SELECT pg_notify('launchpad_events', ${JSON.stringify({ type: 'coverage.changed', chainId: source.chainId })})`);
+    },
+
+    async saveIndexBatch(sourceId: string, fromBlock: bigint, toBlock: bigint, batch: IndexBatch): Promise<void> {
+      if (fromBlock > toBlock) throw new Error('Invalid block range');
+      await db.transaction(async (tx) => {
+        const [source] = await tx.select().from(sources).where(eq(sources.id, sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${sourceId}`);
+        await this.persistBatchInTransaction(tx, source, sourceId, fromBlock, toBlock, batch, 'legacy');
+      });
+    },
+
+    async enqueueScanJob(input: NewScanJob): Promise<ScanJob> {
+      if (input.fromBlock > input.toBlock || input.fromBlock < 0n) throw new Error('Invalid scan job range');
+      const id = `${input.sourceId}:${input.lane}:${input.fromBlock}-${input.toBlock}`;
+      return db.transaction(async (tx) => {
+        const [source] = await tx.select().from(sources).where(eq(sources.id, input.sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${input.sourceId}`);
+        if (input.fromBlock < source.startBlock) throw new Error('Job starts before source deployment');
+        const [existing] = await tx.select().from(scanJobs).where(eq(scanJobs.id, id)).limit(1);
+        if (existing) return scanJob(existing);
+        if (input.lane === 'certified') {
+          const [overlap] = await tx.select({ id: scanJobs.id }).from(scanJobs).where(and(
+            eq(scanJobs.sourceId, input.sourceId), eq(scanJobs.lane, 'certified'),
+            lte(scanJobs.fromBlock, input.toBlock), gte(scanJobs.toBlock, input.fromBlock),
+          )).limit(1);
+          if (overlap) throw new Error(`Overlapping certified scan job: ${overlap.id}`);
+        }
+        const [row] = await tx.insert(scanJobs).values({ id, sourceId: input.sourceId, lane: input.lane,
+          fromBlock: input.fromBlock, toBlock: input.toBlock, status: 'pending' }).returning();
+        return scanJob(row);
+      });
+    },
+
+    async claimScanJob(workerId: string, now: Date, leaseMs: number): Promise<ScanJob | null> {
+      if (!workerId || !Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 3_600_000) {
+        throw new Error('Invalid scan job lease');
+      }
+      return db.transaction(async (tx) => {
+        const [candidate] = await tx.select().from(scanJobs).where(or(
+          eq(scanJobs.status, 'pending'),
+          and(eq(scanJobs.status, 'leased'), lte(scanJobs.leaseUntil, now)),
+        )).orderBy(scanJobs.fromBlock, scanJobs.id).limit(1).for('update', { skipLocked: true });
+        if (!candidate) return null;
+        const [row] = await tx.update(scanJobs).set({ status: 'leased', leaseOwner: workerId,
+          leaseUntil: new Date(now.getTime() + leaseMs), startedAt: now, errorReason: null })
+          .where(eq(scanJobs.id, candidate.id)).returning();
+        return scanJob(row);
+      });
+    },
+
+    async commitScanJob(jobId: string, workerId: string, generation: bigint, batch: IndexBatch): Promise<void> {
+      await db.transaction(async (tx) => {
+        const [identified] = await tx.select({ sourceId: scanJobs.sourceId }).from(scanJobs)
+          .where(eq(scanJobs.id, jobId)).limit(1);
+        if (!identified) throw new Error(`Unknown scan job: ${jobId}`);
+        const [source] = await tx.select().from(sources).where(eq(sources.id, identified.sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${identified.sourceId}`);
+        const [job] = await tx.select().from(scanJobs).where(eq(scanJobs.id, jobId)).for('update');
+        if (!job || job.status !== 'leased' || job.leaseOwner !== workerId || job.generation !== generation
+          || job.leaseUntil === null || job.leaseUntil.getTime() <= Date.now()) {
+          throw new Error('Scan job lease is no longer valid');
+        }
+        await this.persistBatchInTransaction(tx, source, job.sourceId, job.fromBlock, job.toBlock, batch, job.lane as 'certified' | 'provisional');
+        const completedAt = new Date();
+        await tx.update(scanJobs).set({ status: 'complete', leaseOwner: null, leaseUntil: null, completedAt,
+          elapsedMs: job.startedAt ? Math.max(0, completedAt.getTime() - job.startedAt.getTime()) : null })
+          .where(eq(scanJobs.id, jobId));
+        if (job.lane === 'certified') {
+          const complete = await tx.select({ fromBlock: scanJobs.fromBlock, toBlock: scanJobs.toBlock }).from(scanJobs)
+            .where(and(eq(scanJobs.sourceId, job.sourceId), eq(scanJobs.lane, 'certified'), eq(scanJobs.status, 'complete')))
+            .orderBy(scanJobs.fromBlock);
+          let frontier = source.scannedToBlock;
+          for (const range of complete) {
+            if (range.fromBlock > frontier + 1n) break;
+            if (range.toBlock > frontier) frontier = range.toBlock;
+          }
+          if (frontier > source.scannedToBlock) await tx.update(sources).set({ scannedToBlock: frontier,
+            confirmedToBlock: frontier, status: 'backfilling' }).where(eq(sources.id, job.sourceId));
+        }
+      });
+    },
+
+    async failScanJob(jobId: string, workerId: string, generation: bigint, reason: string): Promise<void> {
+      await db.transaction(async (tx) => {
+        const [job] = await tx.select().from(scanJobs).where(eq(scanJobs.id, jobId)).for('update');
+        if (!job || job.status !== 'leased' || job.leaseOwner !== workerId || job.generation !== generation) {
+          throw new Error('Scan job lease is no longer valid');
+        }
+        await tx.update(scanJobs).set({ status: 'failed', leaseOwner: null, leaseUntil: null,
+          errorReason: safeErrorMessage(reason) }).where(eq(scanJobs.id, jobId));
+      });
+    },
+
+    async getCertifiedFrontier(sourceId: string): Promise<bigint> {
+      const [source] = await db.select({ scannedToBlock: sources.scannedToBlock }).from(sources)
+        .where(eq(sources.id, sourceId)).limit(1);
+      if (!source) throw new Error(`Unknown source: ${sourceId}`);
+      return source.scannedToBlock;
+    },
+
+    async seedCertifiedCoverageFromCursors(): Promise<void> {
+      await db.transaction(async (tx) => {
+        const allSources = await tx.select().from(sources).orderBy(sources.id).for('update');
+        for (const source of allSources) {
+          if (source.scannedToBlock < source.startBlock) continue;
+          const gaps = await tx.select().from(sourceGaps).where(and(eq(sourceGaps.sourceId, source.id),
+            lte(sourceGaps.fromBlock, source.scannedToBlock), gte(sourceGaps.toBlock, source.startBlock)))
+            .orderBy(sourceGaps.fromBlock);
+          let next = source.startBlock;
+          async function insertCovered(toBlock: bigint) {
+            if (next > toBlock) return;
+            const id = `${source.id}:certified:${next}-${toBlock}`;
+            await tx.insert(scanJobs).values({ id, sourceId: source.id, lane: 'certified',
+              fromBlock: next, toBlock, status: 'complete', completedAt: new Date() }).onConflictDoNothing();
+          }
+          for (const gap of gaps) {
+            await insertCovered(gap.fromBlock - 1n);
+            if (gap.toBlock + 1n > next) next = gap.toBlock + 1n;
+          }
+          await insertCovered(source.scannedToBlock);
+          if (gaps.length) {
+            const frontier = gaps[0].fromBlock <= source.startBlock ? source.startBlock - 1n : gaps[0].fromBlock - 1n;
+            await tx.update(sources).set({ scannedToBlock: frontier, confirmedToBlock: frontier,
+              status: 'backfilling' }).where(eq(sources.id, source.id));
+          }
+        }
       });
     },
 

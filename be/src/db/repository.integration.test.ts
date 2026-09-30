@@ -99,6 +99,90 @@ afterAll(async () => {
 });
 
 describe('index batch repository', () => {
+  it('leases distinct certified windows to workers and only advances a contiguous frontier', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 101n, toBlock: 101n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const now = new Date();
+    const first = await repository.claimScanJob('worker-a', now, 10_000);
+    const second = await repository.claimScanJob('worker-b', now, 10_000);
+    expect(first?.id).not.toBe(second?.id);
+    expect(first?.fromBlock).toBe(100n);
+    expect(second?.fromBlock).toBe(101n);
+    const empty = { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
+    await repository.commitScanJob(second!.id, 'worker-b', second!.generation, empty);
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(99n);
+    await repository.commitScanJob(first!.id, 'worker-a', first!.generation, empty);
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(101n);
+    expect((await repository.getCursor('test-a')).scannedToBlock).toBe(101n);
+  });
+
+  it('rejects stale lease owners and preserves job state when a batch transaction fails', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const now = new Date();
+    const old = await repository.claimScanJob('old-worker', now, 1_000);
+    const current = await repository.claimScanJob('new-worker', new Date(now.getTime() + 2_000), 10_000);
+    expect(current?.id).toBe(old?.id);
+    await expect(repository.commitScanJob(old!.id, 'old-worker', old!.generation, batch(4663, 'test-a')))
+      .rejects.toThrow(/lease/i);
+    await expect(repository.commitScanJob(current!.id, 'new-worker', current!.generation,
+      batch(4663, 'test-a', 10n ** 80n))).rejects.toThrow();
+    expect((await pool.query("SELECT status FROM scan_jobs WHERE source_id='test-a'")).rows[0].status).toBe('leased');
+    expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(0);
+    await repository.commitScanJob(current!.id, 'new-worker', current!.generation, batch(4663, 'test-a'));
+    expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(1);
+  });
+
+  it('replays provisional data as certified without counting one trade twice', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'provisional', fromBlock: 100n, toBlock: 100n });
+    const now = new Date();
+    const live = await repository.claimScanJob('live', now, 10_000);
+    await repository.commitScanJob(live!.id, 'live', live!.generation, batch(4663, 'test-a'));
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(99n);
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const history = await repository.claimScanJob('history', new Date(now.getTime() + 1_000), 10_000);
+    await repository.commitScanJob(history!.id, 'history', history!.generation, batch(4663, 'test-a'));
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(100n);
+    expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(1);
+  });
+
+  it('seeds certified coverage from the legacy cursor without erasing gaps', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 105n, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
+    await repository.recordScanReport({ sourceId: 'test-a', committedRanges: [],
+      missingRanges: [{ fromBlock: 106n, toBlock: 110n, reason: 'archive required' }] });
+    await repository.seedCertifiedCoverageFromCursors();
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(105n);
+    expect((await pool.query("SELECT from_block,to_block FROM scan_jobs WHERE source_id='test-a' AND lane='certified'"))
+      .rows).toEqual([{ from_block: '100', to_block: '105' }]);
+    expect((await pool.query("SELECT count(*)::int AS count FROM source_gaps WHERE source_id='test-a'"))
+      .rows[0].count).toBe(1);
+  });
+
+  it('does not certify a recorded gap hidden behind a legacy cursor', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.saveIndexBatch('test-a', 100n, 105n, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
+    await repository.recordScanReport({ sourceId: 'test-a', committedRanges: [],
+      missingRanges: [{ fromBlock: 102n, toBlock: 103n, reason: 'unverified' }] });
+    await repository.seedCertifiedCoverageFromCursors();
+    const ranges = await pool.query("SELECT from_block,to_block FROM scan_jobs WHERE source_id='test-a' ORDER BY from_block");
+    expect(ranges.rows).toEqual([{ from_block: '100', to_block: '101' }, { from_block: '104', to_block: '105' }]);
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(101n);
+  });
+
+  it('rejects overlapping certified jobs and a batch outside its leased window', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 101n, toBlock: 110n });
+    await expect(repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 105n, toBlock: 120n }))
+      .rejects.toThrow(/overlap/i);
+    const job = await repository.claimScanJob('worker', new Date(), 10_000);
+    await expect(repository.commitScanJob(job!.id, 'worker', job!.generation, batch(4663, 'test-a')))
+      .rejects.toThrow(/outside.*range/i);
+    expect((await pool.query("SELECT status FROM scan_jobs WHERE id=$1", [job!.id])).rows[0].status).toBe('leased');
+  });
+
   it('persists protocol activity while defaulting an unclassified legacy trade to user activity', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const data = batch(4663, 'test-a');

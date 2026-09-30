@@ -1,4 +1,5 @@
-import { bigint, boolean, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 
 export const sources = pgTable('sources', {
   id: text('id').primaryKey(),
@@ -17,6 +18,28 @@ export const sourceGaps = pgTable('source_gaps', {
   toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
   reason: text('reason').notNull(),
 }, (table) => [primaryKey({ columns: [table.sourceId, table.fromBlock, table.toBlock] })]);
+
+export const scanJobs = pgTable('scan_jobs', {
+  id: text('id').primaryKey(),
+  sourceId: text('source_id').notNull().references(() => sources.id, { onDelete: 'cascade' }),
+  lane: text('lane').notNull(),
+  fromBlock: bigint('from_block', { mode: 'bigint' }).notNull(),
+  toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
+  generation: bigint('generation', { mode: 'bigint' }).notNull().default(sql`0`),
+  status: text('status').notNull(),
+  leaseOwner: text('lease_owner'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  elapsedMs: integer('elapsed_ms'),
+  requestCount: integer('request_count'),
+  errorReason: text('error_reason'),
+}, (table) => [
+  uniqueIndex('scan_jobs_source_lane_range').on(table.sourceId, table.lane, table.fromBlock, table.toBlock),
+  index('scan_jobs_claim_idx').on(table.status, table.leaseUntil, table.sourceId),
+  check('scan_jobs_valid_range', sql`${table.fromBlock} <= ${table.toBlock}`),
+  check('scan_jobs_valid_lane', sql`${table.lane} IN ('certified', 'provisional')`),
+]);
 
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
