@@ -141,6 +141,13 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ```yaml
 name: pons-envio-indexer
+# event.block.number/.hash and event.transaction.hash are core fields, always present without
+# selection (confirmed against node_modules/envio/evm.schema.json's BlockField/TransactionField
+# enums: neither "number" nor "hash" is a selectable BlockField, but "hash" IS a valid
+# TransactionField — so only the transaction hash needs explicit field_selection below).
+field_selection:
+  transaction_fields:
+    - hash
 contracts:
   - name: PonsV1LegacyFactory
     handler: src/EventHandlers.ts
@@ -204,7 +211,7 @@ indexer.onEvent(
 cd envio && pnpm install && pnpm codegen
 ```
 
-Expected: codegen completes. If it reports `event.block.hash` or `event.transaction.hash` as missing/untyped, open the generated types under `envio/generated/` to find the exact `field_selection` key Envio's current version expects, add it under `chains[0].contracts[0]` (or per-event, per whatever the generated types indicate) in `config.yaml`, and re-run `pnpm codegen` until it succeeds. This is a real, checkable compiler loop — do not guess past what the generated types show.
+Expected: codegen completes. `event.block.number`/`.hash`/`.timestamp` are default block fields (need no `field_selection`) and `event.transaction.hash` is covered by the `field_selection.transaction_fields: [hash]` above — confirmed against the project's own `.claude/skills/indexer-transactions/SKILL.md` (copied in with the reference scaffold in Task 1 Step 2) and the installed package's `evm.schema.json`. If codegen or `tsc` still reports any of these as missing/untyped, open `envio/generated/` to see the real generated types and re-run `pnpm codegen` until it succeeds — a real, checkable compiler loop, not a guess.
 
 - [ ] **Step 5: Start the indexer against the real chain**
 
@@ -259,6 +266,9 @@ Extend the `contracts:` and `chains[0].contracts:` blocks from Task 2 (full file
 
 ```yaml
 name: pons-envio-indexer
+field_selection:
+  transaction_fields:
+    - hash
 contracts:
   - name: PonsV1LegacyFactory
     handler: src/EventHandlers.ts
@@ -338,7 +348,7 @@ indexer.onEvent(
 );
 ```
 
-If `event.block.timestamp` is missing/untyped, apply the same real-compiler-feedback loop as Task 2 Step 4 (check `envio/generated/`, add the right `field_selection` key, re-run codegen).
+`event.block.timestamp` is a default block field (confirmed in Task 2 Step 4) and needs no `field_selection` entry. If codegen or `tsc` disagrees, apply the same real-compiler-feedback loop as Task 2 Step 4.
 
 - [ ] **Step 4: Codegen, restart from a clean volume, and run past the fixture swap block**
 
