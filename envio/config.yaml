@@ -8,6 +8,10 @@ contracts:
     handler: src/EventHandlers.ts
     events:
       - event: "TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)"
+  - name: PonsV3Pool
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
 chains:
   - id: 4663
     hypersync_config:
@@ -17,3 +21,4 @@ chains:
       - name: PonsV1LegacyFactory
         address:
           - "0x0c37a24F5D23A486FA692d1500881d698B1F77a4"
+      - name: PonsV3Pool
