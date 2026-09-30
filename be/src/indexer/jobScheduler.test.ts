@@ -22,12 +22,24 @@ function harness(sources: SourceDefinition[], frontiers: ReadonlyMap<string, big
     estimatePoolCount: async () => 0,
     enqueueJob: async (input: NewScanJob) => {
       const id = `${input.sourceId}:${input.lane}:${input.fromBlock}-${input.toBlock}`;
-      if (!jobs.some((job) => job.id === id)) jobs.push({ ...input, id, generation: 0n,
-        status: 'pending', leaseOwner: null, leaseUntil: null });
+      if (jobs.some((job) => job.id === id)) return;
+      // Mirrors repository.ts's real certified-overlap check, including the same failure mode C1
+      // regresses against — a mock that always accepted overlaps would hide the bug it's meant to catch.
+      if (input.lane === 'certified') {
+        const overlap = jobs.find((job) => job.sourceId === input.sourceId && job.lane === 'certified'
+          && job.fromBlock <= input.toBlock && job.toBlock >= input.fromBlock);
+        if (overlap) throw new Error(`Overlapping certified scan job: ${overlap.id}`);
+      }
+      jobs.push({ ...input, id, generation: 0n, status: 'pending', leaseOwner: null, leaseUntil: null });
     },
     claimJob: async (owner, _time, _leaseMs, allowed, lane) => {
-      const job = jobs.find((item) => item.status === 'pending' && allowed.includes(item.sourceId)
+      // Mirrors repository.ts's real `ORDER BY from_block, id` — a mock that picked in insertion
+      // order instead would hide the C2 starvation bug it's meant to catch.
+      const candidates = jobs.filter((item) => item.status === 'pending' && allowed.includes(item.sourceId)
         && (!lane || item.lane === lane));
+      candidates.sort((a, b) => (a.fromBlock < b.fromBlock ? -1 : a.fromBlock > b.fromBlock ? 1
+        : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      const job = candidates[0];
       if (!job) return null;
       job.status = 'leased'; job.leaseOwner = owner;
       return { ...job };
@@ -42,6 +54,15 @@ function harness(sources: SourceDefinition[], frontiers: ReadonlyMap<string, big
     failJob: async (id) => { failed.push(id); const job = jobs.find((item) => item.id === id)!; job.status = 'failed'; },
     now: () => new Date(now),
     wait: async (ms) => { now += ms; },
+    getPlannedFrontiers: async () => {
+      const map = new Map(frontiers);
+      for (const job of jobs) {
+        if (job.lane !== 'certified') continue;
+        const current = map.get(job.sourceId);
+        if (current === undefined || job.toBlock > current) map.set(job.sourceId, job.toBlock);
+      }
+      return map;
+    },
     plannerOptions: { maxWindowBlocks: 2n, maxJobs: 1, targetWorkUnits: 1_000n },
     leaseMs: 60_000,
     pollMs: 1_000,
@@ -91,8 +112,13 @@ describe('bounded parallel job scheduler', () => {
     setup.deps.once = false;
     setup.deps.maxPasses = 2;
     await runJobScheduler(setup.deps, new AbortController().signal);
-    expect(started).toHaveLength(3);
-    expect(started.every((item) => item.from === 103n)).toBe(true);
+    // Each worker slot now loops within a pass instead of claiming exactly once (see I1), so all 3
+    // pass-1 windows complete inside pass 1 itself; pass 2's planning then correctly discovers the
+    // next window per source (using the planned, not just certified, frontier — see C1) instead of
+    // being unable to plan past a still-in-flight job. 3 sources x 2 passes = 6 total starts.
+    expect(started).toHaveLength(6);
+    expect(new Set(started.map((item) => item.id)).size).toBe(3);
+    expect(started.every((item) => item.from === 103n || item.from === 105n)).toBe(true);
     expect(peak).toBe(2);
   });
 
@@ -118,7 +144,10 @@ describe('bounded parallel job scheduler', () => {
     setup.deps.maxPasses = 2;
     await runJobScheduler(setup.deps, new AbortController().signal);
     expect(attempts).toBe(1);
-    expect(setup.jobs.map((job) => job.status)).toEqual(['failed', 'pending']);
+    // Planning is unconditional each pass (not gated by an endpoint cooldown), and now correctly plans
+    // past whatever is already queued (certified or not — see C1) instead of blindly recomputing pass
+    // 1's same two windows again; pass 2 discovers a genuine 3rd window while the endpoint cools down.
+    expect(setup.jobs.map((job) => job.status)).toEqual(['failed', 'pending', 'pending']);
   });
 
   it('claims a reserved near-head provisional job even while certified backfill saturates its endpoint', async () => {
@@ -153,6 +182,54 @@ describe('bounded parallel job scheduler', () => {
     });
     setup.deps.failJob = async () => { throw new Error('Scan job lease is no longer valid'); };
     await expect(runJobScheduler(setup.deps, new AbortController().signal)).resolves.toBeUndefined();
+  });
+
+  it('does not throw when the next pass would replan an overlapping certified window over one still pending (C1)', async () => {
+    let calls = 0;
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async () => empty);
+    setup.deps.claimJob = async () => null; // nothing is ever claimed: the job stays 'pending' across passes
+    setup.deps.estimatePoolCount = async () => { calls++; return calls === 1 ? 1 : 10; };
+    setup.deps.plannerOptions = { maxWindowBlocks: 100n, maxJobs: 1, targetWorkUnits: 50n };
+    setup.deps.once = false;
+    setup.deps.maxPasses = 2;
+    await expect(runJobScheduler(setup.deps, new AbortController().signal)).resolves.toBeUndefined();
+    const certifiedJobs = setup.jobs.filter((job) => job.sourceId === 'pons-v1-active' && job.lane === 'certified');
+    expect(certifiedJobs).toHaveLength(1);
+  });
+
+  it('gives every source on a shared endpoint a fair turn across passes instead of starving the higher-block one (C2)', async () => {
+    const started: string[] = [];
+    const setup = harness([
+      { id: 'pons-v1-active', startBlock: 100n }, { id: 'pons-v1-legacy', startBlock: 100n },
+    ], new Map([['pons-v1-legacy', 500n]]), async (job) => { started.push(job.sourceId); return empty; }, { shared: 1, trades: 1 });
+    setup.deps.getSafeHead = async () => 100_000n;
+    // maxJobs high enough that pons-v1-active never runs out of pending work across every pass below —
+    // otherwise it could "lose" a later pass by exhaustion rather than by the scheduler's own fairness.
+    setup.deps.plannerOptions = { maxWindowBlocks: 1n, maxJobs: 20, targetWorkUnits: 1_000n };
+    setup.deps.once = false;
+    setup.deps.maxPasses = 6;
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    expect(started).toContain('pons-v1-legacy');
+  });
+
+  it('lets another endpoint worker keep claiming new work while one worker is stuck on a slow job (I1)', async () => {
+    // Single source with several pending windows, so this isolates I1 (the pass barrier) from C2
+    // (cross-source fairness, covered separately above) — only the first-ever claimed job blocks.
+    let firstJobStuck = true;
+    let release!: () => void;
+    const slow = new Promise<void>((resolve) => { release = resolve; });
+    const fastCompletions: string[] = [];
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async (job) => {
+      if (firstJobStuck) { firstJobStuck = false; await slow; return empty; }
+      fastCompletions.push(job.id);
+      return empty;
+    }, { shared: 2, trades: 1 });
+    setup.deps.plannerOptions = { maxWindowBlocks: 1n, maxJobs: 5, targetWorkUnits: 1_000n };
+    const running = runJobScheduler(setup.deps, new AbortController().signal);
+    for (let i = 0; i < 50 && fastCompletions.length < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fastCompletions.length).toBeGreaterThanOrEqual(3);
+    release();
+    await running;
   });
 
   it('lets a dedicated trade endpoint progress while the shared endpoint is busy', async () => {

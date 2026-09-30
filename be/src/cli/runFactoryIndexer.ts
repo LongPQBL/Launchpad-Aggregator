@@ -283,6 +283,13 @@ async function getJobFrontiers(): Promise<ReadonlyMap<string, bigint>> {
   return new Map(entries);
 }
 
+async function getJobPlannedFrontiers(): Promise<ReadonlyMap<string, bigint>> {
+  const list = await listJobSources();
+  const entries = await Promise.all(list.map(async (source) =>
+    [source.id, await repository.getPlannedCertifiedFrontier(source.id)] as const));
+  return new Map(entries);
+}
+
 async function estimateJobPoolCount(sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<number> {
   const definition = jobTradeDefinition(sourceId);
   if (!definition) return 0;
@@ -388,6 +395,7 @@ async function runJobsMode(signal: AbortSignal): Promise<void> {
     },
     listSources: listJobSources,
     getFrontiers: getJobFrontiers,
+    getPlannedFrontiers: getJobPlannedFrontiers,
     estimatePoolCount: estimateJobPoolCount,
     // Bound: createRepository returns a plain object whose methods call this.persistBatchInTransaction
     // internally, so passing them unbound as bare references loses `this` when jobScheduler invokes them.

@@ -456,8 +456,14 @@ export function createRepository(db: Database) {
         const [candidate] = await tx.select().from(scanJobs).where(and(...filters))
           .orderBy(scanJobs.fromBlock, scanJobs.id).limit(1).for('update', { skipLocked: true });
         if (!candidate) return null;
+        // Bump generation on every claim (not only on reorg): a worker id can be reused across
+        // passes/restarts (e.g. `${endpoint}:${slot}`), so the fence must not rely on the id being
+        // unique — only on the claimant holding the CURRENT generation. A stale worker from a prior
+        // claim of this same job (lease expired, or orphaned by a crash-restart) then fails the
+        // generation check in commitScanJob/failScanJob even if it reuses the same worker id.
         const [row] = await tx.update(scanJobs).set({ status: 'leased', leaseOwner: workerId,
-          leaseUntil: new Date(now.getTime() + leaseMs), startedAt: now, errorReason: null })
+          leaseUntil: new Date(now.getTime() + leaseMs), startedAt: now, errorReason: null,
+          generation: sql`${scanJobs.generation} + 1` })
           .where(eq(scanJobs.id, candidate.id)).returning();
         return scanJob(row);
       });
@@ -512,6 +518,22 @@ export function createRepository(db: Database) {
         .where(eq(sources.id, sourceId)).limit(1);
       if (!source) throw new Error(`Unknown source: ${sourceId}`);
       return source.scannedToBlock;
+    },
+
+    // The frontier the SCHEDULER should plan new certified windows from — distinct from
+    // getCertifiedFrontier (which only reflects actually-certified/complete coverage, and gates
+    // downstream dependents). Without this, re-planning every pass from the certified frontier alone
+    // recomputes a window starting at the same block whose end can differ from a still-pending/leased
+    // job already covering that start (pool-count-driven width, or the safe-head truncation point
+    // moving) — enqueueScanJob's certified-overlap check then throws, permanently, every pass.
+    async getPlannedCertifiedFrontier(sourceId: string): Promise<bigint> {
+      const [source] = await db.select({ scannedToBlock: sources.scannedToBlock }).from(sources)
+        .where(eq(sources.id, sourceId)).limit(1);
+      if (!source) throw new Error(`Unknown source: ${sourceId}`);
+      const [queued] = await db.select({ maxToBlock: sql<string | null>`max(${scanJobs.toBlock})` }).from(scanJobs)
+        .where(and(eq(scanJobs.sourceId, sourceId), eq(scanJobs.lane, 'certified')));
+      const queuedMax = queued?.maxToBlock === null || queued?.maxToBlock === undefined ? null : BigInt(queued.maxToBlock);
+      return queuedMax !== null && queuedMax > source.scannedToBlock ? queuedMax : source.scannedToBlock;
     },
 
     async seedCertifiedCoverageFromCursors(): Promise<void> {

@@ -223,6 +223,33 @@ describe('index batch repository', () => {
     expect(retry?.leaseOwner).toBe('retry');
   });
 
+  it('bumps generation on every claim so a stale worker cannot commit after a reclaim, even reusing the same worker id', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const now = new Date();
+    const first = await repository.claimScanJob('worker', now, 1_000);
+    const reclaimed = await repository.claimScanJob('worker', new Date(now.getTime() + 2_000), 10_000);
+    expect(reclaimed?.id).toBe(first?.id);
+    expect(reclaimed?.generation).not.toBe(first?.generation);
+    const empty = { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
+    await expect(repository.commitScanJob(first!.id, 'worker', first!.generation, empty)).rejects.toThrow(/lease/i);
+    await repository.commitScanJob(reclaimed!.id, 'worker', reclaimed!.generation, empty);
+  });
+
+  it('reports a planned frontier past any already-queued certified job, not just the certified frontier', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    expect(await repository.getPlannedCertifiedFrontier('test-a')).toBe(99n);
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 199n });
+    // Still pending/unclaimed: the certified frontier hasn't moved, but planning must not re-plan block 100 again.
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(99n);
+    expect(await repository.getPlannedCertifiedFrontier('test-a')).toBe(199n);
+    const job = await repository.claimScanJob('worker', new Date(), 10_000);
+    expect(await repository.getPlannedCertifiedFrontier('test-a')).toBe(199n);
+    await repository.commitScanJob(job!.id, 'worker', job!.generation, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
+    expect(await repository.getCertifiedFrontier('test-a')).toBe(199n);
+    expect(await repository.getPlannedCertifiedFrontier('test-a')).toBe(199n);
+  });
+
   it('claims only jobs of the requested lane', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
