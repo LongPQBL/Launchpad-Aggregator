@@ -148,7 +148,8 @@ contracts:
       - event: "TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)"
 chains:
   - id: 4663
-    rpc: https://robinhood.hypersync.xyz
+    hypersync_config:
+      url: https://robinhood.hypersync.xyz
     start_block: 8600612
     contracts:
       - name: PonsV1LegacyFactory
@@ -269,7 +270,8 @@ contracts:
       - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
 chains:
   - id: 4663
-    rpc: https://robinhood.hypersync.xyz
+    hypersync_config:
+      url: https://robinhood.hypersync.xyz
     start_block: 8600612
     contracts:
       - name: PonsV1LegacyFactory
