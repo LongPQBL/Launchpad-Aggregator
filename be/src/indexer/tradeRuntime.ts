@@ -8,6 +8,7 @@ import { decodeV2CurveBatch } from '../launchpads/pons/v2/adapter.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent } from '../launchpads/pons/v2/abi.js';
 import type { LogSource } from './scan.js';
 import type { VenueContext } from './venueStore.js';
+import { eligibleVenues } from './eligibleVenues.js';
 
 export interface TradeSourceDefinition { source: LogSource; venueKind: VenueKind; factoryAddress: Address; version: string; factorySourceIds: readonly string[] }
 
@@ -23,6 +24,18 @@ export const MAX_ADDRESSES_PER_LOG_QUERY = 5_000;
 // real group count pons-v1-active-trades needs) succeeded repeatedly with zero errors in ~7-9s
 // total. The old cap of 4 forced that into ~4 sequential rounds for no measured benefit.
 export const TRADE_LOG_GROUP_CONCURRENCY = 20;
+
+// A source small enough to fit in one call (<= MAX_ADDRESSES_PER_LOG_QUERY) stays as one group —
+// measured 2026-09-30: splitting 1,385 addresses into 20 tiny groups (3.35s) was no faster than
+// one group (3.28s). Past that point, splitting is happening anyway, so use the smallest group
+// size that still fits within TRADE_LOG_GROUP_CONCURRENCY concurrent calls rather than always
+// maxing out each group — measured 3,462-address groups (20 groups, one concurrent round) at
+// 5.9s vs 5,000-address groups (14 groups, still one round) at 7-9s for the same 69,227-address
+// source, i.e. more smaller concurrent calls beat fewer larger ones once concurrency has headroom.
+export function computeGroupSize(addressCount: number): number {
+  if (addressCount <= MAX_ADDRESSES_PER_LOG_QUERY) return Math.max(1, addressCount);
+  return Math.min(MAX_ADDRESSES_PER_LOG_QUERY, Math.ceil(addressCount / TRADE_LOG_GROUP_CONCURRENCY));
+}
 
 export function getTradeSourceDefinitions(): TradeSourceDefinition[] {
   const factories = getPonsFactorySources();
@@ -50,8 +63,10 @@ export function tradeFrontier(sourceId: string, factoryCursors: ReadonlyMap<stri
   return values.reduce((lowest, value) => value < lowest ? value : lowest, values[0]);
 }
 
-export function withVenueAddresses(definition: TradeSourceDefinition, contexts: readonly VenueContext[]): LogSource {
-  return { ...definition.source, addresses: [...new Set(contexts.map((context) => context.venue.ref.toLowerCase() as Address))] };
+export function withVenueAddresses(definition: TradeSourceDefinition, contexts: readonly VenueContext[],
+  range?: { fromBlock: bigint; toBlock: bigint }): LogSource {
+  const selected = range ? eligibleVenues(contexts, range.fromBlock, range.toBlock) : contexts;
+  return { ...definition.source, addresses: [...new Set(selected.map((context) => context.venue.ref.toLowerCase() as Address))] };
 }
 
 export async function getGroupedTradeLogs(source: LogSource, fromBlock: bigint, toBlock: bigint, maxAddresses: number,

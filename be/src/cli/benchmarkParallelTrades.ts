@@ -2,9 +2,9 @@ import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
 import { createBatchedGetBlockData } from '../indexer/blockDataBatch.js';
-import { scanToHead, type LogSource } from '../indexer/scan.js';
+import { safeErrorMessage, scanToHead, type LogSource } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
-import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, MAX_ADDRESSES_PER_LOG_QUERY, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { computeGroupSize, createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
 import { createViemGetLogs } from './indexer.js';
 
 // One-off experiment: trade-decoding sources already fetch timestamps/traders with internal
@@ -28,17 +28,28 @@ const getLogs: typeof rawGetLogs = async (source, fromBlock, toBlock) => {
     return await rawGetLogs(source, fromBlock, toBlock);
   } catch (error) {
     transientErrors++;
-    console.error(JSON.stringify({ getLogsError: error instanceof Error ? error.message : String(error), sourceId: source.id }));
+    console.error(JSON.stringify({ getLogsError: safeErrorMessage(error), sourceId: source.id }));
     throw error;
   }
 };
 const getBlocksData = createBatchedGetBlockData(rpcUrl, 100);
 
 async function scanBounded(source: LogSource, contexts: Awaited<ReturnType<typeof venueStore.listOfficial>>, target: bigint) {
+  const definition = tradeDefinitions.find((item) => item.source.id === source.id)!;
   return scanToHead(source, target, {
     initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
     getCursor: repository.getCursor,
-    getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, getLogs),
+    getLogs: (_group, fromBlock, toBlock) => {
+      const windowSource = withVenueAddresses(definition, contexts, { fromBlock, toBlock });
+      const started = performance.now();
+      return getGroupedTradeLogs(windowSource, fromBlock, toBlock, computeGroupSize(windowSource.addresses.length), getLogs)
+        .then((logs) => {
+          console.log(JSON.stringify({ sourceId: source.id, fromBlock: fromBlock.toString(), toBlock: toBlock.toString(),
+            eligibleAddressCount: windowSource.addresses.length, logCount: logs.length,
+            durationMs: Math.round(performance.now() - started) }));
+          return logs;
+        });
+    },
     decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });

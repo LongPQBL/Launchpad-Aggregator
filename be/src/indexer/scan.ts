@@ -33,8 +33,17 @@ export interface ScanDeps {
   sleep(milliseconds: number): Promise<void>;
 }
 
+export function scanChunkBounds(maxChunk: bigint): Pick<ScanDeps, 'initialChunk' | 'maxChunk'> {
+  if (maxChunk < 1n || maxChunk > 500_000n) throw new Error('Invalid RPC log range cap');
+  return { initialChunk: maxChunk < 10_000n ? maxChunk : 10_000n, maxChunk };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function safeErrorMessage(error: unknown): string {
+  return errorMessage(error).replace(/https?:\/\/[^\s"'\\]+/g, '[RPC endpoint]').slice(0, 1_024);
 }
 
 function isHistoricalGap(message: string): boolean {
@@ -84,7 +93,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
       } catch (error) {
         const message = errorMessage(error);
         if (isHistoricalGap(message)) {
-          report.missingRanges.push({ fromBlock, toBlock, reason: message });
+          report.missingRanges.push({ fromBlock, toBlock, reason: safeErrorMessage(error) });
           return report;
         }
         if (isRangeLimit(message) && chunk > deps.minChunk) {
@@ -96,7 +105,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
           attempt++;
           continue;
         }
-        report.missingRanges.push({ fromBlock, toBlock, reason: message });
+        report.missingRanges.push({ fromBlock, toBlock, reason: safeErrorMessage(error) });
         return report;
       }
     }
@@ -118,7 +127,7 @@ export async function scanToHead(source: LogSource, safeHead: bigint, deps: Scan
           saveAttempt++;
           continue;
         }
-        report.missingRanges.push({ fromBlock, toBlock, reason: message });
+        report.missingRanges.push({ fromBlock, toBlock, reason: safeErrorMessage(error) });
         return report;
       }
     }

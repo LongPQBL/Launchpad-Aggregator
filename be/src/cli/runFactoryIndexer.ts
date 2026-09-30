@@ -7,9 +7,9 @@ import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
 import { createLifecycleDecoder, getV2LifecycleSource, lifecycleTarget, readV2FactoryPoolConfig } from '../indexer/lifecycleRuntime.js';
 import { reconcileV2Phase } from '../indexer/phaseReconcile.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
-import { scanToHead } from '../indexer/scan.js';
+import { safeErrorMessage, scanChunkBounds, scanToHead } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
-import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, MAX_ADDRESSES_PER_LOG_QUERY, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { computeGroupSize, createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
 import { createV4GetLogs, createV4TradeDecoder, getV4PoolSources } from '../indexer/v4Runtime.js';
 import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
@@ -30,6 +30,7 @@ function tradeSourceRpcUrl(sourceId: string): string {
 }
 const maxBlocksPerSource = BigInt(process.env.INDEXER_MAX_BLOCKS_PER_CYCLE ?? '10000');
 if (maxBlocksPerSource < 1n || maxBlocksPerSource > 1_000_000n) throw new Error('Invalid INDEXER_MAX_BLOCKS_PER_CYCLE');
+const sharedLogChunks = scanChunkBounds(BigInt(process.env.INDEXER_SHARED_RPC_LOG_RANGE ?? '500000'));
 const { db, pool } = createDatabase(databaseUrl);
 const repository = createRepository(db);
 const client = createRobinhoodPublicClient(rpcUrl);
@@ -99,7 +100,7 @@ async function runOnce(): Promise<void> {
     recordScanReport: repository.recordScanReport,
     setSourceStatus: repository.setSourceStatus,
     scan: (source, target) => scanToHead(source, target, {
-      initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
+      ...sharedLogChunks, minChunk: 1n, maxRetries: 6,
       getCursor: repository.getCursor, getLogs, decodeLogs: decoder, saveIndexBatch: repository.saveIndexBatch,
       sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     }),
@@ -115,7 +116,7 @@ async function runOnce(): Promise<void> {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
       scan: (source, head) => scanToHead(source, head, {
-        initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
+        ...sharedLogChunks, minChunk: 1n, maxRetries: 6,
         getCursor: repository.getCursor, getLogs,
         decodeLogs: createLifecycleDecoder({
           loadLaunch: async (token) => {
@@ -150,7 +151,7 @@ async function runOnce(): Promise<void> {
     const frontier = tradeFrontier(definition.source.id, factoryCursors);
     const contexts = (await venueStore.listOfficial(definition.venueKind, definition.source.chainId))
       .filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
-    const tradeSource = withVenueAddresses(definition, contexts);
+    const tradeSource = definition.source;
     // Own client per trade source (see tradeSourceRpcUrl above) — Validation Cloud's real
     // eth_getLogs range cap is 2,000 blocks (measured 2026-09-30: "Exceeded max range limit for
     // eth_getLogs: 2000"), so the chunk size is fixed to that rather than relying on scan.ts's
@@ -165,7 +166,10 @@ async function runOnce(): Promise<void> {
       scan: (source, target) => scanToHead(source, target, {
         initialChunk: 2_000n, minChunk: 1n, maxChunk: 2_000n, maxRetries: 6,
         getCursor: repository.getCursor,
-        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, tradeGetLogs),
+        getLogs: (_group, fromBlock, toBlock) => {
+          const windowSource = withVenueAddresses(definition, contexts, { fromBlock, toBlock });
+          return getGroupedTradeLogs(windowSource, fromBlock, toBlock, computeGroupSize(windowSource.addresses.length), tradeGetLogs);
+        },
         decodeLogs: createTradeDecoder(contexts, tradeGetBlocksData), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
@@ -186,7 +190,7 @@ async function runOnce(): Promise<void> {
         getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
         setSourceStatus: repository.setSourceStatus,
         scan: (poolSource, target) => scanToHead(poolSource, target, {
-          initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
+          ...sharedLogChunks, minChunk: 1n, maxRetries: 6,
           getCursor: repository.getCursor,
           getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
           decodeLogs: createV4TradeDecoder(context, getBlocksData, poolManager, hook),
@@ -230,7 +234,7 @@ try {
     try {
       await runOnce();
     } catch (error) {
-      console.error(JSON.stringify({ cycleError: error instanceof Error ? error.message : String(error) }));
+      console.error(JSON.stringify({ cycleError: safeErrorMessage(error) }));
     }
     if (process.env.INDEXER_ONCE === 'true') break;
     await new Promise((resolve) => setTimeout(resolve, 5_000));

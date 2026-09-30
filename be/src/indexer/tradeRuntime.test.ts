@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
-import { getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier } from './tradeRuntime.js';
+import { computeGroupSize, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier } from './tradeRuntime.js';
 
 describe('official trade source runtime', () => {
   it('uses one grouped source per protocol venue kind with a factory checkpoint frontier', () => {
@@ -50,5 +50,28 @@ describe('official trade source runtime', () => {
     expect(started).toHaveLength(14);
     for (const release of releases) release();
     await resultPromise;
+  });
+
+  it('keeps a small source as one group instead of splitting to fill concurrency slots', () => {
+    // Measured 2026-09-30: splitting 1,385 addresses into 20 tiny groups (3.35s) was no faster
+    // than one group (3.28s) — small sources should stay as one call, not be split artificially.
+    expect(computeGroupSize(1385)).toBe(1385);
+  });
+
+  it('shrinks the group size below the max so a large source fits within one concurrent round', () => {
+    // Measured 2026-09-30: pons-v1-active-trades (69,227 addresses) at the default max (5,000,
+    // 14 groups) took 7-9s wall-clock under real concurrency; splitting into exactly enough
+    // groups to fill the concurrency limit (ceil(69227/20) = 3,462, 20 groups) took 5.9s.
+    expect(computeGroupSize(69_227)).toBe(3_462);
+  });
+
+  it('falls back to the max group size once even the concurrency-filling size would exceed it', () => {
+    // 200,000 addresses / 20 = 10,000, which exceeds the 5,000 hard max — cap at 5,000 and accept
+    // more than one concurrent round rather than sending oversized groups.
+    expect(computeGroupSize(200_000)).toBe(5_000);
+  });
+
+  it('never returns less than 1 for an empty address list', () => {
+    expect(computeGroupSize(0)).toBe(1);
   });
 });

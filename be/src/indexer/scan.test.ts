@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Address } from 'viem';
 import type { IndexBatch, SourceCursor, Venue } from '../domain/types.js';
 import { groupVenueQueries } from './groupQueries.js';
-import { scanToHead, type LogSource, type ScanDeps } from './scan.js';
+import { scanChunkBounds, scanToHead, type LogSource, type ScanDeps } from './scan.js';
 import { getFactoryLogSources, runIndexerOnce } from '../cli/indexer.js';
 
 const address = '0x1111111111111111111111111111111111111111' as Address;
@@ -27,6 +27,20 @@ function depsFor(getLogs: ScanDeps['getLogs']) {
 }
 
 describe('bounded HTTP scanner', () => {
+  it('keeps every log request within a provider 2000-block cap while covering a larger cycle', async () => {
+    const requested: Array<[bigint, bigint]> = [];
+    const setup = depsFor(async (_source, from, to) => {
+      requested.push([from, to]);
+      if (to - from + 1n > 2_000n) throw new Error('Exceeded max range limit for eth_getLogs: 2000');
+      return [];
+    });
+    Object.assign(setup.deps, scanChunkBounds(2_000n));
+    const report = await scanToHead(source, 5_009n, setup.deps);
+    expect(report.missingRanges).toEqual([]);
+    expect(requested).toEqual([[10n, 2_009n], [2_010n, 4_009n], [4_010n, 5_009n]]);
+    expect(setup.getCursor()).toBe(5_009n);
+  });
+
   it('shrinks timed-out ranges without leaving a gap', async () => {
     const calls: Array<[bigint, bigint]> = [];
     const setup = depsFor(async (_source, from, to) => {
@@ -54,6 +68,16 @@ describe('bounded HTTP scanner', () => {
     const resumed = depsFor(async () => []);
     await scanToHead(source, 12n, resumed.deps);
     expect(resumed.committed).toEqual([[10n, 12n]]);
+  });
+
+  it('redacts a private RPC URL before an error can become a persisted source gap', async () => {
+    const setup = depsFor(async () => {
+      throw new Error('RPC Request failed. URL: https://rpc.example/v1/private-key\nStatus: 403');
+    });
+    const report = await scanToHead(source, 12n, setup.deps);
+    expect(report.missingRanges).toEqual([{ fromBlock: 10n, toBlock: 12n,
+      reason: 'RPC Request failed. URL: [RPC endpoint]\nStatus: 403' }]);
+    expect(setup.getCursor()).toBe(9n);
   });
 
   it('reports an invalid lifecycle receipt as a gap without advancing the cursor', async () => {
