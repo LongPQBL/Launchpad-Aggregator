@@ -20,6 +20,14 @@ import { createViemGetLogs, getFactoryLogSources } from './indexer.js';
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const rpcUrl = process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com';
+// Trade sources default to the shared RPC but can be pointed at their own dedicated endpoint —
+// e.g. RH_RPC_URL_PONS_V1_LEGACY_TRADES for source id "pons-v1-legacy-trades" — so each can run
+// against its own provider account/quota instead of contending for the shared one (see README.md,
+// 2026-09-30: the free public RPC proved permanently unreliable for these specific sources).
+function tradeSourceRpcUrl(sourceId: string): string {
+  const envKey = `RH_RPC_URL_${sourceId.toUpperCase().replace(/-/g, '_')}`;
+  return process.env[envKey] ?? rpcUrl;
+}
 const maxBlocksPerSource = BigInt(process.env.INDEXER_MAX_BLOCKS_PER_CYCLE ?? '10000');
 if (maxBlocksPerSource < 1n || maxBlocksPerSource > 1_000_000n) throw new Error('Invalid INDEXER_MAX_BLOCKS_PER_CYCLE');
 const { db, pool } = createDatabase(databaseUrl);
@@ -138,24 +146,32 @@ async function runOnce(): Promise<void> {
       }),
     }));
   }
-  for (const definition of tradeDefinitions.filter((item) => selectedIds.includes(item.source.id))) {
+  const tradeResults = await Promise.all(tradeDefinitions.filter((item) => selectedIds.includes(item.source.id)).map(async (definition) => {
     const frontier = tradeFrontier(definition.source.id, factoryCursors);
     const contexts = (await venueStore.listOfficial(definition.venueKind, definition.source.chainId))
       .filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
     const tradeSource = withVenueAddresses(definition, contexts);
-    const tradeReports = await runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
+    // Own client per trade source (see tradeSourceRpcUrl above) — Validation Cloud's real
+    // eth_getLogs range cap is 2,000 blocks (measured 2026-09-30: "Exceeded max range limit for
+    // eth_getLogs: 2000"), so the chunk size is fixed to that rather than relying on scan.ts's
+    // adaptive shrink, whose error-message matching doesn't recognize this provider's wording.
+    const tradeRpcUrl = tradeSourceRpcUrl(definition.source.id);
+    const tradeClient = createRobinhoodPublicClient(tradeRpcUrl);
+    const tradeGetLogs = createViemGetLogs(tradeClient);
+    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100);
+    return runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
       scan: (source, target) => scanToHead(source, target, {
-        initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
+        initialChunk: 2_000n, minChunk: 1n, maxChunk: 2_000n, maxRetries: 6,
         getCursor: repository.getCursor,
-        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, getLogs),
-        decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
+        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, tradeGetLogs),
+        decodeLogs: createTradeDecoder(contexts, tradeGetBlocksData), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
     });
-    reports.push(...tradeReports);
-  }
+  }));
+  reports.push(...tradeResults.flat());
   if (selectedIds.includes(v4SelectionId)) {
     const { poolManager, hook } = await getPoolConfig();
     const contexts = (await venueStore.listOfficial('v4_pool', lifecycleSource.chainId))

@@ -11,15 +11,13 @@ import type { VenueContext } from './venueStore.js';
 
 export interface TradeSourceDefinition { source: LogSource; venueKind: VenueKind; factoryAddress: Address; version: string; factorySourceIds: readonly string[] }
 
-// This RPC hard-rejects eth_getLogs with more than 1000 combined address+topic selectors (measured
-// 2026-09-30: 1313 addresses+1 topic => "1313 address and topic selectors ... only 1000 are
-// allowed"). Grouping addresses in small batches (e.g. 100) multiplies the number of separate
-// getLogs calls needed for a source with many known pools (1000+ addresses => 10+ calls per scan
-// chunk) for no benefit, since a single call can carry far more — group as large as the hard
-// limit allows. NOTE: this did not, on its own, resolve a separate live stall investigated the
-// same day (pons-v1-legacy-trades repeatedly hit 429 "Too Many Requests" with no reported reset
-// time, even in isolation and even after this change) — see README.md for what's still unknown.
-export const MAX_ADDRESSES_PER_LOG_QUERY = 900;
+// Trade sources moved to Validation Cloud (see README.md, 2026-09-30) after the free public RPC
+// proved permanently unreliable for them. Validation Cloud has no hard address-count limit found
+// so far (a single call with all 68,456 known pons-v1-active pool addresses succeeded), but a very
+// large address list makes each call slow (~22.6s for 68,456 addresses vs ~5s for 5,000) — 5,000
+// keeps each call reasonably fast while still needing far fewer groups than the old public RPC's
+// 1000-selector hard cap required.
+export const MAX_ADDRESSES_PER_LOG_QUERY = 5_000;
 
 export function getTradeSourceDefinitions(): TradeSourceDefinition[] {
   const factories = getPonsFactorySources();
