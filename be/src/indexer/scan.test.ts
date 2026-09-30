@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Address } from 'viem';
 import type { IndexBatch, SourceCursor, Venue } from '../domain/types.js';
 import { groupVenueQueries } from './groupQueries.js';
-import { scanChunkBounds, scanToHead, type LogSource, type ScanDeps } from './scan.js';
+import { safeErrorMessage, scanChunkBounds, scanToHead, type LogSource, type ScanDeps } from './scan.js';
 import { getFactoryLogSources, runIndexerOnce } from '../cli/indexer.js';
 
 const address = '0x1111111111111111111111111111111111111111' as Address;
@@ -190,6 +190,30 @@ describe('bounded HTTP scanner', () => {
     expect(delays).toEqual([61_000]);
     expect(report.missingRanges).toEqual([]);
     expect(setup.getCursor()).toBe(12n);
+  });
+});
+
+describe('safeErrorMessage', () => {
+  it('includes the wrapped cause, not just the outer wrapper message', () => {
+    const cause = new Error('duplicate key value violates unique constraint "trades_source_log_id_key"');
+    const outer = new Error('Failed query: insert into "trades" (...) values (...)');
+    (outer as Error & { cause?: unknown }).cause = cause;
+    expect(safeErrorMessage(outer)).toContain('duplicate key value violates unique constraint');
+  });
+
+  it('redacts an RPC URL that appears only in a nested cause', () => {
+    const cause = new Error('request to https://mainnet.robinhood.validationcloud.io/v1/SECRET-KEY failed');
+    const outer = new Error('Failed query');
+    (outer as Error & { cause?: unknown }).cause = cause;
+    expect(safeErrorMessage(outer)).not.toContain('SECRET-KEY');
+  });
+
+  it('does not walk a cause cycle forever', () => {
+    const a = new Error('a');
+    const b = new Error('b');
+    (a as Error & { cause?: unknown }).cause = b;
+    (b as Error & { cause?: unknown }).cause = a;
+    expect(safeErrorMessage(a)).toContain('a');
   });
 });
 

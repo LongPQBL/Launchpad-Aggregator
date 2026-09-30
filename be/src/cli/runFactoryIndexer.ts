@@ -356,11 +356,7 @@ async function executeJob(job: ScanJob): Promise<IndexBatch> {
   throw new Error(`Unknown job source: ${job.sourceId}`);
 }
 
-async function runJobsMode(): Promise<void> {
-  const abortController = new AbortController();
-  const stop = () => abortController.abort();
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
+async function runJobsMode(signal: AbortSignal): Promise<void> {
   // Each trade source has its own dedicated RPC endpoint (tradeSourceRpcUrl) whose internal
   // address-group concurrency (TRADE_LOG_GROUP_CONCURRENCY) is already 20 — 2 concurrent
   // job-windows per trade source lets the scheduler work ahead on the next window while a slow
@@ -414,16 +410,28 @@ async function runJobsMode(): Promise<void> {
     enqueueProvisionalWindow: repository.replaceProvisionalWindow.bind(repository),
     provisionalWorkers: 1,
   };
-  await runJobScheduler(deps, abortController.signal);
+  await runJobScheduler(deps, signal);
 }
 
-// A single cycle can still throw outside scanToHead's own retry/backoff (e.g. the safe-head
-// getBlockNumber/getBlock calls above aren't wrapped). For a long unattended run, one such
-// hiccup must not kill the whole process — log it and keep cycling; the next cycle resumes
-// from the last saved checkpoint, so nothing is lost besides this cycle's attempt.
+// A single cycle/pass can still throw outside scanToHead's/runWorker's own retry/backoff (e.g. the
+// safe-head getBlockNumber/getBlock calls, or a transient DB error during planning). For a long
+// unattended run, one such hiccup must not kill the whole process — log it and keep going; the next
+// cycle/pass resumes from the last saved checkpoint, so nothing is lost besides this attempt.
 try {
   if (process.env.INDEXER_SCHEDULER === 'jobs') {
-    await runJobsMode();
+    const abortController = new AbortController();
+    const stop = () => abortController.abort();
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+    for (;;) {
+      try {
+        await runJobsMode(abortController.signal);
+      } catch (error) {
+        console.error(JSON.stringify({ cycleError: safeErrorMessage(error) }));
+      }
+      if (process.env.INDEXER_ONCE === 'true' || abortController.signal.aborted) break;
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
+    }
   } else for (;;) {
     try {
       await runOnce();

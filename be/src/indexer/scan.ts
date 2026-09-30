@@ -39,7 +39,15 @@ export function scanChunkBounds(maxChunk: bigint): Pick<ScanDeps, 'initialChunk'
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const seen = new Set<unknown>();
+  const parts: string[] = [];
+  let current = error;
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    parts.push(current instanceof Error ? current.message : String(current));
+    current = current instanceof Error ? current.cause : undefined;
+  }
+  return parts.join(' — caused by: ');
 }
 
 export function safeErrorMessage(error: unknown): string {
