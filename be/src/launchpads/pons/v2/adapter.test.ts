@@ -158,9 +158,12 @@ describe('pons v2 curve trades', () => {
     launch.quoteAsset = { address: buybackFixture.quoteAddress as Address, symbol: 'USDG', decimals: 6 };
     venue.tokenAddress = launch.tokenAddress;
     venue.ref = buybackFixture.curveAddress as string;
+    const buybackLog = asLog(buybackFixture.buyback as Record<string, unknown>);
+    const feesSweptLog = asLog(buybackFixture.feesSwept as Record<string, unknown>);
     const batch = await decodeV2CurveBatch(
-      [asLog(buybackFixture.buyback as Record<string, unknown>), asLog(buybackFixture.feesSwept as Record<string, unknown>)],
-      'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, async () => trader,
+      [buybackLog, feesSweptLog],
+      'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]),
+      async () => ({ timestamp: 1_700_000_000, traders: new Map([[buybackLog.transactionHash, trader], [feesSweptLog.transactionHash, trader]]) }),
     );
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].activityKind).toBe('protocol_buyback');
@@ -206,48 +209,32 @@ describe('pons v2 curve trades', () => {
       topics: ['0x9f4cd7c4ed99d08a797804560c9c5d71d2cf7e101f2e3b5e7d1ca8a24c370e4f'],
       data: '0x',
     };
-    const batch = await decodeV2CurveBatch([buyLog, otherLog], 'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, async () => trader);
+    const batch = await decodeV2CurveBatch([buyLog, otherLog], 'pons-v2-curve-cohort', new Map([[venue.ref.toLowerCase(), { launch, venue }]]),
+      async () => ({ timestamp: 1_700_000_000, traders: new Map([[buyLog.transactionHash, trader]]) }));
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].quoteAmountRaw).toBe(28_716_771_876_358_226n);
     expect(batch.rawLogs).toHaveLength(2);
   });
 
-  it('fetches distinct block timestamps concurrently instead of one round trip at a time', async () => {
+  it('fetches distinct blocks concurrently instead of one round trip at a time, for both timestamp and trader', async () => {
     const { launch, venue } = context();
     const buyLog = asLog(reference.buy as Record<string, unknown>);
     const sellLog = { ...asLog(reference.sell as Record<string, unknown>), blockNumber: buyLog.blockNumber + 1n };
     const requestedBlocks: bigint[] = [];
-    const releases = new Map<bigint, (value: number) => void>();
-    const getTimestamp = (blockNumber: bigint) => {
+    const releases = new Map<bigint, (value: { timestamp: number; traders: Map<Hash, Address> }) => void>();
+    const getBlockData = (blockNumber: bigint) => {
       requestedBlocks.push(blockNumber);
-      return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
+      return new Promise<{ timestamp: number; traders: Map<Hash, Address> }>((resolve) => { releases.set(blockNumber, resolve); });
     };
     const resultPromise = decodeV2CurveBatch([buyLog, sellLog], 'pons-v2-curve-cohort',
-      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), getTimestamp, async () => trader);
+      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), getBlockData);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestedBlocks).toHaveLength(2);
-    for (const release of releases.values()) release(1_700_000_000);
+    releases.get(buyLog.blockNumber)!({ timestamp: 1_700_000_000, traders: new Map([[buyLog.transactionHash, trader]]) });
+    releases.get(sellLog.blockNumber)!({ timestamp: 1_700_000_000, traders: new Map([[sellLog.transactionHash, trader]]) });
     const batch = await resultPromise;
     expect(batch.trades).toHaveLength(2);
-  });
-
-  it('fetches distinct transaction traders concurrently instead of one round trip at a time', async () => {
-    const { launch, venue } = context();
-    const buyLog = asLog(reference.buy as Record<string, unknown>);
-    const sellLog = { ...asLog(reference.sell as Record<string, unknown>), transactionHash: `0x${'9'.repeat(64)}` as Hash };
-    const requestedHashes: Hash[] = [];
-    const releases = new Map<Hash, (value: Address) => void>();
-    const getTrader = (txHash: Hash) => {
-      requestedHashes.push(txHash);
-      return new Promise<Address>((resolve) => { releases.set(txHash, resolve); });
-    };
-    const resultPromise = decodeV2CurveBatch([buyLog, sellLog], 'pons-v2-curve-cohort',
-      new Map([[venue.ref.toLowerCase(), { launch, venue }]]), async () => 1_700_000_000, getTrader);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(requestedHashes).toHaveLength(2);
-    for (const release of releases.values()) release(trader);
-    const batch = await resultPromise;
-    expect(batch.trades).toHaveLength(2);
+    expect(batch.trades.every((t) => t.traderAddress === trader.toLowerCase())).toBe(true);
   });
 
   it('uses post-trade reserves for price and scales by quote decimals', () => {

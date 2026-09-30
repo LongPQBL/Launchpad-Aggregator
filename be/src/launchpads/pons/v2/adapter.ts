@@ -2,6 +2,7 @@ import { decodeEventLog, parseAbi, toEventSelector, zeroAddress, type Address, t
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, LifecycleStatus, QuoteAsset, RawLog, Trade, Venue } from '../../../domain/types.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
+import type { GetBlockData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
@@ -183,8 +184,7 @@ export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: Fac
 }
 
 export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: string,
-  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getTimestamp: (block: bigint) => Promise<number>,
-  getTrader: (txHash: Hash) => Promise<Address>): Promise<IndexBatch> {
+  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getBlockData: GetBlockData): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown pons v2 curve: ${log.address}`);
@@ -194,23 +194,18 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
   });
   const tradeItems = resolved.filter((item) => item.isTradeEvent);
   const uniqueBlocks = [...new Set(tradeItems.map((item) => item.log.blockNumber))];
-  const uniqueTxHashes = [...new Set(tradeItems.map((item) => item.log.transactionHash))];
-  const [timestamps, traders] = await Promise.all([
-    mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
-    mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
-      async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
-  ]);
+  const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+    async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context, isTradeEvent } of resolved) {
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
     if (!isTradeEvent) continue;
-    const timestamp = timestamps.get(log.blockNumber)!;
-    const trader = traders.get(log.transactionHash)!;
+    const data = blocks.get(log.blockNumber)!;
+    const trader = data.traders.get(log.transactionHash)!;
     trades.push(log.topics[0] === toEventSelector(curveBuybackEvent)
-      ? decodeCurveBuyback(log, context.launch, context.venue, timestamp, trader)
-      : decodeCurveTrade(log, context.launch, context.venue, timestamp, trader));
+      ? decodeCurveBuyback(log, context.launch, context.venue, data.timestamp, trader)
+      : decodeCurveTrade(log, context.launch, context.venue, data.timestamp, trader));
   }
   return { rawLogs, launches: [], venues: [], trades, transitions: [] };
 }

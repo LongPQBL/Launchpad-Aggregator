@@ -1,4 +1,3 @@
-import type { Hash } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
@@ -32,15 +31,17 @@ const getLogs: typeof rawGetLogs = async (source, fromBlock, toBlock) => {
     throw error;
   }
 };
-const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
-const getTrader = async (txHash: Hash) => (await client.getTransaction({ hash: txHash })).from;
+const getBlockData = async (blockNumber: bigint) => {
+  const block = await client.getBlock({ blockNumber, includeTransactions: true });
+  return { timestamp: Number(block.timestamp), traders: new Map(block.transactions.map((tx) => [tx.hash, tx.from] as const)) };
+};
 
 async function scanBounded(source: LogSource, contexts: Awaited<ReturnType<typeof venueStore.listOfficial>>, target: bigint) {
   return scanToHead(source, target, {
     initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
     getCursor: repository.getCursor,
     getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
-    decodeLogs: createTradeDecoder(contexts, getTimestamp, getTrader), saveIndexBatch: repository.saveIndexBatch,
+    decodeLogs: createTradeDecoder(contexts, getBlockData), saveIndexBatch: repository.saveIndexBatch,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });
 }

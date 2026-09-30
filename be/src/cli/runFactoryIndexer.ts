@@ -1,4 +1,3 @@
-import type { Hash } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
@@ -62,6 +61,10 @@ const decoder = createFactoryDecoder({
   },
 });
 const getLogs = createViemGetLogs(client);
+const getBlockData = async (blockNumber: bigint) => {
+  const block = await client.getBlock({ blockNumber, includeTransactions: true });
+  return { timestamp: Number(block.timestamp), traders: new Map(block.transactions.map((tx) => [tx.hash, tx.from] as const)) };
+};
 
 for (const factory of factories) {
   await repository.registerSource({ id: factory.id, chainId: factory.chainId, version: factory.version,
@@ -142,8 +145,6 @@ async function runOnce(): Promise<void> {
     const contexts = (await venueStore.listOfficial(definition.venueKind, definition.source.chainId))
       .filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
     const tradeSource = withVenueAddresses(definition, contexts);
-    const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
-    const getTrader = async (txHash: Hash) => (await client.getTransaction({ hash: txHash })).from;
     const tradeReports = await runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
@@ -151,7 +152,7 @@ async function runOnce(): Promise<void> {
         initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
         getCursor: repository.getCursor,
         getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
-        decodeLogs: createTradeDecoder(contexts, getTimestamp, getTrader), saveIndexBatch: repository.saveIndexBatch,
+        decodeLogs: createTradeDecoder(contexts, getBlockData), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
     });
@@ -167,8 +168,6 @@ async function runOnce(): Promise<void> {
       await repository.registerSource({ id: source.id, chainId: source.chainId, version: 'v2-v4',
         factoryAddress: poolManager, startBlock: source.startBlock });
       const context = bySourceId.get(source.id)!;
-      const getTimestamp = async (blockNumber: bigint) => Number((await client.getBlock({ blockNumber })).timestamp);
-      const getTrader = async (txHash: Hash) => (await client.getTransaction({ hash: txHash })).from;
       reports.push(...await runFactoryCycle([source], safeHead, maxBlocksPerSource, {
         getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
         setSourceStatus: repository.setSourceStatus,
@@ -176,7 +175,7 @@ async function runOnce(): Promise<void> {
           initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
           getCursor: repository.getCursor,
           getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
-          decodeLogs: createV4TradeDecoder(context, getTimestamp, getTrader, poolManager, hook),
+          decodeLogs: createV4TradeDecoder(context, getBlockData, poolManager, hook),
           saveIndexBatch: repository.saveIndexBatch,
           sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
         }),

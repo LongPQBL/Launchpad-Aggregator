@@ -2,6 +2,7 @@ import { decodeEventLog, toEventSelector, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, RawLog, Venue, Trade } from '../../../domain/types.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
+import type { GetBlockData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import { v1LaunchEvent, v3SwapEvent } from './abi.js';
 
@@ -175,8 +176,7 @@ export async function decodeV1SwapBatch(
   logs: readonly RpcLog[],
   sourceId: string,
   contexts: ReadonlyMap<string, LaunchWithVenue>,
-  getTimestamp: (blockNumber: bigint) => Promise<number>,
-  getTrader: (txHash: Hash) => Promise<Address>,
+  getBlockData: GetBlockData,
 ): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
@@ -184,19 +184,14 @@ export async function decodeV1SwapBatch(
     return { log, context };
   });
   const uniqueBlocks = [...new Set(resolved.map(({ log }) => log.blockNumber))];
-  const uniqueTxHashes = [...new Set(resolved.map(({ log }) => log.transactionHash))];
-  const [timestamps, traders] = await Promise.all([
-    mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-      async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
-    mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
-      async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
-  ]);
+  const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+    async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context } of resolved) {
-    const timestamp = timestamps.get(log.blockNumber)!;
-    const trader = traders.get(log.transactionHash)!;
-    const trade = decodeV1Swap(log, context.venue, context.launch, timestamp, trader);
+    const data = blocks.get(log.blockNumber)!;
+    const trader = data.traders.get(log.transactionHash)!;
+    const trade = decodeV1Swap(log, context.venue, context.launch, data.timestamp, trader);
     if (trade) trades.push(trade);
     rawLogs.push(toRawLog(log, context.launch.chainId, sourceId));
   }

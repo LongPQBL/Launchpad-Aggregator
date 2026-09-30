@@ -50,7 +50,7 @@ describe('official Pons V4 swap runtime', () => {
     const logs = await fetch(source, 27_828_161n, 27_828_165n);
     expect(requests[0]).toMatchObject({ address: poolManager, args: { id: poolId },
       fromBlock: 27_828_161n, toBlock: 27_828_165n });
-    const decoder = createV4TradeDecoder(context, async () => 1_700_000_000, async () => trader, poolManager, hook);
+    const decoder = createV4TradeDecoder(context, async () => ({ timestamp: 1_700_000_000, traders: new Map([[swap.transactionHash as Hash, trader]]) }), poolManager, hook);
     const batch = await decoder(logs, source);
     expect(batch.trades).toMatchObject([{ venueId: venue.id, quoteAmountRaw: 5_620_497_268_881_825_819n,
       activityKind: 'user_trade', traderAddress: trader.toLowerCase() }]);
@@ -70,7 +70,7 @@ describe('official Pons V4 swap runtime', () => {
       getCursor: async () => ({ sourceId: source.id, chainId: 4663, scannedToBlock: cursor,
         confirmedToBlock: cursor, status: 'backfilling' }),
       getLogs: async () => [early],
-      decodeLogs: createV4TradeDecoder(context, async () => 1_700_000_000, async () => trader, poolManager, hook),
+      decodeLogs: createV4TradeDecoder(context, async () => ({ timestamp: 1_700_000_000, traders: new Map([[swap.transactionHash as Hash, trader]]) }), poolManager, hook),
       saveIndexBatch: async (_id, _from, to) => { cursor = to; }, sleep: async () => {},
     });
     expect(report.missingRanges).toMatchObject([{ fromBlock: 27_828_161n, toBlock: 27_828_161n }]);
@@ -82,50 +82,32 @@ describe('official Pons V4 swap runtime', () => {
     const [source] = getV4PoolSources([context], poolManager);
     const hookLog = { ...asLog(swap), topics: encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap',
       args: { id: poolId, sender: hook } }) } as Log;
-    const batch = await createV4TradeDecoder(context, async () => 1_700_000_000, async () => trader, poolManager, hook)([hookLog], source);
+    const batch = await createV4TradeDecoder(context, async () => ({ timestamp: 1_700_000_000, traders: new Map([[hookLog.transactionHash!, trader]]) }), poolManager, hook)([hookLog], source);
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].activityKind).toBe('protocol_fee_conversion');
     expect(batch.rawLogs).toHaveLength(1);
   });
 
-  it('fetches distinct block timestamps concurrently instead of one round trip at a time', async () => {
+  it('fetches distinct blocks concurrently instead of one round trip at a time, for both timestamp and trader', async () => {
     const { createV4TradeDecoder, getV4PoolSources } = await import('./v4Runtime.js');
     const [source] = getV4PoolSources([context], poolManager);
     const first = asLog(swap) as Log;
     const second = { ...asLog(swap), blockNumber: first.blockNumber! + 1n,
       transactionHash: `0x${'2'.repeat(64)}` as Hash } as Log;
     const requestedBlocks: bigint[] = [];
-    const releases = new Map<bigint, (value: number) => void>();
-    const getTimestamp = (blockNumber: bigint) => {
+    const releases = new Map<bigint, (value: { timestamp: number; traders: Map<Hash, Address> }) => void>();
+    const getBlockData = (blockNumber: bigint) => {
       requestedBlocks.push(blockNumber);
-      return new Promise<number>((resolve) => { releases.set(blockNumber, resolve); });
+      return new Promise<{ timestamp: number; traders: Map<Hash, Address> }>((resolve) => { releases.set(blockNumber, resolve); });
     };
-    const decoder = createV4TradeDecoder(context, getTimestamp, async () => trader, poolManager, hook);
+    const decoder = createV4TradeDecoder(context, getBlockData, poolManager, hook);
     const resultPromise = decoder([first, second], source);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requestedBlocks).toHaveLength(2);
-    for (const release of releases.values()) release(1_700_000_000);
+    releases.get(first.blockNumber!)!({ timestamp: 1_700_000_000, traders: new Map([[first.transactionHash!, trader]]) });
+    releases.get(second.blockNumber!)!({ timestamp: 1_700_000_000, traders: new Map([[second.transactionHash!, trader]]) });
     const batch = await resultPromise;
     expect(batch.trades).toHaveLength(2);
-  });
-
-  it('fetches distinct transaction traders concurrently instead of one round trip at a time', async () => {
-    const { createV4TradeDecoder, getV4PoolSources } = await import('./v4Runtime.js');
-    const [source] = getV4PoolSources([context], poolManager);
-    const first = asLog(swap) as Log;
-    const second = { ...asLog(swap), transactionHash: `0x${'2'.repeat(64)}` as Hash } as Log;
-    const requestedHashes: Hash[] = [];
-    const releases = new Map<Hash, (value: Address) => void>();
-    const getTrader = (txHash: Hash) => {
-      requestedHashes.push(txHash);
-      return new Promise<Address>((resolve) => { releases.set(txHash, resolve); });
-    };
-    const decoder = createV4TradeDecoder(context, async () => 1_700_000_000, getTrader, poolManager, hook);
-    const resultPromise = decoder([first, second], source);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(requestedHashes).toHaveLength(2);
-    for (const release of releases.values()) release(trader);
-    const batch = await resultPromise;
-    expect(batch.trades).toHaveLength(2);
+    expect(batch.trades.every((t) => t.traderAddress === trader.toLowerCase())).toBe(true);
   });
 });

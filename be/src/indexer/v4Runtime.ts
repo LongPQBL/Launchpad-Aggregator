@@ -2,6 +2,7 @@ import { isHash, type Address, type Hash, type Log } from 'viem';
 import type { IndexBatch, RawLog } from '../domain/types.js';
 import type { RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { decodePonsV4Swap, v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
+import type { GetBlockData } from './blockData.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from './concurrency.js';
 import type { LogSource, ScanDeps } from './scan.js';
 import type { VenueContext } from './venueStore.js';
@@ -39,8 +40,8 @@ function verifiedLog(log: Log): RpcLog {
     blockHash: log.blockHash, transactionHash: log.transactionHash, logIndex: log.logIndex };
 }
 
-export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block: bigint) => Promise<number>,
-  getTrader: (txHash: Hash) => Promise<Address>, poolManager: Address, hook: Address): ScanDeps['decodeLogs'] {
+export function createV4TradeDecoder(context: VenueContext, getBlockData: GetBlockData,
+  poolManager: Address, hook: Address): ScanDeps['decodeLogs'] {
   const poolId = context.venue.ref.toLowerCase() as Hash;
   const sourceId = `pons-v2-v4:${poolId}`;
   return async (logs, source): Promise<IndexBatch> => {
@@ -55,19 +56,14 @@ export function createV4TradeDecoder(context: VenueContext, getTimestamp: (block
       return log;
     });
     const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
-    const uniqueTxHashes = [...new Set(verifiedLogs.map((log) => log.transactionHash))];
-    const [timestamps, traders] = await Promise.all([
-      mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-        async (blockNumber) => [blockNumber, await getTimestamp(blockNumber)] as const).then((entries) => new Map(entries)),
-      mapWithConcurrency(uniqueTxHashes, RPC_FETCH_CONCURRENCY,
-        async (txHash) => [txHash, await getTrader(txHash)] as const).then((entries) => new Map(entries)),
-    ]);
+    const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
+      async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
     const rawLogs: RawLog[] = [];
     const trades: IndexBatch['trades'][number][] = [];
     for (const log of verifiedLogs) {
-      const timestamp = timestamps.get(log.blockNumber)!;
-      const trader = traders.get(log.transactionHash)!;
-      const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, timestamp, trader, poolManager, hook);
+      const data = blocks.get(log.blockNumber)!;
+      const trader = data.traders.get(log.transactionHash)!;
+      const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, data.timestamp, trader, poolManager, hook);
       if (!trade) continue;
       trades.push(trade);
       rawLogs.push({ chainId: source.chainId, sourceId, blockNumber: log.blockNumber, blockHash: log.blockHash,
