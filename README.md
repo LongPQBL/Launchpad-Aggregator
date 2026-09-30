@@ -91,8 +91,11 @@ sau khi cả 6 task của plan hoàn tất:
 ```sh
 cd envio && docker compose up -d
 # đợi indexer bắt kịp head hoặc ít nhất qua khỏi các block đã dùng làm fixture
-cd .. && DATABASE_URL=... ENVIO_DATABASE_URL=... npm run -w be compare:envio-staging
+cd .. && DATABASE_URL=... ENVIO_DATABASE_URL=postgres://postgres:testing@127.0.0.1:5433/envio-dev npm run -w be sync:envio-staging
+DATABASE_URL=... npm run -w be compare:envio-staging
 ```
+
+`sync:envio-staging` phải chạy trước — nó đọc bảng raw của Envio và ghi vào các bảng `*_envio_staging`; nếu bỏ qua bước này, `compare:envio-staging` sẽ báo mọi launch/trade thật là "chỉ có ở real" (bảng staging vẫn trống).
 
 Đây là bước đối chiếu thủ công cho phạm vi Phase 1 (chỉ V1-legacy). Đối chiếu tự động, đầy đủ,
 chạy song song với indexer thật đang sống — theo mục 6 của spec — thuộc một plan kế tiếp riêng.

@@ -1,0 +1,1 @@
+ALTER TABLE "trades_envio_staging" ADD COLUMN "trader_address" text NOT NULL;

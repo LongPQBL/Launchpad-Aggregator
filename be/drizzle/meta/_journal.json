@@ -85,6 +85,20 @@
       "when": 1790785631382,
       "tag": "0011_icy_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1790791289042,
+      "tag": "0012_steep_tyger_tiger",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1790791467848,
+      "tag": "0013_mute_magneto",
+      "breakpoints": true
     }
   ]
 }

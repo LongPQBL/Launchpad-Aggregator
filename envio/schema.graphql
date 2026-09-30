@@ -17,6 +17,10 @@ type RawSwap {
   poolAddress: String!
   sender: String!
   recipient: String!
+  # The transaction's originating EOA (tx.from), not the Swap event's own `sender` param — on a
+  # router-mediated swap `sender` is typically the router contract, not the wallet that traded. See
+  # be/src/domain/types.ts's Trade.traderAddress doc comment for the same distinction.
+  txFrom: String!
   amount0: BigInt!
   amount1: BigInt!
   sqrtPriceX96: BigInt!

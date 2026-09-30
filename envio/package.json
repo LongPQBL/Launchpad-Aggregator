@@ -5,20 +5,15 @@
     "clean": "tsc --clean",
     "build": "tsc --build",
     "watch": "tsc --watch",
-    "mocha": "ts-mocha test/**/*.ts",
     "codegen": "envio codegen",
     "dev": "envio dev",
     "start": "envio start",
-    "test": "pnpm mocha"
+    "test": "vitest run"
   },
   "devDependencies": {
-    "@types/chai": "^4.3.11",
-    "@types/mocha": "10.0.6",
     "@types/node": "20.8.8",
-    "ts-mocha": "^10.0.0",
     "typescript": "5.2.2",
-    "chai": "4.3.10",
-    "mocha": "10.2.0"
+    "vitest": "^3.2.4"
   },
   "dependencies": {
     "envio": "3.6.1"

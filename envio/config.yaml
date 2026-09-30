@@ -3,6 +3,7 @@ name: pons-envio-indexer
 field_selection:
   transaction_fields:
     - hash
+    - from
 contracts:
   - name: PonsV1LegacyFactory
     handler: src/EventHandlers.ts

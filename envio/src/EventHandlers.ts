@@ -28,12 +28,16 @@ indexer.contractRegister(
 indexer.onEvent(
   { contract: "PonsV3Pool", event: "Swap" },
   async ({ event, context }) => {
+    if (!event.transaction.from) {
+      throw new Error(`Missing transaction.from for swap ${event.transaction.hash}`);
+    }
     context.RawSwap.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
       poolAddress: event.srcAddress.toLowerCase(),
       sender: event.params.sender.toLowerCase(),
       recipient: event.params.recipient.toLowerCase(),
+      txFrom: event.transaction.from.toLowerCase(),
       amount0: event.params.amount0,
       amount1: event.params.amount1,
       sqrtPriceX96: event.params.sqrtPriceX96,

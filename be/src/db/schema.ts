@@ -184,8 +184,12 @@ export const observedBlocks = pgTable('observed_blocks', {
 export const launchesEnvioStaging = pgTable('launches_envio_staging', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
-  name: text('name').notNull(),
-  symbol: text('symbol').notNull(),
+  // name/symbol/lifecycleStatus are nullable: Phase 1's sync layer has no on-chain metadata/graduation
+  // RPC call (deliberately out of scope — see the comment in envioSync/runSync.ts), so these are
+  // genuinely unknown rather than defaulted to a plausible-looking fake value (CLAUDE.md: null means
+  // unavailable, never silently faked).
+  name: text('name'),
+  symbol: text('symbol'),
   tokenDecimals: integer('token_decimals').notNull(),
   platform: text('platform').notNull(),
   protocolVersion: text('protocol_version').notNull(),
@@ -196,7 +200,7 @@ export const launchesEnvioStaging = pgTable('launches_envio_staging', {
   quoteAssetAddress: text('quote_asset_address').notNull(),
   quoteAssetSymbol: text('quote_asset_symbol').notNull(),
   quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
-  lifecycleStatus: text('lifecycle_status').notNull(),
+  lifecycleStatus: text('lifecycle_status'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
 ]);
@@ -216,6 +220,9 @@ export const tradesEnvioStaging = pgTable('trades_envio_staging', {
   tokenAddress: text('token_address').notNull(),
   venueId: text('venue_id').notNull(),
   blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  // Provenance kept for future reorg-handling (spec section 5 keys on (chainId, blockHash, txHash,
+  // logIndex)); the actual reorg-delete-stale-rows logic is deferred to the parallel-run plan.
+  blockHash: text('block_hash').notNull(),
   txHash: text('tx_hash').notNull(),
   logIndex: integer('log_index').notNull(),
   timestamp: integer('timestamp').notNull(),
@@ -223,6 +230,9 @@ export const tradesEnvioStaging = pgTable('trades_envio_staging', {
   tokenAmountRaw: numeric('token_amount_raw', { precision: 78, scale: 0 }).notNull(),
   quoteAmountRaw: numeric('quote_amount_raw', { precision: 78, scale: 0 }).notNull(),
   activityKind: text('activity_kind').notNull(),
+  priceNumeratorRaw: text('price_numerator_raw'),
+  priceDenominatorRaw: text('price_denominator_raw'),
+  traderAddress: text('trader_address').notNull(),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
 ]);
