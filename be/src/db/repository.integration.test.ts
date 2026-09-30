@@ -99,6 +99,13 @@ afterAll(async () => {
 });
 
 describe('index batch repository', () => {
+  it('persists a sequential batch when saveIndexBatch is passed as a callback', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const saveIndexBatch = repository.saveIndexBatch;
+    await saveIndexBatch('test-a', 100n, 100n, { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] });
+    expect((await repository.getCursor('test-a')).scannedToBlock).toBe(100n);
+  });
+
   it('leases distinct certified windows to workers and only advances a contiguous frontier', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 101n, toBlock: 101n });

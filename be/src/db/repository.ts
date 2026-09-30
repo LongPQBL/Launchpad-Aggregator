@@ -72,7 +72,7 @@ export interface IndexedSource extends SourceCursor {
 }
 
 export function createRepository(db: Database) {
-  return {
+  const repository = {
     async listV2PhaseAuditCandidates(chainId: number, limit: number): Promise<Array<{
       tokenAddress: Address; factoryAddress: Address; lifecycleStatus: LifecycleStatus;
     }>> {
@@ -644,4 +644,6 @@ export function createRepository(db: Database) {
       }));
     },
   };
+  // Sequential scanning passes this method as a callback; keep its repository context.
+  return { ...repository, saveIndexBatch: repository.saveIndexBatch.bind(repository) };
 }
