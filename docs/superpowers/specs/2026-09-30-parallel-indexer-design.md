@@ -51,6 +51,7 @@ RPC lỗi/historical gap chỉ làm job liên quan `failed` và ghi gap; job đ�
 - Reorg: fork ở giữa hai job hoặc trong block chứa launch/transition/Initialize/trade; worker thế hệ cũ bị từ chối; projection sau quét lại bằng kết quả một lượt quét sạch; không để lại nến hoặc volume từ nhánh cũ.
 - API: launch mới hiện khi backfill còn thiếu; trade/chart/volume có coverage đúng từng cửa sổ; giá trị `null`/`complete=false` khi chưa đầy đủ; khi backfill nối đủ các khoảng, cùng dữ liệu trở thành hoàn chỉnh mà không đổi số lượng trade.
 - Benchmark trên cùng mẫu block/RPC: ghi baseline và kết quả sau từng tối ưu cho thời gian lấy launch mới, block/giây backfill, request/giây, tỷ lệ 429, số job lỗi và thời gian một vòng. Không tăng worker nếu throughput không tăng. Chạy test, integration test, lint, typecheck và build trước khi chuyển tiến trình đang chạy sang scheduler mới.
+- Báo cáo vận hành: cho từng nguồn và toàn pipeline, hiển thị safe head, block đã chứng nhận liên tục, số khoảng hoàn tất/rỗng/lỗi, tốc độ block/giây theo cửa sổ đo đủ dài, tỷ lệ RPC lỗi/429 và ETA quét hết lịch sử. ETA lấy số việc còn lại và throughput quan sát được của các nhóm phụ thuộc (không cộng đơn giản các nguồn đang chạy song song), kèm mốc đo và khoảng ước lượng; nếu mẫu chưa đủ, provider đang lỗi hoặc còn pool V4 chưa được phát hiện, ghi `ETA chưa đáng tin cậy` thay vì cho ngày giờ giả chính xác. So sánh baseline với từng giai đoạn tối ưu trên cùng dữ liệu mẫu.
 
 ## 7. Thứ tự triển khai dự kiến
 
