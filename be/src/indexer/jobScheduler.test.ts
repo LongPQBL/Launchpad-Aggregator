@@ -232,6 +232,75 @@ describe('bounded parallel job scheduler', () => {
     await running;
   });
 
+  it('halves an endpoint\'s effective concurrency after a 429, never below 1', async () => {
+    let attempt = 0;
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async () => {
+      attempt++;
+      if (attempt === 1) throw new Error('429 Too Many Requests');
+      return empty;
+    }, { shared: 4, trades: 1 });
+    setup.deps.getSafeHead = async () => 100_000n;
+    setup.deps.plannerOptions = { maxWindowBlocks: 1n, maxJobs: 50, targetWorkUnits: 1_000n };
+    const workerIdsByPass: Set<string>[] = [];
+    let currentPassIds = new Set<string>();
+    const originalClaim = setup.deps.claimJob;
+    setup.deps.claimJob = async (workerId, ...rest) => {
+      currentPassIds.add(workerId);
+      return originalClaim(workerId, ...rest);
+    };
+    const originalWait = setup.deps.wait;
+    // Advance the fake clock well past any 429 cooldown (retryDelayMs defaults to 65s for a plain
+    // "429" message with no reported reset time) so the next pass isn't skipped by cooldown itself.
+    setup.deps.wait = async (_ms, sig) => {
+      workerIdsByPass.push(currentPassIds);
+      currentPassIds = new Set();
+      await originalWait(70_000, sig);
+    };
+    setup.deps.once = false;
+    setup.deps.maxPasses = 2;
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    workerIdsByPass.push(currentPassIds);
+    const slotsInPass1 = new Set([...workerIdsByPass[0]].map((id) => id.split(':').pop()));
+    const slotsInPass2 = new Set([...workerIdsByPass[1]].map((id) => id.split(':').pop()));
+    expect(slotsInPass1.size).toBe(4); // ceiling used before any rate limit is observed
+    expect(slotsInPass2.size).toBe(2); // halved after pass 1's 429 (cooldown also elapses via wait())
+  });
+
+  it('recovers concurrency by one additive step per clean pass after backing off, capped at the configured ceiling', async () => {
+    let attempt = 0;
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async () => {
+      attempt++;
+      if (attempt === 1) throw new Error('429 Too Many Requests');
+      return empty;
+    }, { shared: 4, trades: 1 });
+    setup.deps.getSafeHead = async () => 100_000n;
+    setup.deps.plannerOptions = { maxWindowBlocks: 1n, maxJobs: 50, targetWorkUnits: 1_000n };
+    const workerIdsByPass: Set<string>[] = [];
+    let currentPassIds = new Set<string>();
+    const originalClaim = setup.deps.claimJob;
+    setup.deps.claimJob = async (workerId, ...rest) => {
+      currentPassIds.add(workerId);
+      return originalClaim(workerId, ...rest);
+    };
+    const originalWait = setup.deps.wait;
+    // Advance the fake clock well past any 429 cooldown (retryDelayMs defaults to 65s for a plain
+    // "429" message with no reported reset time) so the next pass isn't skipped by cooldown itself.
+    setup.deps.wait = async (_ms, sig) => {
+      workerIdsByPass.push(currentPassIds);
+      currentPassIds = new Set();
+      await originalWait(70_000, sig);
+    };
+    setup.deps.once = false;
+    setup.deps.maxPasses = 5; // pass1: 429 (->2); passes 2-5 clean: 2 -> 3 -> 4 -> 4 (capped)
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    workerIdsByPass.push(currentPassIds);
+    const slotCount = (pass: number) => new Set([...workerIdsByPass[pass]].map((id) => id.split(':').pop())).size;
+    expect(slotCount(1)).toBe(2);
+    expect(slotCount(2)).toBe(3);
+    expect(slotCount(3)).toBe(4);
+    expect(slotCount(4)).toBe(4);
+  });
+
   it('lets a dedicated trade endpoint progress while the shared endpoint is busy', async () => {
     let release!: () => void;
     const slow = new Promise<void>((resolve) => { release = resolve; });

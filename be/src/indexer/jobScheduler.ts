@@ -50,6 +50,21 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
   // across passes for the life of this call — so claim attempts cycle through sources instead of a
   // global lowest-block-first order always favoring whichever source happens to be least caught up.
   const roundRobin = new Map<string, number>();
+  // AIMD (TCP-congestion-control-style) concurrency per endpoint: deps.endpointLimits is the CEILING
+  // (the highest value already known safe from real benchmarking), not a fixed operating point. A 429
+  // multiplicatively halves the current value (floor 1); a pass that used the endpoint with no 429
+  // additively climbs it back by one step, never past the ceiling. This finds/re-finds a safe rate
+  // instead of always running at a stale hand-picked constant, and backs off fast but recovers gradually
+  // so a recovery doesn't immediately re-trigger the same rate limit.
+  const concurrencyLimits = new Map<string, number>();
+  function endpointCeiling(endpoint: string): number {
+    const ceiling = deps.endpointLimits[endpoint];
+    if (!Number.isSafeInteger(ceiling) || ceiling < 1) throw new Error(`Invalid endpoint worker limit: ${endpoint}`);
+    return ceiling;
+  }
+  function currentConcurrency(endpoint: string): number {
+    return Math.min(concurrencyLimits.get(endpoint) ?? endpointCeiling(endpoint), endpointCeiling(endpoint));
+  }
   const maxPasses = deps.once ? 1 : deps.maxPasses ?? Number.POSITIVE_INFINITY;
   let pass = 0;
   while (!signal.aborted && pass < maxPasses) {
@@ -99,6 +114,8 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
       }
       return null;
     }
+    const rateLimitedThisPass = new Set<string>();
+    const usedThisPass = new Set<string>();
     // Each worker slot loops claim -> execute -> commit/fail -> claim again until no more claimable
     // work remains (or it cools down / the pass ends), instead of doing exactly one claim and then
     // sitting idle until every other slot's Promise.all settles. Without this, one slow job holds the
@@ -109,6 +126,7 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
         if ((cooldowns.get(endpoint) ?? 0) > deps.now().getTime()) return;
         const job = await claimFairly(endpoint, workerId, sourceIds, lane);
         if (!job || signal.aborted) return;
+        usedThisPass.add(endpoint);
         const started = deps.now().getTime();
         try {
           const batch = await deps.executeJob(job, signal);
@@ -132,6 +150,8 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
           }
           if (/429|rate limit|too many requests|503|502/i.test(message)) {
             cooldowns.set(endpoint, deps.now().getTime() + retryDelayMs(message, 0));
+            rateLimitedThisPass.add(endpoint);
+            concurrencyLimits.set(endpoint, Math.max(1, Math.floor(currentConcurrency(endpoint) / 2)));
           }
           deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'failed',
             durationMs: Math.max(0, deps.now().getTime() - started), error: message });
@@ -140,10 +160,8 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
     };
     await Promise.all([
       ...[...byEndpoint].flatMap(([endpoint, sourceIds]) => {
-        const configured = deps.endpointLimits[endpoint];
-        if (!Number.isSafeInteger(configured) || configured < 1) throw new Error(`Invalid endpoint worker limit: ${endpoint}`);
         const reserved = endpoint === provisionalEndpoint ? provisionalWorkers : 0;
-        const limit = Math.max(0, configured - reserved);
+        const limit = Math.max(0, currentConcurrency(endpoint) - reserved);
         if ((cooldowns.get(endpoint) ?? 0) > deps.now().getTime()) return [];
         return Array.from({ length: limit }, (_, slot) => runWorkerLoop(endpoint, `${endpoint}:${slot}`, sourceIds, 'certified'));
       }),
@@ -152,6 +170,10 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
           runWorkerLoop(provisionalEndpoint, `${provisionalEndpoint}:provisional:${slot}`, factorySourceIds, 'provisional'))
         : []),
     ]);
+    for (const endpoint of usedThisPass) {
+      if (rateLimitedThisPass.has(endpoint)) continue;
+      concurrencyLimits.set(endpoint, Math.min(endpointCeiling(endpoint), currentConcurrency(endpoint) + 1));
+    }
     if (!deps.once && pass < maxPasses && !signal.aborted) await deps.wait(deps.pollMs, signal);
   }
 }
