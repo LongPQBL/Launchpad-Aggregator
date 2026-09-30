@@ -117,6 +117,25 @@ describe('index batch repository', () => {
     expect((await repository.getCursor('test-a')).scannedToBlock).toBe(101n);
   });
 
+  it('persists a batch with more trades than fit in one INSERT under the 65,535-bind-parameter limit', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const data = batch(4663, 'test-a');
+    const tradeCount = 3_700; // 18 columns × 3,700 = 66,600 > 65,535: must split into more than one INSERT
+    const extraTrades: Trade[] = [];
+    const extraLogs = [];
+    for (let i = 0; i < tradeCount; i++) {
+      const txHash = `0x${(i + 1).toString(16).padStart(64, '0')}` as Hash;
+      extraLogs.push({ chainId: 4663, sourceId: 'test-a', blockNumber: 100n, blockHash, txHash, logIndex: 1,
+        address: poolAddress, topics: [], data: '0x' as Hash });
+      extraTrades.push({ ...data.trades[0], txHash, logIndex: 1 });
+    }
+    await repository.saveIndexBatch('test-a', 100n, 100n, {
+      rawLogs: [data.rawLogs[0], ...extraLogs], launches: data.launches, venues: data.venues,
+      trades: extraTrades, transitions: [],
+    });
+    expect((await pool.query('SELECT count(*)::int AS count FROM trades')).rows[0].count).toBe(tradeCount);
+  });
+
   it('rejects stale lease owners and preserves job state when a batch transaction fails', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });

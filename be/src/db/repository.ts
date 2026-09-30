@@ -8,6 +8,7 @@ import type { PhaseReconciliation } from '../indexer/phaseReconcile.js';
 import type { NewScanJob, ScanJob } from '../indexer/jobTypes.js';
 import { retryDelayMs, safeErrorMessage } from '../indexer/scan.js';
 import type { Candle } from '../market/aggregate.js';
+import { chunkForInsert } from './chunk.js';
 import type { Database } from './client.js';
 import { candles, launches, lifecycleTransitions, observedBlocks, phaseObservations, rawLogs, scanJobs, sourceGaps, sources, trades, venues } from './schema.js';
 
@@ -228,7 +229,7 @@ export function createRepository(db: Database) {
           throw new Error(`Non-contiguous range for ${sourceId}: expected ${source.scannedToBlock + 1n}, got ${fromBlock}`);
         }
         if (batch.rawLogs.length) {
-          await tx.insert(rawLogs).values(batch.rawLogs.map((log) => ({
+          const rows = batch.rawLogs.map((log) => ({
             id: logKey(log.chainId, log.blockHash, log.txHash, log.logIndex),
             chainId: log.chainId,
             sourceId: log.sourceId,
@@ -239,10 +240,11 @@ export function createRepository(db: Database) {
             address: log.address.toLowerCase(),
             topics: log.topics.map((topic) => topic.toLowerCase()),
             data: log.data.toLowerCase(),
-          }))).onConflictDoNothing();
+          }));
+          for (const chunk of chunkForInsert(rows, 10)) await tx.insert(rawLogs).values(chunk).onConflictDoNothing();
         }
         if (batch.launches.length) {
-          await tx.insert(launches).values(batch.launches.map((launch) => ({
+          const rows = batch.launches.map((launch) => ({
             chainId: launch.chainId,
             tokenAddress: launch.tokenAddress.toLowerCase(),
             sourceId: launch.sourceId,
@@ -262,10 +264,11 @@ export function createRepository(db: Database) {
             lifecycleStatus: launch.lifecycleStatus,
             v4PoolFee: launch.v4PoolFee ?? null,
             v4TickSpacing: launch.v4TickSpacing ?? null,
-          }))).onConflictDoNothing();
+          }));
+          for (const chunk of chunkForInsert(rows, 19)) await tx.insert(launches).values(chunk).onConflictDoNothing();
         }
         if (batch.venues.length) {
-          await tx.insert(venues).values(batch.venues.map((venue) => ({
+          const rows = batch.venues.map((venue) => ({
             id: venue.id.toLowerCase(),
             chainId: venue.chainId,
             tokenAddress: venue.tokenAddress.toLowerCase(),
@@ -278,7 +281,8 @@ export function createRepository(db: Database) {
             effectiveToBlock: venue.effectiveToBlock,
             effectiveToLogIndex: venue.effectiveToLogIndex ?? null,
             official: venue.official,
-          }))).onConflictDoNothing();
+          }));
+          for (const chunk of chunkForInsert(rows, 12)) await tx.insert(venues).values(chunk).onConflictDoNothing();
         }
         if (batch.trades.length) {
           const ids = [...new Set(batch.trades.map((trade) => trade.venueId.toLowerCase()))];
@@ -294,7 +298,7 @@ export function createRepository(db: Database) {
               throw new Error('Trade is outside official venue position');
             }
           }
-          await tx.insert(trades).values(batch.trades.map((trade) => ({
+          const rows = batch.trades.map((trade) => ({
             chainId: trade.chainId,
             tokenAddress: trade.tokenAddress.toLowerCase(),
             venueId: trade.venueId.toLowerCase(),
@@ -313,7 +317,8 @@ export function createRepository(db: Database) {
             priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
             priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
             traderAddress: trade.traderAddress.toLowerCase(),
-          }))).onConflictDoNothing();
+          }));
+          for (const chunk of chunkForInsert(rows, 18)) await tx.insert(trades).values(chunk).onConflictDoNothing();
         }
         if (batch.transitions.length) {
           const logsById = new Map(batch.rawLogs.map((log) => [logKey(log.chainId, log.blockHash, log.txHash, log.logIndex), log]));
@@ -325,7 +330,7 @@ export function createRepository(db: Database) {
               throw new Error('Transition does not match its source log');
             }
           }
-          await tx.insert(lifecycleTransitions).values(batch.transitions.map((transition) => ({
+          const transitionRows = batch.transitions.map((transition) => ({
             sourceLogId: transition.sourceLogId,
             chainId: transition.chainId,
             tokenAddress: transition.tokenAddress.toLowerCase(),
@@ -336,7 +341,10 @@ export function createRepository(db: Database) {
             blockHash: transition.blockHash.toLowerCase(),
             txHash: transition.txHash.toLowerCase(),
             logIndex: transition.logIndex,
-          }))).onConflictDoNothing();
+          }));
+          for (const chunk of chunkForInsert(transitionRows, 10)) {
+            await tx.insert(lifecycleTransitions).values(chunk).onConflictDoNothing();
+          }
           for (const tokenAddress of new Set(batch.transitions.map((transition) => transition.tokenAddress.toLowerCase()))) {
             await tx.delete(phaseObservations).where(and(eq(phaseObservations.chainId, source.chainId),
               eq(phaseObservations.tokenAddress, tokenAddress)));

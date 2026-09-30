@@ -208,6 +208,13 @@ describe('safeErrorMessage', () => {
     expect(safeErrorMessage(outer)).not.toContain('SECRET-KEY');
   });
 
+  it('keeps a short root cause visible behind a very long outer message', () => {
+    const cause = new Error('insert or update on table "trades" violates foreign key constraint "trades_venue_id_venues_id_fk"');
+    const outer = new Error(`Failed query: insert into "trades" (...) values ${'($1, $2, $3), '.repeat(200)}`);
+    (outer as Error & { cause?: unknown }).cause = cause;
+    expect(safeErrorMessage(outer)).toContain('violates foreign key constraint');
+  });
+
   it('does not walk a cause cycle forever', () => {
     const a = new Error('a');
     const b = new Error('b');

@@ -38,20 +38,26 @@ export function scanChunkBounds(maxChunk: bigint): Pick<ScanDeps, 'initialChunk'
   return { initialChunk: maxChunk < 10_000n ? maxChunk : 10_000n, maxChunk };
 }
 
+// Caps each level of the cause chain individually (not the joined total) so a long outer wrapper
+// message — e.g. drizzle-orm's "Failed query" dump of a large parameterized INSERT — cannot crowd out
+// the actually diagnostic root cause (e.g. the underlying Postgres constraint violation).
+const MAX_PART_LENGTH = 300;
+
 function errorMessage(error: unknown): string {
   const seen = new Set<unknown>();
   const parts: string[] = [];
   let current = error;
   while (current !== undefined && current !== null && !seen.has(current)) {
     seen.add(current);
-    parts.push(current instanceof Error ? current.message : String(current));
+    const message = current instanceof Error ? current.message : String(current);
+    parts.push(message.length > MAX_PART_LENGTH ? `${message.slice(0, MAX_PART_LENGTH)}…` : message);
     current = current instanceof Error ? current.cause : undefined;
   }
   return parts.join(' — caused by: ');
 }
 
 export function safeErrorMessage(error: unknown): string {
-  return errorMessage(error).replace(/https?:\/\/[^\s"'\\]+/g, '[RPC endpoint]').slice(0, 1_024);
+  return errorMessage(error).replace(/https?:\/\/[^\s"'\\]+/g, '[RPC endpoint]').slice(0, 4_096);
 }
 
 function isHistoricalGap(message: string): boolean {
