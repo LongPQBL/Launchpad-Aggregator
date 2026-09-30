@@ -33,4 +33,22 @@ describe('official trade source runtime', () => {
       return [];
     })).rejects.toThrow(/RPC group failed/);
   });
+
+  it('fires more than 4 address groups concurrently instead of throttling to the old cap', async () => {
+    // Measured 2026-09-30 against Validation Cloud: 14 concurrent 5,000-address getLogs calls
+    // (pons-v1-active-trades' real group count) succeeded repeatedly with no errors in ~7-9s total,
+    // vs the old cap of 4 concurrent groups serializing them into ~4 sequential rounds.
+    const source = { ...getTradeSourceDefinitions()[0].source, addresses: Array.from({ length: 14 }, (_, index) =>
+      `0x${index.toString(16).padStart(40, '0')}` as const) };
+    const started: number[] = [];
+    const releases: Array<() => void> = [];
+    const resultPromise = getGroupedTradeLogs(source, 100n, 200n, 1, (group) => {
+      started.push(group.addresses.length);
+      return new Promise((resolve) => { releases.push(() => resolve([])); });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(started).toHaveLength(14);
+    for (const release of releases) release();
+    await resultPromise;
+  });
 });

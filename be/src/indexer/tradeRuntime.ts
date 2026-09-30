@@ -19,6 +19,11 @@ export interface TradeSourceDefinition { source: LogSource; venueKind: VenueKind
 // 1000-selector hard cap required.
 export const MAX_ADDRESSES_PER_LOG_QUERY = 5_000;
 
+// Measured 2026-09-30 against Validation Cloud: 14 concurrent 5,000-address getLogs calls (the
+// real group count pons-v1-active-trades needs) succeeded repeatedly with zero errors in ~7-9s
+// total. The old cap of 4 forced that into ~4 sequential rounds for no measured benefit.
+export const TRADE_LOG_GROUP_CONCURRENCY = 20;
+
 export function getTradeSourceDefinitions(): TradeSourceDefinition[] {
   const factories = getPonsFactorySources();
   return [
@@ -58,7 +63,7 @@ export async function getGroupedTradeLogs(source: LogSource, fromBlock: bigint, 
   }
   const results: Log[][] = Array.from({ length: groups.length }, () => []);
   let next = 0;
-  await Promise.all(Array.from({ length: Math.min(4, groups.length) }, async () => {
+  await Promise.all(Array.from({ length: Math.min(TRADE_LOG_GROUP_CONCURRENCY, groups.length) }, async () => {
     while (next < groups.length) {
       const index = next++;
       results[index] = [...await fetch(groups[index], fromBlock, toBlock)];
