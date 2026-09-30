@@ -177,3 +177,52 @@ export const observedBlocks = pgTable('observed_blocks', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.number] }),
 ]);
+
+// Isolated shadow copies of launches/venues/trades, written only by the Envio sync layer
+// (be/src/envioSync/) during the Phase 1 parallel-run slice — never read by the real API, no
+// foreign keys to the real tables. See docs/superpowers/specs/2026-09-30-envio-indexer-migration-design.md.
+export const launchesEnvioStaging = pgTable('launches_envio_staging', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  name: text('name').notNull(),
+  symbol: text('symbol').notNull(),
+  tokenDecimals: integer('token_decimals').notNull(),
+  platform: text('platform').notNull(),
+  protocolVersion: text('protocol_version').notNull(),
+  factoryAddress: text('factory_address').notNull(),
+  deployerAddress: text('deployer_address').notNull(),
+  launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
+  launchTxHash: text('launch_tx_hash').notNull(),
+  quoteAssetAddress: text('quote_asset_address').notNull(),
+  quoteAssetSymbol: text('quote_asset_symbol').notNull(),
+  quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
+  lifecycleStatus: text('lifecycle_status').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+]);
+
+export const venuesEnvioStaging = pgTable('venues_envio_staging', {
+  id: text('id').primaryKey(),
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  kind: text('kind').notNull(),
+  ref: text('ref').notNull(),
+  effectiveFromBlock: bigint('effective_from_block', { mode: 'bigint' }).notNull(),
+  official: boolean('official').notNull(),
+});
+
+export const tradesEnvioStaging = pgTable('trades_envio_staging', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  venueId: text('venue_id').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+  timestamp: integer('timestamp').notNull(),
+  side: text('side').notNull(),
+  tokenAmountRaw: numeric('token_amount_raw', { precision: 78, scale: 0 }).notNull(),
+  quoteAmountRaw: numeric('quote_amount_raw', { precision: 78, scale: 0 }).notNull(),
+  activityKind: text('activity_kind').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
+]);
