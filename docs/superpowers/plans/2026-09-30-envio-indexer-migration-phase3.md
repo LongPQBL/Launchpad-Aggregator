@@ -250,7 +250,7 @@ indexer.onEvent(
       sqrtPriceX96: event.params.sqrtPriceX96,
       liquidity: event.params.liquidity,
       tick: Number(event.params.tick),
-      fee: event.params.fee,
+      fee: Number(event.params.fee),
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
