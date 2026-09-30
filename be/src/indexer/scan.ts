@@ -84,7 +84,12 @@ function isTransient(message: string): boolean {
 export function retryDelayMs(message: string, attempt: number): number {
   const resetMatch = message.match(/reset in (\d+)\s*seconds?/i);
   if (resetMatch) return Number(resetMatch[1]) * 1000 + 1_000;
-  if (isTransient(message)) return 65_000;
+  // A range-limit failure (e.g. an exceptionally dense block's log response is too large even at
+  // scanToHead's smallest 1-block chunk) is deterministic, not transient: retrying sooner cannot
+  // change the outcome. Waiting the same flat ~60s as a rate limit, instead of the short
+  // exponential cap, avoids hammering the RPC on a query that cannot succeed no matter how fast
+  // it's retried — found live (2026-09-30) hammering one job 540+ times on the short cap.
+  if (isTransient(message) || isRangeLimit(message)) return 65_000;
   return Math.min(250 * 2 ** attempt, 8_000);
 }
 

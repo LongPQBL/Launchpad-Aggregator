@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Address } from 'viem';
 import type { IndexBatch, SourceCursor, Venue } from '../domain/types.js';
 import { groupVenueQueries } from './groupQueries.js';
-import { safeErrorMessage, scanChunkBounds, scanToHead, type LogSource, type ScanDeps } from './scan.js';
+import { retryDelayMs, safeErrorMessage, scanChunkBounds, scanToHead, type LogSource, type ScanDeps } from './scan.js';
 import { getFactoryLogSources, runIndexerOnce } from '../cli/indexer.js';
 
 const address = '0x1111111111111111111111111111111111111111' as Address;
@@ -206,6 +206,21 @@ describe('bounded HTTP scanner', () => {
     expect(delays).toEqual([61_000]);
     expect(report.missingRanges).toEqual([]);
     expect(setup.getCursor()).toBe(12n);
+  });
+});
+
+describe('retryDelayMs', () => {
+  // Found live 2026-09-30: an exceptionally dense V4 pool's window kept failing "response too
+  // large" even at scanToHead's smallest chunk (1 block) — the same query can never succeed no
+  // matter how soon it's retried, but the job-queue's own per-job backoff (repository.failScanJob)
+  // only recognized isTransient messages as worth a long wait, so this deterministic failure was
+  // retried on the short ~8s exponential cap instead — 540 claims and counting, hammering the RPC
+  // for no benefit. A range-limit message deserves the same long wait as a rate limit: retrying
+  // immediately cannot change the outcome, so there is nothing to gain from retrying fast.
+  it('waits the same long, flat delay for a range-limit message as for a rate limit', () => {
+    expect(retryDelayMs('response too large', 0)).toBe(65_000);
+    expect(retryDelayMs('payload too large', 3)).toBe(65_000);
+    expect(retryDelayMs('log response size exceeded', 0)).toBe(65_000);
   });
 });
 
