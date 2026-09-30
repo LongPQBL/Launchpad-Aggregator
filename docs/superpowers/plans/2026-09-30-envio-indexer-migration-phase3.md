@@ -137,11 +137,11 @@ indexer.onEvent(
       poolId: event.params.id.toLowerCase(),
       currency0: event.params.currency0.toLowerCase(),
       currency1: event.params.currency1.toLowerCase(),
-      fee: event.params.fee,
-      tickSpacing: event.params.tickSpacing,
+      fee: Number(event.params.fee),
+      tickSpacing: Number(event.params.tickSpacing),
       hooks: event.params.hooks.toLowerCase(),
       sqrtPriceX96: event.params.sqrtPriceX96,
-      tick: event.params.tick,
+      tick: Number(event.params.tick),
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
@@ -151,7 +151,7 @@ indexer.onEvent(
 );
 ```
 
-`event.params.fee`/`tickSpacing`/`tick` are the raw ABI `uint24`/`int24` types — if `pnpm codegen`/`tsc` reports these as `bigint` instead of `number` (Phase 2's Task 3 found V1's `tick` — an `int24` — was typed `bigint`, needing `Number(...)`), apply the same real-compiler-feedback fix here.
+`event.params.fee`/`tickSpacing`/`tick` (the raw ABI `uint24`/`int24` types) already have `Number(...)` applied above — confirmed necessary via real `tsc` output while executing this task (same finding as Phase 2's Task 3 for V1's `tick`).
 
 - [ ] **Step 4: Codegen and typecheck**
 
