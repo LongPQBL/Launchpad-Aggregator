@@ -113,13 +113,17 @@ describe('bounded HTTP scanner', () => {
     expect(setup.getCursor()).toBe(10n);
   });
 
-  it('backs off up to 8s (not the old 2s cap) so a real rate-limit window has a chance to clear', async () => {
+  it('waits a full ~60s on a plain rate-limit message with no reported reset time, not a short exponential backoff', async () => {
+    // Real evidence (2026-09-30): this RPC's 429 sometimes omits "reset in N seconds" and just
+    // says "Too Many Requests" — a short exponential backoff (capped at 8s) exhausts all retries
+    // in well under the real ~60s window every time, permanently stalling the source on the same
+    // block range every cycle. See README.md.
     const delays: number[] = [];
     const setup = depsFor(async () => { throw new Error('429 Too Many Requests'); });
     setup.deps.maxRetries = 5;
     setup.deps.sleep = async (ms) => { delays.push(ms); };
     await scanToHead(source, 10n, setup.deps);
-    expect(delays).toEqual([250, 500, 1000, 2000, 4000]);
+    expect(delays).toEqual([65_000, 65_000, 65_000, 65_000, 65_000]);
   });
 
   it('eventually gives up a persistent rate limit as a gap, without advancing the checkpoint', async () => {

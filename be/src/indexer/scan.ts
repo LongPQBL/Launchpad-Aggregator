@@ -52,11 +52,16 @@ function isTransient(message: string): boolean {
 // Some rate-limit responses report exactly how long the window has left (e.g. "limit will
 // reset in 60 seconds") — honor that instead of the short exponential backoff, which gives up
 // long before a real reset window clears and leaves a gap that only a later manual rescan fills.
+// This RPC's 429 sometimes omits the reset time and just says "Too Many Requests" — real
+// evidence (2026-09-30) shows the underlying window is still ~60s even then, so a rate-limit
+// match with no explicit reset time defaults to the same ~60s wait rather than a short backoff
+// that exhausts every retry long before the window actually clears.
 // Exported so one-off scripts that hit this RPC directly (e.g. backfillTraderAddress.ts) reuse
 // the same wait instead of a shorter backoff that crashes on the same message.
 export function retryDelayMs(message: string, attempt: number): number {
   const resetMatch = message.match(/reset in (\d+)\s*seconds?/i);
   if (resetMatch) return Number(resetMatch[1]) * 1000 + 1_000;
+  if (isTransient(message)) return 65_000;
   return Math.min(250 * 2 ** attempt, 8_000);
 }
 
