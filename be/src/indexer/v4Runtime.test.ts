@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { encodeEventTopics, type Address, type Hash, type Log } from 'viem';
+import { encodeAbiParameters, encodeEventTopics, type Address, type Hash, type Log } from 'viem';
 import type { Launch, Venue } from '../domain/types.js';
 import { scanToHead } from './scan.js';
 import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
@@ -86,6 +86,20 @@ describe('official Pons V4 swap runtime', () => {
     expect(batch.trades).toHaveLength(1);
     expect(batch.trades[0].activityKind).toBe('protocol_fee_conversion');
     expect(batch.rawLogs).toHaveLength(1);
+  });
+
+  it('keeps a zero-leg V4 swap as raw evidence without inventing a priced trade', async () => {
+    const { createV4TradeDecoder, getV4PoolSources } = await import('./v4Runtime.js');
+    const [source] = getV4PoolSources([context], poolManager);
+    const dust = { ...asLog(swap),
+      data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' },
+        { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+      [0n, -2_151_085n, 950_082_850_365_762_154_825_372_512_040_952n, 1n, 0, 0]) } as Log;
+    const decoder = createV4TradeDecoder(context, async (blocks) => new Map(blocks.map((block) => [block,
+      { timestamp: 1_700_000_000, traders: new Map([[dust.transactionHash!, trader]]) }])), poolManager, hook);
+    const batch = await decoder([dust], source);
+    expect(batch.trades).toEqual([]);
+    expect(batch.rawLogs).toMatchObject([{ txHash: dust.transactionHash, sourceId: source.id }]);
   });
 
   it('fetches all distinct blocks in a single batch call instead of one round trip per block', async () => {

@@ -113,6 +113,28 @@ describe('pons v2 official V4 pool', () => {
     expect(decodePonsV4Swap({ ...swap, topics: [swap.topics[0], '0x' + '11'.repeat(32) as Hash, ...swap.topics.slice(2)] }, poolId, launch, venue, 1_700_000_000, trader, fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
   });
 
+  it('ignores a real zero-leg V4 swap that cannot form a priced trade', () => {
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
+    // Observed on Robinhood at block 31,130,655: amount0=0, amount1=-2,151,085.
+    const dust = { ...asLog(fixture.swap as Record<string, unknown>),
+      data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' },
+        { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+      [0n, -2_151_085n, 950_082_850_365_762_154_825_372_512_040_952n, 1n, 0, 0]) };
+    expect(decodePonsV4Swap(dust, poolId, launch, venue, 1_700_000_000, trader,
+      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toBeNull();
+  });
+
+  it('still rejects V4 swaps whose two nonzero legs have the same sign', () => {
+    const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
+      { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;
+    const malformed = { ...asLog(fixture.swap as Record<string, unknown>),
+      data: encodeAbiParameters([{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' },
+        { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }], [1n, 2n, 2n ** 96n, 1n, 0, 0]) };
+    expect(() => decodePonsV4Swap(malformed, poolId, launch, venue, 1_700_000_000, trader,
+      fixture.poolManagerAddress as Address, fixture.hookAddress as Address)).toThrow(/Invalid V4 swap amounts/);
+  });
+
   it('keeps a hook-initiated fee conversion as a protocol trade in pool volume', () => {
     const venue = transitionOfficialVenue(launch, curveVenue, 2, { blockNumber: 27_828_161n, logIndex: 16 },
       { poolId, sourceLogId: 'initialize-log', sourceId: 'pons-v2-lifecycle' }).openedPool!;

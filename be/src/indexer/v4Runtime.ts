@@ -1,4 +1,4 @@
-import { isHash, type Address, type Hash, type Log } from 'viem';
+import { isHash, toEventSelector, type Address, type Hash, type Log } from 'viem';
 import type { IndexBatch, RawLog } from '../domain/types.js';
 import type { RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { decodePonsV4Swap, v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
@@ -54,16 +54,17 @@ export function createV4TradeDecoder(context: VenueContext, getBlocksData: GetBl
       }
       return log;
     });
-    const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
+    const relevantLogs = verifiedLogs.filter((log) => log.address.toLowerCase() === poolManager.toLowerCase()
+      && log.topics[0] === toEventSelector(v4SwapEvent) && log.topics[1]?.toLowerCase() === poolId);
+    const uniqueBlocks = [...new Set(relevantLogs.map((log) => log.blockNumber))];
     const blocks = await getBlocksData(uniqueBlocks);
     const rawLogs: RawLog[] = [];
     const trades: IndexBatch['trades'][number][] = [];
-    for (const log of verifiedLogs) {
+    for (const log of relevantLogs) {
       const data = blocks.get(log.blockNumber)!;
       const trader = data.traders.get(log.transactionHash)!;
       const trade = decodePonsV4Swap(log, poolId, context.launch, context.venue, data.timestamp, trader, poolManager, hook);
-      if (!trade) continue;
-      trades.push(trade);
+      if (trade) trades.push(trade);
       rawLogs.push({ chainId: source.chainId, sourceId, blockNumber: log.blockNumber, blockHash: log.blockHash,
         txHash: log.transactionHash, logIndex: log.logIndex, address: log.address, topics: log.topics, data: log.data });
     }

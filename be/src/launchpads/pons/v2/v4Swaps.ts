@@ -23,7 +23,8 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
   const tokenIsCurrency0 = launch.tokenAddress.toLowerCase() < launch.quoteAsset.address.toLowerCase();
   const tokenSigned = tokenIsCurrency0 ? decoded.args.amount0 : decoded.args.amount1;
   const quoteSigned = tokenIsCurrency0 ? decoded.args.amount1 : decoded.args.amount0;
-  if (tokenSigned === 0n || quoteSigned === 0n || tokenSigned * quoteSigned >= 0n || decoded.args.sqrtPriceX96 === 0n) {
+  if (tokenSigned === 0n || quoteSigned === 0n) return null;
+  if (tokenSigned * quoteSigned >= 0n || decoded.args.sqrtPriceX96 === 0n) {
     throw new Error('Invalid V4 swap amounts or price');
   }
   const q192 = 2n ** 192n;
