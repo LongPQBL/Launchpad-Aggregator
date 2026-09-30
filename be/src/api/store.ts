@@ -14,13 +14,37 @@ const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
 function string(value: unknown): string { return String(value); }
 function number(value: unknown): number { return Number(value); }
 
-function summary(row: Row, coverageStatus: string): LaunchSummary {
+// Per-launch coverage, not the global `coverage()` below: a launch's 24h volume/price/candles are
+// complete only if ITS OWN factory, lifecycle (v2) and official venue trade sources are each
+// certified to safe head — not every source ever discovered for the whole chain (docs/superpowers/
+// specs/2026-09-30-parallel-indexer-design.md §5). The trade-source-id-from-venue-kind mapping
+// mirrors getTradeSourceDefinitions()/getV4PoolSources(); update both together if either changes.
+function launchCoverageSql(headParamIndex: number): string {
+  return `(
+    SELECT $${headParamIndex}::bigint IS NOT NULL AND count(*) = count(src.id)
+      AND coalesce(bool_and(src.confirmed_to_block >= $${headParamIndex}::bigint), false)
+    FROM (
+      SELECT l.source_id AS id
+      UNION ALL SELECT 'pons-v2-lifecycle' WHERE l.protocol_version = 'v2'
+      UNION ALL SELECT CASE v.kind
+          WHEN 'v4_pool' THEN 'pons-v2-v4:' || v.ref
+          WHEN 'curve' THEN 'pons-v2-curve'
+          WHEN 'v3_pool' THEN l.source_id || '-trades'
+        END AS id
+      FROM venues v WHERE v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true
+    ) req
+    LEFT JOIN sources src ON src.id = req.id
+  )`;
+}
+
+function summary(row: Row, complete: boolean): LaunchSummary {
+  const coverageStatus = complete ? 'caught_up' : 'backfilling';
   return {
     chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: string(row.name), symbol: string(row.symbol),
     platform: string(row.platform), protocolVersion: string(row.protocol_version),
     quoteAsset: { address: string(row.quote_asset_address), symbol: string(row.quote_asset_symbol), decimals: number(row.quote_asset_decimals) },
     lifecycleStatus: string(row.lifecycle_status),
-    officialVolume24h: coverageStatus === 'caught_up' && row.official_volume_raw !== undefined
+    officialVolume24h: complete && row.official_volume_raw !== undefined
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
     coverageStatus,
   };
@@ -35,6 +59,10 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row) => T): Pag
 }
 
 export function createApiStore(pool: Pool): ApiDeps['data'] {
+  async function safeHead(): Promise<bigint | null> {
+    const result = await pool.query('SELECT max(number) AS safe_head FROM observed_blocks WHERE chain_id = 4663');
+    return result.rows[0]?.safe_head === null ? null : BigInt(string(result.rows[0].safe_head));
+  }
   async function coverage() {
     const [sourceResult, headResult, gapResult, poolResult, phaseResult] = await Promise.all([
       pool.query('SELECT id, status, confirmed_to_block, start_block FROM sources'),
@@ -67,15 +95,15 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
     },
     getCoverage: coverage,
     async listLaunches(query: LaunchListQuery) {
-      const status = await coverage();
-      const coverageStatus = status.complete ? 'caught_up' : 'backfilling';
+      const head = await safeHead();
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       const since = Math.floor(Date.now() / 1000) - 86_400;
       const result = await pool.query(`
         SELECT l.*, s.status AS source_status, r.block_number, r.tx_hash, r.log_index,
           (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
            WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
-             AND t.timestamp >= $6) AS official_volume_raw
+             AND t.timestamp >= $6) AS official_volume_raw,
+          ${launchCoverageSql(9)} AS launch_coverage_complete
         FROM launches l JOIN sources s ON s.id = l.source_id JOIN raw_logs r ON r.id = l.source_log_id
         WHERE ($1::integer IS NULL OR l.chain_id = $1)
           AND ($2::bigint IS NULL OR (r.block_number, r.tx_hash, r.log_index) < ($2::bigint, $3::text, $4::integer))
@@ -83,20 +111,23 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
           AND ($8::text IS NULL OR l.lifecycle_status = $8)
         ORDER BY r.block_number DESC, r.tx_hash DESC, r.log_index DESC LIMIT $5`,
       [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
-        query.search ?? null, query.status ?? null]);
-      return page(result.rows as Row[], query.limit, (row) => summary(row, coverageStatus));
+        query.search ?? null, query.status ?? null, head?.toString() ?? null]);
+      return page(result.rows as Row[], query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete)));
     },
     async getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
-      const status = await coverage();
+      const head = await safeHead();
       const since = Math.floor(Date.now() / 1000) - 86_400;
       const result = await pool.query(`SELECT l.*, s.status AS source_status,
         (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
          WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
-           AND t.timestamp >= $3) AS official_volume_raw
+           AND t.timestamp >= $3) AS official_volume_raw,
+        ${launchCoverageSql(4)} AS launch_coverage_complete
         FROM launches l JOIN sources s ON s.id = l.source_id
-        WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`, [chainId, tokenAddress.toLowerCase(), since]);
+        WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
+      [chainId, tokenAddress.toLowerCase(), since, head?.toString() ?? null]);
       const row = result.rows[0] as Row | undefined;
       if (!row) return null;
+      const complete = Boolean(row.launch_coverage_complete);
       const venueRows = await pool.query(`SELECT id, kind, ref, effective_from_block, effective_to_block FROM venues
         WHERE chain_id = $1 AND token_address = $2 AND official = true ORDER BY effective_from_block`, [chainId, tokenAddress.toLowerCase()]);
       const lastPrice = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, v.kind AS venue_kind FROM trades t
@@ -104,11 +135,11 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         AND v.official = true AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
-      return { ...summary(row, status.complete ? 'caught_up' : 'backfilling'), officialVenues: venueRows.rows.map((venue: Row) => ({
+      return { ...summary(row, complete), officialVenues: venueRows.rows.map((venue: Row) => ({
         id: string(venue.id), kind: string(venue.kind), ref: string(venue.ref),
         effectiveFromBlock: string(venue.effective_from_block),
         effectiveToBlock: venue.effective_to_block === null ? null : string(venue.effective_to_block),
-      })), priceQuote: status.complete && priced
+      })), priceQuote: complete && priced
         ? formatRational(BigInt(string(priced.price_numerator_raw)), BigInt(string(priced.price_denominator_raw)), 18) : null,
       priceStale: row.protocol_version === 'v2' && row.lifecycle_status !== 'trading'
         && (row.lifecycle_status !== 'graduated' || priced?.venue_kind !== 'v4_pool') };
@@ -134,8 +165,11 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
       })) as Page<TradeResponse>;
     },
     async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
-      const launchResult = await pool.query(`SELECT quote_asset_address, quote_asset_decimals FROM launches
-        WHERE chain_id = $1 AND token_address = $2 LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
+      const head = await safeHead();
+      const launchResult = await pool.query(`SELECT quote_asset_address, quote_asset_decimals,
+        ${launchCoverageSql(3)} AS launch_coverage_complete
+        FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
+      [chainId, tokenAddress.toLowerCase(), head?.toString() ?? null]);
       const launch = launchResult.rows[0] as Row | undefined;
       if (!launch) return { items: [], complete: false };
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
@@ -158,7 +192,8 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
       const candles = buildOfficialCandles(mapped, intervalSeconds, { chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
         quoteAssetAddress: string(launch.quote_asset_address) as Address,
         venueIds: new Set(rows.map((row) => string(row.venue_id))), complete: true });
-      return { complete: (await coverage()).complete && !rows.some((row) => row.price_numerator_raw === null || row.price_denominator_raw === null),
+      return { complete: Boolean(launch.launch_coverage_complete)
+        && !rows.some((row) => row.price_numerator_raw === null || row.price_denominator_raw === null),
         items: candles.reverse().map((candle) => ({ intervalSeconds, bucketStart: candle.bucketStart,
         open: candle.open, high: candle.high, low: candle.low, close: candle.close,
         quoteVolume: formatUnits(candle.quoteVolumeRaw, number(launch.quote_asset_decimals)),

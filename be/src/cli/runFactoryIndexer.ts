@@ -390,6 +390,11 @@ async function runJobsMode(): Promise<void> {
     leaseMs: 120_000,
     pollMs: 5_000,
     onReport: (report) => console.log(JSON.stringify(report)),
+    // Reserve 1 of the shared endpoint's 3 workers for near-head factory scans so new launches
+    // surface at safe head without waiting behind historical backfill (docs/superpowers/specs/
+    // 2026-09-30-parallel-indexer-design.md §4.1); the other 2 keep backfilling certified history.
+    enqueueProvisionalWindow: repository.replaceProvisionalWindow.bind(repository),
+    provisionalWorkers: 1,
   };
   await runJobScheduler(deps, abortController.signal);
 }

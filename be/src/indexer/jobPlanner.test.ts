@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dependencyFrontier, planCertifiedJobs } from './jobPlanner.js';
+import { dependencyFrontier, isFactorySource, planCertifiedJobs, planProvisionalWindow } from './jobPlanner.js';
 
 const small = { maxWindowBlocks: 2n, maxJobs: 20, targetWorkUnits: 1_000n };
 const noPools = async () => 0;
@@ -55,5 +55,30 @@ describe('parallel scan job planner', () => {
       { fromBlock: 100n, toBlock: 104n }, { fromBlock: 105n, toBlock: 109n },
       { fromBlock: 110n, toBlock: 111n }, { fromBlock: 112n, toBlock: 113n },
     ]);
+  });
+
+  it('recognizes only registered Pons factory sources', () => {
+    expect(isFactorySource('pons-v1-legacy')).toBe(true);
+    expect(isFactorySource('pons-v1-active')).toBe(true);
+    expect(isFactorySource('pons-v2')).toBe(true);
+    expect(isFactorySource('pons-v2-lifecycle')).toBe(false);
+    expect(isFactorySource('pons-v1-active-trades')).toBe(false);
+    expect(isFactorySource(`pons-v2-v4:0x${'a'.repeat(64)}`)).toBe(false);
+  });
+
+  it('plans a single near-head provisional window clipped to source startBlock', () => {
+    const source = { id: 'pons-v1-active', startBlock: 100n };
+    expect(planProvisionalWindow(source, 150n, 20n)).toEqual({ fromBlock: 131n, toBlock: 150n });
+    expect(planProvisionalWindow(source, 110n, 20n)).toEqual({ fromBlock: 100n, toBlock: 110n });
+  });
+
+  it('returns null for a provisional window when safe head has not reached the source startBlock', () => {
+    expect(planProvisionalWindow({ id: 'pons-v1-active', startBlock: 100n }, 99n, 20n)).toBeNull();
+  });
+
+  it('rejects an invalid provisional window size', () => {
+    const source = { id: 'pons-v1-active', startBlock: 100n };
+    expect(() => planProvisionalWindow(source, 150n, 0n)).toThrow('Invalid scan job planning bounds');
+    expect(() => planProvisionalWindow(source, 150n, 2_001n)).toThrow('Invalid scan job planning bounds');
   });
 });

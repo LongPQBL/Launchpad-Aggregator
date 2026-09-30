@@ -26,6 +26,22 @@ export function dependencyFrontier(sourceId: string, frontiers: ReadonlyMap<stri
   return { ready: true, maximumBlock: (values as bigint[]).reduce((lowest, value) => value < lowest ? value : lowest) };
 }
 
+export function isFactorySource(sourceId: string): boolean {
+  return getPonsFactorySources().some((factory) => factory.id === sourceId);
+}
+
+// Near-head provisional window: always [safeHead - windowBlocks + 1, safeHead] clipped to the source's
+// startBlock, so new launches surface before historical backfill certifies the same range. Unlike
+// planCertifiedJobs this never checks dependencyFrontier — a provisional trade/lifecycle scan is allowed
+// to run against whatever venues are currently known, since it can never certify coverage (see
+// persistBatchInTransaction's 'provisional' mode).
+export function planProvisionalWindow(source: SourceDefinition, safeHead: bigint, windowBlocks: bigint): ScanWindow | null {
+  if (windowBlocks < 1n || windowBlocks > 2_000n) throw new Error('Invalid scan job planning bounds');
+  if (safeHead < source.startBlock) return null;
+  const fromBlock = safeHead - windowBlocks + 1n > source.startBlock ? safeHead - windowBlocks + 1n : source.startBlock;
+  return { fromBlock, toBlock: safeHead };
+}
+
 export async function planCertifiedJobs(source: SourceDefinition, fromBlock: bigint, safeHead: bigint,
   upstreamFrontiers: ReadonlyMap<string, bigint>, estimatePoolCount: (fromBlock: bigint, toBlock: bigint) => Promise<number>,
   options?: Partial<PlannerOptions>): Promise<ScanWindow[]> {

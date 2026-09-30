@@ -375,7 +375,29 @@ export function createRepository(db: Database) {
       });
     },
 
-    async claimScanJob(workerId: string, now: Date, leaseMs: number, allowedSourceIds?: readonly string[]): Promise<ScanJob | null> {
+    // Provisional jobs never certify coverage, so an older pending/failed near-head window is pure
+    // noise once a fresher one exists for the same source — discard it instead of leaving claimJob
+    // to work through a growing backlog of stale near-head ranges ordered before the current head.
+    // A 'leased' row is being executed right now and is left alone.
+    async replaceProvisionalWindow(sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<ScanJob> {
+      if (fromBlock > toBlock || fromBlock < 0n) throw new Error('Invalid scan job range');
+      const id = `${sourceId}:provisional:${fromBlock}-${toBlock}`;
+      return db.transaction(async (tx) => {
+        const [source] = await tx.select().from(sources).where(eq(sources.id, sourceId)).for('update');
+        if (!source) throw new Error(`Unknown source: ${sourceId}`);
+        if (fromBlock < source.startBlock) throw new Error('Job starts before source deployment');
+        await tx.delete(scanJobs).where(and(eq(scanJobs.sourceId, sourceId), eq(scanJobs.lane, 'provisional'),
+          inArray(scanJobs.status, ['pending', 'failed']), ne(scanJobs.id, id)));
+        const [existing] = await tx.select().from(scanJobs).where(eq(scanJobs.id, id)).limit(1);
+        if (existing) return scanJob(existing);
+        const [row] = await tx.insert(scanJobs).values({ id, sourceId, lane: 'provisional',
+          fromBlock, toBlock, status: 'pending' }).returning();
+        return scanJob(row);
+      });
+    },
+
+    async claimScanJob(workerId: string, now: Date, leaseMs: number, allowedSourceIds?: readonly string[],
+      lane?: 'certified' | 'provisional'): Promise<ScanJob | null> {
       if (!workerId || !Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 3_600_000) {
         throw new Error('Invalid scan job lease');
       }
@@ -383,8 +405,10 @@ export function createRepository(db: Database) {
       return db.transaction(async (tx) => {
         const claimable = or(eq(scanJobs.status, 'pending'),
           and(inArray(scanJobs.status, ['leased', 'failed']), lte(scanJobs.leaseUntil, now)));
-        const [candidate] = await tx.select().from(scanJobs).where(allowedSourceIds
-          ? and(claimable, inArray(scanJobs.sourceId, [...allowedSourceIds])) : claimable)
+        const filters = [claimable,
+          ...(allowedSourceIds ? [inArray(scanJobs.sourceId, [...allowedSourceIds])] : []),
+          ...(lane ? [eq(scanJobs.lane, lane)] : [])];
+        const [candidate] = await tx.select().from(scanJobs).where(and(...filters))
           .orderBy(scanJobs.fromBlock, scanJobs.id).limit(1).for('update', { skipLocked: true });
         if (!candidate) return null;
         const [row] = await tx.update(scanJobs).set({ status: 'leased', leaseOwner: workerId,

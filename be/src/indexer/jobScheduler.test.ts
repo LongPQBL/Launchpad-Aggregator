@@ -25,11 +25,17 @@ function harness(sources: SourceDefinition[], frontiers: ReadonlyMap<string, big
       if (!jobs.some((job) => job.id === id)) jobs.push({ ...input, id, generation: 0n,
         status: 'pending', leaseOwner: null, leaseUntil: null });
     },
-    claimJob: async (owner, _time, _leaseMs, allowed) => {
-      const job = jobs.find((item) => item.status === 'pending' && allowed.includes(item.sourceId));
+    claimJob: async (owner, _time, _leaseMs, allowed, lane) => {
+      const job = jobs.find((item) => item.status === 'pending' && allowed.includes(item.sourceId)
+        && (!lane || item.lane === lane));
       if (!job) return null;
       job.status = 'leased'; job.leaseOwner = owner;
       return { ...job };
+    },
+    enqueueProvisionalWindow: async (sourceId, fromBlock, toBlock) => {
+      const id = `${sourceId}:provisional:${fromBlock}-${toBlock}`;
+      if (!jobs.some((job) => job.id === id)) jobs.push({ id, sourceId, lane: 'provisional', fromBlock, toBlock,
+        generation: 0n, status: 'pending', leaseOwner: null, leaseUntil: null });
     },
     executeJob: execute,
     commitJob: async (id) => { completed.push(id); const job = jobs.find((item) => item.id === id)!; job.status = 'complete'; },
@@ -113,6 +119,32 @@ describe('bounded parallel job scheduler', () => {
     await runJobScheduler(setup.deps, new AbortController().signal);
     expect(attempts).toBe(1);
     expect(setup.jobs.map((job) => job.status)).toEqual(['failed', 'pending']);
+  });
+
+  it('claims a reserved near-head provisional job even while certified backfill saturates its endpoint', async () => {
+    const started: Array<{ sourceId: string; lane: string; toBlock: bigint }> = [];
+    const setup = harness([{ id: 'pons-v1-active', startBlock: 100n }], new Map(), async (job) => {
+      started.push({ sourceId: job.sourceId, lane: job.lane, toBlock: job.toBlock });
+      return empty;
+    }, { shared: 2, trades: 1 });
+    setup.deps.provisionalWorkers = 1;
+    setup.deps.plannerOptions = { maxWindowBlocks: 2n, maxJobs: 20, targetWorkUnits: 1_000n };
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    expect(started.some((item) => item.lane === 'provisional' && item.toBlock === 105n)).toBe(true);
+    expect(started.some((item) => item.lane === 'certified')).toBe(true);
+  });
+
+  it('does not plan a near-head provisional window for a trade source', async () => {
+    const enqueued: string[] = [];
+    const setup = harness([{ id: 'pons-v1-active-trades', startBlock: 100n }], new Map(), async () => empty);
+    const originalEnqueue = setup.deps.enqueueProvisionalWindow;
+    setup.deps.enqueueProvisionalWindow = async (sourceId, fromBlock, toBlock) => {
+      enqueued.push(sourceId);
+      return originalEnqueue(sourceId, fromBlock, toBlock);
+    };
+    setup.deps.provisionalWorkers = 1;
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    expect(enqueued).toEqual([]);
   });
 
   it('lets a dedicated trade endpoint progress while the shared endpoint is busy', async () => {

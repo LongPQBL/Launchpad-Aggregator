@@ -270,6 +270,9 @@
                           "priceQuote": {
                             "type": "string",
                             "nullable": true
+                          },
+                          "traderAddress": {
+                            "type": "string"
                           }
                         }
                       }

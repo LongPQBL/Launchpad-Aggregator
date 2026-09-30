@@ -204,6 +204,40 @@ describe('index batch repository', () => {
     expect(retry?.leaseOwner).toBe('retry');
   });
 
+  it('claims only jobs of the requested lane', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    await repository.replaceProvisionalWindow('test-a', 150n, 150n);
+    const provisional = await repository.claimScanJob('worker-p', new Date(), 10_000, undefined, 'provisional');
+    expect(provisional?.lane).toBe('provisional');
+    expect(provisional?.fromBlock).toBe(150n);
+    const certified = await repository.claimScanJob('worker-c', new Date(), 10_000, undefined, 'certified');
+    expect(certified?.lane).toBe('certified');
+    expect(certified?.fromBlock).toBe(100n);
+  });
+
+  it('replaces a stale pending provisional window instead of piling up near-head jobs', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.replaceProvisionalWindow('test-a', 100n, 105n);
+    await repository.replaceProvisionalWindow('test-a', 106n, 110n);
+    const rows = await pool.query(
+      "SELECT from_block,to_block,status FROM scan_jobs WHERE source_id='test-a' AND lane='provisional' ORDER BY from_block");
+    expect(rows.rows).toEqual([{ from_block: '106', to_block: '110', status: 'pending' }]);
+  });
+
+  it('does not discard a provisional job that is currently leased when a fresher window arrives', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.replaceProvisionalWindow('test-a', 100n, 105n);
+    await repository.claimScanJob('worker', new Date(), 10_000, undefined, 'provisional');
+    await repository.replaceProvisionalWindow('test-a', 106n, 110n);
+    const rows = await pool.query(
+      "SELECT from_block,to_block,status FROM scan_jobs WHERE source_id='test-a' AND lane='provisional' ORDER BY from_block");
+    expect(rows.rows).toEqual([
+      { from_block: '100', to_block: '105', status: 'leased' },
+      { from_block: '106', to_block: '110', status: 'pending' },
+    ]);
+  });
+
   it('persists protocol activity while defaulting an unclassified legacy trade to user activity', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const data = batch(4663, 'test-a');
@@ -529,6 +563,56 @@ describe('PostgreSQL API store', () => {
     expect((await store.getLaunch(4663, token))?.priceStale).toBe(true);
     await pool.query("UPDATE venues SET kind = 'v4_pool' WHERE chain_id = 4663");
     expect((await store.getLaunch(4663, token))?.priceStale).toBe(false);
+  });
+
+  it('reports a launch as fully covered while an unrelated V4 pool source is still behind', async () => {
+    const tradeTime = Math.floor(Date.now() / 1000) - 60;
+    const ids = ['pons-v1-legacy', 'pons-v1-active', 'pons-v2', 'pons-v1-legacy-trades',
+      'pons-v1-active-trades', 'pons-v2-curve', 'pons-v2-lifecycle'];
+    for (const id of ids) {
+      await repository.registerSource({ id, chainId: 4663, version: 'test', factoryAddress: factory, startBlock: 100n });
+      const data = id === 'pons-v1-active' ? batch(4663, id) : { rawLogs: [], launches: [], venues: [], trades: [], transitions: [] };
+      if (id === 'pons-v1-active') data.trades[0].timestamp = tradeTime;
+      await repository.saveIndexBatch(id, 100n, 100n, data);
+      await repository.setSourceStatus(id, 'caught_up', 100n);
+    }
+    await repository.recordObservedBlock(4663, 100n, blockHash);
+    const otherToken = '0x8888888888888888888888888888888888888888' as Address;
+    const otherPool = '0x9999999999999999999999999999999999999999' as Address;
+    await repository.registerSource({ id: `pons-v2-v4:${otherPool}`, chainId: 4663, version: 'v2-v4',
+      factoryAddress: factory, startBlock: 100n });
+    const otherVenue: Venue = { id: `4663:v4_pool:${otherPool}`, chainId: 4663, tokenAddress: otherToken, kind: 'v4_pool',
+      ref: otherPool, sourceId: 'pons-v2-lifecycle', sourceLogId: logKey(4663, blockHash, txHash, 9),
+      effectiveFromBlock: 101n, effectiveToBlock: null, official: true };
+    const otherLaunch: Launch = { chainId: 4663, tokenAddress: otherToken, name: 'Other', symbol: 'OTH', tokenDecimals: 18,
+      platform: 'pons', protocolVersion: 'v2', sourceId: 'pons-v2-lifecycle', sourceLogId: logKey(4663, blockHash, txHash, 9),
+      factoryAddress: factory, deployerAddress: factory, launchBlock: 101n, launchTxHash: txHash,
+      quoteAsset: { address: quote, symbol: 'WETH', decimals: 18 }, lifecycleStatus: 'graduated' };
+    await repository.saveIndexBatch('pons-v2-lifecycle', 101n, 101n, {
+      rawLogs: [{ chainId: 4663, sourceId: 'pons-v2-lifecycle', blockNumber: 101n, blockHash, txHash, logIndex: 9,
+        address: otherPool, topics: [], data: '0x' }],
+      launches: [otherLaunch], venues: [otherVenue], trades: [], transitions: [],
+    });
+    const store = createApiStore(pool);
+    expect((await store.getCoverage()).complete).toBe(false);
+    expect((await store.listLaunches({ limit: 10 })).items.find((item) => item.tokenAddress === token)?.officialVolume24h)
+      .toBe('0.1');
+    const detail = await store.getLaunch(4663, token);
+    expect(detail?.officialVolume24h).toBe('0.1');
+    expect(detail?.coverageStatus).toBe('caught_up');
+  });
+
+  it('shows a new launch from a provisional near-head job while its factory history is still backfilling', async () => {
+    await repository.registerSource({ id: 'pons-v1-active', chainId: 4663, version: 'test', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'pons-v1-active', lane: 'provisional', fromBlock: 100n, toBlock: 100n });
+    const job = await repository.claimScanJob('worker', new Date(), 10_000);
+    await repository.commitScanJob(job!.id, 'worker', job!.generation, batch(4663, 'pons-v1-active'));
+    await repository.recordObservedBlock(4663, 100n, blockHash);
+    const store = createApiStore(pool);
+    const listed = await store.listLaunches({ limit: 10 });
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0]).toMatchObject({ tokenAddress: token, officialVolume24h: null, coverageStatus: 'backfilling' });
+    expect((await store.getCoverage()).complete).toBe(false);
   });
 
   it('requires lifecycle and discovered V4 sources without requiring a nonexistent V4 umbrella', async () => {

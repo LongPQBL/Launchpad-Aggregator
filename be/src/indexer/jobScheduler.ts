@@ -1,7 +1,7 @@
 import type { IndexBatch } from '../domain/types.js';
 import type { NewScanJob, ScanJob } from './jobTypes.js';
 import type { PlannerOptions, SourceDefinition } from './jobPlanner.js';
-import { planCertifiedJobs } from './jobPlanner.js';
+import { isFactorySource, planCertifiedJobs, planProvisionalWindow } from './jobPlanner.js';
 import { retryDelayMs, safeErrorMessage } from './scan.js';
 
 export interface SchedulerDeps {
@@ -14,7 +14,8 @@ export interface SchedulerDeps {
   getFrontiers(): Promise<ReadonlyMap<string, bigint>>;
   estimatePoolCount(sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<number>;
   enqueueJob(input: NewScanJob): Promise<unknown>;
-  claimJob(workerId: string, now: Date, leaseMs: number, allowedSourceIds: readonly string[]): Promise<ScanJob | null>;
+  claimJob(workerId: string, now: Date, leaseMs: number, allowedSourceIds: readonly string[],
+    lane?: 'certified' | 'provisional'): Promise<ScanJob | null>;
   executeJob(job: ScanJob, signal: AbortSignal): Promise<IndexBatch>;
   commitJob(jobId: string, workerId: string, generation: bigint, batch: IndexBatch): Promise<void>;
   failJob(jobId: string, workerId: string, generation: bigint, reason: string): Promise<void>;
@@ -24,6 +25,14 @@ export interface SchedulerDeps {
   leaseMs: number;
   pollMs: number;
   onReport?(report: { jobId: string; sourceId: string; outcome: 'complete' | 'failed'; durationMs: number; error?: string }): void;
+  // Near-head provisional lane (docs/superpowers/specs/2026-09-30-parallel-indexer-design.md §4.1):
+  // reserves `provisionalWorkers` worker slots out of `provisionalEndpoint`'s existing endpointLimits
+  // entry so new launches surface at safe head without waiting behind historical backfill. 0 (default)
+  // keeps prior sequential-equivalent behavior; only factory sources ever get a provisional window.
+  enqueueProvisionalWindow(sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<unknown>;
+  provisionalWorkers?: number;
+  provisionalWindowBlocks?: bigint;
+  provisionalEndpoint?: string;
 }
 
 export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal): Promise<void> {
@@ -46,6 +55,16 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
         await deps.enqueueJob({ sourceId: source.id, lane: 'certified', ...window });
       }
     }
+    const factorySourceIds = sources.filter((source) => isFactorySource(source.id)).map((source) => source.id);
+    const provisionalWorkers = deps.provisionalWorkers ?? 0;
+    const provisionalEndpoint = deps.provisionalEndpoint ?? 'shared';
+    if (provisionalWorkers > 0) {
+      for (const source of sources) {
+        if (signal.aborted || !isFactorySource(source.id)) continue;
+        const window = planProvisionalWindow(source, safeHead, deps.provisionalWindowBlocks ?? 2_000n);
+        if (window) await deps.enqueueProvisionalWindow(source.id, window.fromBlock, window.toBlock);
+      }
+    }
     const byEndpoint = new Map<string, string[]>();
     for (const source of sources) {
       const endpoint = deps.endpointFor(source.id);
@@ -53,34 +72,43 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
       list.push(source.id);
       byEndpoint.set(endpoint, list);
     }
-    await Promise.all([...byEndpoint].flatMap(([endpoint, sourceIds]) => {
-      const limit = deps.endpointLimits[endpoint];
-      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error(`Invalid endpoint worker limit: ${endpoint}`);
-      if ((cooldowns.get(endpoint) ?? 0) > deps.now().getTime()) return [];
-      return Array.from({ length: limit }, async (_, slot) => {
+    const runWorker = async (endpoint: string, workerId: string, sourceIds: readonly string[],
+      lane?: 'certified' | 'provisional') => {
+      if (signal.aborted) return;
+      const job = await deps.claimJob(workerId, deps.now(), deps.leaseMs, sourceIds, lane);
+      if (!job || signal.aborted) return;
+      const started = deps.now().getTime();
+      try {
+        const batch = await deps.executeJob(job, signal);
         if (signal.aborted) return;
-        const workerId = `${endpoint}:${slot}`;
-        const job = await deps.claimJob(workerId, deps.now(), deps.leaseMs, sourceIds);
-        if (!job || signal.aborted) return;
-        const started = deps.now().getTime();
-        try {
-          const batch = await deps.executeJob(job, signal);
-          if (signal.aborted) return;
-          await deps.commitJob(job.id, workerId, job.generation, batch);
-          deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'complete',
-            durationMs: Math.max(0, deps.now().getTime() - started) });
-        } catch (error) {
-          if (signal.aborted) return;
-          const message = safeErrorMessage(error);
-          await deps.failJob(job.id, workerId, job.generation, message);
-          if (/429|rate limit|too many requests|503|502/i.test(message)) {
-            cooldowns.set(endpoint, deps.now().getTime() + retryDelayMs(message, 0));
-          }
-          deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'failed',
-            durationMs: Math.max(0, deps.now().getTime() - started), error: message });
+        await deps.commitJob(job.id, workerId, job.generation, batch);
+        deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'complete',
+          durationMs: Math.max(0, deps.now().getTime() - started) });
+      } catch (error) {
+        if (signal.aborted) return;
+        const message = safeErrorMessage(error);
+        await deps.failJob(job.id, workerId, job.generation, message);
+        if (/429|rate limit|too many requests|503|502/i.test(message)) {
+          cooldowns.set(endpoint, deps.now().getTime() + retryDelayMs(message, 0));
         }
-      });
-    }));
+        deps.onReport?.({ jobId: job.id, sourceId: job.sourceId, outcome: 'failed',
+          durationMs: Math.max(0, deps.now().getTime() - started), error: message });
+      }
+    };
+    await Promise.all([
+      ...[...byEndpoint].flatMap(([endpoint, sourceIds]) => {
+        const configured = deps.endpointLimits[endpoint];
+        if (!Number.isSafeInteger(configured) || configured < 1) throw new Error(`Invalid endpoint worker limit: ${endpoint}`);
+        const reserved = endpoint === provisionalEndpoint ? provisionalWorkers : 0;
+        const limit = Math.max(0, configured - reserved);
+        if ((cooldowns.get(endpoint) ?? 0) > deps.now().getTime()) return [];
+        return Array.from({ length: limit }, (_, slot) => runWorker(endpoint, `${endpoint}:${slot}`, sourceIds, 'certified'));
+      }),
+      ...(provisionalWorkers > 0 && (cooldowns.get(provisionalEndpoint) ?? 0) <= deps.now().getTime()
+        ? Array.from({ length: provisionalWorkers }, (_, slot) =>
+          runWorker(provisionalEndpoint, `${provisionalEndpoint}:provisional:${slot}`, factorySourceIds, 'provisional'))
+        : []),
+    ]);
     if (!deps.once && pass < maxPasses && !signal.aborted) await deps.wait(deps.pollMs, signal);
   }
 }
