@@ -4,7 +4,7 @@ import { createRepository } from '../db/repository.js';
 import { createBatchedGetBlockData } from '../indexer/blockDataBatch.js';
 import { scanToHead, type LogSource } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
-import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, MAX_ADDRESSES_PER_LOG_QUERY, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
 import { createViemGetLogs } from './indexer.js';
 
 // One-off experiment: trade-decoding sources already fetch timestamps/traders with internal
@@ -38,7 +38,7 @@ async function scanBounded(source: LogSource, contexts: Awaited<ReturnType<typeo
   return scanToHead(source, target, {
     initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
     getCursor: repository.getCursor,
-    getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
+    getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, getLogs),
     decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });

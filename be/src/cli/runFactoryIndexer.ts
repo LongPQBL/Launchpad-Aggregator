@@ -9,7 +9,7 @@ import { reconcileV2Phase } from '../indexer/phaseReconcile.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { scanToHead } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
-import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
+import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, MAX_ADDRESSES_PER_LOG_QUERY, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
 import { createV4GetLogs, createV4TradeDecoder, getV4PoolSources } from '../indexer/v4Runtime.js';
 import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
@@ -149,7 +149,7 @@ async function runOnce(): Promise<void> {
       scan: (source, target) => scanToHead(source, target, {
         initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
         getCursor: repository.getCursor,
-        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
+        getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, MAX_ADDRESSES_PER_LOG_QUERY, getLogs),
         decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
