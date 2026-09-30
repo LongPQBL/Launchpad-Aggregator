@@ -1,5 +1,4 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
@@ -28,7 +27,7 @@ const testTradeTxHash = '0x8147b8c06a405cd1d5314c16a25c86a0ba3aea64e490547e60afd
 const testLifecycleTxHash = '0x98dfda1126a8b6b66a249db891a221f6fcebd2d17b6e57e2f0c119dba09ad6a3';
 
 beforeAll(async () => {
-  await migrate(db, { migrationsFolder: './drizzle' });
+  // Migration runs once in vitest.integration.globalSetup.ts, before any test file's beforeAll.
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_v2');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v2."RawLaunchV2" (
     id text primary key, "chainId" int, "tokenAddress" text, "curveAddress" text, "deployerAddress" text,
@@ -39,7 +38,7 @@ beforeAll(async () => {
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v2."RawCurveBuyback" (
     id text primary key, "chainId" int, "curveAddress" text, "quoteSpentRaw" numeric, "tokensLockedRaw" numeric,
-    "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
+    "txFrom" text, "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v2."RawLifecycleTransition" (
     id text primary key, "chainId" int, "tokenAddress" text, phase int, kind text,
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int)`);
@@ -86,7 +85,13 @@ describe('syncV2Once', () => {
 
     const first = await syncV2Once(envioPool, db, fixtureTables);
     expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1, transitionsWritten: 1 });
-    expect(await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken))).toHaveLength(1);
+    const launchRows = await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken));
+    expect(launchRows).toHaveLength(1);
+    // The fixture's real quote token (NVDA, a real ERC20) is not the zero address, so its symbol/
+    // decimals are genuinely unknown without a metadata RPC call this phase doesn't make — null, not
+    // a faked 18/placeholder symbol.
+    expect(launchRows[0].quoteAssetSymbol).toBeNull();
+    expect(launchRows[0].quoteAssetDecimals).toBeNull();
     expect(await db.select().from(venuesEnvioStaging).where(eq(venuesEnvioStaging.tokenAddress, testToken))).toHaveLength(1);
     expect(await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testTradeTxHash))).toHaveLength(1);
     const transitions = await db.select().from(lifecycleTransitionsEnvioStaging).where(eq(lifecycleTransitionsEnvioStaging.tokenAddress, testToken));

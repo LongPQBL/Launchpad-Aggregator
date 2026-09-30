@@ -177,12 +177,14 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "PonsV2Curve", event: "BuybackLocked" },
   async ({ event, context }) => {
+    if (!event.transaction.from) throw new Error(`Missing transaction.from for buyback ${event.transaction.hash}`);
     context.RawCurveBuyback.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
       curveAddress: event.srcAddress.toLowerCase(),
       quoteSpentRaw: event.params.quoteSpent,
       tokensLockedRaw: event.params.tokensLocked,
+      txFrom: event.transaction.from.toLowerCase(),
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,

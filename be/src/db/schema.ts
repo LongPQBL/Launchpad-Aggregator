@@ -198,10 +198,12 @@ export const launchesEnvioStaging = pgTable('launches_envio_staging', {
   launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
   launchTxHash: text('launch_tx_hash').notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
-  // Nullable: V2's quote asset symbol is genuinely unknown without a metadata RPC call this phase
-  // doesn't make (same reasoning as name/symbol above).
+  // Both nullable: known for free only when the quote asset is native ETH (the zero address) — see
+  // envioSync/transformV2.ts's resolveKnownQuoteAsset. Any real ERC20 pair token's symbol/decimals
+  // are genuinely unknown without a metadata RPC call this phase doesn't make (found live: real V2
+  // launches quote in tokens with decimals other than 18 — faking 18 would silently corrupt volume).
   quoteAssetSymbol: text('quote_asset_symbol'),
-  quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
+  quoteAssetDecimals: integer('quote_asset_decimals'),
   lifecycleStatus: text('lifecycle_status'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),

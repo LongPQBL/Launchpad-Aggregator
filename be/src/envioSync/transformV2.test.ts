@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import type { Address, Hash } from 'viem';
+import { zeroAddress, type Address, type Hash } from 'viem';
 import { decodeV2Launch } from '../launchpads/pons/v2/adapter.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { decodeCurveTrade } from '../launchpads/pons/v2/adapter.js';
 import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded,
-  type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
+  resolveKnownQuoteAsset, type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
 
 const fixture = JSON.parse(readFileSync(new URL('../../tests/fixtures/pons-v2-graduated.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 const v2Factory = getPonsFactorySources()[2];
@@ -131,10 +131,12 @@ describe('hydrateCurveTradeFromDecoded', () => {
 
 describe('hydrateCurveBuybackFromDecoded', () => {
   it('maps a BuybackLocked row to activityKind protocol_buyback, not user_trade', () => {
+    const buybackTxFrom = '0x9999999999999999999999999999999999999999' as Address;
     const row: EnvioRawCurveBuybackRow = {
       curveAddress: fixture.curveAddress as string,
       quoteSpentRaw: 1_000_000_000_000_000_000n,
       tokensLockedRaw: 2_000_000_000_000_000_000n,
+      txFrom: buybackTxFrom,
       blockNumber: 27827500n,
       blockHash: '0x' + 'd'.repeat(64),
       txHash: '0x' + '8'.repeat(64),
@@ -146,5 +148,21 @@ describe('hydrateCurveBuybackFromDecoded', () => {
     expect(trade.side).toBe('buy');
     expect(trade.tokenAmountRaw).toBe(2_000_000_000_000_000_000n);
     expect(trade.quoteAmountRaw).toBe(1_000_000_000_000_000_000n);
+    // The trader is the transaction's tx.from (BuybackLocked has no buyer param at all) — not a
+    // made-up value like the launch's factory address.
+    expect(trade.traderAddress).toBe(buybackTxFrom);
+    expect(trade.traderAddress).not.toBe(launch.factoryAddress);
+  });
+});
+
+describe('resolveKnownQuoteAsset', () => {
+  it('knows the zero address is native ETH, 18 decimals, without any RPC call', () => {
+    expect(resolveKnownQuoteAsset(zeroAddress)).toEqual({ symbol: 'ETH', decimals: 18 });
+  });
+
+  it('returns null for any real ERC20 pair token — decimals are genuinely unknown without a metadata RPC call', () => {
+    // Real V2 launches quote in tokens with decimals other than 18 (e.g. USDG has 6, cbBTC has 8) —
+    // faking 18 here would silently corrupt any volume computed from staging for those launches.
+    expect(resolveKnownQuoteAsset(fixture.quoteAddress as Address)).toBeNull();
   });
 });

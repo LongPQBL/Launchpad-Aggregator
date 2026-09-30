@@ -1,5 +1,4 @@
-import { beforeAll, beforeEach, afterAll, describe, expect, it } from 'vitest';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { beforeEach, afterAll, describe, expect, it } from 'vitest';
 import type { Address, Hash } from 'viem';
 import type { IndexBatch, Launch, Trade, Venue } from '../domain/types.js';
 import { logKey } from '../domain/ids.js';
@@ -86,10 +85,7 @@ function batch(chainId: number, sourceId: string, tokenAmountRaw = 1_000_000_000
   };
 }
 
-beforeAll(async () => {
-  await migrate(db, { migrationsFolder: new URL('../../drizzle', import.meta.url).pathname });
-});
-
+// Migration runs once in vitest.integration.globalSetup.ts, before any test file's own setup.
 beforeEach(async () => {
   await pool.query('TRUNCATE TABLE trades, venues, launches, raw_logs, candles, observed_blocks, sources RESTART IDENTITY CASCADE');
 });

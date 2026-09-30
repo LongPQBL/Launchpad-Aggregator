@@ -6,5 +6,8 @@ export default defineConfig({
     // The default 5s can flake when the shared local Postgres instance is also serving a live
     // indexer writer (found during a whole-branch review: 2-3 spurious "Test timed out" failures).
     testTimeout: 30_000,
+    // Runs the Drizzle migration exactly once, before any test file's own beforeAll — see the file
+    // for why (concurrent migrate() calls from multiple files race on a fresh database).
+    globalSetup: ['./vitest.integration.globalSetup.ts'],
   },
 });

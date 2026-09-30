@@ -81,6 +81,9 @@ type RawCurveBuyback {
   curveAddress: String!
   quoteSpentRaw: BigInt!
   tokensLockedRaw: BigInt!
+  # BuybackLocked has no buyer/trader param at all — this is the transaction's originating EOA
+  # (tx.from), the same provenance RawCurveTrade.txFrom uses, not a made-up value.
+  txFrom: String!
   blockNumber: BigInt!
   blockHash: String!
   txHash: String!

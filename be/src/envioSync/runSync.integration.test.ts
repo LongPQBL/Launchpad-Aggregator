@@ -1,5 +1,4 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
@@ -27,7 +26,7 @@ const testToken = '0x39dbed3a2bd333467115de45665cc57f813c4571';
 const testTxHash = '0x1f54f25fec2d963dcb338ecb8b46a6eb123198a5c7a746d34cb2dbe78d074af8';
 
 beforeAll(async () => {
-  await migrate(db, { migrationsFolder: './drizzle' });
+  // Migration runs once in vitest.integration.globalSetup.ts, before any test file's beforeAll.
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_v1');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v1."RawLaunch" (
     id text primary key, "chainId" int, "tokenAddress" text, "deployerAddress" text,

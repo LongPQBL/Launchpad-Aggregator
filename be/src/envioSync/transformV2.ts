@@ -1,4 +1,4 @@
-import type { Address, Hash } from 'viem';
+import { zeroAddress, type Address, type Hash } from 'viem';
 import { logKey } from '../domain/ids.js';
 import { hydrateV2Launch, type V2LaunchEvent, type V2LaunchRecord, type V2LaunchWithVenue } from '../launchpads/pons/v2/adapter.js';
 import type { FactorySource } from '../launchpads/pons/sourceRegistry.js';
@@ -35,8 +35,11 @@ export function envioRawLaunchV2ToEvent(row: EnvioRawLaunchV2Row): V2LaunchEvent
 // record-matches-event check a structural no-op here, same documented tradeoff as Phase 1's
 // liquidityPool bypass. poolFee/tickSpacing are placeholders unused by this phase (no V4 logic here);
 // Phase 3 will source real values directly from the V4 pool's own Initialize event instead of this
-// placeholder. name/symbol/decimals are placeholders too — overwritten with null at the staging
-// insert layer (see runSyncV2.ts), matching Phase 1's "null means unavailable" convention.
+// placeholder. The launched token's own name/symbol are placeholders too — overwritten with null at
+// the staging insert layer (see runSyncV2.ts), matching Phase 1's "null means unavailable"
+// convention. The QUOTE asset's symbol/decimals are NOT simply nulled: runSyncV2.ts calls
+// resolveKnownQuoteAsset (below) separately and writes its real answer when known (native ETH) or
+// null when not, ignoring this function's own quoteAsset placeholder for that specific pair.
 export function hydrateV2LaunchFromEnvio(event: V2LaunchEvent, factory: FactorySource): V2LaunchWithVenue {
   const record: V2LaunchRecord = {
     token: event.tokenAddress, curve: event.curveAddress, deployer: event.deployerAddress,
@@ -44,6 +47,16 @@ export function hydrateV2LaunchFromEnvio(event: V2LaunchEvent, factory: FactoryS
   };
   return hydrateV2Launch(event, factory, record, { name: '', symbol: '', decimals: 18 },
     { address: event.pairToken, symbol: '', decimals: 18 });
+}
+
+// Same zero-address-means-native-ETH rule as resolveV2QuoteAsset (be/src/launchpads/pons/v2/adapter.ts)
+// — that one case is knowable with zero RPC calls (per CLAUDE.md's "null means unavailable", this
+// project never fakes a value it could instead just know or omit). Any real ERC20 pairToken's
+// symbol/decimals are genuinely unknown without a metadata RPC call this phase doesn't make; real V2
+// launches quote in tokens with decimals other than 18 (found live: USDG has 6, cbBTC has 8), so a
+// universal placeholder would silently corrupt any volume computed from staging for those launches.
+export function resolveKnownQuoteAsset(pairToken: Address): { symbol: string; decimals: number } | null {
+  return pairToken.toLowerCase() === zeroAddress.toLowerCase() ? { symbol: 'ETH', decimals: 18 } : null;
 }
 
 export interface EnvioRawCurveTradeRow {
@@ -65,6 +78,7 @@ export interface EnvioRawCurveBuybackRow {
   curveAddress: string;
   quoteSpentRaw: bigint;
   tokensLockedRaw: bigint;
+  txFrom: string;
   blockNumber: bigint;
   blockHash: string;
   txHash: string;
@@ -98,6 +112,6 @@ export function hydrateCurveBuybackFromDecoded(row: EnvioRawCurveBuybackRow, ven
     side: 'buy', tokenAmountRaw: row.tokensLockedRaw, quoteAmountRaw: row.quoteSpentRaw,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'BuybackLocked', activityKind: 'protocol_buyback',
     priceNumeratorRaw: null, priceDenominatorRaw: null,
-    traderAddress: launch.factoryAddress.toLowerCase() as Address,
+    traderAddress: row.txFrom.toLowerCase() as Address,
   };
 }

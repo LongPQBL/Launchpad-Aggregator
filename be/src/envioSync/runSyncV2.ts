@@ -3,7 +3,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
-import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded,
+import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded, resolveKnownQuoteAsset,
   type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
 import { envioRawLifecycleToTransition, type EnvioRawLifecycleRow } from './transformLifecycle.js';
 
@@ -42,13 +42,15 @@ export async function syncV2Once(
       throw new Error(`Failed to sync V2 launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
     }
     launchByCurve.set(event.curveAddress, { launch, venue });
+    const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
     const inserted = await appDb.transaction(async (tx) => {
       const launchRows = await tx.insert(launchesEnvioStaging).values({
         chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: null, symbol: null,
         tokenDecimals: launch.tokenDecimals, platform: launch.platform, protocolVersion: launch.protocolVersion,
         factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock,
-        launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: null,
-        quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: null,
+        launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address,
+        quoteAssetSymbol: knownQuoteAsset?.symbol ?? null, quoteAssetDecimals: knownQuoteAsset?.decimals ?? null,
+        lifecycleStatus: null,
       }).onConflictDoNothing().returning({ tokenAddress: launchesEnvioStaging.tokenAddress });
       if (launchRows.length === 0) return false;
       await tx.insert(venuesEnvioStaging).values({

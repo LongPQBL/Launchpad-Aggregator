@@ -1,0 +1,1 @@
+ALTER TABLE "launches_envio_staging" ALTER COLUMN "quote_asset_decimals" DROP NOT NULL;
