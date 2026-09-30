@@ -215,3 +215,28 @@ indexer.onEvent(
     });
   },
 );
+
+indexer.onEvent(
+  { contract: "UniswapV4PoolManager", event: "V4Swap" },
+  async ({ event, context }) => {
+    if (!event.transaction.from) throw new Error(`Missing transaction.from for V4 swap ${event.transaction.hash}`);
+    context.RawV4Swap.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      poolId: event.params.id.toLowerCase(),
+      sender: event.params.sender.toLowerCase(),
+      txFrom: event.transaction.from.toLowerCase(),
+      amount0: event.params.amount0,
+      amount1: event.params.amount1,
+      sqrtPriceX96: event.params.sqrtPriceX96,
+      liquidity: event.params.liquidity,
+      tick: Number(event.params.tick),
+      fee: Number(event.params.fee),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+      timestamp: event.block.timestamp,
+    });
+  },
+);

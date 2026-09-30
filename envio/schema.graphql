@@ -107,3 +107,24 @@ type RawV4Initialize {
   txHash: String!
   logIndex: Int!
 }
+
+type RawV4Swap {
+  id: ID!
+  chainId: Int!
+  poolId: String!
+  # `sender` distinguishes a hook-initiated swap (protocol activity) from a user swap — NOT the
+  # trader. See envio/schema.graphql's RawSwap.txFrom comment for why: same distinction as V1/V2.
+  sender: String!
+  txFrom: String!
+  amount0: BigInt!
+  amount1: BigInt!
+  sqrtPriceX96: BigInt!
+  liquidity: BigInt!
+  tick: Int!
+  fee: Int!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Int!
+}
