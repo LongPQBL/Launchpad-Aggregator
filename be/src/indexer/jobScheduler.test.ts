@@ -301,6 +301,25 @@ describe('bounded parallel job scheduler', () => {
     expect(slotCount(4)).toBe(4);
   });
 
+  it('picks the source with the larger backlog first, regardless of listing order, when both have work available', async () => {
+    // A single continuously-looping worker eventually drains all pending work regardless of pick
+    // order, so final per-source totals aren't a useful signal here (both reach 1/1 either way).
+    // The FIRST pick is: with a fresh (never-touched) SWRR accumulator, it is exactly the higher-weight
+    // (bigger-backlog) source — a real signal that plain array/listing order isn't what's driving the
+    // choice. Listing the smaller-backlog source FIRST rules out "array order" as an alternative
+    // explanation for the result.
+    const started: string[] = [];
+    const setup = harness([
+      { id: 'pons-v1-legacy', startBlock: 100n }, { id: 'pons-v1-active', startBlock: 100n },
+    ], new Map([['pons-v1-legacy', 99_989n]]), async (job) => { started.push(job.sourceId); return empty; },
+    { shared: 1, trades: 1 });
+    // pons-v1-active backlog ~ 99,900 blocks; pons-v1-legacy backlog ~ 10 blocks.
+    setup.deps.getSafeHead = async () => 99_999n;
+    setup.deps.plannerOptions = { maxWindowBlocks: 1n, maxJobs: 1, targetWorkUnits: 1_000n };
+    await runJobScheduler(setup.deps, new AbortController().signal);
+    expect(started[0]).toBe('pons-v1-active');
+  });
+
   it('lets a dedicated trade endpoint progress while the shared endpoint is busy', async () => {
     let release!: () => void;
     const slow = new Promise<void>((resolve) => { release = resolve; });

@@ -3,6 +3,7 @@ import type { NewScanJob, ScanJob } from './jobTypes.js';
 import type { PlannerOptions, SourceDefinition } from './jobPlanner.js';
 import { isFactorySource, planCertifiedJobs, planProvisionalWindow } from './jobPlanner.js';
 import { retryDelayMs, safeErrorMessage } from './scan.js';
+import { nextWeightedSource } from './weightedRoundRobin.js';
 
 export interface SchedulerDeps {
   once?: boolean;
@@ -46,10 +47,13 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
   if (!Number.isSafeInteger(deps.leaseMs) || deps.leaseMs < 1 || deps.leaseMs > 3_600_000
     || !Number.isSafeInteger(deps.pollMs) || deps.pollMs < 1) throw new Error('Invalid scheduler timing');
   const cooldowns = new Map<string, number>();
-  // Rotating start index per endpoint, shared across every worker slot on that endpoint and carried
-  // across passes for the life of this call — so claim attempts cycle through sources instead of a
-  // global lowest-block-first order always favoring whichever source happens to be least caught up.
-  const roundRobin = new Map<string, number>();
+  // Smooth-weighted-round-robin accumulator, keyed by `${endpoint}:${sourceId}` and carried across
+  // passes for the life of this call — so claim attempts cycle through an endpoint's sources instead
+  // of a global lowest-block-first order always favoring whichever source happens to be least caught
+  // up (starvation), while still weighting picks toward whichever source has the larger remaining
+  // backlog (so a source that's much further behind doesn't converge at the same rate as one nearly
+  // caught up — see weightedRoundRobin.ts).
+  const swrrState = new Map<string, number>();
   // AIMD (TCP-congestion-control-style) concurrency per endpoint: deps.endpointLimits is the CEILING
   // (the highest value already known safe from real benchmarking), not a fixed operating point. A 429
   // multiplicatively halves the current value (floor 1); a pass that used the endpoint with no 429
@@ -72,6 +76,15 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
     const [safeHead, sources, frontiers, plannedFrontiers] = await Promise.all([
       deps.getSafeHead(), deps.listSources(), deps.getFrontiers(), deps.getPlannedFrontiers(),
     ]);
+    // Weight = remaining backlog (blocks left to certify), clamped to a safe JS-integer range — exact
+    // precision doesn't matter here, only rough proportion between sources, and nextWeightedSource
+    // does plain number arithmetic. A caught-up source (0 backlog) still gets weight 1, never 0, so it
+    // isn't excluded outright — new work can appear for it later.
+    const weights = new Map(sources.map((source) => {
+      const frontier = plannedFrontiers.get(source.id) ?? (source.startBlock - 1n);
+      const backlog = safeHead > frontier ? safeHead - frontier : 0n;
+      return [source.id, Math.max(1, Math.min(1_000_000, Number(backlog)))];
+    }));
     for (const source of sources) {
       if (signal.aborted) break;
       const fromBlock = (plannedFrontiers.get(source.id) ?? (source.startBlock - 1n)) + 1n;
@@ -98,16 +111,16 @@ export async function runJobScheduler(deps: SchedulerDeps, signal: AbortSignal):
       list.push(source.id);
       byEndpoint.set(endpoint, list);
     }
-    // Tries each source in rotating order (not sourceIds' own, usually block-ascending, order) so a
-    // claim attempt across an endpoint's sources doesn't always land on whichever source is least
-    // caught up. Advancing the shared round-robin index on every attempt (not only successful ones)
-    // keeps concurrent slots on the same endpoint from all starting at the same place.
+    // Tries each source in backlog-weighted order (not sourceIds' own, usually block-ascending, order)
+    // so a claim attempt across an endpoint's sources neither always lands on whichever source is
+    // least caught up (starvation) nor treats a far-behind source the same as a nearly-caught-up one
+    // (plain round robin). Falls back through the rest in listed order if the top pick has no
+    // claimable work right now.
     async function claimFairly(endpoint: string, workerId: string, sourceIds: readonly string[],
       lane?: 'certified' | 'provisional'): Promise<ScanJob | null> {
       if (sourceIds.length === 0) return null;
-      const start = (roundRobin.get(endpoint) ?? 0) % sourceIds.length;
-      roundRobin.set(endpoint, start + 1);
-      const order = [...sourceIds.slice(start), ...sourceIds.slice(0, start)];
+      const preferred = nextWeightedSource(swrrState, weights, sourceIds);
+      const order = [preferred, ...sourceIds.filter((id) => id !== preferred)];
       for (const sourceId of order) {
         const job = await deps.claimJob(workerId, deps.now(), deps.leaseMs, [sourceId], lane);
         if (job) return job;
