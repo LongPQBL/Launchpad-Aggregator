@@ -13,6 +13,20 @@ contracts:
     handler: src/EventHandlers.ts
     events:
       - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
+  - name: PonsV2Factory
+    handler: src/EventHandlers.ts
+    events:
+      - event: "TokenLaunched(address indexed token, address indexed curve, address indexed deployer, address pairToken, uint256 launchConfigId, uint256 graduationThreshold)"
+        name: TokenLaunchedV2
+      - event: "LaunchSwept(address indexed token, uint256 quoteOut, uint256 tokenOut)"
+      - event: "PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)"
+      - event: "LaunchGraduationRescued(address indexed token, address indexed recipient, uint256 quoteAmount, uint256 tokenAmount)"
+  - name: PonsV2Curve
+    handler: src/EventHandlers.ts
+    events:
+      - event: "CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut, uint256 fee, uint256 tax)"
+      - event: "CurveSell(address indexed seller, address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax)"
+      - event: "BuybackLocked(uint256 quoteSpent, uint256 tokensLocked)"
 chains:
   - id: 4663
     hypersync_config:
@@ -23,3 +37,7 @@ chains:
         address:
           - "0x0c37a24F5D23A486FA692d1500881d698B1F77a4"
       - name: PonsV3Pool
+      - name: PonsV2Factory
+        address:
+          - "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
+      - name: PonsV2Curve

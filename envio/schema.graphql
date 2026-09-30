@@ -32,3 +32,58 @@ type RawSwap {
   logIndex: Int!
   timestamp: Int!
 }
+
+type RawLaunchV2 {
+  id: ID!
+  chainId: Int!
+  tokenAddress: String!
+  curveAddress: String!
+  deployerAddress: String!
+  pairTokenAddress: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}
+
+type RawLifecycleTransition {
+  id: ID!
+  chainId: Int!
+  tokenAddress: String!
+  phase: Int!
+  kind: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}
+
+type RawCurveTrade {
+  id: ID!
+  chainId: Int!
+  curveAddress: String!
+  side: String!
+  tokenAmountRaw: BigInt!
+  quoteAmountRaw: BigInt!
+  feeRaw: BigInt!
+  taxRaw: BigInt!
+  txFrom: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Int!
+}
+
+type RawCurveBuyback {
+  id: ID!
+  chainId: Int!
+  curveAddress: String!
+  quoteSpentRaw: BigInt!
+  tokensLockedRaw: BigInt!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Int!
+}

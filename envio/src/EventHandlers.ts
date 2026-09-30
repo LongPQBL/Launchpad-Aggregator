@@ -51,3 +51,143 @@ indexer.onEvent(
     });
   },
 );
+
+indexer.onEvent(
+  { contract: "PonsV2Factory", event: "TokenLaunchedV2" },
+  async ({ event, context }) => {
+    context.RawLaunchV2.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      curveAddress: event.params.curve.toLowerCase(),
+      deployerAddress: event.params.deployer.toLowerCase(),
+      pairTokenAddress: event.params.pairToken.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Factory", event: "LaunchSwept" },
+  async ({ event, context }) => {
+    context.RawLifecycleTransition.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      phase: 1,
+      kind: "swept",
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Factory", event: "PoolGraduated" },
+  async ({ event, context }) => {
+    context.RawLifecycleTransition.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      phase: 2,
+      kind: "graduated",
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Factory", event: "LaunchGraduationRescued" },
+  async ({ event, context }) => {
+    context.RawLifecycleTransition.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      phase: 3,
+      kind: "rescued",
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+indexer.contractRegister(
+  { contract: "PonsV2Factory", event: "TokenLaunchedV2" },
+  async ({ event, context }) => {
+    context.chain.PonsV2Curve.add(event.params.curve);
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Curve", event: "CurveBuy" },
+  async ({ event, context }) => {
+    if (!event.transaction.from) throw new Error(`Missing transaction.from for curve buy ${event.transaction.hash}`);
+    context.RawCurveTrade.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      curveAddress: event.srcAddress.toLowerCase(),
+      side: "buy",
+      tokenAmountRaw: event.params.tokensOut,
+      quoteAmountRaw: event.params.quoteIn,
+      feeRaw: event.params.fee,
+      taxRaw: event.params.tax,
+      txFrom: event.transaction.from.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+      timestamp: event.block.timestamp,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Curve", event: "CurveSell" },
+  async ({ event, context }) => {
+    if (!event.transaction.from) throw new Error(`Missing transaction.from for curve sell ${event.transaction.hash}`);
+    context.RawCurveTrade.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      curveAddress: event.srcAddress.toLowerCase(),
+      side: "sell",
+      tokenAmountRaw: event.params.tokensIn,
+      quoteAmountRaw: event.params.quoteOut,
+      feeRaw: event.params.fee,
+      taxRaw: event.params.tax,
+      txFrom: event.transaction.from.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+      timestamp: event.block.timestamp,
+    });
+  },
+);
+
+indexer.onEvent(
+  { contract: "PonsV2Curve", event: "BuybackLocked" },
+  async ({ event, context }) => {
+    context.RawCurveBuyback.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      curveAddress: event.srcAddress.toLowerCase(),
+      quoteSpentRaw: event.params.quoteSpent,
+      tokensLockedRaw: event.params.tokensLocked,
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+      timestamp: event.block.timestamp,
+    });
+  },
+);
