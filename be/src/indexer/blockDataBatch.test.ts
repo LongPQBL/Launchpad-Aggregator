@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Address, Hash } from 'viem';
 import { createBatchedGetBlockData } from './blockDataBatch.js';
 
@@ -50,6 +50,35 @@ describe('createBatchedGetBlockData', () => {
     expect(calls[0]).toHaveLength(2);
     expect(calls[1]).toHaveLength(1);
     expect(result.size).toBe(3);
+  });
+
+  it('starts at most two batches together and maps out-of-order responses to their blocks', async () => {
+    const calls: bigint[][] = [];
+    const release: Array<() => void> = [];
+    const fetchImpl = async (_url: string, init: { body: string }) => {
+      const requests = JSON.parse(init.body) as Array<{ id: number; params: [string, boolean] }>;
+      calls.push(requests.map((request) => BigInt(request.params[0])));
+      await new Promise<void>((resolve) => { release.push(resolve); });
+      return { json: async () => requests.map((request) => ({ id: request.id,
+        result: rawBlock(BigInt(request.params[0]), `0x${'1'.repeat(64)}` as Hash,
+          Number(BigInt(request.params[0]))),
+      })) } as Response;
+    };
+    const getBlocksData = createBatchedGetBlockData(rpcUrl, 2, fetchImpl as typeof fetch, 2);
+    const pending = getBlocksData([1n, 2n, 3n, 4n, 5n]);
+    expect(calls).toEqual([[1n, 2n], [3n, 4n]]);
+    release[1]();
+    await vi.waitFor(() => expect(calls).toEqual([[1n, 2n], [3n, 4n], [5n]]));
+    release[2]();
+    release[0]();
+    const result = await pending;
+    expect([...result.keys()]).toEqual([1n, 2n, 3n, 4n, 5n]);
+    expect(result.get(5n)?.timestamp).toBe(5);
+  });
+
+  it('rejects unsafe batch concurrency instead of starting unbounded requests', () => {
+    expect(() => createBatchedGetBlockData(rpcUrl, 100, fetch, 0)).toThrow(/concurrency/i);
+    expect(() => createBatchedGetBlockData(rpcUrl, 100, fetch, 5)).toThrow(/concurrency/i);
   });
 
   it('throws the RPC-reported message when the whole batch is rejected (non-array response)', async () => {

@@ -38,6 +38,10 @@ function tradeSourceRpcUrl(sourceId: string): string {
 }
 const maxBlocksPerSource = BigInt(process.env.INDEXER_MAX_BLOCKS_PER_CYCLE ?? '10000');
 if (maxBlocksPerSource < 1n || maxBlocksPerSource > 1_000_000n) throw new Error('Invalid INDEXER_MAX_BLOCKS_PER_CYCLE');
+const activeBlockBatchConcurrency = Number(process.env.INDEXER_ACTIVE_BLOCK_BATCH_CONCURRENCY ?? '2');
+if (!Number.isSafeInteger(activeBlockBatchConcurrency) || activeBlockBatchConcurrency < 1
+  || activeBlockBatchConcurrency > 4) throw new Error('Invalid INDEXER_ACTIVE_BLOCK_BATCH_CONCURRENCY');
+const blockBatchConcurrency = (sourceId: string) => sourceId === 'pons-v1-active-trades' ? activeBlockBatchConcurrency : 1;
 const sharedLogChunks = scanChunkBounds(BigInt(process.env.INDEXER_SHARED_RPC_LOG_RANGE ?? '500000'));
 const { db, pool } = createDatabase(databaseUrl);
 const repository = createRepository(db);
@@ -167,7 +171,8 @@ async function runOnce(): Promise<void> {
     const tradeRpcUrl = tradeSourceRpcUrl(definition.source.id);
     const tradeClient = createRobinhoodPublicClient(tradeRpcUrl);
     const tradeGetLogs = createViemGetLogs(tradeClient);
-    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100);
+    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100, fetch,
+      blockBatchConcurrency(definition.source.id));
     return runFactoryCycle([tradeSource], frontier < safeHead ? frontier : safeHead, maxBlocksPerSource, {
       getCursor: repository.getCursor, recordScanReport: repository.recordScanReport,
       setSourceStatus: repository.setSourceStatus,
@@ -338,7 +343,8 @@ async function executeJob(job: ScanJob): Promise<IndexBatch> {
     const tradeRpcUrl = tradeSourceRpcUrl(job.sourceId);
     const tradeClient = createRobinhoodPublicClient(tradeRpcUrl);
     const tradeGetLogs = createViemGetLogs(tradeClient);
-    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100);
+    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100, fetch,
+      blockBatchConcurrency(job.sourceId));
     const windowSource = withVenueAddresses(definition, contexts, { fromBlock: job.fromBlock, toBlock: job.toBlock });
     return runPonsJob(job, {
       source: windowSource,
