@@ -1,16 +1,24 @@
+import type { Hash } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
+import type { IndexBatch } from '../domain/types.js';
 import { createBatchedGetBlockData } from '../indexer/blockDataBatch.js';
+import { eligibleVenues } from '../indexer/eligibleVenues.js';
 import { runFactoryCycle } from '../indexer/factoryCycle.js';
 import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
+import type { ScanJob } from '../indexer/jobTypes.js';
+import type { SourceDefinition } from '../indexer/jobPlanner.js';
+import { runJobScheduler, type SchedulerDeps } from '../indexer/jobScheduler.js';
+import { runPonsJob } from '../indexer/ponsJobWorker.js';
 import { createLifecycleDecoder, getV2LifecycleSource, lifecycleTarget, readV2FactoryPoolConfig } from '../indexer/lifecycleRuntime.js';
 import { reconcileV2Phase } from '../indexer/phaseReconcile.js';
 import { reconcileCanonicalHead } from '../indexer/reorg.js';
 import { safeErrorMessage, scanChunkBounds, scanToHead } from '../indexer/scan.js';
-import { createVenueStore } from '../indexer/venueStore.js';
+import { createVenueStore, type VenueContext } from '../indexer/venueStore.js';
 import { computeGroupSize, createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
 import { createV4GetLogs, createV4TradeDecoder, getV4PoolSources } from '../indexer/v4Runtime.js';
+import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
 import { selectIndexerSourceIds } from '../indexer/sourceSelection.js';
 import { readV1Graduation, readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
 import { readV2LaunchRecord, readV2Phase, readV2TokenMetadata, resolveV2QuoteAsset, type V2ReadClient } from '../launchpads/pons/v2/adapter.js';
@@ -225,12 +233,175 @@ async function runOnce(): Promise<void> {
   }
 }
 
+// --- Jobs-mode runner (INDEXER_SCHEDULER=jobs) -----------------------------------------------
+// Bounded parallel scheduler over durable, leased block-window jobs (see
+// docs/superpowers/specs/2026-09-30-parallel-indexer-design.md). Kept behind an explicit flag so
+// the sequential runOnce() above remains selectable for rollback per the plan's Global Constraints.
+const sleep = (milliseconds: number) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+
+interface VenueSnapshot { curve: VenueContext[]; v3Pool: VenueContext[]; v4Pool: VenueContext[] }
+let venueSnapshot: VenueSnapshot = { curve: [], v3Pool: [], v4Pool: [] };
+async function refreshVenueSnapshot(): Promise<void> {
+  const [curve, v3Pool, v4Pool] = await Promise.all([
+    venueStore.listOfficial('curve', 4663), venueStore.listOfficial('v3_pool', 4663), venueStore.listOfficial('v4_pool', 4663),
+  ]);
+  venueSnapshot = { curve, v3Pool, v4Pool };
+}
+
+function jobTradeDefinition(sourceId: string) {
+  return tradeDefinitions.find((definition) => definition.source.id === sourceId);
+}
+function jobTradeContexts(definition: NonNullable<ReturnType<typeof jobTradeDefinition>>): VenueContext[] {
+  const pool = definition.venueKind === 'curve' ? venueSnapshot.curve : venueSnapshot.v3Pool;
+  return pool.filter((context) => definition.factorySourceIds.includes(context.launch.sourceId));
+}
+
+// listSources/getFrontiers run concurrently (jobScheduler.ts calls both via Promise.all), so each
+// refreshes and registers V4 pools independently rather than sharing one pass's snapshot — a
+// deliberately redundant venue query per pass, not per planned window.
+async function listJobSources(): Promise<SourceDefinition[]> {
+  await refreshVenueSnapshot();
+  const { poolManager } = await getPoolConfig();
+  const v4Sources = getV4PoolSources(venueSnapshot.v4Pool.filter((context) => context.launch.sourceId === 'pons-v2'), poolManager);
+  for (const source of v4Sources) {
+    await repository.registerSource({ id: source.id, chainId: source.chainId, version: 'v2-v4',
+      factoryAddress: poolManager, startBlock: source.startBlock });
+  }
+  const base: SourceDefinition[] = [
+    ...sources.map((source) => ({ id: source.id, startBlock: source.startBlock })),
+    { id: lifecycleSource.id, startBlock: lifecycleSource.startBlock },
+    ...tradeDefinitions.map((definition) => ({ id: definition.source.id, startBlock: definition.source.startBlock })),
+    ...v4Sources.map((source) => ({ id: source.id, startBlock: source.startBlock, verifiedInitialize: true })),
+  ];
+  return base.filter((source) => selectedIds.includes(source.id)
+    || (source.id.startsWith('pons-v2-v4:') && selectedIds.includes(v4SelectionId)));
+}
+
+async function getJobFrontiers(): Promise<ReadonlyMap<string, bigint>> {
+  const list = await listJobSources();
+  const entries = await Promise.all(list.map(async (source) => [source.id, await repository.getCertifiedFrontier(source.id)] as const));
+  return new Map(entries);
+}
+
+async function estimateJobPoolCount(sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<number> {
+  const definition = jobTradeDefinition(sourceId);
+  if (!definition) return 0;
+  return eligibleVenues(jobTradeContexts(definition), fromBlock, toBlock).length;
+}
+
+async function executeJob(job: ScanJob): Promise<IndexBatch> {
+  const factorySource = sources.find((source) => source.id === job.sourceId);
+  if (factorySource) return runPonsJob(job, { source: factorySource, getLogs, decodeLogs: decoder, sleep });
+  if (job.sourceId === lifecycleSource.id) {
+    const poolConfig = await getPoolConfig();
+    const byToken = new Map(venueSnapshot.curve.filter((context) => context.launch.sourceId === 'pons-v2')
+      .map((context) => [context.launch.tokenAddress.toLowerCase(), context]));
+    return runPonsJob(job, {
+      source: lifecycleSource, getLogs,
+      decodeLogs: createLifecycleDecoder({
+        loadLaunch: async (token) => {
+          const context = byToken.get(token.toLowerCase());
+          if (!context) return null;
+          if (context.launch.v4PoolFee !== null && context.launch.v4PoolFee !== undefined
+            && context.launch.v4TickSpacing !== null && context.launch.v4TickSpacing !== undefined) return context;
+          const factory = factories.find((item) => item.version === 'v2')!;
+          const record = await readV2LaunchRecord(v2Reader, factory.factory, token);
+          if (!record.exists || record.token.toLowerCase() !== token.toLowerCase()
+            || record.curve.toLowerCase() !== context.venue.ref.toLowerCase()
+            || record.pairToken.toLowerCase() !== context.launch.quoteAsset.address.toLowerCase()) {
+            throw new Error(`Pons V2 historical pool terms do not match launch ${token}`);
+          }
+          await repository.setV2PoolTerms(context.launch.chainId, token, record.poolFee, record.tickSpacing);
+          context.launch.v4PoolFee = record.poolFee;
+          context.launch.v4TickSpacing = record.tickSpacing;
+          return context;
+        },
+        getReceiptLogs: async (txHash) => (await client.getTransactionReceipt({ hash: txHash })).logs.map((log) => ({
+          address: log.address, topics: log.topics, data: log.data, blockNumber: log.blockNumber,
+          blockHash: log.blockHash, transactionHash: log.transactionHash, logIndex: log.logIndex,
+        })),
+        ...poolConfig,
+      }),
+      sleep,
+    });
+  }
+  const definition = jobTradeDefinition(job.sourceId);
+  if (definition) {
+    const contexts = jobTradeContexts(definition);
+    const tradeRpcUrl = tradeSourceRpcUrl(job.sourceId);
+    const tradeClient = createRobinhoodPublicClient(tradeRpcUrl);
+    const tradeGetLogs = createViemGetLogs(tradeClient);
+    const tradeGetBlocksData = createBatchedGetBlockData(tradeRpcUrl, 100);
+    const windowSource = withVenueAddresses(definition, contexts, { fromBlock: job.fromBlock, toBlock: job.toBlock });
+    return runPonsJob(job, {
+      source: windowSource,
+      getLogs: (_source, fromBlock, toBlock) =>
+        getGroupedTradeLogs(windowSource, fromBlock, toBlock, computeGroupSize(windowSource.addresses.length), tradeGetLogs),
+      decodeLogs: createTradeDecoder(contexts, tradeGetBlocksData),
+      sleep,
+    });
+  }
+  if (job.sourceId.startsWith('pons-v2-v4:')) {
+    const { poolManager, hook } = await getPoolConfig();
+    const context = venueSnapshot.v4Pool.find((item) => `pons-v2-v4:${item.venue.ref.toLowerCase()}` === job.sourceId);
+    if (!context) throw new Error(`Unknown V4 pool source: ${job.sourceId}`);
+    const poolId = context.venue.ref.toLowerCase() as Hash;
+    return runPonsJob(job, {
+      source: { id: job.sourceId, chainId: 4663, startBlock: context.venue.effectiveFromBlock, addresses: [poolManager], events: [v4SwapEvent] },
+      getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, poolId),
+      decodeLogs: createV4TradeDecoder(context, getBlocksData, poolManager, hook),
+      sleep,
+    });
+  }
+  throw new Error(`Unknown job source: ${job.sourceId}`);
+}
+
+async function runJobsMode(): Promise<void> {
+  const abortController = new AbortController();
+  const stop = () => abortController.abort();
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+  // Each trade source has its own dedicated RPC endpoint (tradeSourceRpcUrl) whose internal
+  // address-group concurrency (TRADE_LOG_GROUP_CONCURRENCY) is already 20 — 2 concurrent
+  // job-windows per trade source lets the scheduler work ahead on the next window while a slow
+  // one is still running, without contending with the shared factory/lifecycle/V4 endpoint.
+  const endpointLimits: Record<string, number> = { shared: 3 };
+  for (const definition of tradeDefinitions) endpointLimits[definition.source.id] = 2;
+  const deps: SchedulerDeps = {
+    once: process.env.INDEXER_ONCE === 'true',
+    endpointLimits,
+    endpointFor: (sourceId) => jobTradeDefinition(sourceId) ? sourceId : 'shared',
+    getSafeHead: async () => { const head = await client.getBlockNumber(); return head > 12n ? head - 12n : 0n; },
+    listSources: listJobSources,
+    getFrontiers: getJobFrontiers,
+    estimatePoolCount: estimateJobPoolCount,
+    // Bound: createRepository returns a plain object whose methods call this.persistBatchInTransaction
+    // internally, so passing them unbound as bare references loses `this` when jobScheduler invokes them.
+    enqueueJob: repository.enqueueScanJob.bind(repository),
+    claimJob: repository.claimScanJob.bind(repository),
+    executeJob,
+    commitJob: repository.commitScanJob.bind(repository),
+    failJob: repository.failScanJob.bind(repository),
+    now: () => new Date(),
+    wait: (milliseconds, signal) => new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, milliseconds);
+      signal.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+    }),
+    leaseMs: 120_000,
+    pollMs: 5_000,
+    onReport: (report) => console.log(JSON.stringify(report)),
+  };
+  await runJobScheduler(deps, abortController.signal);
+}
+
 // A single cycle can still throw outside scanToHead's own retry/backoff (e.g. the safe-head
 // getBlockNumber/getBlock calls above aren't wrapped). For a long unattended run, one such
 // hiccup must not kill the whole process — log it and keep cycling; the next cycle resumes
 // from the last saved checkpoint, so nothing is lost besides this cycle's attempt.
 try {
-  for (;;) {
+  if (process.env.INDEXER_SCHEDULER === 'jobs') {
+    await runJobsMode();
+  } else for (;;) {
     try {
       await runOnce();
     } catch (error) {

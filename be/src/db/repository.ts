@@ -6,7 +6,7 @@ import type { ObservedBlock } from '../indexer/reorg.js';
 import type { ScanReport } from '../indexer/scan.js';
 import type { PhaseReconciliation } from '../indexer/phaseReconcile.js';
 import type { NewScanJob, ScanJob } from '../indexer/jobTypes.js';
-import { safeErrorMessage } from '../indexer/scan.js';
+import { retryDelayMs, safeErrorMessage } from '../indexer/scan.js';
 import type { Candle } from '../market/aggregate.js';
 import type { Database } from './client.js';
 import { candles, launches, lifecycleTransitions, observedBlocks, phaseObservations, rawLogs, scanJobs, sourceGaps, sources, trades, venues } from './schema.js';
@@ -375,15 +375,17 @@ export function createRepository(db: Database) {
       });
     },
 
-    async claimScanJob(workerId: string, now: Date, leaseMs: number): Promise<ScanJob | null> {
+    async claimScanJob(workerId: string, now: Date, leaseMs: number, allowedSourceIds?: readonly string[]): Promise<ScanJob | null> {
       if (!workerId || !Number.isSafeInteger(leaseMs) || leaseMs < 1 || leaseMs > 3_600_000) {
         throw new Error('Invalid scan job lease');
       }
+      if (allowedSourceIds?.length === 0) return null;
       return db.transaction(async (tx) => {
-        const [candidate] = await tx.select().from(scanJobs).where(or(
-          eq(scanJobs.status, 'pending'),
-          and(eq(scanJobs.status, 'leased'), lte(scanJobs.leaseUntil, now)),
-        )).orderBy(scanJobs.fromBlock, scanJobs.id).limit(1).for('update', { skipLocked: true });
+        const claimable = or(eq(scanJobs.status, 'pending'),
+          and(inArray(scanJobs.status, ['leased', 'failed']), lte(scanJobs.leaseUntil, now)));
+        const [candidate] = await tx.select().from(scanJobs).where(allowedSourceIds
+          ? and(claimable, inArray(scanJobs.sourceId, [...allowedSourceIds])) : claimable)
+          .orderBy(scanJobs.fromBlock, scanJobs.id).limit(1).for('update', { skipLocked: true });
         if (!candidate) return null;
         const [row] = await tx.update(scanJobs).set({ status: 'leased', leaseOwner: workerId,
           leaseUntil: new Date(now.getTime() + leaseMs), startedAt: now, errorReason: null })
@@ -430,7 +432,8 @@ export function createRepository(db: Database) {
         if (!job || job.status !== 'leased' || job.leaseOwner !== workerId || job.generation !== generation) {
           throw new Error('Scan job lease is no longer valid');
         }
-        await tx.update(scanJobs).set({ status: 'failed', leaseOwner: null, leaseUntil: null,
+        await tx.update(scanJobs).set({ status: 'failed', leaseOwner: null,
+          leaseUntil: new Date(Date.now() + retryDelayMs(reason, 0)),
           errorReason: safeErrorMessage(reason) }).where(eq(scanJobs.id, jobId));
       });
     },

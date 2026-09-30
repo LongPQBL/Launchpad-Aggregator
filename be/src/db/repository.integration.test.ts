@@ -183,6 +183,27 @@ describe('index batch repository', () => {
     expect((await pool.query("SELECT status FROM scan_jobs WHERE id=$1", [job!.id])).rows[0].status).toBe('leased');
   });
 
+  it('claims only a permitted source for an endpoint-specific worker', async () => {
+    for (const id of ['test-a', 'test-b']) {
+      await repository.registerSource({ id, chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+      await repository.enqueueScanJob({ sourceId: id, lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    }
+    const claimed = await repository.claimScanJob('worker-b', new Date(), 10_000, ['test-b']);
+    expect(claimed?.sourceId).toBe('test-b');
+  });
+
+  it('retries a failed rate-limited job only after its cooldown', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    await repository.enqueueScanJob({ sourceId: 'test-a', lane: 'certified', fromBlock: 100n, toBlock: 100n });
+    const now = new Date();
+    const job = await repository.claimScanJob('worker', now, 10_000);
+    await repository.failScanJob(job!.id, 'worker', job!.generation, '429 Too Many Requests');
+    expect(await repository.claimScanJob('early', new Date(now.getTime() + 1_000), 10_000)).toBeNull();
+    const retry = await repository.claimScanJob('retry', new Date(now.getTime() + 70_000), 10_000);
+    expect(retry?.id).toBe(job!.id);
+    expect(retry?.leaseOwner).toBe('retry');
+  });
+
   it('persists protocol activity while defaulting an unclassified legacy trade to user activity', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const data = batch(4663, 'test-a');
