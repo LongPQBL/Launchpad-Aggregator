@@ -10,3 +10,7 @@ export interface BlockTradeData {
 }
 
 export type GetBlockData = (blockNumber: bigint) => Promise<BlockTradeData>;
+
+// Batch form: fetches many blocks' data in as few HTTP round trips as possible (see
+// indexer/blockDataBatch.ts), rather than one round trip per block.
+export type GetBlocksData = (blockNumbers: readonly bigint[]) => Promise<ReadonlyMap<bigint, BlockTradeData>>;

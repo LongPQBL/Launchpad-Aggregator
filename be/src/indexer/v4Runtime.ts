@@ -2,8 +2,7 @@ import { isHash, type Address, type Hash, type Log } from 'viem';
 import type { IndexBatch, RawLog } from '../domain/types.js';
 import type { RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { decodePonsV4Swap, v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
-import type { GetBlockData } from './blockData.js';
-import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from './concurrency.js';
+import type { GetBlocksData } from './blockData.js';
 import type { LogSource, ScanDeps } from './scan.js';
 import type { VenueContext } from './venueStore.js';
 
@@ -40,7 +39,7 @@ function verifiedLog(log: Log): RpcLog {
     blockHash: log.blockHash, transactionHash: log.transactionHash, logIndex: log.logIndex };
 }
 
-export function createV4TradeDecoder(context: VenueContext, getBlockData: GetBlockData,
+export function createV4TradeDecoder(context: VenueContext, getBlocksData: GetBlocksData,
   poolManager: Address, hook: Address): ScanDeps['decodeLogs'] {
   const poolId = context.venue.ref.toLowerCase() as Hash;
   const sourceId = `pons-v2-v4:${poolId}`;
@@ -56,8 +55,7 @@ export function createV4TradeDecoder(context: VenueContext, getBlockData: GetBlo
       return log;
     });
     const uniqueBlocks = [...new Set(verifiedLogs.map((log) => log.blockNumber))];
-    const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-      async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
+    const blocks = await getBlocksData(uniqueBlocks);
     const rawLogs: RawLog[] = [];
     const trades: IndexBatch['trades'][number][] = [];
     for (const log of verifiedLogs) {

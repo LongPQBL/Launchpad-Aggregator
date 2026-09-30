@@ -2,7 +2,7 @@ import { decodeEventLog, parseAbi, toEventSelector, zeroAddress, type Address, t
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, LifecycleStatus, QuoteAsset, RawLog, Trade, Venue } from '../../../domain/types.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
-import type { GetBlockData } from '../../../indexer/blockData.js';
+import type { GetBlocksData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
@@ -184,7 +184,7 @@ export async function decodeV2FactoryBatch(logs: readonly RpcLog[], factory: Fac
 }
 
 export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: string,
-  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getBlockData: GetBlockData): Promise<IndexBatch> {
+  contexts: ReadonlyMap<string, V2LaunchWithVenue>, getBlocksData: GetBlocksData): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
     if (!context) throw new Error(`Unknown pons v2 curve: ${log.address}`);
@@ -194,8 +194,7 @@ export async function decodeV2CurveBatch(logs: readonly RpcLog[], sourceId: stri
   });
   const tradeItems = resolved.filter((item) => item.isTradeEvent);
   const uniqueBlocks = [...new Set(tradeItems.map((item) => item.log.blockNumber))];
-  const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-    async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
+  const blocks = await getBlocksData(uniqueBlocks);
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context, isTradeEvent } of resolved) {

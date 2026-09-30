@@ -1,6 +1,6 @@
 import type { Address, Log } from 'viem';
 import type { IndexBatch, VenueKind } from '../domain/types.js';
-import type { GetBlockData } from './blockData.js';
+import type { GetBlocksData } from './blockData.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { decodeV1SwapBatch, type LaunchWithVenue, type RpcLog } from '../launchpads/pons/v1/adapter.js';
 import { v3SwapEvent } from '../launchpads/pons/v1/abi.js';
@@ -70,14 +70,14 @@ function verifiedLog(log: Log): RpcLog {
     blockHash: log.blockHash, transactionHash: log.transactionHash, logIndex: log.logIndex };
 }
 
-export function createTradeDecoder(contexts: readonly VenueContext[], getBlockData: GetBlockData) {
+export function createTradeDecoder(contexts: readonly VenueContext[], getBlocksData: GetBlocksData) {
   const byAddress = new Map(contexts.map((context) => [context.venue.ref.toLowerCase(), context as LaunchWithVenue]));
   return async (logs: readonly Log[], source: LogSource): Promise<IndexBatch> => {
     const canonical = logs.map(verifiedLog);
     if (source.id === 'pons-v1-legacy-trades' || source.id === 'pons-v1-active-trades') {
-      return decodeV1SwapBatch(canonical, source.id, byAddress, getBlockData);
+      return decodeV1SwapBatch(canonical, source.id, byAddress, getBlocksData);
     }
-    if (source.id === 'pons-v2-curve') return decodeV2CurveBatch(canonical, source.id, byAddress, getBlockData);
+    if (source.id === 'pons-v2-curve') return decodeV2CurveBatch(canonical, source.id, byAddress, getBlocksData);
     throw new Error(`Unknown trade source: ${source.id}`);
   };
 }

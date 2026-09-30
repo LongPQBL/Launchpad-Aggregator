@@ -1,6 +1,7 @@
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
+import { createBatchedGetBlockData } from '../indexer/blockDataBatch.js';
 import { runFactoryCycle } from '../indexer/factoryCycle.js';
 import { createFactoryDecoder } from '../indexer/factoryRuntime.js';
 import { createLifecycleDecoder, getV2LifecycleSource, lifecycleTarget, readV2FactoryPoolConfig } from '../indexer/lifecycleRuntime.js';
@@ -61,10 +62,7 @@ const decoder = createFactoryDecoder({
   },
 });
 const getLogs = createViemGetLogs(client);
-const getBlockData = async (blockNumber: bigint) => {
-  const block = await client.getBlock({ blockNumber, includeTransactions: true });
-  return { timestamp: Number(block.timestamp), traders: new Map(block.transactions.map((tx) => [tx.hash, tx.from] as const)) };
-};
+const getBlocksData = createBatchedGetBlockData(rpcUrl, 100);
 
 for (const factory of factories) {
   await repository.registerSource({ id: factory.id, chainId: factory.chainId, version: factory.version,
@@ -152,7 +150,7 @@ async function runOnce(): Promise<void> {
         initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
         getCursor: repository.getCursor,
         getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
-        decodeLogs: createTradeDecoder(contexts, getBlockData), saveIndexBatch: repository.saveIndexBatch,
+        decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
         sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
       }),
     });
@@ -175,7 +173,7 @@ async function runOnce(): Promise<void> {
           initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
           getCursor: repository.getCursor,
           getLogs: createV4GetLogs(client as unknown as Parameters<typeof createV4GetLogs>[0], poolManager, source.poolId),
-          decodeLogs: createV4TradeDecoder(context, getBlockData, poolManager, hook),
+          decodeLogs: createV4TradeDecoder(context, getBlocksData, poolManager, hook),
           saveIndexBatch: repository.saveIndexBatch,
           sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
         }),

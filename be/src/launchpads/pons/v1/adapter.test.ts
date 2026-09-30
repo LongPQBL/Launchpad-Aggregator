@@ -194,7 +194,7 @@ describe('pons v1 normalized batches', () => {
       [log],
       'pons-v1-pool-cohort-0',
       new Map([[context.venue.ref.toLowerCase(), context]]),
-      async () => ({ timestamp: 1_700_000_000, traders: new Map([[log.transactionHash, trader]]) }),
+      async () => new Map([[log.blockNumber, { timestamp: 1_700_000_000, traders: new Map([[log.transactionHash, trader]]) }]]),
     );
     expect(result.trades).toHaveLength(1);
     expect(result.rawLogs).toHaveLength(1);
@@ -219,14 +219,15 @@ describe('pons v1 normalized batches', () => {
       [dustLog, realLog],
       'pons-v1-pool-cohort-0',
       new Map([[context.venue.ref.toLowerCase(), context]]),
-      async () => ({ timestamp: 1_700_000_000, traders: new Map([[dustLog.transactionHash, trader], [realLog.transactionHash, trader]]) }),
+      async () => new Map([[dustLog.blockNumber, { timestamp: 1_700_000_000,
+        traders: new Map([[dustLog.transactionHash, trader], [realLog.transactionHash, trader]]) }]]),
     );
     expect(result.rawLogs).toHaveLength(2);
     expect(result.trades).toHaveLength(1);
     expect(result.trades[0].txHash).toBe(realLog.transactionHash);
   });
 
-  it('fetches distinct blocks concurrently instead of one round trip at a time, for both timestamp and trader', async () => {
+  it('fetches all distinct blocks in a single batch call instead of one round trip per block', async () => {
     const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
     const context = hydrateV1Launch(event, legacy, {
       name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address,
@@ -236,21 +237,18 @@ describe('pons v1 normalized batches', () => {
       ...base, blockNumber: base.blockNumber + offset,
       transactionHash: `0x${(index + 1).toString().repeat(64)}`.slice(0, 66) as Hash,
     }));
-    const requestedBlocks: bigint[] = [];
-    const releases = new Map<bigint, (value: { timestamp: number; traders: Map<Hash, Address> }) => void>();
-    const getBlockData = (blockNumber: bigint) => {
-      requestedBlocks.push(blockNumber);
-      return new Promise<{ timestamp: number; traders: Map<Hash, Address> }>((resolve) => { releases.set(blockNumber, resolve); });
+    const calls: readonly bigint[][] = [];
+    const getBlocksData = async (blockNumbers: readonly bigint[]) => {
+      (calls as bigint[][]).push([...blockNumbers]);
+      return new Map(blockNumbers.map((blockNumber) => {
+        const log = logs.find((item) => item.blockNumber === blockNumber)!;
+        return [blockNumber, { timestamp: 1_700_000_000, traders: new Map([[log.transactionHash, trader]]) }] as const;
+      }));
     };
-    const resultPromise = decodeV1SwapBatch(logs, 'pons-v1-pool-cohort-0',
-      new Map([[context.venue.ref.toLowerCase(), context]]), getBlockData);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(requestedBlocks).toHaveLength(3);
-    for (const [blockNumber, release] of releases) {
-      const log = logs.find((item) => item.blockNumber === blockNumber)!;
-      release({ timestamp: 1_700_000_000, traders: new Map([[log.transactionHash, trader]]) });
-    }
-    const result = await resultPromise;
+    const result = await decodeV1SwapBatch(logs, 'pons-v1-pool-cohort-0',
+      new Map([[context.venue.ref.toLowerCase(), context]]), getBlocksData);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toHaveLength(3);
     expect(result.trades).toHaveLength(3);
     expect(result.trades.every((t) => t.traderAddress === trader.toLowerCase())).toBe(true);
   });

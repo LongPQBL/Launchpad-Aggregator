@@ -1,6 +1,7 @@
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { createDatabase } from '../db/client.js';
 import { createRepository } from '../db/repository.js';
+import { createBatchedGetBlockData } from '../indexer/blockDataBatch.js';
 import { scanToHead, type LogSource } from '../indexer/scan.js';
 import { createVenueStore } from '../indexer/venueStore.js';
 import { createTradeDecoder, getGroupedTradeLogs, getTradeSourceDefinitions, tradeFrontier, withVenueAddresses } from '../indexer/tradeRuntime.js';
@@ -31,17 +32,14 @@ const getLogs: typeof rawGetLogs = async (source, fromBlock, toBlock) => {
     throw error;
   }
 };
-const getBlockData = async (blockNumber: bigint) => {
-  const block = await client.getBlock({ blockNumber, includeTransactions: true });
-  return { timestamp: Number(block.timestamp), traders: new Map(block.transactions.map((tx) => [tx.hash, tx.from] as const)) };
-};
+const getBlocksData = createBatchedGetBlockData(rpcUrl, 100);
 
 async function scanBounded(source: LogSource, contexts: Awaited<ReturnType<typeof venueStore.listOfficial>>, target: bigint) {
   return scanToHead(source, target, {
     initialChunk: 10_000n, minChunk: 1n, maxChunk: 500_000n, maxRetries: 6,
     getCursor: repository.getCursor,
     getLogs: (group, fromBlock, toBlock) => getGroupedTradeLogs(group, fromBlock, toBlock, 100, getLogs),
-    decodeLogs: createTradeDecoder(contexts, getBlockData), saveIndexBatch: repository.saveIndexBatch,
+    decodeLogs: createTradeDecoder(contexts, getBlocksData), saveIndexBatch: repository.saveIndexBatch,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   });
 }

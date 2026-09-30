@@ -2,7 +2,7 @@ import { decodeEventLog, toEventSelector, type Address, type Hash } from 'viem';
 import { logKey, venueKey } from '../../../domain/ids.js';
 import type { IndexBatch, Launch, RawLog, Venue, Trade } from '../../../domain/types.js';
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
-import type { GetBlockData } from '../../../indexer/blockData.js';
+import type { GetBlocksData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import { v1LaunchEvent, v3SwapEvent } from './abi.js';
 
@@ -176,7 +176,7 @@ export async function decodeV1SwapBatch(
   logs: readonly RpcLog[],
   sourceId: string,
   contexts: ReadonlyMap<string, LaunchWithVenue>,
-  getBlockData: GetBlockData,
+  getBlocksData: GetBlocksData,
 ): Promise<IndexBatch> {
   const resolved = logs.map((log) => {
     const context = contexts.get(log.address.toLowerCase());
@@ -184,8 +184,7 @@ export async function decodeV1SwapBatch(
     return { log, context };
   });
   const uniqueBlocks = [...new Set(resolved.map(({ log }) => log.blockNumber))];
-  const blocks = new Map(await mapWithConcurrency(uniqueBlocks, RPC_FETCH_CONCURRENCY,
-    async (blockNumber) => [blockNumber, await getBlockData(blockNumber)] as const));
+  const blocks = await getBlocksData(uniqueBlocks);
   const rawLogs: RawLog[] = [];
   const trades: Trade[] = [];
   for (const { log, context } of resolved) {
