@@ -36,8 +36,6 @@
 **Files:**
 - Create: `envio/` (copied from the `enviodev/local-docker-example` reference repository, then trimmed)
 - Create: `envio/.env.example`
-- Modify: root `.gitignore`
-- Modify: root `README.md` (new short section pointing at `envio/`)
 
 **Interfaces:**
 - Consumes: nothing from this repo.
@@ -81,14 +79,15 @@ ENVIO_API_TOKEN=
 ENVIO_API_TOKEN=<token from envio.dev>
 ```
 
-- [ ] **Step 5: Add `envio/.env` to `.gitignore`**
+- [ ] **Step 5: Confirm `envio/.env` is ignored**
 
-Add to the root `.gitignore` (alongside the existing `.env`/`.env.local` entries):
+The upstream reference repo ships its own `envio/.gitignore`, which already covers `.env` and the real generated-types directory (`.envio/` — not `generated/`, despite what the directory's own inline comment says). Verify instead of duplicating in the root `.gitignore`:
 
+```bash
+git check-ignore -v envio/.env
 ```
-envio/.env
-envio/generated/
-```
+
+Expected: prints `envio/.gitignore:<line>:.env    envio/.env` — confirming it's already ignored. No root `.gitignore` edit needed.
 
 - [ ] **Step 6: Bring the stack up using the reference example's own unmodified config**
 
@@ -211,7 +210,7 @@ indexer.onEvent(
 cd envio && pnpm install && pnpm codegen
 ```
 
-Expected: codegen completes. `event.block.number`/`.hash`/`.timestamp` are default block fields (need no `field_selection`) and `event.transaction.hash` is covered by the `field_selection.transaction_fields: [hash]` above — confirmed against the project's own `.claude/skills/indexer-transactions/SKILL.md` (copied in with the reference scaffold in Task 1 Step 2) and the installed package's `evm.schema.json`. If codegen or `tsc` still reports any of these as missing/untyped, open `envio/generated/` to see the real generated types and re-run `pnpm codegen` until it succeeds — a real, checkable compiler loop, not a guess.
+Expected: codegen completes. `event.block.number`/`.hash`/`.timestamp` are default block fields (need no `field_selection`) and `event.transaction.hash` is covered by the `field_selection.transaction_fields: [hash]` above — confirmed against the project's own `.claude/skills/indexer-transactions/SKILL.md` (copied in with the reference scaffold in Task 1 Step 2) and the installed package's `evm.schema.json`. If codegen or `tsc` still reports any of these as missing/untyped, open `envio/.envio/ (the real generated-types directory; not "generated/")` to see the real generated types and re-run `pnpm codegen` until it succeeds — a real, checkable compiler loop, not a guess.
 
 - [ ] **Step 5: Start the indexer against the real chain**
 
