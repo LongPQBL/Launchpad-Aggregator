@@ -318,7 +318,7 @@ type RawSwap {
 ```typescript
 indexer.contractRegister(
   { contract: "PonsV1LegacyFactory", event: "TokenLaunched" },
-  ({ event, context }) => {
+  async ({ event, context }) => {
     context.chain.PonsV3Pool.add(event.params.pool);
   },
 );
@@ -336,7 +336,7 @@ indexer.onEvent(
       amount1: event.params.amount1,
       sqrtPriceX96: event.params.sqrtPriceX96,
       liquidity: event.params.liquidity,
-      tick: event.params.tick,
+      tick: Number(event.params.tick),
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
@@ -347,7 +347,7 @@ indexer.onEvent(
 );
 ```
 
-`event.block.timestamp` is a default block field (confirmed in Task 2 Step 4) and needs no `field_selection` entry. If codegen or `tsc` disagrees, apply the same real-compiler-feedback loop as Task 2 Step 4.
+`event.block.timestamp` is a default block field (confirmed in Task 2 Step 4) and needs no `field_selection` entry. The code above already reflects two real `tsc` findings from executing this step: `contractRegister`'s handler must be `async` (a sync arrow function type-errors — `Type 'void' is not assignable to type 'Promise<void>'`), and `event.params.tick` is `bigint` (int24), needing `Number(...)` to match `RawSwap.tick: Int!`'s generated `number` type (`Type 'bigint' is not assignable to type 'number'`). If codegen or `tsc` reports anything else, apply the same real-compiler-feedback loop as Task 2 Step 4.
 
 - [ ] **Step 4: Codegen, restart from a clean volume, and run past the fixture swap block**
 
