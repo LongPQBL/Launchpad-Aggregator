@@ -17,6 +17,7 @@
     "db:seed-certified-coverage": "tsx src/cli/seedCertifiedCoverage.ts",
     "dev:api": "tsx src/cli/api.ts",
     "dev:indexer": "tsx src/cli/runFactoryIndexer.ts",
+    "indexer:status": "tsx src/cli/indexerStatus.ts",
     "openapi:write": "tsx src/cli/openapi.ts --write",
     "openapi:check": "tsx src/cli/openapi.ts --check"
   },

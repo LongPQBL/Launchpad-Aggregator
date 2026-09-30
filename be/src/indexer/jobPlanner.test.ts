@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dependencyFrontier, isFactorySource, planCertifiedJobs, planProvisionalWindow } from './jobPlanner.js';
+import { dependencyFrontier, isFactorySource, planCertifiedJobs, planProvisionalWindow, requiredSourceDependencies } from './jobPlanner.js';
 
 const small = { maxWindowBlocks: 2n, maxJobs: 20, targetWorkUnits: 1_000n };
 const noPools = async () => 0;
@@ -55,6 +55,14 @@ describe('parallel scan job planner', () => {
       { fromBlock: 100n, toBlock: 104n }, { fromBlock: 105n, toBlock: 109n },
       { fromBlock: 110n, toBlock: 111n }, { fromBlock: 112n, toBlock: 113n },
     ]);
+  });
+
+  it('reports each source\'s upstream dependencies for pipeline scheduling', () => {
+    expect(requiredSourceDependencies('pons-v1-active')).toEqual([]);
+    expect(requiredSourceDependencies('pons-v2-lifecycle')).toEqual(['pons-v2']);
+    expect(requiredSourceDependencies('pons-v1-active-trades')).toEqual(['pons-v1-active']);
+    expect(requiredSourceDependencies(`pons-v2-v4:0x${'a'.repeat(64)}`)).toEqual(['pons-v2-lifecycle']);
+    expect(() => requiredSourceDependencies('unknown-source')).toThrow('Unknown indexer source');
   });
 
   it('recognizes only registered Pons factory sources', () => {

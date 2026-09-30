@@ -62,6 +62,14 @@ Lệnh này chuyển cursor `sources.scanned_to_block`/`confirmed_to_block` hi�
 
 **Trước khi chuyển tiến trình đang chạy thật sang scheduler mới:** chạy đủ bộ kiểm thử ở mục Kiểm thử bên dưới, dừng tiến trình indexer cũ, chạy `db:seed-certified-coverage`, khởi động lại với `INDEXER_SCHEDULER=jobs`, rồi đối chiếu cursor, số khoảng `scan_jobs` lỗi/rỗng, số launch/trade, tỷ lệ lỗi 429 và độ trễ giữa bản chạy cũ và mới trên cùng một khoảng thời gian quan sát trước khi coi là ổn định. Không chạy đồng thời hai tiến trình ghi cùng một DB.
 
+**Xem tốc độ/ETA:** `DATABASE_URL=... npm run indexer:status -w be` in tốc độ quan sát được (block/giây) và ETA còn lại cho từng nguồn cùng cho cả pipeline, dựa trên các job `scan_jobs` đã hoàn tất gần đây (mặc định 30 phút gần nhất, chỉnh bằng `INDEXER_STATUS_LOOKBACK_MINUTES`). Lệnh chỉ đọc DB, không cần RPC, không bao giờ in URL/khóa. Nếu một nguồn chưa có job hoàn tất nào trong cửa sổ quan sát, hoặc còn pool V4 chưa được phát hiện hết (lifecycle chưa quét kịp safe head), hoặc gặp 429 lặp lại, lệnh báo `unreliable` kèm lý do thay vì đưa ETA giả chính xác — xem `be/src/indexer/backfillEstimate.ts`.
+
+**Baseline (tuần tự) so với candidate (job-queue), đo ngày 30/09/2026:** không có một cửa sổ đo hoàn toàn cùng điều kiện cho cả hai (baseline chạy nhiều giờ trước khi candidate được bật), nên đây là quan sát thực tế đã ghi lại, không phải benchmark kiểm soát chặt:
+- Baseline (vòng lặp tuần tự, RPC Validation Cloud, trước khi cutover): pipeline ổn định nhiều giờ liên tục, nhưng `pons-v1-active-trades` gần như đứng yên ở cursor `10.111.761` (không tự vượt qua được, xem lỗi bên dưới).
+- Lần cutover đầu tiên sang job-queue: tiến trình crash sau ~3,5 phút (lỗi Postgres tạm thời không được bắt), và `pons-v1-active-trades` lỗi lặp lại xác định trên mọi cửa sổ ("bind message has N parameter formats but 0 parameters" — vượt giới hạn cứng 65.535 tham số bind của PostgreSQL cho một câu INSERT nhiều dòng). Đã rollback ngay, không mất dữ liệu.
+- Sau khi vá cả hai lỗi (tự phục hồi sau crash + chia nhỏ insert theo `be/src/db/chunk.ts`) và cutover lại: `pons-v1-active-trades` vượt qua điểm kẹt cũ, quan sát ~4 phút đầu đạt 43/43 job hoàn tất, 0 lỗi; cửa sổ ~20 phút sau đó đạt 178/178 job hoàn tất, 0 lỗi, với 14 lần tự phục hồi sau lỗi tạm thời (cùng loại lỗi shared-memory ban đầu, không còn làm crash tiến trình).
+- Tốc độ quan sát trực tiếp qua `indexer:status` ngay sau cutover (cửa sổ 30 phút, nhiều nguồn còn `no reliable sample` vì chưa tới lượt trong cửa sổ đó): `pons-v1-active` 263,4 block/s, `pons-v1-legacy-trades` 304,6 block/s, `pons-v1-active-trades` 91,3 block/s, `pons-v2-curve` 362,7 block/s. Đây là tốc độ tại một thời điểm, không phải cam kết ổn định; đo lại bằng `indexer:status` sau khi chạy đủ lâu để có mẫu đáng tin cho mọi nguồn.
+
 Kiểm tra API:
 
 ```sh

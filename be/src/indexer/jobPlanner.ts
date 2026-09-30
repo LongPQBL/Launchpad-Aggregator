@@ -14,13 +14,18 @@ export interface PlannerOptions {
 
 export interface DependencyLimit { ready: boolean; maximumBlock: bigint | null }
 
-export function dependencyFrontier(sourceId: string, frontiers: ReadonlyMap<string, bigint>): DependencyLimit {
-  const factories = getPonsFactorySources();
-  if (factories.some((factory) => factory.id === sourceId)) return { ready: true, maximumBlock: null };
+export function requiredSourceDependencies(sourceId: string): readonly string[] {
+  if (isFactorySource(sourceId)) return [];
   const required = sourceId === 'pons-v2-lifecycle' ? ['pons-v2']
     : sourceId.startsWith('pons-v2-v4:') ? ['pons-v2-lifecycle']
       : getTradeSourceDefinitions().find((definition) => definition.source.id === sourceId)?.factorySourceIds;
   if (!required) throw new Error(`Unknown indexer source: ${sourceId}`);
+  return required;
+}
+
+export function dependencyFrontier(sourceId: string, frontiers: ReadonlyMap<string, bigint>): DependencyLimit {
+  const required = requiredSourceDependencies(sourceId);
+  if (required.length === 0) return { ready: true, maximumBlock: null };
   const values = required.map((id) => frontiers.get(id));
   if (values.some((value) => value === undefined)) return { ready: false, maximumBlock: null };
   return { ready: true, maximumBlock: (values as bigint[]).reduce((lowest, value) => value < lowest ? value : lowest) };
