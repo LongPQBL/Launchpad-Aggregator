@@ -1,46 +1,19 @@
-import { indexer, User } from "envio";
+import { indexer } from "envio";
 
-// Handler for the NewGreeting event
 indexer.onEvent(
-  { contract: "Greeter", event: "NewGreeting" },
+  { contract: "PonsV1LegacyFactory", event: "TokenLaunched" },
   async ({ event, context }) => {
-  const userId = event.params.user;
-  const latestGreeting = event.params.greeting;
-  const currentUserEntity: User | undefined = await context.User.get(userId);
-
-  // Update or create a new User entity
-  const userEntity: User = currentUserEntity
-    ? {
-      id: userId,
-      latestGreeting,
-      numberOfGreetings: currentUserEntity.numberOfGreetings + 1,
-      greetings: [...currentUserEntity.greetings, latestGreeting],
-    }
-    : {
-      id: userId,
-      latestGreeting,
-      numberOfGreetings: 1,
-      greetings: [latestGreeting],
-    };
-
-  context.User.set(userEntity);
-}
-);
-
-// Handler for the ClearGreeting event
-indexer.onEvent(
-  { contract: "Greeter", event: "ClearGreeting" },
-  async ({ event, context }) => {
-  const userId = event.params.user;
-  const currentUserEntity: User | undefined = await context.User.get(userId);
-
-  if (currentUserEntity) {
-    // Clear the latestGreeting
-    context.User.set({
-      ...currentUserEntity,
-      latestGreeting: "",
+    context.RawLaunch.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      deployerAddress: event.params.deployer.toLowerCase(),
+      pairTokenAddress: event.params.pairToken.toLowerCase(),
+      poolAddress: event.params.pool.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
     });
-  }
-}
+  },
 );
-

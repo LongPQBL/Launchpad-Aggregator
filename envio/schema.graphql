@@ -1,6 +1,12 @@
-type User {
+type RawLaunch {
   id: ID!
-  greetings: [String!]!
-  latestGreeting: String!
-  numberOfGreetings: Int!
+  chainId: Int!
+  tokenAddress: String!
+  deployerAddress: String!
+  pairTokenAddress: String!
+  poolAddress: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
 }

@@ -21,8 +21,8 @@ RUN pnpm install --frozen-lockfile
 COPY ./config.yaml ./config.yaml
 COPY ./schema.graphql ./schema.graphql
 
-# Remove the line if you inlined all event ABIs in the config.yaml
-COPY ./abis ./abis
+# No abis/ dir: config.yaml uses inline human-readable event signatures (they take precedence over
+# an abi_file_path per envio's own schema description), so there is no ABI file to copy here.
 
 RUN pnpm envio codegen
 
