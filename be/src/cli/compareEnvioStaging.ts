@@ -50,6 +50,15 @@ try {
   const stagingTransitions = await db.select({ txHash: lifecycleTransitionsEnvioStaging.txHash, logIndex: lifecycleTransitionsEnvioStaging.logIndex }).from(lifecycleTransitionsEnvioStaging);
   const transitionDiff = compareTradeCounts(realTransitions, stagingTransitions);
   console.log('Lifecycle transitions — matching:', transitionDiff.matching, 'only in real:', transitionDiff.onlyInReal.length, 'only in staging:', transitionDiff.onlyInStaging.length);
+
+  const realV4Trades = await db.select({ txHash: trades.txHash, logIndex: trades.logIndex })
+    .from(trades).innerJoin(venues, eq(trades.venueId, venues.id))
+    .where(and(eq(trades.chainId, 4663), eq(venues.kind, 'v4_pool')));
+  const stagingV4Trades = await db.select({ txHash: tradesEnvioStaging.txHash, logIndex: tradesEnvioStaging.logIndex })
+    .from(tradesEnvioStaging).innerJoin(venuesEnvioStaging, eq(tradesEnvioStaging.venueId, venuesEnvioStaging.id))
+    .where(eq(venuesEnvioStaging.kind, 'v4_pool'));
+  const v4TradeDiff = compareTradeCounts(realV4Trades, stagingV4Trades);
+  console.log('V4 swaps — matching:', v4TradeDiff.matching, 'only in real:', v4TradeDiff.onlyInReal.length, 'only in staging:', v4TradeDiff.onlyInStaging.length);
 } finally {
   await pool.end();
 }
