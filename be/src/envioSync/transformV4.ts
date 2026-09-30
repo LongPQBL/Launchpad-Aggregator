@@ -1,6 +1,6 @@
 import type { Address, Hash } from 'viem';
 import { derivePonsV4PoolId, transitionOfficialVenue, type GraduatedPoolEvidence, type V4PoolTerms } from '../launchpads/pons/v2/poolKey.js';
-import type { Launch, Venue } from '../domain/types.js';
+import type { Launch, Trade, Venue } from '../domain/types.js';
 
 const PONS_HOOK: Address = '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044';
 
@@ -56,4 +56,51 @@ export function openV4Venue(launch: Launch, curveVenue: Venue, evidence: Graduat
   const transition = transitionOfficialVenue(launch, curveVenue, 2, position, evidence);
   if (!transition.openedPool) throw new Error('Expected an opened V4 pool venue');
   return transition.openedPool;
+}
+
+export interface EnvioRawV4SwapRow {
+  poolId: string;
+  sender: string;
+  txFrom: string;
+  amount0: bigint;
+  amount1: bigint;
+  sqrtPriceX96: bigint;
+  liquidity: bigint;
+  tick: number;
+  blockNumber: bigint;
+  blockHash: string;
+  txHash: string;
+  logIndex: number;
+  timestamp: number;
+}
+
+// Mirrors decodePonsV4Swap's output exactly (be/src/launchpads/pons/v2/v4Swaps.ts) but Envio already
+// decoded the event, so there is no raw log to re-decode — same pattern as Phase 2's curve trade
+// transform. `sender` classifies protocol-vs-user activity (hook-initiated); `txFrom` (tx.from, not
+// `sender`) is the real trader.
+export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, launch: Launch): Trade | null {
+  if (venue.kind !== 'v4_pool' || !venue.official || row.poolId.toLowerCase() !== venue.ref.toLowerCase()) {
+    throw new Error('Swap is not from the official V4 pool');
+  }
+  const protocolSwap = row.sender.toLowerCase() === PONS_HOOK.toLowerCase();
+  const tokenIsCurrency0 = launch.tokenAddress.toLowerCase() < launch.quoteAsset.address.toLowerCase();
+  const tokenSigned = tokenIsCurrency0 ? row.amount0 : row.amount1;
+  const quoteSigned = tokenIsCurrency0 ? row.amount1 : row.amount0;
+  if (tokenSigned === 0n || quoteSigned === 0n) return null;
+  if (tokenSigned * quoteSigned >= 0n || row.sqrtPriceX96 === 0n) throw new Error('Invalid V4 swap amounts or price');
+  const q192 = 2n ** 192n;
+  const sqrtSquared = row.sqrtPriceX96 * row.sqrtPriceX96;
+  return {
+    chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id,
+    blockNumber: row.blockNumber, blockHash: row.blockHash.toLowerCase() as Hash,
+    txHash: row.txHash.toLowerCase() as Hash, logIndex: row.logIndex, timestamp: row.timestamp,
+    side: quoteSigned < 0n ? 'buy' : 'sell',
+    tokenAmountRaw: tokenSigned < 0n ? -tokenSigned : tokenSigned,
+    quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
+    quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
+    activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
+    priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
+    priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
+    traderAddress: row.txFrom.toLowerCase() as Address,
+  };
 }
