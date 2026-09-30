@@ -38,7 +38,7 @@ function tradeSourceRpcUrl(sourceId: string): string {
 }
 const maxBlocksPerSource = BigInt(process.env.INDEXER_MAX_BLOCKS_PER_CYCLE ?? '10000');
 if (maxBlocksPerSource < 1n || maxBlocksPerSource > 1_000_000n) throw new Error('Invalid INDEXER_MAX_BLOCKS_PER_CYCLE');
-const activeBlockBatchConcurrency = Number(process.env.INDEXER_ACTIVE_BLOCK_BATCH_CONCURRENCY ?? '2');
+const activeBlockBatchConcurrency = Number(process.env.INDEXER_ACTIVE_BLOCK_BATCH_CONCURRENCY ?? '1');
 if (!Number.isSafeInteger(activeBlockBatchConcurrency) || activeBlockBatchConcurrency < 1
   || activeBlockBatchConcurrency > 4) throw new Error('Invalid INDEXER_ACTIVE_BLOCK_BATCH_CONCURRENCY');
 const blockBatchConcurrency = (sourceId: string) => sourceId === 'pons-v1-active-trades' ? activeBlockBatchConcurrency : 1;
