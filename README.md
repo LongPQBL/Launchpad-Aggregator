@@ -82,11 +82,12 @@ curl 'http://127.0.0.1:3001/v1/launches?chainId=4663'
 
 OpenAPI ở `/openapi.json`; bản snapshot là `be/openapi.json`. SSE ở `/v1/events`, chỉ báo loại sự kiện và ID token để frontend gọi lại API. CORS chỉ cho phép `FE_ORIGIN`.
 
-### Envio HyperIndex — thử nghiệm Phase 1 (Pons V1-legacy)
+### Envio HyperIndex — thử nghiệm Phase 1 + Phase 2 (Pons V1-legacy, V2 launch/curve/lifecycle)
 
-Xem `docs/superpowers/specs/2026-09-30-envio-indexer-migration-design.md` và
-`docs/superpowers/plans/2026-09-30-envio-indexer-migration-phase1.md`. Để thử nghiệm thủ công
-sau khi cả 6 task của plan hoàn tất:
+Xem `docs/superpowers/specs/2026-09-30-envio-indexer-migration-design.md`,
+`docs/superpowers/plans/2026-09-30-envio-indexer-migration-phase1.md` và
+`docs/superpowers/plans/2026-09-30-envio-indexer-migration-phase2.md`. Để thử nghiệm thủ công
+sau khi các task của cả hai plan hoàn tất:
 
 ```sh
 cd envio && docker compose up -d
@@ -95,7 +96,7 @@ cd .. && DATABASE_URL=... ENVIO_DATABASE_URL=postgres://postgres:testing@127.0.0
 DATABASE_URL=... npm run -w be compare:envio-staging
 ```
 
-`sync:envio-staging` phải chạy trước — nó đọc bảng raw của Envio và ghi vào các bảng `*_envio_staging`; nếu bỏ qua bước này, `compare:envio-staging` sẽ báo mọi launch/trade thật là "chỉ có ở real" (bảng staging vẫn trống).
+`sync:envio-staging` phải chạy trước — nó đọc bảng raw của Envio và ghi vào các bảng `*_envio_staging`; nếu bỏ qua bước này, `compare:envio-staging` sẽ báo mọi launch/trade thật là "chỉ có ở real" (bảng staging vẫn trống). `sync:envio-staging`/`compare:envio-staging` giờ đồng bộ và đối chiếu cả V1-legacy lẫn V2 (launch, curve trade, lifecycle transition) trong cùng một lần chạy.
 
 Đây là bước đối chiếu thủ công cho phạm vi Phase 1 (chỉ V1-legacy). Đối chiếu tự động, đầy đủ,
 chạy song song với indexer thật đang sống — theo mục 6 của spec — thuộc một plan kế tiếp riêng.
