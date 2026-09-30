@@ -198,7 +198,9 @@ export const launchesEnvioStaging = pgTable('launches_envio_staging', {
   launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
   launchTxHash: text('launch_tx_hash').notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
-  quoteAssetSymbol: text('quote_asset_symbol').notNull(),
+  // Nullable: V2's quote asset symbol is genuinely unknown without a metadata RPC call this phase
+  // doesn't make (same reasoning as name/symbol above).
+  quoteAssetSymbol: text('quote_asset_symbol'),
   quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
   lifecycleStatus: text('lifecycle_status'),
 }, (table) => [
@@ -236,3 +238,15 @@ export const tradesEnvioStaging = pgTable('trades_envio_staging', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
 ]);
+
+export const lifecycleTransitionsEnvioStaging = pgTable('lifecycle_transitions_envio_staging', {
+  sourceLogId: text('source_log_id').primaryKey(),
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  phase: integer('phase').notNull(),
+  kind: text('kind').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  blockHash: text('block_hash').notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+});

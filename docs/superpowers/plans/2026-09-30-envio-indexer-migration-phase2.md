@@ -481,8 +481,10 @@ describe('hydrateV2LaunchFromEnvio', () => {
     expect(launch.tokenAddress).toBe(fixture.tokenAddress as string);
     expect(launch.protocolVersion).toBe('v2');
     expect(launch.quoteAsset.address).toBe(fixture.quoteAddress as string);
-    expect(launch.name).toBeNull();
-    expect(launch.symbol).toBeNull();
+    // name/symbol are placeholder strings here (Launch.name/symbol are non-nullable `string`) —
+    // nulling happens only at the staging-table INSERT layer (see runSyncV2.ts), same as Phase 1's
+    // hydrateV1Launch. tokenDecimals is the documented 18 placeholder the swap-price math needs.
+    expect(launch.tokenDecimals).toBe(18);
     expect(venue.kind).toBe('curve');
     expect(venue.ref).toBe(fixture.curveAddress as string);
     expect(venue.official).toBe(true);
