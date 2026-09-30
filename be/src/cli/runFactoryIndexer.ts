@@ -374,7 +374,13 @@ async function runJobsMode(signal: AbortSignal): Promise<void> {
   // address-group concurrency (TRADE_LOG_GROUP_CONCURRENCY) is already 20 — 2 concurrent
   // job-windows per trade source lets the scheduler work ahead on the next window while a slow
   // one is still running, without contending with the shared factory/lifecycle/V4 endpoint.
-  const endpointLimits: Record<string, number> = { shared: 3 };
+  // The 'shared' ceiling was 3 (from a 2026-09-30 benchmark predating most discovered V4 pools);
+  // with 60+ V4 pool sources now sharing it, that starved most of them (see indexer:status "no
+  // reliable sample"). Measured directly (2026-09-30, curl): the endpoint completed 30 concurrent
+  // eth_blockNumber calls and 15 concurrent eth_getLogs calls (2,000-block range — the real per-job
+  // shape) with zero errors. This is now the AIMD ceiling (jobScheduler.ts), not a fixed operating
+  // point, so it only needs to be a safe upper bound — AIMD backs off automatically on a real 429.
+  const endpointLimits: Record<string, number> = { shared: Number(process.env.INDEXER_SHARED_CONCURRENCY_CEILING ?? '12') };
   for (const definition of tradeDefinitions) endpointLimits[definition.source.id] = 2;
   const deps: SchedulerDeps = {
     once: process.env.INDEXER_ONCE === 'true',
