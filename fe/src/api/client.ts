@@ -51,14 +51,14 @@ async function rawFetch(path: string, searchParams?: Record<string, string | num
   try {
     return await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), cache: 'no-store' });
   } catch (cause) {
-    throw new ApiError(`Không gọi được ${path}`, cause);
+    throw new ApiError(`Failed to call ${path}`, cause);
   }
 }
 
 async function request<T>(path: string, searchParams?: Record<string, string | number | undefined>): Promise<T> {
   const response = await rawFetch(path, searchParams);
   if (!response.ok) {
-    throw new ApiError(`${path} trả về lỗi ${response.status}`);
+    throw new ApiError(`${path} returned error ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -121,7 +121,7 @@ export async function getLaunchDetail(chainId: number, tokenAddress: string): Pr
   const path = `/v1/launches/${chainId}/${tokenAddress}`;
   const response = await rawFetch(path);
   if (response.status === 404) return null;
-  if (!response.ok) throw new ApiError(`${path} trả về lỗi ${response.status}`);
+  if (!response.ok) throw new ApiError(`${path} returned error ${response.status}`);
   return (await response.json()) as LaunchDetail;
 }
 

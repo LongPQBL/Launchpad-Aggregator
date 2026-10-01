@@ -4,12 +4,12 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Launchpad Aggregator',
-  description: 'Theo dõi launch pons trên Robinhood Chain',
+  description: 'Track Pons launches on Robinhood Chain',
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="vi" className="dark">
+    <html lang="vi">
       <body>{children}</body>
     </html>
   );

@@ -30,8 +30,8 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
     return (
       <AppShell>
         <div role="alert">
-          <p>Không tải được thông tin launch từ máy chủ. Vui lòng thử lại.</p>
-          <a href={`/launches/${chainId}/${tokenAddress}`}>Thử lại</a>
+          <p>Could not load launch details from the server. Please try again.</p>
+          <a href={`/launches/${chainId}/${tokenAddress}`}>Retry</a>
         </div>
       </AppShell>
     );

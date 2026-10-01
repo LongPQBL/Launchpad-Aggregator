@@ -8,18 +8,18 @@ test.beforeEach(async ({ page }) => {
 test('shows launch identity, source, and official venues', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /E2E Launch/i })).toBeVisible();
   await expect(page.getByRole('link', { name: 'pons' })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
-  const venueSection = page.getByRole('region', { name: /nơi giao dịch chính thức/i });
+  const venueSection = page.getByRole('region', { name: /official trading venues/i });
   await expect(venueSection.getByText('Bonding curve')).toBeVisible();
 });
 
 test('shows the syncing coverage state honestly instead of hiding it', async ({ page }) => {
   const badges = page.getByTestId('coverage-badge');
   await expect(badges.first()).toBeVisible();
-  await expect(badges.first()).toHaveText('Đang đồng bộ');
+  await expect(badges.first()).toHaveText('Backfilling');
 });
 
 test('shows the official trade history table', async ({ page }) => {
-  await expect(page.getByRole('table', { name: /giao dịch chính thức/i })).toBeVisible();
+  await expect(page.getByRole('table', { name: /official trades/i })).toBeVisible();
 });
 
 test('renders the official chart without crashing on the BE\'s real (newest-first) candle order', async ({ page }) => {

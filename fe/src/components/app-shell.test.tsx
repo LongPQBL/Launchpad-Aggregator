@@ -3,22 +3,22 @@ import { describe, expect, it } from 'vitest';
 import { AppShell } from './app-shell';
 
 describe('AppShell', () => {
-  it('shows the app name, a main landmark, and dark theme', () => {
+  it('shows the app name and a main landmark', () => {
     render(
       <AppShell>
-        <p>Nội dung</p>
+        <p>Content</p>
       </AppShell>,
     );
 
     expect(screen.getByText('Launchpad Aggregator')).toBeInTheDocument();
     expect(screen.getByRole('main')).toBeInTheDocument();
-    expect(screen.getByTestId('app-shell')).toHaveClass('dark');
+    expect(screen.getByTestId('app-shell')).not.toHaveClass('dark');
   });
 
   it('does not render any wallet or trading controls', () => {
     render(
       <AppShell>
-        <p>Nội dung</p>
+        <p>Content</p>
       </AppShell>,
     );
 

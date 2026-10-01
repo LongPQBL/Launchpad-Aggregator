@@ -4,9 +4,9 @@ import { useRouter } from 'next/navigation';
 import { useLiveRefresh } from '@/hooks/use-live-refresh';
 
 const STATUS_LABELS = {
-  connecting: 'Đang kết nối realtime…',
-  live: 'Đang cập nhật realtime',
-  polling: 'Mất kết nối realtime — đang làm mới định kỳ',
+  connecting: 'Connecting to realtime…',
+  live: 'Live realtime updates',
+  polling: 'Realtime connection lost — refreshing periodically',
 };
 
 export interface LiveRefreshIndicatorProps {

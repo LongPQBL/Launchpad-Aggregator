@@ -84,7 +84,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
               position: 'aboveBar',
               color: '#22d3ee',
               shape: 'arrowDown',
-              text: 'Giao dịch V4 đầu tiên',
+              text: 'First V4 trade',
             },
           ]
         : [],
@@ -96,7 +96,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       <div className="mb-2 flex items-center gap-2">
         <CoverageBadge status={coverageStatus} />
         <p className="text-xs text-muted-foreground">
-          Giá trên biểu đồ ({quoteSymbol}) là giá trị xấp xỉ để vẽ; xem bảng giao dịch cho số liệu chính xác.
+          Chart prices ({quoteSymbol}) are approximate for plotting; see the trade table for exact figures.
         </p>
       </div>
       <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />
