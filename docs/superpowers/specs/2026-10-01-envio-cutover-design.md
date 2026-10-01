@@ -8,8 +8,9 @@
 
 ## Quyết định đã chốt qua hội thoại (khác với spec gốc 2026-09-30)
 
-- **Không giữ indexer cũ làm đường lùi sau cutover.** Spec gốc (mục 6) đề xuất "giữ code indexer cũ lại một thời gian làm đường lùi trước khi gỡ hẳn" — người dùng đã **từ chối rõ ràng** hướng này sau khi được giải thích hậu quả cụ thể (FE mất phần lớn dữ liệu hiển thị nếu tắt sớm). Quyết định cuối: chờ đủ điều kiện sẵn sàng (xem mục 5) rồi tắt hẳn indexer cũ ngay lúc cutover, không chạy song song thêm sau đó.
+- **Không giữ indexer cũ làm đường lùi sau cutover.** Spec gốc (mục 6) đề xuất "giữ code indexer cũ lại một thời gian làm đường lùi trước khi gỡ hẳn" — người dùng quyết định không giữ. Tắt hẳn indexer cũ ngay lúc cutover, không chạy song song thêm sau đó.
 - **Đường lùi duy nhất:** không xóa code/migration của indexer cũ khỏi repo (vẫn nằm trong git history và có thể khôi phục nếu cần), nhưng sau cutover sẽ không có tiến trình indexer cũ nào chạy nền — nếu phát hiện sự cố, phải chủ động khởi động lại indexer cũ bằng tay (nó tự tiếp tục từ cursor đã lưu trong bảng `sources`, không mất tiến độ).
+- **Không chờ Envio quét xong toàn bộ lịch sử mới cutover.** Quyết định cuối sau khi làm rõ cơ chế ghi: mọi hàm ghi của lớp đồng bộ dùng `onConflictDoNothing` — chỉ **thêm dòng chưa có**, không bao giờ xóa/ghi đè dữ liệu đã tồn tại trong bảng thật. Vì vậy dữ liệu lịch sử indexer cũ đã ghi (hàng nghìn launch, hàng trăm nghìn giao dịch tại thời điểm viết spec) **không biến mất** khi chuyển sang Envio, kể cả khi Envio chưa quét xong toàn bộ lịch sử. Hệ quả thật sự của việc cutover sớm chỉ là: **launch/giao dịch MỚI phát sinh sau khi tắt indexer cũ sẽ xuất hiện trễ**, cho tới khi Envio quét tuần tự tới đúng thời điểm đó (có thể nhiều giờ, tùy tốc độ quét đo được lúc thực thi) — không phải mất dữ liệu cũ. Xem mục 5 (điều kiện cutover đã cập nhật theo quyết định này) và rủi ro còn lại (chống reorg cho đoạn lịch sử Envio chưa quét tới).
 
 ## 1. Hai lỗ hổng chặn việc ghi thẳng vào bảng thật
 
@@ -65,26 +66,26 @@ Vì bước (2) xóa trước khi (3) ghi lại, không cần so sánh từng d�
 
 ## 5. Điều kiện phải đạt trước khi cutover
 
-Tất cả các điều kiện sau phải đạt **đồng thời**, xác nhận bằng dữ liệu thật đo được — không ước lượng:
+**Không chờ Envio quét xong toàn bộ lịch sử** (xem quyết định ở đầu spec) — vì `onConflictDoNothing` đảm bảo dữ liệu cũ không mất. Điều kiện chỉ xoay quanh **code mới đã đúng và kiểm thử kỹ**, không xoay quanh tiến độ quét:
 
-1. Envio đã quét xong toàn bộ lịch sử tới gần khối đầu chain an toàn hiện tại (không còn "only in real" đáng kể trong `compare:envio-staging` — chênh lệch còn lại chỉ là độ trễ tự nhiên vài chu kỳ sync, không phải backlog lớn).
-2. `compare:envio-staging` cho kết quả khớp 100% ở mọi hạng mục (launches, trades, V2 launches, V2 curve trades, lifecycle transitions, V4 swaps) — `only in staging` = 0 tuyệt đối trong N lần chạy liên tiếp (số N cụ thể chốt ở kế hoạch triển khai).
-3. Cơ chế chống reorg (mục 4) đã triển khai, có test, và đã chạy ổn định trên staging một khoảng thời gian quan sát được trước khi áp dụng cho bảng thật.
-4. Migration mục 3 đã chạy trên DB thật, kiểm tra không ảnh hưởng dữ liệu/API hiện có.
-5. Bổ sung metadata (mục 2) đã kiểm thử, xác nhận launches mới có đầy đủ tên/ký hiệu như indexer cũ từng cung cấp.
+1. Bổ sung metadata (mục 2) đã có test đơn vị, xác nhận launches mới (trong phạm vi Envio đã quét) có đầy đủ tên/ký hiệu đúng như indexer cũ từng cung cấp — đối chiếu trên vài launch thật đã biết trước.
+2. Migration mục 3 đã chạy thành công trên DB test, xác nhận dữ liệu cũ (sourceLogId thật) không bị ảnh hưởng, dữ liệu mới (sourceLogId null) ghi được — trước khi áp dụng lên DB thật.
+3. Cơ chế chống reorg (mục 4) đã triển khai, có test đơn vị, và đã chạy ít nhất vài chu kỳ trên staging xác nhận hoạt động đúng (không xóa oan dữ liệu ngoài cửa sổ — xem lưu ý ở mục 4) trước khi áp dụng cho bảng thật.
+4. Lớp đồng bộ đã thử ghi thành công vào bảng thật trên DB test (tích hợp, mục 8) — không chỉ chạy đơn vị.
+
+**Rủi ro đã biết, chấp nhận theo quyết định của người dùng (không phải điều kiện chặn):** trong khoảng thời gian Envio còn quét từ vị trí hiện tại tới khối an toàn hiện tại (ước tính nhiều giờ, đo thực tế lúc thực thi), (a) launch/giao dịch mới phát sinh trong khoảng đó xuất hiện trễ cho tới khi Envio quét tới, và (b) đoạn lịch sử indexer cũ đã ghi nhưng Envio CHƯA quét lại tới (vẫn còn trong bảng thật, nguyên vẹn) tạm thời không có cơ chế giám sát reorg nào theo dõi — vì indexer cũ đã tắt và cơ chế chống reorg mới (mục 4) chỉ hoạt động trên phần Envio đã quét tới. Rủi ro này tự hết khi Envio quét xong và cơ chế chống reorg theo kịp toàn bộ.
 
 ## 6. Quy trình cutover
 
 Thực hiện theo đúng thứ tự, không đảo bước, mỗi bước xác nhận xong mới sang bước kế:
 
-1. Xác nhận đủ 5 điều kiện ở mục 5.
+1. Xác nhận đủ 4 điều kiện ở mục 5 (code đã đúng và kiểm thử — không chờ Envio quét xong lịch sử).
 2. Dừng indexer RPC-scan cũ (`runFactoryIndexer.ts`) — dừng sạch, không kill cứng giữa một batch đang ghi dở.
-3. Chạy một lần `compare:envio-staging` cuối cùng, xác nhận vẫn khớp 100% tại đúng thời điểm vừa dừng indexer cũ.
-4. Đổi lớp đồng bộ từ ghi vào bảng staging sang ghi thẳng vào bảng thật (tái sử dụng gần như nguyên vẹn logic hiện có — xem mục 7).
-5. Chạy lớp đồng bộ một chu kỳ, kiểm tra API/FE vẫn trả về đúng dữ liệu như trước khi cutover (so sánh thủ công vài launch/trade cụ thể).
-6. Bật vòng lặp sync liên tục (`sync:envio-staging:loop`, đổi tên/đích phù hợp) chạy nền thay thế hoàn toàn vai trò của indexer cũ.
+3. Đổi lớp đồng bộ từ ghi vào bảng staging sang ghi thẳng vào bảng thật (tái sử dụng gần như nguyên vẹn logic hiện có — xem mục 7).
+4. Chạy lớp đồng bộ một chu kỳ, kiểm tra API/FE vẫn trả về đúng dữ liệu như trước khi cutover (so sánh thủ công vài launch/trade cụ thể) — xác nhận không có lỗi ghi (vi phạm ràng buộc, v.v.) trên dữ liệu thật thay vì chỉ trên DB test.
+5. Bật vòng lặp sync liên tục (`sync:envio-staging:loop`, đổi tên/đích phù hợp) chạy nền thay thế hoàn toàn vai trò của indexer cũ.
 
-**Không có giai đoạn chạy song song sau bước 2** — theo đúng quyết định đã chốt ở đầu spec này. Nếu bước 5 phát hiện vấn đề, dừng lớp đồng bộ, khởi động lại indexer cũ bằng tay (tự tiếp tục từ cursor đã lưu), xử lý lỗi trước khi thử cutover lại.
+**Không có giai đoạn chạy song song sau bước 2** — theo đúng quyết định đã chốt ở đầu spec này. Nếu bước 4 phát hiện vấn đề, dừng lớp đồng bộ, khởi động lại indexer cũ bằng tay (tự tiếp tục từ cursor đã lưu), xử lý lỗi trước khi thử cutover lại.
 
 ## 7. Lớp đồng bộ chuyển hướng ghi
 
