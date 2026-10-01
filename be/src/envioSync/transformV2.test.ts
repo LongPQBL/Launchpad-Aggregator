@@ -57,13 +57,16 @@ describe('hydrateV2LaunchFromEnvio', () => {
       logIndex: 30,
     };
     const event = envioRawLaunchV2ToEvent(row);
-    const { launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory);
+    const { launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory,
+      { name: 'Real Name', symbol: 'REAL', decimals: 18 },
+      { address: event.pairToken, symbol: 'USDG', decimals: 6 });
     expect(launch.tokenAddress).toBe(fixture.tokenAddress as string);
     expect(launch.protocolVersion).toBe('v2');
     expect(launch.quoteAsset.address).toBe(fixture.quoteAddress as string);
-    // name/symbol are placeholder strings here (Launch.name/symbol are non-nullable `string`) —
-    // nulling happens only at the staging-table INSERT layer (see runSyncV2.ts), same as Phase 1's
-    // hydrateV1Launch. tokenDecimals is the documented 18 placeholder the swap-price math needs.
+    expect(launch.name).toBe('Real Name');
+    expect(launch.symbol).toBe('REAL');
+    expect(launch.quoteAsset.symbol).toBe('USDG');
+    expect(launch.quoteAsset.decimals).toBe(6);
     expect(launch.tokenDecimals).toBe(18);
     expect(venue.kind).toBe('curve');
     expect(venue.ref).toBe(fixture.curveAddress as string);
@@ -79,6 +82,8 @@ const { launch, venue } = hydrateV2LaunchFromEnvio(
     txHash: (fixture.launch as Record<string, unknown>).transactionHash as string, logIndex: 30,
   }),
   v2Factory,
+  { name: 'Fixture', symbol: 'FIX', decimals: 18 },
+  { address: fixture.quoteAddress as Address, symbol: 'ETH', decimals: 18 },
 );
 const curveTrader = '0x1234567890123456789012345678901234567890' as Address;
 

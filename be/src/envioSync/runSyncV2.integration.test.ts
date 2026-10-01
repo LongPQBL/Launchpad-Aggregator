@@ -25,6 +25,18 @@ const fixtureTables = {
 const testToken = '0xc9e9ab90654f82893d7fd18b62f694992e8cef29';
 const testTradeTxHash = '0x8147b8c06a405cd1d5314c16a25c86a0ba3aea64e490547e60afdbbff534cc28';
 const testLifecycleTxHash = '0x98dfda1126a8b6b66a249db891a221f6fcebd2d17b6e57e2f0c119dba09ad6a3';
+const rpcCalls: string[] = [];
+const rpcClient = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+  rpcCalls.push(`${address.toLowerCase()}:${functionName}`);
+  if (address.toLowerCase() === testToken) {
+    if (functionName === 'name') return 'Test V2';
+    if (functionName === 'symbol') return 'TV2';
+    if (functionName === 'decimals') return 18;
+  }
+  if (functionName === 'symbol') return 'NVDA';
+  if (functionName === 'decimals') return 8;
+  throw new Error(`unexpected ${functionName}`);
+} };
 
 beforeAll(async () => {
   // Migration runs once in vitest.integration.globalSetup.ts, before any test file's beforeAll.
@@ -83,22 +95,24 @@ describe('syncV2Once', () => {
         testLifecycleTxHash, 36],
     );
 
-    const first = await syncV2Once(envioPool, db, fixtureTables);
+    const first = await syncV2Once(envioPool, db, fixtureTables, rpcClient);
     expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1, transitionsWritten: 1 });
     const launchRows = await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken));
     expect(launchRows).toHaveLength(1);
-    // The fixture's real quote token (NVDA, a real ERC20) is not the zero address, so its symbol/
-    // decimals are genuinely unknown without a metadata RPC call this phase doesn't make — null, not
-    // a faked 18/placeholder symbol.
-    expect(launchRows[0].quoteAssetSymbol).toBeNull();
-    expect(launchRows[0].quoteAssetDecimals).toBeNull();
+    expect(launchRows[0].name).toBe('Test V2');
+    expect(launchRows[0].symbol).toBe('TV2');
+    expect(launchRows[0].quoteAssetSymbol).toBe('NVDA');
+    expect(launchRows[0].quoteAssetDecimals).toBe(8);
+    expect(rpcCalls).toHaveLength(5);
+    expect(rpcCalls.filter((call) => call.startsWith('0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec:'))).toHaveLength(2);
     expect(await db.select().from(venuesEnvioStaging).where(eq(venuesEnvioStaging.tokenAddress, testToken))).toHaveLength(1);
     expect(await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testTradeTxHash))).toHaveLength(1);
     const transitions = await db.select().from(lifecycleTransitionsEnvioStaging).where(eq(lifecycleTransitionsEnvioStaging.tokenAddress, testToken));
     expect(transitions).toHaveLength(1);
     expect(transitions[0].kind).toBe('graduated');
 
-    const second = await syncV2Once(envioPool, db, fixtureTables);
+    const second = await syncV2Once(envioPool, db, fixtureTables, rpcClient);
     expect(second).toEqual({ launchesWritten: 0, tradesWritten: 0, transitionsWritten: 0 });
+    expect(rpcCalls).toHaveLength(5);
   });
 });

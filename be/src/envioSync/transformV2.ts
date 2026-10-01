@@ -28,25 +28,19 @@ export function envioRawLaunchV2ToEvent(row: EnvioRawLaunchV2Row): V2LaunchEvent
   };
 }
 
-// hydrateV2Launch (be/src/launchpads/pons/v2/adapter.ts) validates its `record`/`metadata`/`quoteAsset`
-// params against the event, sourced from factory-state RPC reads in the RPC-scan path. This phase's
-// sync layer has no RPC calls (same scope decision as Phase 1's V1 launch handling), so the "record"
-// is synthesized from the event's own fields as ground truth — this makes hydrateV2Launch's
-// record-matches-event check a structural no-op here, same documented tradeoff as Phase 1's
-// liquidityPool bypass. poolFee/tickSpacing are placeholders unused by this phase (no V4 logic here);
-// Phase 3 will source real values directly from the V4 pool's own Initialize event instead of this
-// placeholder. The launched token's own name/symbol are placeholders too — overwritten with null at
-// the staging insert layer (see runSyncV2.ts), matching Phase 1's "null means unavailable"
-// convention. The QUOTE asset's symbol/decimals are NOT simply nulled: runSyncV2.ts calls
-// resolveKnownQuoteAsset (below) separately and writes its real answer when known (native ETH) or
-// null when not, ignoring this function's own quoteAsset placeholder for that specific pair.
-export function hydrateV2LaunchFromEnvio(event: V2LaunchEvent, factory: FactorySource): V2LaunchWithVenue {
+// Metadata and quote asset are supplied by the caller from RPC or a stored launch.
+// The factory record is reconstructed from event fields; its pool fee and tick spacing
+// remain unavailable here and are not used for the current sync path.
+export function hydrateV2LaunchFromEnvio(
+  event: V2LaunchEvent, factory: FactorySource,
+  metadata: { name: string; symbol: string; decimals: number },
+  quoteAsset: { address: Address; symbol: string; decimals: number },
+): V2LaunchWithVenue {
   const record: V2LaunchRecord = {
     token: event.tokenAddress, curve: event.curveAddress, deployer: event.deployerAddress,
     pairToken: event.pairToken, poolFee: 0, tickSpacing: 60, phase: 0, exists: true,
   };
-  return hydrateV2Launch(event, factory, record, { name: '', symbol: '', decimals: 18 },
-    { address: event.pairToken, symbol: '', decimals: 18 });
+  return hydrateV2Launch(event, factory, record, metadata, quoteAsset);
 }
 
 // Same zero-address-means-native-ETH rule as resolveV2QuoteAsset (be/src/launchpads/pons/v2/adapter.ts)

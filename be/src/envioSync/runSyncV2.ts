@@ -1,5 +1,8 @@
 import type { Pool } from 'pg';
+import { eq } from 'drizzle-orm';
+import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
+import { readV2TokenMetadata, resolveV2QuoteAsset, type V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
@@ -23,33 +26,58 @@ export const DEFAULT_ENVIO_V2_TABLES: EnvioV2TableNames = {
   rawLifecycleTable: 'envio."RawLifecycleTransition"',
 };
 
+function defaultRpcClient(): V2QuoteClient {
+  return createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com');
+}
+
 export async function syncV2Once(
   envioPool: Pool,
   appDb: Database,
   tables: EnvioV2TableNames = DEFAULT_ENVIO_V2_TABLES,
+  rpcClient: V2QuoteClient = defaultRpcClient(),
 ): Promise<{ launchesWritten: number; tradesWritten: number; transitionsWritten: number }> {
   const rawLaunches = (await envioPool.query(`SELECT * FROM ${tables.rawLaunchV2Table} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawLaunchV2Row[];
+  const existingRows = await appDb.select().from(launchesEnvioStaging);
+  const existingByToken = new Map(existingRows.map((row) => [row.tokenAddress.toLowerCase(), row]));
   let launchesWritten = 0;
   const launchByCurve = new Map<string, { launch: Launch; venue: Venue }>();
   for (const raw of rawLaunches) {
     const row: EnvioRawLaunchV2Row = { ...raw, blockNumber: BigInt(raw.blockNumber) };
     const event = envioRawLaunchV2ToEvent(row);
+    const existing = existingByToken.get(event.tokenAddress.toLowerCase());
+    const isNew = !existing;
+    const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
+    const needsMetadata = !existing || existing.name === null || existing.symbol === null;
+    const needsQuote = !existing || existing.quoteAssetSymbol === null || existing.quoteAssetDecimals === null;
+    const metadata = needsMetadata
+      ? await readV2TokenMetadata(rpcClient, event.tokenAddress)
+      : { name: existing.name!, symbol: existing.symbol!, decimals: existing.tokenDecimals };
+    const quoteAsset = knownQuoteAsset
+      ? { address: event.pairToken, ...knownQuoteAsset }
+      : needsQuote
+        ? await resolveV2QuoteAsset(event.pairToken, rpcClient)
+        : { address: event.pairToken, symbol: existing.quoteAssetSymbol!, decimals: existing.quoteAssetDecimals! };
     let launch: Launch;
     let venue: Venue;
     try {
-      ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory));
+      ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, metadata, quoteAsset));
     } catch (error) {
       throw new Error(`Failed to sync V2 launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
     }
     launchByCurve.set(event.curveAddress, { launch, venue });
-    const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
+    if (existing && (needsMetadata || needsQuote)) {
+      await appDb.update(launchesEnvioStaging).set({ name: metadata.name, symbol: metadata.symbol,
+        tokenDecimals: metadata.decimals, quoteAssetSymbol: quoteAsset.symbol, quoteAssetDecimals: quoteAsset.decimals })
+        .where(eq(launchesEnvioStaging.tokenAddress, event.tokenAddress));
+    }
+    if (isNew) {
     const inserted = await appDb.transaction(async (tx) => {
       const launchRows = await tx.insert(launchesEnvioStaging).values({
-        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: null, symbol: null,
+        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name, symbol: launch.symbol,
         tokenDecimals: launch.tokenDecimals, platform: launch.platform, protocolVersion: launch.protocolVersion,
         factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock,
         launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address,
-        quoteAssetSymbol: knownQuoteAsset?.symbol ?? null, quoteAssetDecimals: knownQuoteAsset?.decimals ?? null,
+        quoteAssetSymbol: launch.quoteAsset.symbol, quoteAssetDecimals: launch.quoteAsset.decimals,
         lifecycleStatus: null,
       }).onConflictDoNothing().returning({ tokenAddress: launchesEnvioStaging.tokenAddress });
       if (launchRows.length === 0) return false;
@@ -60,6 +88,7 @@ export async function syncV2Once(
       return true;
     });
     if (inserted) launchesWritten += 1;
+    }
   }
 
   let tradesWritten = 0;
