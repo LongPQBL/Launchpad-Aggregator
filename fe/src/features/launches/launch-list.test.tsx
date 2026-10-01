@@ -18,6 +18,11 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     fdvUsd: null,
     marketCapUsd: null,
     tvlUsd: null,
+    tvlBasis: null,
+    tvlBlockNumber: null,
+    tvlPriceSource: null,
+    tvlPriceUpdatedAt: null,
+    tvlUnavailableReason: 'unavailable',
     week52High: null,
     week52Low: null,
     ...overrides,
@@ -117,6 +122,14 @@ describe('LaunchList', () => {
 
     const table = screen.getByRole('table', { name: /launch list/i });
     expect(within(table).getByText(/\$269\.17/)).toBeInTheDocument();
+  });
+
+  it('shows TVL in the list with the correct phase explanation', () => {
+    render(<LaunchList page={{ items: [launch({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })], nextCursor: null }}
+      sources={oneChainOneSource} error={false} />);
+    const table = screen.getByRole('table', { name: /launch list/i });
+    expect(within(table).getByRole('columnheader', { name: 'TVL' })).toBeInTheDocument();
+    expect(within(table).getByText('$15.7')).toHaveAttribute('title', expect.stringContaining('real quote'));
   });
 
   it('hides the chain filter when every source shares the same chain', () => {

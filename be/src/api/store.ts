@@ -5,7 +5,9 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow } from '../market/aggregate.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
-import { computeFdvUsd, readTotalSupply, readTvlUsd } from '../market/tokenStats.js';
+import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
+import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
+import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import type { ApiDeps, CandleResponse, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
@@ -52,46 +54,61 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
   };
 }
 
-interface StatsFields { fdvUsd: string | null; marketCapUsd: string | null; tvlUsd: string | null; week52High: string | null; week52Low: string | null }
-const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, tvlUsd: null, week52High: null, week52Low: null };
+interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null }
+const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, ...NULL_TVL };
 
-// Isolated per launch: one launch's RPC failure (bad totalSupply(), unreachable node) must not
-// fail the whole listLaunches/getLaunch call — Review Focus item 2. tvlUsd is always null (see
-// be/src/market/tokenStats.ts's readTvlUsd doc comment — Task 3's ledger ruling).
-async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, chainId: number, tokenAddress: string,
-  tokenDecimals: number, quoteAssetAddress: string, complete: boolean): Promise<StatsFields> {
+async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
+  try {
+    const venueResult = await pool.query(`SELECT kind, ref FROM venues WHERE chain_id = $1 AND token_address = $2
+      AND official = true AND effective_to_block IS NULL
+      ORDER BY effective_from_block DESC, effective_from_log_index DESC LIMIT 1`,
+    [number(row.chain_id), string(row.token_address)]);
+    const current = venueResult.rows[0] as Row | undefined;
+    const kind = current?.kind;
+    const venue = current && (kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')
+      ? { kind: kind as VenueAmountInput['kind'], ref: string(current.ref) } : null;
+    return await readCurrentTvl(rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
+      quote: string(row.quote_asset_address), tokenDecimals: number(row.token_decimals),
+      quoteDecimals: number(row.quote_asset_decimals), protocolVersion: string(row.protocol_version),
+      factory: string(row.factory_address), lifecycleStatus: string(row.lifecycle_status), venue,
+      v4PoolFee: row.v4_pool_fee === null ? null : number(row.v4_pool_fee),
+      v4TickSpacing: row.v4_tick_spacing === null ? null : number(row.v4_tick_spacing) });
+  } catch { return { ...NULL_TVL, tvlUnavailableReason: 'onchain_read_failed' }; }
+}
+
+// TVL reads current chain state independently of historical trade coverage. FDV and 52W extrema
+// retain their existing coverage gate. An RPC error in either path cannot erase the other.
+async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, row: Row,
+  complete: boolean): Promise<StatsFields> {
+  const tvl = rpcClient ? await computeTvl(pool, rpcClient, row) : NULL_TVL;
   // The latest indexed trade and the 52-week range cannot be presented as current/complete
   // while an official source is behind the safe head. Match priceQuote's coverage rule.
-  if (!rpcClient || !complete) return NULL_STATS;
+  if (!rpcClient || !complete) return { ...NULL_STATS, ...tvl };
   try {
     const [usdPrice, totalSupply, priceResult] = await Promise.all([
-      readUsdPrice(rpcClient, quoteAssetAddress),
-      readTotalSupply(rpcClient, tokenAddress as Address),
+      readUsdPrice(rpcClient, string(row.quote_asset_address)),
+      readTotalSupply(rpcClient, string(row.token_address) as Address),
       pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
           AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
-        ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress]),
+        ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [number(row.chain_id), string(row.token_address)]),
     ]);
     const priceRow = priceResult.rows[0] as Row | undefined;
     const priceInQuoteAsset = priceRow
       ? formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18) : null;
-    const fdvUsd = totalSupply !== null ? computeFdvUsd(totalSupply, tokenDecimals, priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
+    const fdvUsd = totalSupply !== null ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
 
     const since = Math.floor(Date.now() / 1000) - 52 * 7 * 86_400;
     const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
       WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
-        AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL`, [chainId, tokenAddress, since]);
+        AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL`, [number(row.chain_id), string(row.token_address), since]);
     const prices = (highLowResult.rows as Row[]).map((row) =>
       formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18));
     const { high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price })));
 
-    // readTvlUsd is unconditionally null right now (Task 3 ruling) — calling it with a
-    // placeholder venue costs nothing extra and keeps this call site ready for when it isn't.
-    const tvlUsd = await readTvlUsd(rpcClient, { kind: 'curve', ref: '' }, usdPrice?.priceUsd ?? null);
-
-    return { fdvUsd, marketCapUsd: fdvUsd, tvlUsd, week52High: high, week52Low: low };
+    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, ...tvl };
   } catch {
-    return NULL_STATS;
+    return { ...NULL_STATS, ...tvl };
   }
 }
 
@@ -170,8 +187,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         query.search ?? null, query.status ?? null, head?.toString() ?? null]);
       const rows = result.rows as Row[];
       const statsByToken = new Map(await Promise.all(rows.slice(0, query.limit).map(async (row) =>
-        [string(row.token_address), await computeStats(pool, rpcClient, number(row.chain_id), string(row.token_address),
-          number(row.token_decimals), string(row.quote_asset_address), Boolean(row.launch_coverage_complete))] as const)));
+        [string(row.token_address), await computeStats(pool, rpcClient, row,
+          Boolean(row.launch_coverage_complete))] as const)));
       return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),
         statsByToken.get(string(row.token_address)) ?? NULL_STATS));
     },
@@ -196,7 +213,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         AND v.official = true AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
-      const stats = await computeStats(pool, rpcClient, chainId, tokenAddress.toLowerCase(), number(row.token_decimals), string(row.quote_asset_address), complete);
+      const stats = await computeStats(pool, rpcClient, row, complete);
       return { ...summary(row, complete, stats), officialVenues: venueRows.rows.map((venue: Row) => ({
         id: string(venue.id), kind: string(venue.kind), ref: string(venue.ref),
         effectiveFromBlock: string(venue.effective_from_block),

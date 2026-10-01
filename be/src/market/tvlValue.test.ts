@@ -19,4 +19,10 @@ describe('calculateTvlUsd', () => {
       basis: 'pool_custody', sqrtPriceX96: 2n ** 96n, tokenIsCurrency0: false }, 18, 18, 1))
       .toBe('1000000000000');
   });
+
+  it('accepts small oracle prices written in exponent notation', () => {
+    expect(calculateTvlUsd({ tokenRaw: 0n, quoteRaw: 100_000_000n, blockNumber: 1n,
+      basis: 'curve_real_quote', sqrtPriceX96: null, tokenIsCurrency0: null }, 0, 18, 1e-8))
+      .toBe('1');
+  });
 });

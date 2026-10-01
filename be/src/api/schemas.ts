@@ -7,7 +7,10 @@ export const launchSummary = { type: 'object', properties: {
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,
   lifecycleStatus: { type: 'string' }, officialVolume24h: { type: 'string', nullable: true }, coverageStatus: { type: 'string' },
   fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true },
-  tvlUsd: { type: 'string', nullable: true }, week52High: { type: 'string', nullable: true }, week52Low: { type: 'string', nullable: true },
+  tvlUsd: { type: 'string', nullable: true }, tvlBasis: { type: 'string', nullable: true },
+  tvlBlockNumber: { type: 'string', nullable: true }, tvlPriceSource: { type: 'string', nullable: true },
+  tvlPriceUpdatedAt: { type: 'integer', nullable: true }, tvlUnavailableReason: { type: 'string', nullable: true },
+  week52High: { type: 'string', nullable: true }, week52Low: { type: 'string', nullable: true },
 } } as const;
 
 export const launchDetail = { type: 'object', properties: {

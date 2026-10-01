@@ -3,7 +3,9 @@ import { parseAbi } from 'viem';
 import { quoteFeedRegistry } from './quoteFeedRegistry.js';
 
 export interface UsdPriceClient {
-  readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] }): Promise<unknown>;
+  readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[];
+    blockNumber?: bigint; gas?: bigint }): Promise<unknown>;
+  getBlockNumber?(): Promise<bigint>;
 }
 
 export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainlink' }
@@ -14,9 +16,9 @@ export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainl
 // ETH is also included. Feed address verified directly against Robinhood Chain mainnet
 // 2026-10-01 — eth_call to latestRoundData() returned a live, sane ETH/USD price. Source of
 // truth for the feed address: https://docs.chain.link/data-feeds/price-feeds/addresses?network=robinhood
-// USDC/USDT are not mapped yet: no real launch in the live DB uses either as a quote asset, and
-// this project does not fabricate unverified token addresses — add them (with verified Robinhood
-// Chain token addresses) if/when a launch actually needs one.
+// Other Stock Token quotes are discovered from Robinhood's canonical asset-address directory
+// and the Chainlink feed directory. A newly introduced quote outside those verified sources
+// remains unpriced until its address/feed pair is independently verified.
 const ETH_USD_FEED: Address = '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9';
 const USDG_ADDRESS = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
 const FEEDS: Record<string, Address> = {

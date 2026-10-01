@@ -56,6 +56,11 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     fdvUsd: null,
     marketCapUsd: null,
     tvlUsd: null,
+    tvlBasis: null,
+    tvlBlockNumber: null,
+    tvlPriceSource: null,
+    tvlPriceUpdatedAt: null,
+    tvlUnavailableReason: 'unavailable',
     week52High: null,
     week52Low: null,
     ...overrides,
@@ -118,6 +123,21 @@ describe('LaunchDetail', () => {
     expect(screen.getByText(/TVL/)).toHaveTextContent('1200.50');
     expect(screen.getByText(/52W High/)).toHaveTextContent('0.08');
     expect(screen.getByText(/52W Low/)).toHaveTextContent('0.001');
+  });
+
+  it('explains the phase-specific TVL basis and missing quote prices', () => {
+    const view = render(<LaunchDetail detail={detail({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })}
+      trades={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('real quote'));
+
+    view.rerender(<LaunchDetail detail={detail({ tvlUsd: '42', tvlBasis: 'pool_principal', tvlUnavailableReason: null })}
+      trades={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('both tokens'));
+
+    view.rerender(<LaunchDetail detail={detail({ tvlUsd: null, tvlUnavailableReason: 'quote_price_unavailable' })}
+      trades={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.getByText(/TVL/)).toHaveTextContent('No data yet');
+    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('USD price'));
   });
 
   it('shows "No data yet" for FDV instead of a fabricated number when fdvUsd is null', () => {

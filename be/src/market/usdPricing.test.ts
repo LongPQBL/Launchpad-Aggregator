@@ -36,6 +36,20 @@ describe('readUsdPrice', () => {
     expect(await readUsdPrice({ readContract }, NVDA_ADDRESS, () => 1_790_859_457_000))
       .toEqual({ priceUsd: 180, updatedAt: 1_790_859_457, source: 'chainlink' });
   });
+  it('prices a newly discovered quote through the refreshed address registry', async () => {
+    const tslaAddress = '0x322f0929c4625ed5bad873c95208d54e1c003b2d';
+    const feedAddress = '0x4A1166a659A55625345e9515b32adECea5547C38';
+    const registry = { resolve: vi.fn(async (address: string) => address === tslaAddress ? feedAddress as `0x${string}` : null) };
+    const readContract = vi.fn(async ({ address, functionName }: { address: string; functionName: string }) => {
+      expect(address).toBe(feedAddress);
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 250_00000000n, 1n, 1_790_859_457n, 1n];
+      throw new Error(`unexpected ${functionName}`);
+    });
+    expect(await readUsdPrice({ readContract }, tslaAddress, () => 1_790_859_457_000, registry))
+      .toEqual({ priceUsd: 250, updatedAt: 1_790_859_457, source: 'chainlink' });
+    expect(registry.resolve).toHaveBeenCalledWith(tslaAddress);
+  });
   it('returns null without calling the RPC for an unverified quote asset address', async () => {
     const readContract = vi.fn();
     const client: UsdPriceClient = { readContract };

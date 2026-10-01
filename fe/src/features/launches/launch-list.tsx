@@ -1,5 +1,5 @@
 import { chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsd } from '@/api/format';
+import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -109,6 +109,7 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
             <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">
               FDV
             </div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">TVL</div>
           </div>
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
@@ -137,6 +138,9 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
               </div>
               <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
                 {formatUsd(launch.fdvUsd)}
+              </div>
+              <div role="cell" title={tvlTooltip(launch)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
+                {formatUsd(launch.tvlUsd)}
               </div>
             </div>
           ))}

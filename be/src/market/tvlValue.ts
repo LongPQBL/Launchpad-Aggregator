@@ -4,11 +4,15 @@ import type { VenueAmounts } from './tvlReserves.js';
 const Q192 = 2n ** 192n;
 
 function decimalFraction(value: number): { numerator: bigint; denominator: bigint } | null {
-  const text = value.toString();
-  if (!Number.isFinite(value) || value <= 0 || !/^\d+(?:\.\d+)?$/.test(text)) return null;
-  const [whole, fraction = ''] = text.split('.');
-  const denominator = 10n ** BigInt(fraction.length);
-  return { numerator: BigInt(whole) * denominator + BigInt(fraction || '0'), denominator };
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const match = /^(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/i.exec(value.toString());
+  if (!match) return null;
+  const fraction = match[2] ?? '';
+  const exponent = Number(match[3] ?? '0') - fraction.length;
+  const digits = BigInt(`${match[1]}${fraction}`);
+  return exponent >= 0
+    ? { numerator: digits * 10n ** BigInt(exponent), denominator: 1n }
+    : { numerator: digits, denominator: 10n ** BigInt(-exponent) };
 }
 
 export function calculateTvlUsd(amounts: VenueAmounts, quoteDecimals: number, tokenDecimals: number,

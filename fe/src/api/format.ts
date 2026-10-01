@@ -8,6 +8,23 @@ export function formatUsd(value: string | null): string {
   return `$${value}`;
 }
 
+export function tvlTooltip(value: {
+  tvlBasis: string | null;
+  tvlUnavailableReason: string | null;
+  tvlPriceSource: string | null;
+  tvlPriceUpdatedAt: number | null;
+}): string {
+  if (value.tvlUnavailableReason === 'quote_price_unavailable') return 'TVL unavailable: no current trusted USD price for this quote asset.';
+  if (value.tvlUnavailableReason) return 'TVL unavailable: current on-chain venue data is incomplete.';
+  const basis = value.tvlBasis === 'curve_real_quote'
+    ? 'Value of the real quote reserve in the bonding curve; excludes virtual reserves and unsold launch tokens.'
+    : 'Market value of both tokens held as liquidity in the pool.';
+  if (value.tvlPriceSource === 'chainlink' && value.tvlPriceUpdatedAt !== null) {
+    return `${basis} Quote USD price: Chainlink oracle, updated ${new Date(value.tvlPriceUpdatedAt * 1000).toISOString()}.`;
+  }
+  return basis;
+}
+
 export function formatSide(side: string): string {
   if (side === 'buy') return 'Buy';
   if (side === 'sell') return 'Sell';

@@ -287,4 +287,37 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       await pool.query('UPDATE launches SET quote_asset_address = $1 WHERE token_address = $2', [ETH_ADDRESS, goodToken]);
     }
   });
+
+  it('shows curve TVL from current real USDG reserve even while historical coverage is incomplete', async () => {
+    const usdg = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+    const curve = '0xf17871c268122408f677073066bb36fecddc1ba0';
+    await pool.query(`UPDATE launches SET protocol_version='v2', quote_asset_address=$1,
+      quote_asset_symbol='USDG', quote_asset_decimals=6 WHERE token_address=$2`, [usdg, goodToken]);
+    await pool.query("UPDATE venues SET kind='curve',ref=$1 WHERE id=$2", [curve, goodVenueId]);
+    await pool.query("UPDATE sources SET status='backfilling',confirmed_to_block=0 WHERE id=$1", [statsSource]);
+    try {
+      const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'decimals') return 8;
+        if (functionName === 'latestRoundData') {
+          const now = BigInt(Math.floor(Date.now() / 1000));
+          return [1n, 100_000_000n, now, now, 1n];
+        }
+        if (functionName === 'getLaunchedToken') return { exists: true, phase: 0, token: goodToken, curve };
+        if (functionName === 'realQuoteReserve') return 15_700_717n;
+        if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
+        throw new Error(functionName);
+      });
+      const storeWithRpc = createApiStore(pool, { readContract, getBlockNumber: async () => 77_455_470n });
+      const detail = await storeWithRpc.getLaunch(4663, goodToken);
+      expect(detail?.coverageStatus).toBe('backfilling');
+      expect(detail?.tvlUsd).toBe('15.700717');
+      expect(detail?.tvlBasis).toBe('curve_real_quote');
+      expect(detail?.tvlPriceSource).toBe('chainlink');
+    } finally {
+      await pool.query(`UPDATE launches SET protocol_version='v1',quote_asset_address=$1,
+        quote_asset_symbol='ETH',quote_asset_decimals=18 WHERE token_address=$2`, [ETH_ADDRESS, goodToken]);
+      await pool.query("UPDATE venues SET kind='v3_pool',ref=$1 WHERE id=$2", [goodToken, goodVenueId]);
+      await pool.query("UPDATE sources SET status='caught_up',confirmed_to_block=2000 WHERE id=$1", [statsSource]);
+    }
+  });
 });

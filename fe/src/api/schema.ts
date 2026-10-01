@@ -111,6 +111,11 @@ export interface paths {
                                 fdvUsd?: string | null;
                                 marketCapUsd?: string | null;
                                 tvlUsd?: string | null;
+                                tvlBasis?: string | null;
+                                tvlBlockNumber?: string | null;
+                                tvlPriceSource?: string | null;
+                                tvlPriceUpdatedAt?: number | null;
+                                tvlUnavailableReason?: string | null;
                                 week52High?: string | null;
                                 week52Low?: string | null;
                             }[];
@@ -171,6 +176,11 @@ export interface paths {
                             fdvUsd?: string | null;
                             marketCapUsd?: string | null;
                             tvlUsd?: string | null;
+                            tvlBasis?: string | null;
+                            tvlBlockNumber?: string | null;
+                            tvlPriceSource?: string | null;
+                            tvlPriceUpdatedAt?: number | null;
+                            tvlUnavailableReason?: string | null;
                             week52High?: string | null;
                             week52Low?: string | null;
                             officialVenues?: {

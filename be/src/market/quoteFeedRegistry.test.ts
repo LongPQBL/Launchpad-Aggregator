@@ -32,4 +32,22 @@ describe('quote feed discovery', () => {
     time += 3_600_001;
     expect(await registry.resolve(tsla)).toBe('0x4A1166a659A55625345e9515b32adECea5547C38');
   });
+
+  it('keeps a verified mapping and retries later when a directory refresh fails', async () => {
+    let time = 1000;
+    let fail = false;
+    const fetchJson = vi.fn(async (url: string) => {
+      if (fail) throw new Error('directory unavailable');
+      return url.includes('/rhj/assets')
+        ? { assets: [{ tokenSymbol: 'NVDA', status: 'ASSET_STATUS_ACTIVE', deployments: [{ chainId: 4663, contractAddress: nvda }] }] }
+        : [{ name: 'Robinhood NVDA / USD', proxyAddress: '0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15' }];
+    });
+    const registry = createQuoteFeedRegistry(fetchJson, () => time);
+    expect(await registry.resolve(nvda)).not.toBeNull();
+    fail = true;
+    time += 3_600_001;
+    expect(await registry.resolve(nvda)).not.toBeNull();
+    expect(await registry.resolve(tsla)).toBeNull();
+    expect(fetchJson).toHaveBeenCalledTimes(4);
+  });
 });

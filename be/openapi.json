@@ -95,6 +95,26 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "tvlBasis": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlBlockNumber": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlPriceSource": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlPriceUpdatedAt": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "tvlUnavailableReason": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "week52High": {
                             "type": "string",
                             "nullable": true
@@ -197,6 +217,26 @@
                       "nullable": true
                     },
                     "tvlUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlBasis": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlBlockNumber": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlPriceSource": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlPriceUpdatedAt": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "tvlUnavailableReason": {
                       "type": "string",
                       "nullable": true
                     },

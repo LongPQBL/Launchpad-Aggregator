@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind } from '@/api/format';
+import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { CoverageBadge } from './coverage-badge';
@@ -61,7 +61,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
             <p>24h volume: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
             <p>FDV: {formatUsd(detail.fdvUsd)}</p>
             <p>Market cap: {formatUsd(detail.marketCapUsd)}</p>
-            <p>TVL: {formatUsd(detail.tvlUsd)}</p>
+            <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd)}</p>
             <p>52W High: {formatQuote(detail.week52High, detail.quoteAsset.symbol)}</p>
             <p>52W Low: {formatQuote(detail.week52Low, detail.quoteAsset.symbol)}</p>
           </dl>
