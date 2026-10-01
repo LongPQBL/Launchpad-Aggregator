@@ -1,13 +1,34 @@
-import { describe, expect, it, vi } from 'vitest';
-import { readUsdPrice, type UsdPriceClient } from './usdPricing.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { __resetUsdPriceCacheForTests, readUsdPrice, type UsdPriceClient } from './usdPricing.js';
+
+beforeEach(() => {
+  __resetUsdPriceCacheForTests();
+});
+
+const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
+// Real WETH quote-asset address seen on 166,479 real launches in the live DB (2026-10-01) —
+// final-review Critical 1: the old symbol-keyed FEEDS map only matched the literal string 'ETH',
+// so every one of those launches silently got null USD pricing despite being ETH-denominated.
+const WETH_ADDRESS = '0x0bd7d308f8e1639fab988df18a8011f41eacad73';
 
 describe('readUsdPrice', () => {
-  it('returns null without calling the RPC for a quote asset with no known feed', async () => {
+  it('returns null without calling the RPC for a quote asset address with no known feed', async () => {
     const readContract = vi.fn();
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, 'SPCX');
+    const result = await readUsdPrice(client, '0x4a0e65a3eccec6dbe60ae065f2e7bb85fae35eea'); // real SPCX quote address
     expect(result).toBeNull();
     expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('matches a quote asset address case-insensitively', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 269170223591n, 1790859457n, 1790859457n, 1n];
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const client: UsdPriceClient = { readContract };
+    const result = await readUsdPrice(client, WETH_ADDRESS.toUpperCase());
+    expect(result).not.toBeNull();
   });
 });
 
@@ -16,14 +37,25 @@ describe('readUsdPrice — known feed', () => {
     return [1n, answerUsd8dp, BigInt(updatedAt), BigInt(updatedAt), 1n];
   }
 
-  it('reads the ETH/USD feed and scales the answer by decimals()', async () => {
+  it('reads the ETH/USD feed for the native (zero-address) quote asset and scales by decimals()', async () => {
     const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
       if (functionName === 'decimals') return 8;
       if (functionName === 'latestRoundData') return roundData(269170223591n, 1790859457);
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, 'ETH');
+    const result = await readUsdPrice(client, ETH_ADDRESS);
+    expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457 });
+  });
+
+  it('reads the same ETH/USD feed for the WETH quote asset address', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(269170223591n, 1790859457);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const client: UsdPriceClient = { readContract };
+    const result = await readUsdPrice(client, WETH_ADDRESS);
     expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457 });
   });
 
@@ -36,29 +68,83 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    let fakeNow = 0;
+    let fakeNow = 1_000_000;
     const now = () => fakeNow;
-    await readUsdPrice(client, 'USDC', now);
+    await readUsdPrice(client, ETH_ADDRESS, now);
     const callsAfterFirst = calls;
-    fakeNow = 59_000;
-    const second = await readUsdPrice(client, 'USDC', now);
+    fakeNow += 59_000;
+    const second = await readUsdPrice(client, ETH_ADDRESS, now);
     expect(calls).toBe(callsAfterFirst); // no new RPC call
     expect(second).toEqual({ priceUsd: 3000, updatedAt: 1000 });
   });
 
   it('re-reads after the 60s cache expires', async () => {
-    let fakeNow = 0;
+    let fakeNow = 1_000_000;
     const now = () => fakeNow;
     const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
       if (functionName === 'decimals') return 8;
-      if (functionName === 'latestRoundData') return roundData(fakeNow === 0 ? 100000000000n : 200000000000n, Math.floor(fakeNow / 1000));
+      if (functionName === 'latestRoundData') return roundData(fakeNow === 1_000_000 ? 100000000000n : 200000000000n, Math.floor(fakeNow / 1000));
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const first = await readUsdPrice(client, 'USDT', now);
-    fakeNow = 61_000;
-    const second = await readUsdPrice(client, 'USDT', now);
+    const first = await readUsdPrice(client, ETH_ADDRESS, now);
+    fakeNow += 61_000;
+    const second = await readUsdPrice(client, ETH_ADDRESS, now);
     expect(first!.priceUsd).toBe(1000);
     expect(second!.priceUsd).toBe(2000);
+  });
+
+  it('dedupes two concurrent calls for the same address into a single RPC round-trip (final-review Important 5)', async () => {
+    let calls = 0;
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      calls += 1;
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(269170223591n, 1790859457);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const client: UsdPriceClient = { readContract };
+    const [a, b] = await Promise.all([readUsdPrice(client, ETH_ADDRESS), readUsdPrice(client, ETH_ADDRESS)]);
+    expect(a).toEqual(b);
+    expect(calls).toBe(2); // one decimals() + one latestRoundData() call, not four
+  });
+
+  it('rejects a non-positive answer instead of returning a nonsensical price (final-review Important 4)', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(0n, 1790859457);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const client: UsdPriceClient = { readContract };
+    await expect(readUsdPrice(client, ETH_ADDRESS)).rejects.toThrow(/invalid/i);
+  });
+
+  it('rejects an answer older than 24 hours instead of silently serving a stale price (final-review Important 4)', async () => {
+    const nowSeconds = 1_790_859_457;
+    const staleUpdatedAt = nowSeconds - 25 * 3600;
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(269170223591n, staleUpdatedAt);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const client: UsdPriceClient = { readContract };
+    await expect(readUsdPrice(client, ETH_ADDRESS, () => nowSeconds * 1000)).rejects.toThrow(/stale/i);
+  });
+
+  it('rejects a price too large to represent as a finite number', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(10n ** 400n, 1_790_859_457);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    await expect(readUsdPrice({ readContract }, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/invalid/i);
+  });
+
+  it('rejects a feed timestamp more than five minutes in the future', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return roundData(269170223591n, 1_790_859_457 + 3600);
+      throw new Error(`unexpected ${functionName}`);
+    });
+    await expect(readUsdPrice({ readContract }, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/future/i);
   });
 });

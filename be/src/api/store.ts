@@ -59,11 +59,13 @@ const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, tvlUsd: null
 // fail the whole listLaunches/getLaunch call — Review Focus item 2. tvlUsd is always null (see
 // be/src/market/tokenStats.ts's readTvlUsd doc comment — Task 3's ledger ruling).
 async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, chainId: number, tokenAddress: string,
-  tokenDecimals: number, quoteAssetSymbol: string): Promise<StatsFields> {
-  if (!rpcClient) return NULL_STATS;
+  tokenDecimals: number, quoteAssetAddress: string, complete: boolean): Promise<StatsFields> {
+  // The latest indexed trade and the 52-week range cannot be presented as current/complete
+  // while an official source is behind the safe head. Match priceQuote's coverage rule.
+  if (!rpcClient || !complete) return NULL_STATS;
   try {
     const [usdPrice, totalSupply, priceResult] = await Promise.all([
-      readUsdPrice(rpcClient, quoteAssetSymbol),
+      readUsdPrice(rpcClient, quoteAssetAddress),
       readTotalSupply(rpcClient, tokenAddress as Address),
       pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
@@ -169,7 +171,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const rows = result.rows as Row[];
       const statsByToken = new Map(await Promise.all(rows.slice(0, query.limit).map(async (row) =>
         [string(row.token_address), await computeStats(pool, rpcClient, number(row.chain_id), string(row.token_address),
-          number(row.token_decimals), string(row.quote_asset_symbol))] as const)));
+          number(row.token_decimals), string(row.quote_asset_address), Boolean(row.launch_coverage_complete))] as const)));
       return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),
         statsByToken.get(string(row.token_address)) ?? NULL_STATS));
     },
@@ -194,7 +196,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         AND v.official = true AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
-      const stats = await computeStats(pool, rpcClient, chainId, tokenAddress.toLowerCase(), number(row.token_decimals), string(row.quote_asset_symbol));
+      const stats = await computeStats(pool, rpcClient, chainId, tokenAddress.toLowerCase(), number(row.token_decimals), string(row.quote_asset_address), complete);
       return { ...summary(row, complete, stats), officialVenues: venueRows.rows.map((venue: Row) => ({
         id: string(venue.id), kind: string(venue.kind), ref: string(venue.ref),
         effectiveFromBlock: string(venue.effective_from_block),
@@ -206,7 +208,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     async listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>> {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-      const result = await pool.query(`SELECT t.*, l.token_decimals, l.quote_asset_decimals, l.quote_asset_symbol
+      const result = await pool.query(`SELECT t.*, l.token_decimals, l.quote_asset_decimals, l.quote_asset_address AS launch_quote_asset_address
         FROM trades t JOIN venues v ON v.id = t.venue_id
         JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
@@ -217,7 +219,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const rows = result.rows as Row[];
       // Same quote asset for every row of one launch's trades — one price lookup (itself cached
       // ~60s inside usdPricing.ts), not one per trade.
-      const usdPrice = rpcClient && rows[0] ? await readUsdPrice(rpcClient, string(rows[0].quote_asset_symbol)) : null;
+      const usdPrice = rpcClient && rows[0]
+        ? await readUsdPrice(rpcClient, string(rows[0].launch_quote_asset_address)).catch(() => null)
+        : null;
       return page(rows, query.limit, (row) => ({
         venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
         logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side),
