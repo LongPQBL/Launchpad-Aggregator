@@ -48,6 +48,21 @@ export function buildOfficialCandles(trades: readonly Trade[], intervalSeconds: 
   return result.sort((a, b) => a.bucketStart - b.bucketStart);
 }
 
+export function compute52WeekHighLow(candles: readonly { high: string; low: string }[]): { high: string | null; low: string | null } {
+  if (candles.length === 0) return { high: null, low: null };
+  let high = Number(candles[0]!.high);
+  let low = Number(candles[0]!.low);
+  let highStr = candles[0]!.high;
+  let lowStr = candles[0]!.low;
+  for (const candle of candles) {
+    const h = Number(candle.high);
+    const l = Number(candle.low);
+    if (h > high) { high = h; highStr = candle.high; }
+    if (l < low) { low = l; lowStr = candle.low; }
+  }
+  return { high: highStr, low: lowStr };
+}
+
 export function sumOfficialQuoteVolume(trades: readonly Trade[], since: number, market: OfficialMarket): QuoteVolume {
   if (!Number.isInteger(since)) throw new Error('Invalid volume time bound');
   const relevant = officialTrades(trades, market).filter((trade) => trade.timestamp >= since);

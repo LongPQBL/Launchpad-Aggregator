@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Address, Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
-import { buildOfficialCandles, sumOfficialQuoteVolume, type OfficialMarket } from './aggregate.js';
+import { buildOfficialCandles, compute52WeekHighLow, sumOfficialQuoteVolume, type OfficialMarket } from './aggregate.js';
 import { formatRational } from './price.js';
 
 const token = '0x1111111111111111111111111111111111111111' as Address;
@@ -56,5 +56,20 @@ describe('official market aggregation', () => {
   it('formats a large rational using bigint without floating-point money arithmetic', () => {
     expect(formatRational(10n ** 40n + 1n, 10n ** 40n, 18)).toBe('1');
     expect(formatRational(1n, 4n, 18)).toBe('0.25');
+  });
+});
+
+describe('compute52WeekHighLow', () => {
+  it('returns null/null for an empty candle set instead of 0', () => {
+    expect(compute52WeekHighLow([])).toEqual({ high: null, low: null });
+  });
+
+  it('returns the max high and min low across the given candles as decimal strings', () => {
+    const candles = [
+      { high: '0.05', low: '0.01' },
+      { high: '0.08', low: '0.02' },
+      { high: '0.03', low: '0.001' },
+    ];
+    expect(compute52WeekHighLow(candles)).toEqual({ high: '0.08', low: '0.001' });
   });
 });
