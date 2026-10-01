@@ -28,7 +28,8 @@ Lớp đồng bộ (`be/src/envioSync/`) hiện tại chỉ kết nối tới 2 
 
 - `readV1TokenMetadata(client, token)` — `be/src/launchpads/pons/v1/state.ts` — tên/ký hiệu/số thập phân token V1.
 - `readV2TokenMetadata(client, token)` — `be/src/launchpads/pons/v2/adapter.ts` — tên/ký hiệu/số thập phân token V2 (lưu ý: `tokenDecimals` của token V2 tự nó luôn là 18, factory đảm bảo — xem comment hiện có ở `transformV2.ts`, không cần gọi RPC cho trường này).
-- `resolveV2QuoteAsset(client, pairToken)` (tên hàm thực tế xác nhận lại khi đọc code trong task) — `be/src/launchpads/pons/v2/adapter.ts` — ký hiệu/số thập phân tiền giao dịch, trừ trường hợp địa chỉ zero (ETH, đã biết sẵn không cần RPC).
+- `resolveV2QuoteAsset(pairToken, client)` — `be/src/launchpads/pons/v2/adapter.ts` — ký hiệu/số thập phân tiền giao dịch, trừ trường hợp địa chỉ zero (ETH, đã biết sẵn không cần RPC, hàm tự xử lý case này).
+- `readV1TokenMetadata` còn trả về `liquidityPool` — dùng để xác minh khớp với địa chỉ pool trong event (giống hệt indexer cũ đang làm qua `hydrateV1Launch`'s check) — lớp đồng bộ Envio nên tái sử dụng luôn phép xác minh này (hiện tại nó bị bỏ qua, truyền thẳng `liquidityPool: event.poolAddress` khiến check luôn đúng một cách hình thức — xem `be/src/envioSync/runSync.ts` dòng gọi `hydrateV1Launch`).
 
 Các hàm này nhận một interface client tối giản (`readContract`) — một `createPublicClient` từ viem trỏ vào `RH_HTTP_RPC_URL` thỏa mãn interface này trực tiếp, không cần lớp bọc thêm.
 
@@ -43,8 +44,17 @@ Các hàm này nhận một interface client tối giản (`readContract`) — m
 Tất cả thay đổi dưới đây là **nới lỏng** (bớt ràng buộc), không xóa cột, không đổi kiểu dữ liệu của dữ liệu đã có — dòng dữ liệu cũ do indexer RPC-scan ghi giữ nguyên `sourceLogId` thật, không bị ảnh hưởng.
 
 - `launches.sourceLogId`, `venues.sourceLogId`, `trades.sourceLogId`: bỏ `NOT NULL` — NULL sẽ không bị kiểm tra khóa ngoại (hành vi chuẩn của Postgres), cho phép dòng do Envio ghi để trống trường này.
-- `lifecycleTransitions`: đổi khóa chính từ `sourceLogId` sang tổ hợp `(chainId, txHash, logIndex)` (giống cách bảng `trades` đang định danh duy nhất một log) — `sourceLogId` trở thành cột thường, nullable, giữ khóa ngoại khi có giá trị. **Cần kiểm tra trong task thực thi:** có chỗ nào trong code API/truy vấn hiện tại dựa vào `sourceLogId` là khóa chính của bảng này không (ví dụ dùng làm tham chiếu join) — nếu có, cập nhật theo khóa mới.
-- Bảng `sources`: thêm các dòng đăng ký nguồn mới cho Envio (một lần, không lặp lại mỗi launch) — ví dụ `pons-v1-envio`, `pons-v2-envio`, `pons-v2-v4-envio` — để thỏa khóa ngoại `sourceId` NOT NULL của `launches`/`venues`/`trades`/`lifecycle_transitions`. Giá trị cụ thể cho `scannedToBlock`/`confirmedToBlock`/`status` (các cột vốn thiết kế cho cơ chế cursor của indexer cũ) xác định ở task thực thi — có thể để giá trị tĩnh/ước lệ vì lớp đồng bộ Envio không dùng cơ chế cursor này để vận hành (nó tự quét lại từ bảng raw Envio mỗi chu kỳ, không phụ thuộc `sources.scannedToBlock`).
+- `lifecycleTransitions`: đổi khóa chính từ `sourceLogId` sang tổ hợp `(chainId, txHash, logIndex)` (giống cách bảng `trades` đang định danh duy nhất một log) — `sourceLogId` trở thành cột thường, nullable, giữ khóa ngoại khi có giá trị.
+- `launches`: thêm cột mới `launchLogIndex` (integer, NOT NULL) — lý do và cách backfill ở mục 3a ngay dưới.
+- Bảng `sources`: thêm các dòng đăng ký nguồn mới cho Envio (một lần, không lặp lại mỗi launch) — ví dụ `pons-v1-envio`, `pons-v2-envio`, `pons-v2-v4-envio` (hoặc theo đúng `sourceId` lớp đồng bộ Envio thực sự gán cho từng launch — xác nhận khi đọc code trong task, phải khớp chính xác giá trị `launches.sourceId`/`trades.sourceId` ghi ra, nếu không `launchCoverageSql` trong `be/src/api/store.ts` sẽ không khớp được) — để thỏa khóa ngoại `sourceId` NOT NULL. **Không phải giá trị tĩnh một lần:** `sources.status`/`confirmedToBlock` được `be/src/api/store.ts`'s `coverage()`/`launchCoverageSql` đọc trực tiếp để tính "launch này đã đủ dữ liệu chưa" hiển thị cho người dùng (`coverageStatus: 'caught_up' | 'backfilling'`) — đúng nguyên tắc CLAUDE.md "không được báo đã đủ dữ liệu khi chưa thật sự đủ". Lớp đồng bộ phải **cập nhật `confirmedToBlock`/`status` mỗi chu kỳ** theo đúng tiến độ Envio thực tế đã quét/xác nhận tới đâu (không phải giá trị cố định chèn một lần) — xem mục 7.
+
+## 3a. API phân trang danh sách launch phụ thuộc `raw_logs` — phát hiện khi đọc code
+
+`be/src/api/store.ts`'s `listLaunches` (endpoint danh sách launch, có phân trang) hiện lấy vị trí sắp xếp (`block_number, tx_hash, log_index`) bằng `JOIN raw_logs r ON r.id = l.source_log_id` — **INNER JOIN**, không phải LEFT JOIN. Một khi `launches.sourceLogId` được phép NULL (mục 3), launch nào có `sourceLogId = NULL` sẽ **bị loại hoàn toàn khỏi kết quả** của endpoint này — không lỗi, không cảnh báo, chỉ biến mất khỏi danh sách FE hiển thị. Đây là lỗi nghiêm trọng nếu không sửa, vì nó vô hiệu hóa toàn bộ mục tiêu của spec này (launch do Envio ghi sẽ không hiển thị được).
+
+**Cách sửa:** thêm cột `launches.launchLogIndex` (mục 3), để launch tự mang theo đủ vị trí sắp xếp của chính nó (`launchBlock` + `launchTxHash` đã có sẵn, chỉ thiếu log index) — không cần mượn qua `raw_logs` nữa. Migration backfill giá trị này cho dữ liệu cũ bằng chính `raw_logs` đang có (`UPDATE launches SET launch_log_index = r.log_index FROM raw_logs r WHERE r.id = launches.source_log_id`), rồi đặt NOT NULL. Sửa câu truy vấn trong `listLaunches` bỏ hẳn `JOIN raw_logs`, dùng `l.launch_block, l.launch_tx_hash, l.launch_log_index` trực tiếp thay cho `r.block_number, r.tx_hash, r.log_index`. Áp dụng chung cho mọi launch (cả của indexer cũ lẫn Envio), không phải nhánh riêng theo nguồn dữ liệu.
+
+Đã rà toàn bộ `be/src/api/` — đây là **chỗ duy nhất** phụ thuộc `raw_logs` theo kiểu loại-bỏ-dòng-khi-thiếu như vậy (endpoint giao dịch dùng cột riêng sẵn có của bảng `trades`, không bị ảnh hưởng; `getLaunch` — tra cứu một launch — không join `raw_logs`).
 
 ## 4. Chống reorg cho lớp đồng bộ
 
@@ -91,11 +101,14 @@ Thực hiện theo đúng thứ tự, không đảo bước, mỗi bước xác 
 
 Các hàm `syncV1LegacyOnce`/`syncV2Once`/`syncV4Once` hiện tại import trực tiếp các Drizzle schema object của bảng staging (`launchesEnvioStaging`, `venuesEnvioStaging`, v.v.). Việc đổi đích ghi thực hiện bằng cách tham số hóa bảng đích đầu vào (không viết lại logic nghiệp vụ), theo đúng pattern tên bảng Envio raw đã tham số hóa sẵn (`EnvioTableNames`/`EnvioV2TableNames`/`EnvioV4TableNames`) — làm tương tự cho phía ghi. Chi tiết interface cụ thể xác định ở kế hoạch triển khai.
 
+**Cập nhật `sources.confirmedToBlock`/`status` mỗi chu kỳ:** sau mỗi lần sync thành công, lớp đồng bộ phải tự cập nhật dòng `sources` tương ứng (mục 3) với khối cao nhất nó vừa xác nhận xong cho nguồn đó — để `be/src/api/store.ts`'s `coverage()`/`launchCoverageSql` phản ánh đúng thực tế, không báo "đã đủ dữ liệu" sớm hơn thật.
+
 ## 8. Kiểm thử
 
 - Đơn vị: hàm metadata-enrichment (mục 2) — test với client RPC giả lập (mock `readContract`), không gọi RPC thật trong unit test.
 - Đơn vị: hàm chống reorg (mục 4) — test với dữ liệu giả lập mô phỏng một dòng "biến mất" khỏi bảng raw giữa 2 chu kỳ, xác nhận dòng phái sinh tương ứng bị xóa đúng.
-- Tích hợp: migration mục 3 chạy trên DB test, xác nhận dữ liệu cũ (sourceLogId thật) không bị ảnh hưởng, dữ liệu mới (sourceLogId null) ghi được.
+- Tích hợp: migration mục 3 chạy trên DB test, xác nhận dữ liệu cũ (sourceLogId thật) không bị ảnh hưởng, dữ liệu mới (sourceLogId null) ghi được; xác nhận `launchLogIndex` backfill đúng từ `raw_logs` cho dữ liệu cũ.
+- Tích hợp: `listLaunches` (mục 3a) trả về đúng cả launch có `sourceLogId` null lẫn launch cũ có `sourceLogId` thật, đúng thứ tự phân trang.
 - Tích hợp: lớp đồng bộ ghi thẳng vào bảng thật (không phải staging) trên DB test — mở rộng từ các test tích hợp hiện có của `runSync.ts`/`runSyncV2.ts`/`runSyncV4.ts`, đổi đích bảng.
 - Vận hành thật: đối chiếu theo mục 5-6, không phải test tự động một lần mà là quy trình có ghi log kết quả từng lần chạy.
 
