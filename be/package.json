@@ -19,6 +19,7 @@
     "dev:indexer": "tsx src/cli/runFactoryIndexer.ts",
     "indexer:status": "tsx src/cli/indexerStatus.ts",
     "sync:envio-staging": "tsx src/cli/syncEnvioStaging.ts",
+    "sync:envio-staging:loop": "tsx src/cli/syncEnvioStagingLoop.ts",
     "compare:envio-staging": "tsx src/cli/compareEnvioStaging.ts",
     "openapi:write": "tsx src/cli/openapi.ts --write",
     "openapi:check": "tsx src/cli/openapi.ts --check"

@@ -106,6 +106,21 @@ DATABASE_URL=... npm run -w be compare:envio-staging
 Đây là bước đối chiếu thủ công cho phạm vi Phase 1-3 (V1-legacy, V2, V4). Đối chiếu tự động, đầy đủ,
 chạy song song với indexer thật đang sống — theo mục 6 của spec — thuộc một plan kế tiếp riêng.
 
+**Chạy nền liên tục (để staging luôn bắt kịp dữ liệu, so sánh thủ công khi cần):**
+
+```sh
+cd envio && docker compose up -d
+cd .. && DATABASE_URL=... ENVIO_DATABASE_URL=postgres://postgres:testing@127.0.0.1:5433/envio-dev \
+  npm run -w be sync:envio-staging:loop
+```
+
+Lặp lại cả 3 bước sync (V1-legacy, V2, V4) mỗi 15 phút (chỉnh qua `ENVIO_SYNC_LOOP_INTERVAL_MS`,
+đơn vị mili-giây). Một chu kỳ lỗi (mất kết nối DB, Envio chưa quét kịp…) chỉ bị log lại, không làm
+dừng tiến trình — tự thử lại ở chu kỳ sau. Dừng bằng `Ctrl+C` hoặc gửi `SIGTERM` (tiến trình dừng sau
+khi chu kỳ hiện tại xong, trong vòng ~1 giây nếu đang chờ giữa hai chu kỳ). Kiểm tra tiến trình đang
+chạy bằng `ps aux | grep syncEnvioStagingLoop`. Việc so sánh (`compare:envio-staging`) vẫn chạy thủ
+công, riêng, khi nào bạn muốn xem khác biệt.
+
 ## Chạy FE
 
 Cần backend API (`dev:api`) đang chạy trước. Sao chép biến môi trường rồi khởi động FE ở terminal riêng:
