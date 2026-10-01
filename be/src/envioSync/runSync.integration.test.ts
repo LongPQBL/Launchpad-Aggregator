@@ -2,8 +2,8 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
-import { launchesEnvioStaging, tradesEnvioStaging } from '../db/schema.js';
-import { syncV1LegacyOnce } from './runSync.js';
+import { launchesEnvioStaging, tradesEnvioStaging, launches, venues, trades, sources, rawLogs } from '../db/schema.js';
+import { syncV1LegacyOnce, syncV1LegacyToReal } from './runSync.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -21,7 +21,8 @@ const { db, pool } = createDatabase(databaseUrl);
 // are shared in production too), so this file must never TRUNCATE them wholesale or assert on their
 // whole-table length, only on its own token/tx's specific rows.
 const envioPool = new Pool({ connectionString: databaseUrl });
-const fixtureTables = { rawLaunchTable: 'envio_fixture_v1."RawLaunch"', rawSwapTable: 'envio_fixture_v1."RawSwap"' };
+const fixtureTables = { rawLaunchTable: 'envio_fixture_v1."RawLaunch"', rawSwapTable: 'envio_fixture_v1."RawSwap"',
+  progressTable: 'envio_fixture_v1.chain_metadata' };
 const testToken = '0x39dbed3a2bd333467115de45665cc57f813c4571';
 const testTxHash = '0x1f54f25fec2d963dcb338ecb8b46a6eb123198a5c7a746d34cb2dbe78d074af8';
 
@@ -36,6 +37,9 @@ beforeAll(async () => {
     id text primary key, "chainId" int, "poolAddress" text, sender text, recipient text, "txFrom" text,
     amount0 numeric, amount1 numeric, "sqrtPriceX96" numeric, liquidity numeric, tick int,
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
+  await envioPool.query('CREATE TABLE IF NOT EXISTS envio_fixture_v1.chain_metadata (chain_id int primary key, latest_processed_block bigint, block_height bigint)');
+  await envioPool.query(`INSERT INTO envio_fixture_v1.chain_metadata VALUES (4663,8963150,9000000)
+    ON CONFLICT (chain_id) DO UPDATE SET latest_processed_block=8963150,block_height=9000000`);
   // Scoped to this test's own keys only — never a blanket TRUNCATE of the shared staging tables,
   // which runSyncV2.integration.test.ts's concurrently-running test also writes to.
   await pool.query('DELETE FROM trades_envio_staging WHERE tx_hash = $1', [testTxHash]);
@@ -109,5 +113,82 @@ describe('syncV1LegacyOnce', () => {
     expect(rpcCalls).toHaveLength(4);
     expect(await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken))).toHaveLength(1);
     expect(await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testTxHash))).toHaveLength(1);
+    await envioPool.query('DELETE FROM envio_fixture_v1."RawSwap" WHERE id = $1', ['s1']);
+    await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['l1']);
+  });
+});
+
+describe('syncV1LegacyToReal', () => {
+  it('writes into real tables, retains a pre-existing RPC launch and uses Envio progress', async () => {
+    const realToken = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    const existingToken = '0xffffffffffffffffffffffffffffffffffffffff';
+    const poolAddress = '0xabababababababababababababababababababab';
+    const existingPool = '0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd';
+    const launchTx = '0x' + 'a'.repeat(64);
+    const existingTx = '0x' + 'b'.repeat(64);
+    const swapTx = '0x' + 'c'.repeat(64);
+    const blockHash = '0x' + 'd'.repeat(64);
+    const sourceLogId = `4663:${blockHash}:${existingTx}:8`;
+    for (const id of ['pons-v1-legacy', 'pons-v1-legacy-trades']) {
+      await db.insert(sources).values({ id, chainId: 4663, version: 'v1', factoryAddress: realToken,
+        startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+    }
+    await db.insert(rawLogs).values({ id: sourceLogId, chainId: 4663, sourceId: 'pons-v1-legacy',
+      blockNumber: 8963150n, blockHash, txHash: existingTx, logIndex: 8, address: existingToken,
+      topics: [], data: '0x' }).onConflictDoNothing();
+    await db.insert(launches).values({ chainId: 4663, tokenAddress: existingToken, sourceId: 'pons-v1-legacy',
+      sourceLogId, launchLogIndex: 8, name: 'Existing', symbol: 'OLD', tokenDecimals: 18,
+      platform: 'pons', protocolVersion: 'v1', factoryAddress: '0x0c37a24F5D23A486FA692d1500881d698B1F77a4',
+      deployerAddress: existingToken, launchBlock: 8963150n, launchTxHash: existingTx,
+      quoteAssetAddress: '0x4200000000000000000000000000000000000006', quoteAssetSymbol: 'WETH',
+      quoteAssetDecimals: 18, lifecycleStatus: 'trading' }).onConflictDoNothing();
+    const insertLaunch = async (id: string, token: string, poolAddress: string, txHash: string, logIndex: number) => {
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
+        [id, token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, txHash, logIndex]);
+    };
+    await insertLaunch('real', realToken, poolAddress, launchTx, 6);
+    await insertLaunch('old', existingToken, existingPool, existingTx, 8);
+    await envioPool.query(`INSERT INTO envio_fixture_v1."RawSwap" VALUES ($1,4663,$2,$3,$4,$5,$6,$7,$8,$9,$10,8963150,$11,$12,9,1700000000)`,
+      ['real-swap', poolAddress, realToken, realToken, realToken, '100000000000000000', '-68057245261861571047346184',
+        '2005366647941715384651103712059394', '36819258015569838458222', 202790, blockHash, swapTx]);
+    const rpcAddresses: string[] = [];
+    const client = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+      rpcAddresses.push(address.toLowerCase());
+      if (functionName === 'name') return 'Real';
+      if (functionName === 'symbol') return 'RL';
+      if (functionName === 'decimals') return 18;
+      if (functionName === 'liquidityPool') return poolAddress;
+      throw new Error(functionName);
+    } };
+    try {
+      const first = await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1 });
+      expect(rpcAddresses).toEqual([realToken, realToken, realToken, realToken]);
+      const [newLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, realToken));
+      expect(newLaunch.name).toBe('Real');
+      expect(newLaunch.sourceLogId).toBeNull();
+      expect(newLaunch.launchLogIndex).toBe(6);
+      const [oldLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, existingToken));
+      expect(oldLaunch.sourceLogId).toBe(sourceLogId);
+      expect((await db.select().from(trades).where(eq(trades.txHash, swapTx))).length).toBe(1);
+      const [source] = await db.select().from(sources).where(eq(sources.id, 'pons-v1-legacy'));
+      expect(source.confirmedToBlock).toBe(8963150n);
+      expect(source.status).toBe('backfilling');
+      await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      expect((await db.select().from(launches).where(eq(launches.tokenAddress, realToken))).length).toBe(1);
+      expect((await db.select().from(launches).where(eq(launches.tokenAddress, existingToken))).length).toBe(1);
+      // Reconciliation rebuilds the recent Envio launch; the old RPC launch never needs metadata calls.
+      expect(rpcAddresses).toHaveLength(8);
+      expect(rpcAddresses.every((address) => address === realToken)).toBe(true);
+    } finally {
+      await db.delete(trades).where(eq(trades.txHash, swapTx));
+      await db.delete(venues).where(eq(venues.tokenAddress, realToken));
+      await db.delete(venues).where(eq(venues.tokenAddress, existingToken));
+      await db.delete(launches).where(eq(launches.tokenAddress, realToken));
+      await db.delete(launches).where(eq(launches.tokenAddress, existingToken));
+      await db.delete(rawLogs).where(eq(rawLogs.id, sourceLogId));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawSwap" WHERE id = $1', ['real-swap']);
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id IN ($1,$2)', ['real', 'old']);
+    }
   });
 });

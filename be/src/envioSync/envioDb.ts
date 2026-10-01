@@ -1,5 +1,15 @@
 import type { Pool } from 'pg';
 
+export async function readEnvioProgress(envioPool: Pool, tableName = 'envio.chain_metadata'):
+Promise<{ processedBlock: bigint; headBlock: bigint }> {
+  const result = await envioPool.query(`SELECT latest_processed_block, block_height FROM ${tableName} WHERE chain_id = $1`, [4663]);
+  const row = result.rows[0] as { latest_processed_block: number | string | null; block_height: number | string | null } | undefined;
+  if (!row || row.latest_processed_block === null || row.block_height === null) {
+    throw new Error('Envio chain progress is unavailable for chain 4663');
+  }
+  return { processedBlock: BigInt(row.latest_processed_block), headBlock: BigInt(row.block_height) };
+}
+
 export interface EnvioRawLaunchDbRow {
   id: string;
   chainId: number;
