@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { AppShell } from './app-shell';
+
+vi.mock('@/wallet/wallet-control', () => ({ WalletControl: () => <button>Connect wallet</button> }));
 
 describe('AppShell', () => {
   it('shows the app name and a main landmark', () => {
@@ -15,14 +17,14 @@ describe('AppShell', () => {
     expect(screen.getByTestId('app-shell')).not.toHaveClass('dark');
   });
 
-  it('does not render any wallet or trading controls', () => {
+  it('places wallet access in the header without adding trading controls', () => {
     render(
       <AppShell>
         <p>Content</p>
       </AppShell>,
     );
 
-    expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(screen.queryByText(/ví|wallet|mua|bán|buy|sell/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('button', { name: 'Connect wallet' }));
+    expect(screen.queryByText(/mua|bán|buy|sell/i)).not.toBeInTheDocument();
   });
 });

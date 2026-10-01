@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { WalletProviders } from '@/wallet/providers';
 
 export const metadata: Metadata = {
   title: 'Launchpad Aggregator',
@@ -10,7 +11,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="vi">
-      <body>{children}</body>
+      <body><WalletProviders>{children}</WalletProviders></body>
     </html>
   );
 }
