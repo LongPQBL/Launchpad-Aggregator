@@ -59,14 +59,24 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row) => T): Pag
 }
 
 export function createApiStore(pool: Pool): ApiDeps['data'] {
+  // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
+  // "use whichever source has a reading, prefer the more current one" behavior needed here.
+  // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
+  // Envio's own chain head (be/src/envioSync/syncAll.ts's runAllSyncsOnce, 'real' target only) — once
+  // the RPC-scan indexer stops at cutover, observed_blocks freezes, and without this, every source's
+  // coverage would be judged against that stale value forever (final review, Important 3).
+  const safeHeadSql = `SELECT GREATEST(
+    (SELECT max(number) FROM observed_blocks WHERE chain_id = 4663),
+    (SELECT head_block FROM envio_chain_progress WHERE chain_id = 4663)
+  ) AS safe_head`;
   async function safeHead(): Promise<bigint | null> {
-    const result = await pool.query('SELECT max(number) AS safe_head FROM observed_blocks WHERE chain_id = 4663');
+    const result = await pool.query(safeHeadSql);
     return result.rows[0]?.safe_head === null ? null : BigInt(string(result.rows[0].safe_head));
   }
   async function coverage() {
     const [sourceResult, headResult, gapResult, poolResult, phaseResult] = await Promise.all([
       pool.query('SELECT id, status, confirmed_to_block, start_block FROM sources'),
-      pool.query('SELECT max(number) AS safe_head FROM observed_blocks WHERE chain_id = 4663'),
+      pool.query(safeHeadSql),
       pool.query('SELECT source_id, from_block, to_block, reason FROM source_gaps ORDER BY source_id, from_block'),
       pool.query("SELECT DISTINCT 'pons-v2-v4:' || lower(ref) AS id FROM venues WHERE chain_id = 4663 AND kind = 'v4_pool' AND official = true"),
       pool.query(`SELECT count(*)::int AS count FROM launches l LEFT JOIN phase_observations p

@@ -39,3 +39,15 @@ describe('Envio schema migration', () => {
     expect(result.rows[0].source_log_id).toBeNull();
   });
 });
+
+describe('envio_chain_progress table (final review, Important 3)', () => {
+  it('accepts an upsert of the chain head block Envio has observed', async () => {
+    await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 9999');
+    await pool.query('INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (9999, 100)');
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (9999, 200)
+      ON CONFLICT (chain_id) DO UPDATE SET head_block = excluded.head_block, updated_at = now()`);
+    const result = await pool.query('SELECT head_block FROM envio_chain_progress WHERE chain_id = 9999');
+    expect(result.rows[0].head_block).toBe('200');
+    await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 9999');
+  });
+});

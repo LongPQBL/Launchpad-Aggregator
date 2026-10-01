@@ -120,6 +120,13 @@
       "when": 1790821257751,
       "tag": "0016_slippery_black_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790842237887,
+      "tag": "0017_demonic_luminals",
+      "breakpoints": true
     }
   ]
 }

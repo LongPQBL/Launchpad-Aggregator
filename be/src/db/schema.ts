@@ -180,6 +180,19 @@ export const observedBlocks = pgTable('observed_blocks', {
   primaryKey({ columns: [table.chainId, table.number] }),
 ]);
 
+// The Envio sync layer's own view of the chain head (from Envio's chain_metadata.block_height),
+// written once per real-table sync cycle. Separate from observed_blocks (which only the RPC-scan
+// indexer writes, keyed by real block hash, for its own reorg bookkeeping) — reusing that table for
+// this would either fake a hash (risking corrupting its real reorg-detection reads) or grow one row
+// per cycle forever. be/src/api/store.ts's safeHead()/coverage() take the max of both sources, so
+// coverage stays honest once the RPC-scan indexer stops advancing observed_blocks (final review,
+// Important 3 on docs/superpowers/plans/2026-10-01-envio-cutover-implementation.md).
+export const envioChainProgress = pgTable('envio_chain_progress', {
+  chainId: integer('chain_id').primaryKey(),
+  headBlock: bigint('head_block', { mode: 'bigint' }).notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Isolated shadow copies of launches/venues/trades, written only by the Envio sync layer
 // (be/src/envioSync/) during the Phase 1 parallel-run slice — never read by the real API, no
 // foreign keys to the real tables. See docs/superpowers/specs/2026-09-30-envio-indexer-migration-design.md.

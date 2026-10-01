@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import type { Database } from '../db/client.js';
+import { envioChainProgress } from '../db/schema.js';
 
 export async function readEnvioProgress(envioPool: Pool, tableName = 'envio.chain_metadata'):
 Promise<{ processedBlock: bigint; headBlock: bigint }> {
@@ -8,6 +10,15 @@ Promise<{ processedBlock: bigint; headBlock: bigint }> {
     throw new Error('Envio chain progress is unavailable for chain 4663');
   }
   return { processedBlock: BigInt(row.latest_processed_block), headBlock: BigInt(row.block_height) };
+}
+
+// Mirrors Envio's own chain head into the app's own database (envio_chain_progress), so
+// be/src/api/store.ts's safeHead()/coverage() can see it without the API process needing a second
+// database connection to Envio's own Postgres. Written once per real-table sync cycle — see
+// be/src/envioSync/syncAll.ts's runAllSyncsOnce.
+export async function recordEnvioChainProgress(appDb: Database, chainId: number, headBlock: bigint): Promise<void> {
+  await appDb.insert(envioChainProgress).values({ chainId, headBlock })
+    .onConflictDoUpdate({ target: envioChainProgress.chainId, set: { headBlock, updatedAt: new Date() } });
 }
 
 export interface EnvioRawLaunchDbRow {

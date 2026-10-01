@@ -46,3 +46,44 @@ describe('listLaunches without raw log provenance', () => {
     expect(third.items[0].tokenAddress).toBe(tokens[2]);
   });
 });
+
+describe('safe head considers envio_chain_progress (final review, Important 3)', () => {
+  const headToken = '0x1616161616161616161616161616161616161616';
+  const headSource = 'envio-store-head-test';
+  const headBlock = 99_999_999_999n;
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [headToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [headToken]);
+    await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[headSource, `${headSource}-trades`]]);
+    await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
+  });
+
+  it('reports a launch as complete once envio_chain_progress reflects a head its source has reached, with no observed_blocks rows at all', async () => {
+    // launchpad_test has no observed_blocks rows for chain 4663 (confirmed separately) — so with
+    // envio_chain_progress also empty, safeHead must be null and coverage incomplete. Once
+    // envio_chain_progress is set, safeHead must reflect it (GREATEST(NULL, headBlock) = headBlock).
+    for (const id of [headSource, `${headSource}-trades`]) {
+      await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+        VALUES ($1,4663,'v1',$2,0,0,$3,'caught_up') ON CONFLICT (id) DO UPDATE SET confirmed_to_block = $3, status = 'caught_up'`,
+      [id, headToken, headBlock.toString()]);
+    }
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'HeadTest','HT',18,'pons','v1',$1,$1,1,$3,0,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+    [headToken, headSource, '0x' + 'e'.repeat(64)]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v3_pool',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`,
+    [`4663:v3_pool:${headToken}`, headToken, headSource]);
+
+    const beforeHead = await store.getLaunch(4663, headToken);
+    expect(beforeHead?.coverageStatus).toBe('backfilling');
+
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (4663, $1)
+      ON CONFLICT (chain_id) DO UPDATE SET head_block = $1`, [headBlock.toString()]);
+
+    const afterHead = await store.getLaunch(4663, headToken);
+    expect(afterHead?.coverageStatus).toBe('caught_up');
+  });
+});
