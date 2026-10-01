@@ -189,4 +189,101 @@ describe('syncV2ToReal', () => {
       await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
     }
   });
+
+  it('closes the curve venue on sweep and reopens it if the sweep transition vanishes on reorg (final review, Important 6)', async () => {
+    const token = '0x5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a';
+    const curve = '0x5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b5b';
+    const pair = '0x5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c';
+    const launchTx = '0x' + '5d'.repeat(32);
+    const sweepTx = '0x' + '5e'.repeat(32);
+    const blockHash = '0x' + '5f'.repeat(32);
+    for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+      await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+        startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+    }
+    const client = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+      if (address.toLowerCase() === token) {
+        if (functionName === 'name') return 'Sweep Test';
+        if (functionName === 'symbol') return 'SWP';
+        if (functionName === 'decimals') return 18;
+      }
+      if (address.toLowerCase() === pair) {
+        if (functionName === 'symbol') return 'USDG';
+        if (functionName === 'decimals') return 6;
+      }
+      throw new Error(`${address} ${functionName}`);
+    } };
+    try {
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('sweep-launch',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const [openVenue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
+      expect(openVenue.effectiveToBlock).toBeNull();
+
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLifecycleTransition" VALUES ('sweep-tx',4663,$1,1,'swept',27828100,$2,$3,20)`,
+        [token, blockHash, sweepTx]);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const [closedVenue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
+      expect(closedVenue.effectiveToBlock).toBe(27828100n);
+      expect(closedVenue.effectiveToLogIndex).toBe(20);
+      const [sweptLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(sweptLaunch.lifecycleStatus).toBe('swept');
+
+      await envioPool.query('DELETE FROM envio_fixture_v2."RawLifecycleTransition" WHERE id = $1', ['sweep-tx']);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const [reopenedVenue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
+      expect(reopenedVenue.effectiveToBlock).toBeNull();
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
+
+  it('leaves the reorg window untouched when an RPC call fails mid-rebuild (final review, Critical 2)', async () => {
+    const token = '0x6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a';
+    const curve = '0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b';
+    const pair = '0x6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c6c';
+    const launchTx = '0x' + '6d'.repeat(32);
+    const blockHash = '0x' + '6e'.repeat(32);
+    const workingClient = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+      if (address.toLowerCase() === token) {
+        if (functionName === 'name') return 'Atomic V2';
+        if (functionName === 'symbol') return 'AV2';
+        if (functionName === 'decimals') return 18;
+      }
+      if (address.toLowerCase() === pair) {
+        if (functionName === 'symbol') return 'USDG';
+        if (functionName === 'decimals') return 6;
+      }
+      throw new Error(`${address} ${functionName}`);
+    } };
+    const failingClient = { readContract: async () => { throw new Error('simulated RPC failure (403/429)'); } };
+    try {
+      for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+          startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      // Block close to the fixture's pinned progress (27828165), so this launch stays INSIDE the
+      // reorg window (500 blocks back) on every cycle — the second cycle must therefore always try
+      // to rebuild it, which is what makes the RPC failure actually exercise the code path.
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('atomic',4663,$1,$2,$1,$3,27828160,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      const first = await syncV2ToReal(envioPool, db, fixtureTables, workingClient);
+      expect(first.launchesWritten).toBe(1);
+      expect((await db.select().from(venues).where(eq(venues.tokenAddress, token)))).toHaveLength(1);
+
+      await expect(syncV2ToReal(envioPool, db, fixtureTables, failingClient)).rejects.toThrow('simulated RPC failure');
+      expect((await db.select().from(launches).where(eq(launches.tokenAddress, token)))).toHaveLength(1);
+      expect((await db.select().from(venues).where(eq(venues.tokenAddress, token)))).toHaveLength(1);
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
 });

@@ -152,22 +152,29 @@ describe('syncV1LegacyToReal', () => {
       ['real-swap', poolAddress, realToken, realToken, realToken, '100000000000000000', '-68057245261861571047346184',
         '2005366647941715384651103712059394', '36819258015569838458222', 202790, blockHash, swapTx]);
     const rpcAddresses: string[] = [];
+    const legacyFactory = '0x0c37a24F5D23A486FA692d1500881d698B1F77a4'.toLowerCase();
     const client = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
       rpcAddresses.push(address.toLowerCase());
       if (functionName === 'name') return 'Real';
       if (functionName === 'symbol') return 'RL';
       if (functionName === 'decimals') return 18;
       if (functionName === 'liquidityPool') return poolAddress;
+      if (functionName === 'graduationStatus') return [0n, 0n, false];
       throw new Error(functionName);
     } };
     try {
       const first = await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
       expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1 });
-      expect(rpcAddresses).toEqual([realToken, realToken, realToken, realToken]);
+      // 4 metadata calls to the token, plus 1 graduation-status call to the FACTORY (readV1Graduation's
+      // own readContract call targets the factory address, not the token — be/src/launchpads/pons/v1/
+      // state.ts).
+      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(4);
+      expect(rpcAddresses.filter((address) => address === legacyFactory)).toHaveLength(1);
       const [newLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, realToken));
       expect(newLaunch.name).toBe('Real');
       expect(newLaunch.sourceLogId).toBeNull();
       expect(newLaunch.launchLogIndex).toBe(6);
+      expect(newLaunch.lifecycleStatus).toBe('trading');
       const [oldLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, existingToken));
       expect(oldLaunch.sourceLogId).toBe(sourceLogId);
       expect((await db.select().from(trades).where(eq(trades.txHash, swapTx))).length).toBe(1);
@@ -177,9 +184,11 @@ describe('syncV1LegacyToReal', () => {
       await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
       expect((await db.select().from(launches).where(eq(launches.tokenAddress, realToken))).length).toBe(1);
       expect((await db.select().from(launches).where(eq(launches.tokenAddress, existingToken))).length).toBe(1);
-      // Reconciliation rebuilds the recent Envio launch; the old RPC launch never needs metadata calls.
-      expect(rpcAddresses).toHaveLength(8);
-      expect(rpcAddresses.every((address) => address === realToken)).toBe(true);
+      // Reconciliation rebuilds the recent Envio launch every cycle (its block is inside the fixture's
+      // pinned window); the old RPC launch never needs metadata/graduation calls.
+      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(8);
+      expect(rpcAddresses.filter((address) => address === legacyFactory)).toHaveLength(2);
+      expect(rpcAddresses.every((address) => address === realToken || address === legacyFactory)).toBe(true);
     } finally {
       await db.delete(trades).where(eq(trades.txHash, swapTx));
       await db.delete(venues).where(eq(venues.tokenAddress, realToken));
@@ -189,6 +198,87 @@ describe('syncV1LegacyToReal', () => {
       await db.delete(rawLogs).where(eq(rawLogs.id, sourceLogId));
       await envioPool.query('DELETE FROM envio_fixture_v1."RawSwap" WHERE id = $1', ['real-swap']);
       await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id IN ($1,$2)', ['real', 'old']);
+    }
+  });
+
+  it('reads real graduation status via RPC instead of hardcoding trading (final review, Important 5)', async () => {
+    const token = '0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a';
+    const poolAddress = '0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b';
+    const launchTx = '0x' + '7c'.repeat(32);
+    const blockHash = '0x' + '7d'.repeat(32);
+    try {
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
+        ['graduated', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, launchTx, 1]);
+      const graduatedClient = { readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'name') return 'Graduated Token';
+        if (functionName === 'symbol') return 'GRAD';
+        if (functionName === 'decimals') return 18;
+        if (functionName === 'liquidityPool') return poolAddress;
+        if (functionName === 'graduationStatus') return [0n, 0n, true];
+        throw new Error(functionName);
+      } };
+      const result = await syncV1LegacyToReal(envioPool, db, fixtureTables, graduatedClient);
+      expect(result.launchesWritten).toBe(1);
+      const [launch] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(launch.lifecycleStatus).toBe('graduated');
+    } finally {
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['graduated']);
+    }
+  });
+
+  it('leaves the reorg window untouched when an RPC call fails mid-rebuild (final review, Critical 2)', async () => {
+    // Deliberately NOT a simple repeated-digit address like 0x2222.../0x3333... — several other
+    // integration test files (repository.integration.test.ts, market/aggregate.test.ts) already use
+    // those exact addresses as venue refs for a DIFFERENT token. Since a venue's id is derived only
+    // from (chainId, kind, ref) — not tokenAddress — a colliding ref makes onConflictDoNothing silently
+    // skip this test's own venue insert against another file's leftover row (found live, debugging
+    // this exact test).
+    const token = '0xc2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2';
+    const poolAddress = '0xc2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c3';
+    const launchTx = '0x' + 'c2'.repeat(32);
+    const swapTx = '0x' + 'c3'.repeat(32);
+    const blockHash = '0x' + 'c4'.repeat(32);
+    const workingClient = { readContract: async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'name') return 'Atomic';
+      if (functionName === 'symbol') return 'AT';
+      if (functionName === 'decimals') return 18;
+      if (functionName === 'liquidityPool') return poolAddress;
+      if (functionName === 'graduationStatus') return [0n, 0n, false];
+      throw new Error(functionName);
+    } };
+    const failingClient = { readContract: async () => { throw new Error('simulated RPC failure (403/429)'); } };
+    try {
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
+        ['atomic', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, launchTx, 12]);
+      // First cycle: succeeds, writes the launch — this launch's block (8963150) is inside every
+      // subsequent cycle's reorg window too (fixture progress is pinned at 8963150, window = 500
+      // blocks back), so the next cycle will always try to rebuild (not reuse) it.
+      const first = await syncV1LegacyToReal(envioPool, db, fixtureTables, workingClient);
+      expect(first.launchesWritten).toBe(1);
+      expect((await db.select().from(launches).where(eq(launches.tokenAddress, token)))[0].name).toBe('Atomic');
+      expect((await db.select().from(venues).where(eq(venues.tokenAddress, token)))).toHaveLength(1);
+
+      // Second cycle: RPC fails. The whole call must throw, and — this is the actual regression
+      // check — the launch written by the first cycle must still be there afterward, because the
+      // pre-fetch now happens before reconcileReorgWindow ever runs.
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawSwap" VALUES ($1,4663,$2,$3,$4,$5,$6,$7,$8,$9,$10,8963150,$11,$12,20,1700000001)`,
+        ['atomic-swap', poolAddress, token, token, token, '100000000000000000', '-68057245261861571047346184',
+          '2005366647941715384651103712059394', '36819258015569838458222', 202790, blockHash, swapTx]);
+      await expect(syncV1LegacyToReal(envioPool, db, fixtureTables, failingClient)).rejects.toThrow('simulated RPC failure');
+      const survivingLaunch = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(survivingLaunch).toHaveLength(1);
+      expect(survivingLaunch[0].name).toBe('Atomic');
+      // The venue/trade from the first (successful) cycle must also still be there — the failed
+      // second cycle must not have deleted them either.
+      expect((await db.select().from(venues).where(eq(venues.tokenAddress, token)))).toHaveLength(1);
+    } finally {
+      await db.delete(trades).where(eq(trades.txHash, swapTx));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawSwap" WHERE id = $1', ['atomic-swap']);
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['atomic']);
     }
   });
 });
