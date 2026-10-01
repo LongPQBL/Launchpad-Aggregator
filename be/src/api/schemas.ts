@@ -6,6 +6,8 @@ export const launchSummary = { type: 'object', properties: {
   chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' },
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,
   lifecycleStatus: { type: 'string' }, officialVolume24h: { type: 'string', nullable: true }, coverageStatus: { type: 'string' },
+  fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true },
+  tvlUsd: { type: 'string', nullable: true }, week52High: { type: 'string', nullable: true }, week52Low: { type: 'string', nullable: true },
 } } as const;
 
 export const launchDetail = { type: 'object', properties: {

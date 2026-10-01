@@ -156,3 +156,47 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
     expect(trades.items[0]!.usdValueApprox).toBe(false);
   });
 });
+
+describe('new stats fields degrade per-launch, not per-page (Review Focus)', () => {
+  const goodToken = '0x1818181818181818181818181818181818181818';
+  const brokenToken = '0x1919191919191919191919191919191919191919';
+  const statsSource = 'envio-store-stats-test';
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v1',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [statsSource, goodToken]);
+    for (const [i, token] of [goodToken, brokenToken].entries()) {
+      await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+        platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+        quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+        VALUES (4663,$1,$2,NULL,$3,'ST',18,'pons','v1',$1,$1,$4,$5,0,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+      [token, statsSource, `Stats${i}`, (1000 + i).toString(), '0x' + String(i).repeat(64)]);
+    }
+  });
+  afterAll(async () => {
+    await pool.query('DELETE FROM launches WHERE token_address = ANY($1)', [[goodToken, brokenToken]]);
+    await pool.query('DELETE FROM sources WHERE id = $1', [statsSource]);
+  });
+
+  it('returns null stats for a launch whose totalSupply() reverts, while a sibling launch keeps its real name/symbol', async () => {
+    const readContract = vi.fn(async ({ address, functionName }: { address: string; functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 269170223591n, 1790859457n, 1790859457n, 1n];
+      if (functionName === 'totalSupply') {
+        if (address.toLowerCase() === brokenToken.toLowerCase()) throw new Error('execution reverted');
+        return 1_000_000n * 10n ** 18n;
+      }
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const storeWithRpc = createApiStore(pool, { readContract });
+    const page = await storeWithRpc.listLaunches({ limit: 50, chainId: 4663 });
+    const good = page.items.find((item) => item.tokenAddress === goodToken);
+    const broken = page.items.find((item) => item.tokenAddress === brokenToken);
+    expect(good).toBeDefined();
+    expect(broken).toBeDefined();
+    expect(broken!.fdvUsd).toBeNull();
+    expect(broken!.marketCapUsd).toBeNull();
+    expect(good!.name).toBe('Stats0');
+    expect(broken!.name).toBe('Stats1');
+  });
+});

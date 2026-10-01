@@ -7,6 +7,7 @@ const launch = {
   chainId: 4663, tokenAddress: address, name: 'Example', symbol: 'EX', platform: 'pons', protocolVersion: 'v2',
   quoteAsset: { address: '0x2222222222222222222222222222222222222222', symbol: 'USDG', decimals: 6 },
   lifecycleStatus: 'trading', officialVolume24h: null, coverageStatus: 'backfilling',
+  fdvUsd: null, marketCapUsd: null, tvlUsd: null, week52High: null, week52Low: null,
 };
 
 function data() {

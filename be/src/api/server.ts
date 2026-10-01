@@ -12,6 +12,12 @@ export interface LaunchSummary {
   chainId: number; tokenAddress: string; name: string; symbol: string; platform: string; protocolVersion: string;
   quoteAsset: { address: string; symbol: string; decimals: number }; lifecycleStatus: string;
   officialVolume24h: string | null; coverageStatus: string;
+  // marketCapUsd always equals fdvUsd in this project (bonding-curve launches mint their full
+  // supply at launch, no vesting) — see spec docs/superpowers/specs/2026-10-01-uniswap-parity-stats-design.md §4.
+  fdvUsd: string | null; marketCapUsd: string | null;
+  // tvlUsd is always null for now — see be/src/market/tokenStats.ts's readTvlUsd doc comment.
+  tvlUsd: string | null;
+  week52High: string | null; week52Low: string | null;
 }
 export interface LaunchDetail extends LaunchSummary {
   officialVenues: readonly { id: string; kind: string; ref: string; effectiveFromBlock: string; effectiveToBlock: string | null }[];

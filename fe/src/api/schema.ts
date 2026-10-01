@@ -108,6 +108,11 @@ export interface paths {
                                 lifecycleStatus?: string;
                                 officialVolume24h?: string | null;
                                 coverageStatus?: string;
+                                fdvUsd?: string | null;
+                                marketCapUsd?: string | null;
+                                tvlUsd?: string | null;
+                                week52High?: string | null;
+                                week52Low?: string | null;
                             }[];
                             nextCursor?: string | null;
                         };
@@ -163,6 +168,11 @@ export interface paths {
                             lifecycleStatus?: string;
                             officialVolume24h?: string | null;
                             coverageStatus?: string;
+                            fdvUsd?: string | null;
+                            marketCapUsd?: string | null;
+                            tvlUsd?: string | null;
+                            week52High?: string | null;
+                            week52Low?: string | null;
                             officialVenues?: {
                                 id?: string;
                                 kind?: string;
@@ -222,6 +232,9 @@ export interface paths {
                                 tokenAmount?: string;
                                 quoteAmount?: string;
                                 priceQuote?: string | null;
+                                traderAddress?: string;
+                                usdValue?: string | null;
+                                usdValueApprox?: boolean;
                             }[];
                             nextCursor?: string | null;
                         };

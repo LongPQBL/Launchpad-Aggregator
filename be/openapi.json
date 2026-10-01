@@ -82,6 +82,26 @@
                           },
                           "coverageStatus": {
                             "type": "string"
+                          },
+                          "fdvUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "marketCapUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "week52High": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "week52Low": {
+                            "type": "string",
+                            "nullable": true
                           }
                         }
                       }
@@ -167,6 +187,26 @@
                     },
                     "coverageStatus": {
                       "type": "string"
+                    },
+                    "fdvUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "marketCapUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "week52High": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "week52Low": {
+                      "type": "string",
+                      "nullable": true
                     },
                     "officialVenues": {
                       "type": "array",
