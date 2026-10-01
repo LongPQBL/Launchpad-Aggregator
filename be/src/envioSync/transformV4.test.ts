@@ -64,6 +64,7 @@ describe('openV4Venue', () => {
     const venue = openV4Venue(launch, curveVenue, evidence, { blockNumber: 27828161n, logIndex: 36 });
     expect(venue.kind).toBe('v4_pool');
     expect(venue.ref).toBe('0x6eb457f0729bd458608099505990f03d8a6af91202f936124f72ad76c96f6fe1');
+    expect(venue.sourceId).toBe('pons-v2-v4:0x6eb457f0729bd458608099505990f03d8a6af91202f936124f72ad76c96f6fe1');
     expect(venue.official).toBe(true);
     expect(venue.effectiveFromBlock).toBe(27828161n);
   });

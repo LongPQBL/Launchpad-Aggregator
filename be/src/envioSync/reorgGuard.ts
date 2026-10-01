@@ -26,7 +26,7 @@ export async function reconcileReorgWindow(
   appDb: Database, tables: ReorgTargetTables, windowStart: bigint, scope: ReorgScope = {},
 ): Promise<void> {
   if (tables.launches === launches) {
-    if (!scope.venueKinds?.length || !scope.venueSourceIdPattern || !scope.launchSourceIds?.length) {
+    if (!scope.venueKinds?.length || !scope.venueSourceIdPattern) {
       throw new Error('Real-table reorg reconciliation requires an explicit source scope');
     }
     const venueIds = appDb.select({ id: venues.id }).from(venues).where(and(
@@ -39,8 +39,10 @@ export async function reconcileReorgWindow(
     }
     await appDb.delete(venues).where(and(gte(venues.effectiveFromBlock, windowStart), isNull(venues.sourceLogId),
       inArray(venues.kind, scope.venueKinds), like(venues.sourceId, scope.venueSourceIdPattern)));
-    await appDb.delete(launches).where(and(gte(launches.launchBlock, windowStart), isNull(launches.sourceLogId),
-      inArray(launches.sourceId, scope.launchSourceIds)));
+    if (scope.launchSourceIds?.length) {
+      await appDb.delete(launches).where(and(gte(launches.launchBlock, windowStart), isNull(launches.sourceLogId),
+        inArray(launches.sourceId, scope.launchSourceIds)));
+    }
     return;
   }
   const stagingVenueIds = appDb.select({ id: venuesEnvioStaging.id }).from(venuesEnvioStaging)

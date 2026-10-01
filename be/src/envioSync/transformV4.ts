@@ -49,7 +49,8 @@ export function verifyV4PoolFromEnvio(
   if (row.currency0.toLowerCase() !== expectedCurrency0.toLowerCase() || row.currency1.toLowerCase() !== expectedCurrency1.toLowerCase()) {
     return null;
   }
-  return { poolId: row.poolId.toLowerCase() as Hash, sourceLogId: `v4-init-${row.txHash.toLowerCase()}-${row.logIndex}`, sourceId: 'pons-v2-v4' };
+  return { poolId: row.poolId.toLowerCase() as Hash, sourceLogId: `v4-init-${row.txHash.toLowerCase()}-${row.logIndex}`,
+    sourceId: `pons-v2-v4:${row.poolId.toLowerCase()}` };
 }
 
 export function openV4Venue(launch: Launch, curveVenue: Venue, evidence: GraduatedPoolEvidence, position: { blockNumber: bigint; logIndex: number }): Venue {

@@ -1,13 +1,17 @@
 import type { Pool } from 'pg';
-import { and, eq, notExists } from 'drizzle-orm';
+import { and, eq, like, notExists } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
-import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
+import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
+  launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
+import { readEnvioProgress } from './envioDb.js';
+import { reconcileReorgWindow } from './reorgGuard.js';
 import { verifyV4PoolFromEnvio, openV4Venue, hydrateV4SwapFromDecoded, type EnvioRawV4InitializeRow, type EnvioRawV4SwapRow } from './transformV4.js';
 
 export interface EnvioV4TableNames {
   rawV4InitializeTable: string;
   rawV4SwapTable: string;
+  progressTable?: string;
 }
 
 export const DEFAULT_ENVIO_V4_TABLES: EnvioV4TableNames = {
@@ -156,5 +160,114 @@ export async function syncV4Once(
     }
   }
 
+  return { venuesOpened, tradesWritten };
+}
+
+const v4PoolManager = '0x8366a39cC670b4001a1121b8f6A443A643E40951';
+
+function toRealLaunch(row: typeof launches.$inferSelect): Launch {
+  return {
+    chainId: row.chainId, tokenAddress: row.tokenAddress as `0x${string}`, name: row.name, symbol: row.symbol,
+    tokenDecimals: row.tokenDecimals, platform: 'pons', protocolVersion: 'v2', sourceId: row.sourceId, sourceLogId: '',
+    factoryAddress: row.factoryAddress as `0x${string}`, deployerAddress: row.deployerAddress as `0x${string}`,
+    launchBlock: row.launchBlock, launchTxHash: row.launchTxHash as `0x${string}`,
+    quoteAsset: { address: row.quoteAssetAddress as `0x${string}`, symbol: row.quoteAssetSymbol, decimals: row.quoteAssetDecimals },
+    lifecycleStatus: 'graduated',
+  };
+}
+
+export async function syncV4ToReal(
+  envioPool: Pool, appDb: Database, tables: EnvioV4TableNames = DEFAULT_ENVIO_V4_TABLES, reorgWindowBlocks = 500n,
+): Promise<{ venuesOpened: number; tradesWritten: number }> {
+  const { processedBlock, headBlock } = await readEnvioProgress(envioPool, tables.progressTable);
+  const windowStart = processedBlock > reorgWindowBlocks ? processedBlock - reorgWindowBlocks : 0n;
+  await reconcileReorgWindow(appDb, { launches, venues, trades }, windowStart, {
+    venueKinds: ['v4_pool'], venueSourceIdPattern: 'pons-v2-v4:%',
+  });
+
+  const pendingGraduations = await appDb.select({ tokenAddress: lifecycleTransitions.tokenAddress,
+    txHash: lifecycleTransitions.txHash, blockHash: lifecycleTransitions.blockHash,
+    blockNumber: lifecycleTransitions.blockNumber, logIndex: lifecycleTransitions.logIndex })
+    .from(lifecycleTransitions).where(and(eq(lifecycleTransitions.kind, 'graduated'),
+      notExists(appDb.select().from(venues).where(and(eq(venues.tokenAddress, lifecycleTransitions.tokenAddress),
+        eq(venues.kind, 'v4_pool'))))));
+  let venuesOpened = 0;
+  if (pendingGraduations.length) {
+    const txHashes = [...new Set(pendingGraduations.map((row) => row.txHash.toLowerCase()))];
+    const rawInitializes = (await envioPool.query(`SELECT * FROM ${tables.rawV4InitializeTable}
+      WHERE LOWER("txHash") = ANY($1) ORDER BY "blockNumber", "logIndex"`, [txHashes])).rows as EnvioRawV4InitializeRow[];
+    for (const graduation of pendingGraduations) {
+      const launchRow = (await appDb.select().from(launches).where(eq(launches.tokenAddress, graduation.tokenAddress)))[0];
+      const curveRow = (await appDb.select().from(venues).where(and(eq(venues.tokenAddress, graduation.tokenAddress),
+        eq(venues.kind, 'curve'))))[0];
+      if (!launchRow || !curveRow) continue;
+      const launch = toRealLaunch(launchRow);
+      const curveVenue: Venue = { id: curveRow.id, chainId: curveRow.chainId,
+        tokenAddress: curveRow.tokenAddress as `0x${string}`, kind: 'curve', ref: curveRow.ref,
+        sourceId: curveRow.sourceId, sourceLogId: '', effectiveFromBlock: curveRow.effectiveFromBlock,
+        effectiveToBlock: curveRow.effectiveToBlock, official: curveRow.official };
+      let evidence = null;
+      for (const candidate of rawInitializes) {
+        if (candidate.txHash.toLowerCase() !== graduation.txHash.toLowerCase()) continue;
+        evidence = verifyV4PoolFromEnvio({ ...candidate, blockNumber: BigInt(candidate.blockNumber) },
+          graduation.txHash, graduation.blockHash, launch);
+        if (evidence) break;
+      }
+      if (!evidence) continue;
+      const venue = openV4Venue(launch, curveVenue, evidence,
+        { blockNumber: graduation.blockNumber, logIndex: graduation.logIndex });
+      await appDb.insert(sources).values({ id: venue.sourceId, chainId: venue.chainId,
+        version: 'v4', factoryAddress: v4PoolManager, startBlock: venue.effectiveFromBlock,
+        scannedToBlock: venue.effectiveFromBlock, confirmedToBlock: venue.effectiveFromBlock,
+        status: 'backfilling' }).onConflictDoNothing();
+      const inserted = await appDb.insert(venues).values({ id: venue.id, chainId: venue.chainId,
+        tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref, sourceId: venue.sourceId,
+        sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
+      }).onConflictDoNothing().returning({ id: venues.id });
+      if (inserted.length) venuesOpened += 1;
+    }
+  }
+
+  let tradesWritten = 0;
+  const v4Venues = await appDb.select().from(venues).where(eq(venues.kind, 'v4_pool'));
+  if (v4Venues.length) {
+    const poolIds = [...new Set(v4Venues.map((row) => row.ref.toLowerCase()))];
+    const rawSwaps = (await envioPool.query(`SELECT * FROM ${tables.rawV4SwapTable}
+      WHERE LOWER("poolId") = ANY($1) ORDER BY "blockNumber", "logIndex"`, [poolIds])).rows as EnvioRawV4SwapRow[];
+    const venueByPool = new Map(v4Venues.map((row) => [row.ref.toLowerCase(), row]));
+    const launchCache = new Map<string, Launch>();
+    for (const raw of rawSwaps) {
+      const venueRow = venueByPool.get(raw.poolId.toLowerCase());
+      if (!venueRow) continue;
+      let launch = launchCache.get(venueRow.tokenAddress.toLowerCase());
+      if (!launch) {
+        const launchRow = (await appDb.select().from(launches).where(eq(launches.tokenAddress, venueRow.tokenAddress)))[0];
+        if (!launchRow) continue;
+        launch = toRealLaunch(launchRow);
+        launchCache.set(venueRow.tokenAddress.toLowerCase(), launch);
+      }
+      const venue: Venue = { id: venueRow.id, chainId: venueRow.chainId,
+        tokenAddress: venueRow.tokenAddress as `0x${string}`, kind: 'v4_pool', ref: venueRow.ref,
+        sourceId: venueRow.sourceId, sourceLogId: '', effectiveFromBlock: venueRow.effectiveFromBlock,
+        effectiveToBlock: venueRow.effectiveToBlock, official: venueRow.official };
+      const row: EnvioRawV4SwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
+        sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
+      const trade = hydrateV4SwapFromDecoded(row, venue, launch, launch.quoteAsset.decimals);
+      if (!trade) continue;
+      const inserted = await appDb.insert(trades).values({ chainId: trade.chainId, tokenAddress: trade.tokenAddress,
+        venueId: trade.venueId, blockNumber: trade.blockNumber, blockHash: trade.blockHash, txHash: trade.txHash,
+        logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side, tokenAmountRaw: trade.tokenAmountRaw.toString(),
+        quoteAmountRaw: trade.quoteAmountRaw.toString(), quoteAssetAddress: trade.quoteAssetAddress,
+        sourceEvent: trade.sourceEvent, activityKind: trade.activityKind, sourceLogId: null,
+        priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
+        priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null, traderAddress: trade.traderAddress,
+      }).onConflictDoNothing().returning({ txHash: trades.txHash });
+      if (inserted.length) tradesWritten += 1;
+    }
+  }
+
+  const status = processedBlock >= headBlock ? 'caught_up' : 'backfilling';
+  await appDb.update(sources).set({ confirmedToBlock: processedBlock, scannedToBlock: processedBlock, status })
+    .where(like(sources.id, 'pons-v2-v4:%'));
   return { venuesOpened, tradesWritten };
 }

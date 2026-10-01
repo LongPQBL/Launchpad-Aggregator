@@ -3,10 +3,10 @@ import { eq, and } from 'drizzle-orm';
 import { Pool } from 'pg';
 import type { Address } from 'viem';
 import { createDatabase } from '../db/client.js';
-import { venuesEnvioStaging, tradesEnvioStaging } from '../db/schema.js';
+import { venuesEnvioStaging, tradesEnvioStaging, launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
 import type { Launch } from '../domain/types.js';
-import { syncV4Once } from './runSyncV4.js';
+import { syncV4Once, syncV4ToReal } from './runSyncV4.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -16,6 +16,7 @@ const envioPool = new Pool({ connectionString: databaseUrl });
 const fixtureTables = {
   rawV4InitializeTable: 'envio_fixture_v4."RawV4Initialize"',
   rawV4SwapTable: 'envio_fixture_v4."RawV4Swap"',
+  progressTable: 'envio_fixture_v4.chain_metadata',
 };
 // Deliberately synthetic, distinct from the real pons-v2-graduated.json fixture's token/curve
 // addresses that runSync.integration.test.ts and runSyncV2.integration.test.ts also use — Vitest
@@ -67,6 +68,9 @@ beforeAll(async () => {
     id text primary key, "chainId" int, "poolId" text, sender text, "txFrom" text,
     amount0 numeric, amount1 numeric, "sqrtPriceX96" numeric, liquidity numeric, tick int, fee int,
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int, "timestamp" int)`);
+  await envioPool.query('CREATE TABLE IF NOT EXISTS envio_fixture_v4.chain_metadata (chain_id int primary key, latest_processed_block bigint, block_height bigint)');
+  await envioPool.query(`INSERT INTO envio_fixture_v4.chain_metadata VALUES (4663,27828165,90000000)
+    ON CONFLICT (chain_id) DO UPDATE SET latest_processed_block=27828165,block_height=90000000`);
   // Pre-seed the launch/curve-venue/graduated-transition rows this sync depends on — in production
   // these come from syncV1LegacyOnce/syncV2Once running first; this test seeds them directly to stay
   // focused on syncV4Once's own behavior.
@@ -103,6 +107,60 @@ beforeAll(async () => {
     `INSERT INTO lifecycle_transitions_envio_staging (source_log_id, chain_id, token_address, phase, kind, block_number, block_hash, tx_hash, log_index) VALUES ($1,4663,$2,2,'graduated',27828161,$3,$4,36)`,
     [`4663:${testGraduationBlockHash2}:${testGraduationTxHash2}:36`, testToken2, testGraduationBlockHash2, testGraduationTxHash2],
   );
+});
+
+describe('syncV4ToReal', () => {
+  it('opens a verified per-pool source and writes one real V4 swap', async () => {
+    const token = '0xabababababababababababababababababababab' as Address;
+    const quote = '0xbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc' as Address;
+    const curve = '0xdededededededededededededededededededede';
+    const gradTx = '0x' + '8'.repeat(64);
+    const blockHash = '0x' + '9'.repeat(64);
+    const swapTx = '0x' + '7'.repeat(64);
+    const launch = { ...syntheticLaunch, tokenAddress: token,
+      quoteAsset: { address: quote, symbol: 'Q', decimals: 18 } };
+    const poolId = derivePonsV4PoolId(launch, { fee: 0, tickSpacing: 200 }, testHook);
+    for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+      await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+        startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+    }
+    await db.insert(launches).values({ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2', sourceLogId: null,
+      launchLogIndex: 30, name: 'V4 real', symbol: 'V4R', tokenDecimals: 18, platform: 'pons', protocolVersion: 'v2',
+      factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: 27823666n,
+      launchTxHash: launch.launchTxHash, quoteAssetAddress: quote, quoteAssetSymbol: 'Q', quoteAssetDecimals: 18,
+      lifecycleStatus: 'graduated' });
+    await db.insert(venues).values({ id: `4663:curve:${curve}`, chainId: 4663, tokenAddress: token,
+      kind: 'curve', ref: curve, sourceId: 'pons-v2-curve', sourceLogId: null,
+      effectiveFromBlock: 27823666n, official: true });
+    await db.insert(lifecycleTransitions).values({ chainId: 4663, tokenAddress: token, sourceId: 'pons-v2-lifecycle',
+      sourceLogId: null, phase: 2, kind: 'graduated', blockNumber: 27828161n,
+      blockHash, txHash: gradTx, logIndex: 36 });
+    await envioPool.query(`INSERT INTO envio_fixture_v4."RawV4Initialize" VALUES ('real-init',4663,$1,$2,$3,0,200,$4,1,0,27828161,$5,$6,16)`,
+      [poolId, token, quote, testHook, blockHash, gradTx]);
+    await envioPool.query(`INSERT INTO envio_fixture_v4."RawV4Swap" VALUES ('real-swap',4663,$1,$2,$2,-1000000000000000000,500000000000000000,
+      30937564032784793309170036,92140088551983424601325,-156971,0,27828165,$3,$4,108,1700000000)`,
+      [poolId, token, blockHash, swapTx]);
+    try {
+      const first = await syncV4ToReal(envioPool, db, fixtureTables);
+      expect(first).toEqual({ venuesOpened: 1, tradesWritten: 1 });
+      const [venue] = await db.select().from(venues).where(and(eq(venues.tokenAddress, token), eq(venues.kind, 'v4_pool')));
+      expect(venue.sourceId).toBe(`pons-v2-v4:${poolId.toLowerCase()}`);
+      const [source] = await db.select().from(sources).where(eq(sources.id, venue.sourceId));
+      expect(source.confirmedToBlock).toBe(27828165n);
+      expect(source.status).toBe('backfilling');
+      expect((await db.select().from(trades).where(eq(trades.txHash, swapTx))).length).toBe(1);
+      await syncV4ToReal(envioPool, db, fixtureTables);
+      expect((await db.select().from(trades).where(eq(trades.txHash, swapTx))).length).toBe(1);
+    } finally {
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await db.delete(sources).where(eq(sources.id, `pons-v2-v4:${poolId.toLowerCase()}`));
+      await envioPool.query('DELETE FROM envio_fixture_v4."RawV4Swap" WHERE id = $1', ['real-swap']);
+      await envioPool.query('DELETE FROM envio_fixture_v4."RawV4Initialize" WHERE id = $1', ['real-init']);
+    }
+  });
 });
 
 afterAll(async () => {
