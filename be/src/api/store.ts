@@ -99,17 +99,18 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       const since = Math.floor(Date.now() / 1000) - 86_400;
       const result = await pool.query(`
-        SELECT l.*, s.status AS source_status, r.block_number, r.tx_hash, r.log_index,
+        SELECT l.*, s.status AS source_status, l.launch_block AS block_number,
+          l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
           (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
            WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
              AND t.timestamp >= $6) AS official_volume_raw,
           ${launchCoverageSql(9)} AS launch_coverage_complete
-        FROM launches l JOIN sources s ON s.id = l.source_id JOIN raw_logs r ON r.id = l.source_log_id
+        FROM launches l JOIN sources s ON s.id = l.source_id
         WHERE ($1::integer IS NULL OR l.chain_id = $1)
-          AND ($2::bigint IS NULL OR (r.block_number, r.tx_hash, r.log_index) < ($2::bigint, $3::text, $4::integer))
+          AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
           AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
           AND ($8::text IS NULL OR l.lifecycle_status = $8)
-        ORDER BY r.block_number DESC, r.tx_hash DESC, r.log_index DESC LIMIT $5`,
+        ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5`,
       [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
         query.search ?? null, query.status ?? null, head?.toString() ?? null]);
       return page(result.rows as Row[], query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete)));
