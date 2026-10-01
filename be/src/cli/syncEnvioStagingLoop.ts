@@ -7,6 +7,8 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const envioDatabaseUrl = process.env.ENVIO_DATABASE_URL;
 if (!envioDatabaseUrl) throw new Error('ENVIO_DATABASE_URL is required (points at the self-hosted Envio Postgres from envio/docker-compose.yaml)');
 const intervalMs = Number(process.env.ENVIO_SYNC_LOOP_INTERVAL_MS ?? 900_000);
+const syncTarget = (process.env.ENVIO_SYNC_TARGET ?? 'staging') as 'staging' | 'real';
+if (syncTarget !== 'staging' && syncTarget !== 'real') throw new Error('ENVIO_SYNC_TARGET must be "staging" or "real"');
 
 const { db, pool } = createDatabase(databaseUrl);
 const envioPool = new Pool({ connectionString: envioDatabaseUrl });
@@ -27,14 +29,14 @@ async function interruptibleSleep(ms: number): Promise<void> {
   }
 }
 
-console.log(`Starting Envio staging sync loop (interval ${intervalMs}ms). Ctrl+C or SIGTERM stops it after the current cycle.`);
+console.log(`Starting Envio sync loop (target: ${syncTarget}, interval ${intervalMs}ms). Ctrl+C or SIGTERM stops it after the current cycle.`);
 while (!stopping) {
   const startedAt = new Date().toISOString();
   try {
-    const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables);
-    console.log(`[${startedAt}] Synced V1-legacy from Envio into staging:`, v1Result);
-    console.log(`[${startedAt}] Synced V2 from Envio into staging:`, v2Result);
-    console.log(`[${startedAt}] Synced V4 from Envio into staging:`, v4Result);
+    const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables, syncTarget);
+    console.log(`[${startedAt}] Synced V1-legacy from Envio into ${syncTarget}:`, v1Result);
+    console.log(`[${startedAt}] Synced V2 from Envio into ${syncTarget}:`, v2Result);
+    console.log(`[${startedAt}] Synced V4 from Envio into ${syncTarget}:`, v4Result);
   } catch (error) {
     // A single bad cycle (e.g. a transient DB disconnect, or Envio not having reached a block yet)
     // must not kill the loop — log it and retry at the next interval, matching the main indexer's

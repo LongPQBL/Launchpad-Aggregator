@@ -121,6 +121,11 @@ khi chu kỳ hiện tại xong, trong vòng ~1 giây nếu đang chờ giữa ha
 chạy bằng `ps aux | grep syncEnvioStagingLoop`. Việc so sánh (`compare:envio-staging`) vẫn chạy thủ
 công, riêng, khi nào bạn muốn xem khác biệt.
 
+**Cutover (ghi thẳng vào bảng thật thay vì staging):** đặt `ENVIO_SYNC_TARGET=real` cho cả
+`sync:envio-staging`/`sync:envio-staging:loop` — chỉ làm việc này theo đúng quy trình ở
+`docs/superpowers/specs/2026-10-01-envio-cutover-design.md` (mục 6), không bật tùy tiện vì nó thay
+thế vai trò ghi dữ liệu thật của indexer RPC-scan.
+
 ## Chạy FE
 
 Cần backend API (`dev:api`) đang chạy trước. Sao chép biến môi trường rồi khởi động FE ở terminal riêng:
