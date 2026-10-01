@@ -244,7 +244,12 @@ export function createRepository(db: Database) {
           for (const chunk of chunkForInsert(rows, 10)) await tx.insert(rawLogs).values(chunk).onConflictDoNothing();
         }
         if (batch.launches.length) {
-          const rows = batch.launches.map((launch) => ({
+          const launchLogIndexById = new Map(batch.rawLogs.map((log) =>
+            [logKey(log.chainId, log.blockHash, log.txHash, log.logIndex), log.logIndex]));
+          const rows = batch.launches.map((launch) => {
+            const launchLogIndex = launchLogIndexById.get(launch.sourceLogId);
+            if (launchLogIndex === undefined) throw new Error(`Launch source log is missing from batch: ${launch.sourceLogId}`);
+            return ({
             chainId: launch.chainId,
             tokenAddress: launch.tokenAddress.toLowerCase(),
             sourceId: launch.sourceId,
@@ -258,14 +263,16 @@ export function createRepository(db: Database) {
             deployerAddress: launch.deployerAddress.toLowerCase(),
             launchBlock: launch.launchBlock,
             launchTxHash: launch.launchTxHash.toLowerCase(),
+            launchLogIndex,
             quoteAssetAddress: launch.quoteAsset.address.toLowerCase(),
             quoteAssetSymbol: launch.quoteAsset.symbol,
             quoteAssetDecimals: launch.quoteAsset.decimals,
             lifecycleStatus: launch.lifecycleStatus,
             v4PoolFee: launch.v4PoolFee ?? null,
             v4TickSpacing: launch.v4TickSpacing ?? null,
-          }));
-          for (const chunk of chunkForInsert(rows, 19)) await tx.insert(launches).values(chunk).onConflictDoNothing();
+          });
+          });
+          for (const chunk of chunkForInsert(rows, 20)) await tx.insert(launches).values(chunk).onConflictDoNothing();
         }
         if (batch.venues.length) {
           const rows = batch.venues.map((venue) => ({

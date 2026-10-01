@@ -95,6 +95,17 @@ afterAll(async () => {
 });
 
 describe('index batch repository', () => {
+  it('stores the launch event log index on the launch row', async () => {
+    await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
+    const data = batch(4663, 'test-a');
+    data.rawLogs[0].logIndex = 5;
+    data.launches[0].sourceLogId = logKey(4663, blockHash, txHash, 5);
+    data.venues[0].sourceLogId = data.launches[0].sourceLogId;
+    await repository.saveIndexBatch('test-a', 100n, 100n, data);
+    const result = await pool.query('SELECT launch_log_index FROM launches WHERE token_address = $1', [token]);
+    expect(result.rows[0].launch_log_index).toBe(5);
+  });
+
   it('persists a sequential batch when saveIndexBatch is passed as a callback', async () => {
     await repository.registerSource({ id: 'test-a', chainId: 4663, version: 'v1', factoryAddress: factory, startBlock: 100n });
     const saveIndexBatch = repository.saveIndexBatch;

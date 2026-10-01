@@ -61,7 +61,7 @@ export const launches = pgTable('launches', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
-  sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   name: text('name').notNull(),
   symbol: text('symbol').notNull(),
   tokenDecimals: integer('token_decimals').notNull(),
@@ -71,6 +71,7 @@ export const launches = pgTable('launches', {
   deployerAddress: text('deployer_address').notNull(),
   launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
   launchTxHash: text('launch_tx_hash').notNull(),
+  launchLogIndex: integer('launch_log_index').notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
   quoteAssetSymbol: text('quote_asset_symbol').notNull(),
   quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
@@ -89,7 +90,7 @@ export const venues = pgTable('venues', {
   kind: text('kind').notNull(),
   ref: text('ref').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
-  sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   effectiveFromBlock: bigint('effective_from_block', { mode: 'bigint' }).notNull(),
   effectiveFromLogIndex: integer('effective_from_log_index').notNull().default(0),
   effectiveToBlock: bigint('effective_to_block', { mode: 'bigint' }),
@@ -101,7 +102,7 @@ export const venues = pgTable('venues', {
 ]);
 
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {
-  sourceLogId: text('source_log_id').primaryKey().references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
@@ -112,6 +113,7 @@ export const lifecycleTransitions = pgTable('lifecycle_transitions', {
   txHash: text('tx_hash').notNull(),
   logIndex: integer('log_index').notNull(),
 }, (table) => [
+  primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
   index('lifecycle_transitions_token_position_idx').on(table.chainId, table.tokenAddress, table.blockNumber, table.logIndex),
 ]);
@@ -143,7 +145,7 @@ export const trades = pgTable('trades', {
   quoteAssetAddress: text('quote_asset_address').notNull(),
   sourceEvent: text('source_event').notNull(),
   activityKind: text('activity_kind').notNull().default('user_trade'),
-  sourceLogId: text('source_log_id').notNull().references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   priceNumeratorRaw: text('price_numerator_raw'),
   priceDenominatorRaw: text('price_denominator_raw'),
   // Nullable only because rows saved before this field existed haven't been backfilled yet
