@@ -10,12 +10,37 @@ const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
 // final-review Critical 1: the old symbol-keyed FEEDS map only matched the literal string 'ETH',
 // so every one of those launches silently got null USD pricing despite being ETH-denominated.
 const WETH_ADDRESS = '0x0bd7d308f8e1639fab988df18a8011f41eacad73';
+const USDG_ADDRESS = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+const NVDA_ADDRESS = '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec';
 
 describe('readUsdPrice', () => {
-  it('returns null without calling the RPC for a quote asset address with no known feed', async () => {
+  it('reads USDG/USD from its verified Chainlink feed', async () => {
+    const readContract = vi.fn(async ({ address, functionName }: { address: string; functionName: string }) => {
+      expect(address.toLowerCase()).toBe('0x61b7e5650328764b076a108eff5fa7282a1b9ad2');
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 99992674n, 1n, 1_790_782_723n, 1n];
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const result = await readUsdPrice({ readContract }, USDG_ADDRESS, () => 1_790_859_457_000);
+    expect(result).toEqual({ priceUsd: 0.99992674, updatedAt: 1_790_782_723, source: 'chainlink' });
+    expect(readContract).toHaveBeenCalledTimes(2);
+  });
+
+  it('maps a canonical Robinhood Stock Token address to its USD feed', async () => {
+    const readContract = vi.fn(async ({ address, functionName }: { address: string; functionName: string }) => {
+      expect(address.toLowerCase()).toBe('0x379ec4f7c378f34a1b47e4f3cbebcbac3e8e9f15');
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 180_00000000n, 1n, 1_790_859_457n, 1n];
+      throw new Error(`unexpected ${functionName}`);
+    });
+    expect(await readUsdPrice({ readContract }, NVDA_ADDRESS, () => 1_790_859_457_000))
+      .toEqual({ priceUsd: 180, updatedAt: 1_790_859_457, source: 'chainlink' });
+  });
+  it('returns null without calling the RPC for an unverified quote asset address', async () => {
     const readContract = vi.fn();
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, '0x4a0e65a3eccec6dbe60ae065f2e7bb85fae35eea'); // real SPCX quote address
+    const result = await readUsdPrice(client, '0x1111111111111111111111111111111111111111', Date.now,
+      { resolve: async () => null }); // verified absence in the injected directory
     expect(result).toBeNull();
     expect(readContract).not.toHaveBeenCalled();
   });
@@ -45,7 +70,7 @@ describe('readUsdPrice — known feed', () => {
     });
     const client: UsdPriceClient = { readContract };
     const result = await readUsdPrice(client, ETH_ADDRESS);
-    expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457 });
+    expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
   it('reads the same ETH/USD feed for the WETH quote asset address', async () => {
@@ -56,7 +81,7 @@ describe('readUsdPrice — known feed', () => {
     });
     const client: UsdPriceClient = { readContract };
     const result = await readUsdPrice(client, WETH_ADDRESS);
-    expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457 });
+    expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
   it('serves the cached price on a second call within 60s, without a second RPC round-trip', async () => {
@@ -75,7 +100,7 @@ describe('readUsdPrice — known feed', () => {
     fakeNow += 59_000;
     const second = await readUsdPrice(client, ETH_ADDRESS, now);
     expect(calls).toBe(callsAfterFirst); // no new RPC call
-    expect(second).toEqual({ priceUsd: 3000, updatedAt: 1000 });
+    expect(second).toEqual({ priceUsd: 3000, updatedAt: 1000, source: 'chainlink' });
   });
 
   it('re-reads after the 60s cache expires', async () => {

@@ -17,35 +17,35 @@
 - A launch with no trusted quote USD price or incomplete state has `tvlUsd: null`, never `0`.
 - UI label is always `TVL`; tooltip text differs for curve and pool.
 - Read on-chain amounts at one pinned block and retain integer raw amounts until final decimal formatting.
-- Quote assets are keyed by chain and address. USDG `$1` is identified as a par estimate.
+- Quote assets are keyed by chain and address. USDG uses its live USDG/USD Chainlink feed; unknown Stock Token quotes are discovered through the Robinhood asset registry and Chainlink feed directory.
 - Preserve unrelated dirty workspace changes; do not rebuild/index all launches.
 
 ## Review Focus
 
 - A USDG curve's phantom quote must not inflate TVL; compare `getReserves()` and `realQuoteReserve()` in a test.
 - A V4 pool must never inherit another pool's PoolManager balance.
-- A V4 pool with custom accounting or incomplete paged lens result must return `null` unless the economic reserve is verifiable.
+- The verified Pons hook sets the lens custom-accounting flag for fee extraction; use its core principal only, and reject unknown hooks or incomplete paged lens results.
 - A launch transitioning curve → swept → V4 must switch TVL basis and never read a closed curve as current.
 - One failed on-chain read must not erase otherwise valid stats or fail the whole list response.
 
 ---
 
-### Task 1: Quote USD valuation
+### Task 1: Quote USD valuation and new-quote discovery
 
-**Files:** Modify `be/src/market/usdPricing.ts`, `be/src/market/usdPricing.test.ts`; add a focused integration test if a new feed is used.
+**Files:** Modify `be/src/market/usdPricing.ts`, `be/src/market/usdPricing.test.ts`; create `be/src/market/quoteFeedRegistry.ts` and `be/src/market/quoteFeedRegistry.test.ts`.
 
-**Interfaces:** Keep `readUsdPrice(client, quoteAssetAddress)`; extend its result with `source: 'chainlink' | 'par_estimate'` and preserve `updatedAt`. Key USDG by `0x5fc5360d0400a0fd4f2af552add042d716f1d168`, not symbol. Preserve current ETH/WETH mappings. Add verified Stock Token feeds by address only; unsupported assets remain `null`.
+**Interfaces:** Keep `readUsdPrice(client, quoteAssetAddress)`; extend its result with `source: 'chainlink'` and preserve `updatedAt`. Key USDG by `0x5fc5360d0400a0fd4f2af552add042d716f1d168`, using feed `0x61B7e5650328764B076A108EFF5fa7282a1B9aD2`. Preserve current ETH/WETH mappings. `quoteFeedRegistry.resolve(address)` refreshes Robinhood `/rhj/assets` and Chainlink `feeds-robinhood-mainnet.json` on a bounded TTL, joins only canonical chain-4663 contract addresses to unique USD feeds, and returns `null` for unverified assets.
 
-- [ ] Write a failing test proving USDG returns $1 with `par_estimate` and that an unrelated address remains `null`.
-- [ ] Run `npm test -- src/market/usdPricing.test.ts` in `be/` and confirm the test fails for missing USDG support.
-- [ ] Implement the minimal mapping and provenance; check issuer's one-dollar redemption claim in the cited spec source.
-- [ ] Run the focused test and `npm run typecheck`; commit only Task 1 files.
+- [ ] Write failing tests proving USDG reads its feed, a canonical NVDA address finds its feed after registry refresh, a forged ticker address remains `null`, and a later newly listed quote is found after TTL expiry.
+- [ ] Run `npm test -- src/market/usdPricing.test.ts src/market/quoteFeedRegistry.test.ts` in `be/` and confirm missing behavior fails.
+- [ ] Implement feed mapping, TTL/in-flight refresh and provenance. Validate feed answer and timestamp with the existing Chainlink checks.
+- [ ] Run the focused tests and `npm run typecheck`; commit only Task 1 files.
 
 ### Task 2: Raw venue amounts
 
 **Files:** Create `be/src/market/tvlReserves.ts`, `be/src/market/tvlReserves.test.ts`; update `be/src/market/tokenStats.ts` and test only as needed.
 
-**Interfaces:** Export `readVenueAmounts(client, input): Promise<{ tokenRaw: bigint; quoteRaw: bigint; blockNumber: bigint; basis: 'curve_real_quote' | 'pool_custody' | 'pool_principal' } | null>`. Input has `kind`, `ref`, `token`, `quote`, `v4PoolFee`, `v4TickSpacing`, `hook`, and `blockNumber`; curve reports `tokenRaw = 0n` by the TVL convention. Validate V3 token0/token1 and V4 derived pool ID. Treat ReservesLens failures or incomplete/custom-accounting result as `null`.
+**Interfaces:** Export `readVenueAmounts(client, input): Promise<{ tokenRaw: bigint; quoteRaw: bigint; blockNumber: bigint; basis: 'curve_real_quote' | 'pool_custody' | 'pool_principal' } | null>`. Input has `kind`, `ref`, `token`, `quote`, `v4PoolFee`, `v4TickSpacing`, `hook`, and `blockNumber`; curve reports `tokenRaw = 0n` by the TVL convention. Validate V3 token0/token1 and V4 derived pool ID. Use core principal even when the verified Pons hook sets `hasCustomAccounting`, because its custom delta extracts fees after swaps; reject unknown hooks or incomplete lens result.
 
 - [ ] Write failing tests for curve real vs phantom quote, six-decimal USDG, V3 two balances, V4 per-pool lens result, and mismatched pool identity.
 - [ ] Run `npm test -- src/market/tvlReserves.test.ts` and observe the expected failures.
