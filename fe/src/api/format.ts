@@ -1,18 +1,23 @@
 export function formatQuote(value: string | null, symbol: string): string {
-  if (value === null) return 'Chưa có dữ liệu';
+  if (value === null) return 'No data yet';
   return `${value} ${symbol}`;
 }
 
+export function formatUsd(value: string | null): string {
+  if (value === null) return 'No data yet';
+  return `$${value}`;
+}
+
 export function formatSide(side: string): string {
-  if (side === 'buy') return 'Mua';
-  if (side === 'sell') return 'Bán';
+  if (side === 'buy') return 'Buy';
+  if (side === 'sell') return 'Sell';
   return side;
 }
 
 const ACTIVITY_KIND_LABELS: Record<string, string> = {
-  protocol_buyback: 'Buyback bởi Pons',
-  protocol_fee_conversion: 'Đổi phí bởi Pons',
-  protocol_internal: 'Giao dịch nội bộ Pons',
+  protocol_buyback: 'Buyback by Pons',
+  protocol_fee_conversion: 'Fee conversion by Pons',
+  protocol_internal: 'Internal Pons transaction',
 };
 
 // Returns null for an ordinary user trade: callers fall back to formatSide instead of
@@ -22,10 +27,10 @@ export function formatActivityKind(activityKind: string): string | null {
 }
 
 const LIFECYCLE_STATUS_LABELS: Record<string, string> = {
-  trading: 'Đang giao dịch',
-  swept: 'Đã gom (Swept)',
-  graduated: 'Đã tốt nghiệp',
-  rescued: 'Đã cứu hộ (Rescued)',
+  trading: 'Trading',
+  swept: 'Swept',
+  graduated: 'Graduated',
+  rescued: 'Rescued',
 };
 
 export function formatLifecycleStatus(status: string): string {
@@ -34,8 +39,8 @@ export function formatLifecycleStatus(status: string): string {
 
 const VENUE_KIND_LABELS: Record<string, string> = {
   curve: 'Bonding curve',
-  v3_pool: 'Pool Uniswap V3',
-  v4_pool: 'Pool Uniswap V4',
+  v3_pool: 'Uniswap V3 Pool',
+  v4_pool: 'Uniswap V4 Pool',
 };
 
 export function formatVenueKind(kind: string): string {
@@ -43,9 +48,9 @@ export function formatVenueKind(kind: string): string {
 }
 
 const COVERAGE_STATUS_LABELS: Record<string, string> = {
-  caught_up: 'Đã đồng bộ',
-  backfilling: 'Đang đồng bộ',
-  degraded: 'Đồng bộ gián đoạn',
+  caught_up: 'Caught up',
+  backfilling: 'Backfilling',
+  degraded: 'Degraded',
 };
 
 export function formatCoverageStatus(status: string): string {

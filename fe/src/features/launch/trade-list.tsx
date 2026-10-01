@@ -1,6 +1,7 @@
-import { formatActivityKind, formatQuote, formatSide, formatVenueKind } from '@/api/format';
+import { formatActivityKind, formatQuote, formatSide, formatUsd, formatVenueKind } from '@/api/format';
 import type { OfficialVenue, Trade } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { cn } from '@/lib/utils';
 
 export interface TradeListProps {
   trades: readonly Trade[];
@@ -13,15 +14,16 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
   const venueById = new Map(venues.map((v) => [v.id, v]));
 
   return (
-    <Table aria-label="Giao dịch chính thức">
+    <Table aria-label="Official trades">
       <TableHeader>
         <TableRow>
-          <TableHead>Thời gian</TableHead>
-          <TableHead>Loại</TableHead>
-          <TableHead>Nơi giao dịch</TableHead>
-          <TableHead>Lượng token</TableHead>
-          <TableHead>Lượng {quoteSymbol}</TableHead>
-          <TableHead>Giá</TableHead>
+          <TableHead>Time</TableHead>
+          <TableHead>Type</TableHead>
+          <TableHead>Venue</TableHead>
+          <TableHead className="text-right">Token amount</TableHead>
+          <TableHead className="text-right">{quoteSymbol} amount</TableHead>
+          <TableHead className="text-right">Price</TableHead>
+          <TableHead className="text-right">USD</TableHead>
           <TableHead>Explorer</TableHead>
         </TableRow>
       </TableHeader>
@@ -31,14 +33,28 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
           const activityLabel = formatActivityKind(trade.activityKind);
           return (
             <TableRow key={`${trade.blockNumber}-${trade.txHash}-${trade.logIndex}`}>
-              <TableCell>{new Date(trade.timestamp * 1000).toLocaleString('vi-VN')}</TableCell>
-              <TableCell>{activityLabel ?? formatSide(trade.side)}</TableCell>
+              <TableCell className="text-muted-foreground">{new Date(trade.timestamp * 1000).toLocaleString('en-US')}</TableCell>
+              <TableCell
+                className={cn(
+                  'font-medium',
+                  !activityLabel && trade.side === 'buy' && 'text-success',
+                  !activityLabel && trade.side === 'sell' && 'text-destructive',
+                )}
+              >
+                {activityLabel ?? formatSide(trade.side)}
+              </TableCell>
               <TableCell>{venue ? formatVenueKind(venue.kind) : trade.venueId}</TableCell>
-              <TableCell>{trade.tokenAmount}</TableCell>
-              <TableCell>
+              <TableCell className="text-right font-mono">{trade.tokenAmount}</TableCell>
+              <TableCell className="text-right font-mono">
                 {trade.quoteAmount} {quoteSymbol}
               </TableCell>
-              <TableCell>{formatQuote(trade.priceQuote, quoteSymbol)}</TableCell>
+              <TableCell className="text-right font-mono">{formatQuote(trade.priceQuote, quoteSymbol)}</TableCell>
+              <TableCell
+                className="text-right font-mono"
+                title={trade.usdValueApprox ? 'Approximate — converted at the current price, not the price at trade time' : undefined}
+              >
+                {formatUsd(trade.usdValue)}
+              </TableCell>
               <TableCell>
                 {explorerBase ? (
                   <a href={`${explorerBase}/tx/${trade.txHash}`} target="_blank" rel="noreferrer noopener">

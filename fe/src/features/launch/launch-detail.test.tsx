@@ -53,6 +53,11 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     officialVenues: [venue()],
     priceQuote: '0.0001',
     priceStale: false,
+    fdvUsd: null,
+    marketCapUsd: null,
+    tvlUsd: null,
+    week52High: null,
+    week52Low: null,
     ...overrides,
   };
 }
@@ -69,6 +74,9 @@ function trade(overrides: Partial<Trade> = {}): Trade {
     tokenAmount: '10',
     quoteAmount: '1',
     priceQuote: '0.1',
+    traderAddress: '0xtrader',
+    usdValue: null,
+    usdValueApprox: false,
     ...overrides,
   };
 }
@@ -93,8 +101,30 @@ describe('LaunchDetail', () => {
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
     expect(screen.getByText(/Robinhood Chain/)).toBeInTheDocument();
-    expect(screen.getByText(/Tài sản ghép cặp/)).toHaveTextContent('ROBIN');
+    expect(screen.getByText(/Quote asset/)).toHaveTextContent('ROBIN');
     expect(screen.getByText(/12\.5 ROBIN/)).toBeInTheDocument();
+  });
+
+  it('shows FDV, market cap, TVL, and 52-week high/low in the stats grid when available', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001' })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.getByText(/FDV/)).toHaveTextContent('269.17');
+    expect(screen.getByText(/Market cap/)).toHaveTextContent('269.17');
+    expect(screen.getByText(/TVL/)).toHaveTextContent('1200.50');
+    expect(screen.getByText(/52W High/)).toHaveTextContent('0.08');
+    expect(screen.getByText(/52W Low/)).toHaveTextContent('0.001');
+  });
+
+  it('shows "No data yet" for FDV instead of a fabricated number when fdvUsd is null', () => {
+    render(
+      <LaunchDetail detail={detail({ fdvUsd: null })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+    );
+    expect(screen.getByText(/FDV/)).toHaveTextContent('No data yet');
   });
 
   it('shows the swept phase label', () => {
@@ -130,9 +160,9 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    const venueSection = screen.getByRole('region', { name: /nơi giao dịch chính thức/i });
+    const venueSection = screen.getByRole('region', { name: /official trading venues/i });
     expect(within(venueSection).getByText('Bonding curve')).toBeInTheDocument();
-    expect(within(venueSection).getByText('Pool Uniswap V4')).toBeInTheDocument();
+    expect(within(venueSection).getByText('Uniswap V4 Pool')).toBeInTheDocument();
   });
 
   it('updates data on the existing chart instance instead of recreating it on refresh, so the user\'s zoom/pan is not reset', () => {
@@ -215,7 +245,7 @@ describe('LaunchDetail', () => {
     );
 
     const badges = screen.getAllByTestId('coverage-badge');
-    expect(badges.every((badge) => badge.textContent === 'Đang đồng bộ')).toBe(true);
+    expect(badges.every((badge) => badge.textContent === 'Backfilling')).toBe(true);
   });
 
   it('marks the chart as incomplete when the candle window still has unpriced trades, even if the launch is caught up', () => {
@@ -228,7 +258,7 @@ describe('LaunchDetail', () => {
     );
 
     const badges = screen.getAllByTestId('coverage-badge');
-    expect(badges.some((badge) => badge.textContent === 'Đang đồng bộ')).toBe(true);
+    expect(badges.some((badge) => badge.textContent === 'Backfilling')).toBe(true);
   });
 
   it('places the curve-to-V4 marker at the earliest V4 trade, not the newest, even though the API returns trades newest-first', () => {
@@ -264,7 +294,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText('Buyback bởi Pons')).toBeInTheDocument();
+    expect(screen.getByText('Buyback by Pons')).toBeInTheDocument();
   });
 
   it('labels an unattributed internal Pons swap neutrally', () => {
@@ -276,7 +306,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText('Giao dịch nội bộ Pons')).toBeInTheDocument();
+    expect(screen.getByText('Internal Pons transaction')).toBeInTheDocument();
   });
 
   it('shows an ordinary user trade as a buy/sell side, not a protocol label', () => {
@@ -288,7 +318,30 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText('Mua')).toBeInTheDocument();
+    expect(screen.getByText('Buy')).toBeInTheDocument();
+  });
+
+  it('shows the approximate USD value for a trade, with a tooltip that it is not the historical price', () => {
+    render(
+      <LaunchDetail
+        detail={detail()}
+        trades={{ items: [trade({ usdValue: '5.25', usdValueApprox: true })], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.getByText(/5\.25/)).toBeInTheDocument();
+    expect(screen.getByTitle(/current price, not the price at trade time/i)).toBeInTheDocument();
+  });
+
+  it('shows "No data yet" for a trade USD value instead of a fabricated number when usdValue is null', () => {
+    render(
+      <LaunchDetail
+        detail={detail()}
+        trades={{ items: [trade({ usdValue: null, usdValueApprox: false })], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.getAllByText('No data yet').length).toBeGreaterThan(0);
   });
 
   it('shows the current official price', () => {
@@ -312,10 +365,10 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText(/giá cũ/i)).toBeInTheDocument();
+    expect(screen.getByText(/stale price/i)).toBeInTheDocument();
   });
 
-  it('shows "Chưa có dữ liệu" for price instead of a fabricated value when the price is not yet available', () => {
+  it('shows "No data yet" for price instead of a fabricated value when the price is not yet available', () => {
     render(
       <LaunchDetail
         detail={detail({ priceQuote: null })}
@@ -324,7 +377,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText(/Giá hiện tại/)).toHaveTextContent('Chưa có dữ liệu');
+    expect(screen.getByText(/Current price/)).toHaveTextContent('No data yet');
   });
 
   it('keeps the exact decimal string for a 6-decimal token trade amount, without rounding it', () => {

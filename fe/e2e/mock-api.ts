@@ -21,6 +21,11 @@ const launchSummary = {
   // Intentionally not caught_up: the "coverage thiếu" (missing coverage) e2e scenario must see
   // an honest "still syncing" badge, never a silently-completed one.
   coverageStatus: 'backfilling',
+  fdvUsd: null,
+  marketCapUsd: null,
+  tvlUsd: null,
+  week52High: null,
+  week52Low: null,
 };
 
 const launchDetail = {
@@ -45,6 +50,9 @@ const trades = {
       tokenAmount: '1000',
       quoteAmount: '0.1',
       priceQuote: '0.0001',
+      traderAddress: '0xtrader',
+      usdValue: null,
+      usdValueApprox: false,
     },
   ],
   nextCursor: null,

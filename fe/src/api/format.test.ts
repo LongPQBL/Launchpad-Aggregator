@@ -5,17 +5,28 @@ import {
   formatLifecycleStatus,
   formatQuote,
   formatSide,
+  formatUsd,
   formatVenueKind,
   toChartValue,
 } from './format';
+
+describe('formatUsd', () => {
+  it('shows "No data yet" instead of a fabricated value when null', () => {
+    expect(formatUsd(null)).toBe('No data yet');
+  });
+
+  it('prefixes the value with $', () => {
+    expect(formatUsd('269.17')).toBe('$269.17');
+  });
+});
 
 describe('formatQuote', () => {
   it('shows the raw decimal string with its symbol when a value is available', () => {
     expect(formatQuote('12.5', 'ROBIN')).toBe('12.5 ROBIN');
   });
 
-  it('shows "Chưa có dữ liệu" instead of a fabricated zero when the value is null', () => {
-    expect(formatQuote(null, 'ROBIN')).toBe('Chưa có dữ liệu');
+  it('shows "No data yet" instead of a fabricated zero when the value is null', () => {
+    expect(formatQuote(null, 'ROBIN')).toBe('No data yet');
   });
 
   it('keeps the exact decimal string for a 6-decimal ERC-20 amount, without rounding', () => {
@@ -24,26 +35,26 @@ describe('formatQuote', () => {
 });
 
 describe('formatSide', () => {
-  it('labels a buy as "Mua"', () => {
-    expect(formatSide('buy')).toBe('Mua');
+  it('labels a buy as "Buy"', () => {
+    expect(formatSide('buy')).toBe('Buy');
   });
 
-  it('labels a sell as "Bán"', () => {
-    expect(formatSide('sell')).toBe('Bán');
+  it('labels a sell as "Sell"', () => {
+    expect(formatSide('sell')).toBe('Sell');
   });
 });
 
 describe('formatActivityKind', () => {
   it('labels a protocol buyback as done by Pons, not the user', () => {
-    expect(formatActivityKind('protocol_buyback')).toBe('Buyback bởi Pons');
+    expect(formatActivityKind('protocol_buyback')).toBe('Buyback by Pons');
   });
 
   it('labels a protocol fee conversion as done by Pons, not the user', () => {
-    expect(formatActivityKind('protocol_fee_conversion')).toBe('Đổi phí bởi Pons');
+    expect(formatActivityKind('protocol_fee_conversion')).toBe('Fee conversion by Pons');
   });
 
   it('labels an unattributed protocol swap neutrally, without guessing it is a buyback', () => {
-    expect(formatActivityKind('protocol_internal')).toBe('Giao dịch nội bộ Pons');
+    expect(formatActivityKind('protocol_internal')).toBe('Internal Pons transaction');
   });
 
   it('returns null for an ordinary user trade so callers fall back to the buy/sell side label', () => {
@@ -53,11 +64,11 @@ describe('formatActivityKind', () => {
 
 describe('formatLifecycleStatus', () => {
   it('labels the swept phase', () => {
-    expect(formatLifecycleStatus('swept')).toBe('Đã gom (Swept)');
+    expect(formatLifecycleStatus('swept')).toBe('Swept');
   });
 
   it('labels the rescued phase', () => {
-    expect(formatLifecycleStatus('rescued')).toBe('Đã cứu hộ (Rescued)');
+    expect(formatLifecycleStatus('rescued')).toBe('Rescued');
   });
 });
 
@@ -67,7 +78,7 @@ describe('formatVenueKind', () => {
   });
 
   it('labels the V4 pool venue', () => {
-    expect(formatVenueKind('v4_pool')).toBe('Pool Uniswap V4');
+    expect(formatVenueKind('v4_pool')).toBe('Uniswap V4 Pool');
   });
 });
 

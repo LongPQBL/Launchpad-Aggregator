@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatVenueKind } from '@/api/format';
+import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { CoverageBadge } from './coverage-badge';
@@ -26,43 +26,67 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
 
   return (
     <article className="flex flex-col gap-4">
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
+          component router-context-free for unit tests, matching launch-list.tsx's retry link. */}
+      <a href="/" className="text-sm text-muted-foreground hover:text-primary hover:underline">
+        ← Launches
+      </a>
+
       <Card>
         <CardHeader>
-          <h1 className="text-xl font-semibold leading-none">
-            {detail.name} ({detail.symbol})
-          </h1>
-        </CardHeader>
-        <CardContent>
-          <p>
-            Nguồn:{' '}
-            <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="underline">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h1 className="text-xl font-semibold leading-none">
+              {detail.name} <span className="text-muted-foreground">({detail.symbol})</span>
+            </h1>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Source:{' '}
+            <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="underline hover:text-primary">
               pons
             </a>{' '}
             · {detail.protocolVersion} · {chainName(detail.chainId)}
           </p>
-          <p>Tài sản ghép cặp: {detail.quoteAsset.symbol}</p>
-          <p className="flex items-center gap-2">
-            Vòng đời: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
+        </CardHeader>
+        <CardContent>
+          <p className="font-mono text-3xl font-semibold">
+            Current price: {formatQuote(detail.priceQuote, detail.quoteAsset.symbol)}
+            {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
           </p>
-          <p>
-            Giá hiện tại: {formatQuote(detail.priceQuote, detail.quoteAsset.symbol)}
-            {detail.priceStale && ' (giá cũ)'}
-          </p>
-          <p>Volume 24h: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
+
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
+            <p>Quote asset: {detail.quoteAsset.symbol}</p>
+            <p className="flex items-center gap-2">
+              Lifecycle: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
+            </p>
+            <p>24h volume: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
+            <p>FDV: {formatUsd(detail.fdvUsd)}</p>
+            <p>Market cap: {formatUsd(detail.marketCapUsd)}</p>
+            <p>TVL: {formatUsd(detail.tvlUsd)}</p>
+            <p>52W High: {formatQuote(detail.week52High, detail.quoteAsset.symbol)}</p>
+            <p>52W Low: {formatQuote(detail.week52Low, detail.quoteAsset.symbol)}</p>
+          </dl>
+
           {explorerBase && (
-            <a href={`${explorerBase}/address/${detail.tokenAddress}`} target="_blank" rel="noreferrer noopener" className="underline">
-              Xem trên Blockscout
+            <a
+              href={`${explorerBase}/address/${detail.tokenAddress}`}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-4 inline-block text-sm underline hover:text-primary"
+            >
+              View on Blockscout
             </a>
           )}
         </CardContent>
       </Card>
 
-      <section aria-label="Nơi giao dịch chính thức">
+      <section aria-label="Official trading venues">
         <Card>
           <CardContent className="pt-4">
-            <ul className="flex flex-col gap-1">
+            <ul className="flex flex-wrap gap-2">
               {detail.officialVenues.map((venue) => (
-                <li key={venue.id}>{formatVenueKind(venue.kind)}</li>
+                <li key={venue.id} className="rounded-md bg-accent px-2 py-1 text-sm text-accent-foreground">
+                  {formatVenueKind(venue.kind)}
+                </li>
               ))}
             </ul>
           </CardContent>
@@ -89,7 +113,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
           </CardContent>
         </Card>
       ) : (
-        <p role="status">Chưa tải được giao dịch.</p>
+        <p role="status">Could not load trades.</p>
       )}
     </article>
   );
