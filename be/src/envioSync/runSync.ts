@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
+import { eq } from 'drizzle-orm';
 import type { Address } from 'viem';
+import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { hydrateV1Launch } from '../launchpads/pons/v1/adapter.js';
+import { readV1TokenMetadata, type V1ReadClient } from '../launchpads/pons/v1/state.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
@@ -22,11 +25,18 @@ export const DEFAULT_ENVIO_TABLES: EnvioTableNames = {
   rawSwapTable: 'envio."RawSwap"',
 };
 
+function defaultRpcClient(): V1ReadClient {
+  return createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com');
+}
+
 export async function syncV1LegacyOnce(
   envioPool: Pool,
   appDb: Database,
   tables: EnvioTableNames = DEFAULT_ENVIO_TABLES,
+  rpcClient: V1ReadClient = defaultRpcClient(),
 ): Promise<{ launchesWritten: number; tradesWritten: number }> {
+  const existingRows = await appDb.select().from(launchesEnvioStaging);
+  const existingByToken = new Map(existingRows.map((row) => [row.tokenAddress.toLowerCase(), row]));
   const rawLaunches = await readAllRawLaunches(envioPool, tables.rawLaunchTable);
   let launchesWritten = 0;
   const launchByPool = new Map<string, { launch: Launch; venue: Venue }>();
@@ -43,29 +53,27 @@ export async function syncV1LegacyOnce(
       logIndex: raw.logIndex,
     };
     const event = envioRawLaunchToEvent(row);
-    // Metadata/graduation state come from live RPC in the RPC-scanning path
-    // (be/src/indexer/factoryRuntime.ts); this phase's staging tables intentionally omit that
-    // enrichment — see spec section 8 (scope for Phase 1 is the launch/swap decode path only, not
-    // the full metadata/graduation pipeline). liquidityPool is set to the event's own pool address
-    // as ground truth, which means hydrateV1Launch's "token pool matches factory log" check is a
-    // structural no-op here (it always trivially passes) — the real path checks this against the
-    // token contract's own liquidityPool() read. tokenDecimals is hardcoded to 18 (most ERC20s on
-    // this chain use it; a wrong value here would only mis-price a staging-only trade, never a real
-    // one) since the price math genuinely needs a concrete decimals value and this phase has no
-    // metadata RPC call to source a real one from.
+    const existing = existingByToken.get(event.tokenAddress.toLowerCase());
+    const isNew = !existing;
+    const metadata = !existing || existing.name === null || existing.symbol === null
+      ? await readV1TokenMetadata(rpcClient, event.tokenAddress)
+      : { name: existing.name, symbol: existing.symbol, decimals: existing.tokenDecimals, liquidityPool: event.poolAddress };
     let launch: Launch;
     let venue: Venue;
     try {
-      ({ launch, venue } = hydrateV1Launch(event, legacy, {
-        name: '', symbol: '', decimals: 18, liquidityPool: event.poolAddress,
-      }, false));
+      ({ launch, venue } = hydrateV1Launch(event, legacy, metadata, false));
     } catch (error) {
       throw new Error(`Failed to sync launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
     }
     launchByPool.set(event.poolAddress, { launch, venue });
+    if (existing && (existing.name === null || existing.symbol === null)) {
+      await appDb.update(launchesEnvioStaging).set({ name: metadata.name, symbol: metadata.symbol, tokenDecimals: metadata.decimals })
+        .where(eq(launchesEnvioStaging.tokenAddress, event.tokenAddress));
+    }
+    if (isNew) {
     const inserted = await appDb.transaction(async (tx) => {
       const launchRows = await tx.insert(launchesEnvioStaging).values({
-        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: null, symbol: null,
+        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name, symbol: launch.symbol,
         tokenDecimals: launch.tokenDecimals, platform: launch.platform, protocolVersion: launch.protocolVersion,
         factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock,
         launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
@@ -79,6 +87,7 @@ export async function syncV1LegacyOnce(
       return true;
     });
     if (inserted) launchesWritten += 1;
+    }
   }
 
   const rawSwaps = await readAllRawSwaps(envioPool, tables.rawSwapTable);

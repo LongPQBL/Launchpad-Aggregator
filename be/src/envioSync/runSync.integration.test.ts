@@ -57,6 +57,15 @@ afterAll(async () => {
 // the test can tell whether runSync used the real tx-from (correct) or the event's sender (the bug
 // fixed after the final-review finding: routers appear as `sender`, not the actual trader).
 const txFromTrader = '0x1234567890123456789012345678901234567890';
+const rpcCalls: string[] = [];
+const rpcClient = { readContract: async ({ functionName }: { functionName: string }) => {
+  rpcCalls.push(functionName);
+  if (functionName === 'name') return 'Test Token';
+  if (functionName === 'symbol') return 'TEST';
+  if (functionName === 'decimals') return 18;
+  if (functionName === 'liquidityPool') return '0x10cc6bd38112cac182db90b6a71d8bb5939526ba';
+  throw new Error(`unexpected functionName ${functionName}`);
+} };
 
 describe('syncV1LegacyOnce', () => {
   it('writes one launch and one trade from matching raw rows, and is idempotent on re-run', async () => {
@@ -77,15 +86,15 @@ describe('syncV1LegacyOnce', () => {
         testTxHash, 49, 1_700_000_000],
     );
 
-    const first = await syncV1LegacyOnce(envioPool, db, fixtureTables);
+    const first = await syncV1LegacyOnce(envioPool, db, fixtureTables, rpcClient);
     expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1 });
     const launchRows = await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken));
     expect(launchRows).toHaveLength(1);
     expect(launchRows[0].tokenAddress).toBe(testToken);
-    // Metadata that Phase 1 has no RPC call to source is null, not a made-up placeholder — see
-    // schema.ts's comment on launchesEnvioStaging and runSync.ts's on the hydrateV1Launch call.
-    expect(launchRows[0].name).toBeNull();
-    expect(launchRows[0].symbol).toBeNull();
+    // New rows get token metadata from RPC; reruns reuse the stored values.
+    expect(launchRows[0].name).toBe('Test Token');
+    expect(launchRows[0].symbol).toBe('TEST');
+    expect(rpcCalls).toEqual(['name', 'symbol', 'decimals', 'liquidityPool']);
     expect(launchRows[0].lifecycleStatus).toBeNull();
     const tradeRows = await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testTxHash));
     expect(tradeRows).toHaveLength(1);
@@ -95,8 +104,9 @@ describe('syncV1LegacyOnce', () => {
     // fix for the final-review finding described above.
     expect(tradeRows[0].traderAddress).toBe(txFromTrader);
 
-    const second = await syncV1LegacyOnce(envioPool, db, fixtureTables);
+    const second = await syncV1LegacyOnce(envioPool, db, fixtureTables, rpcClient);
     expect(second).toEqual({ launchesWritten: 0, tradesWritten: 0 });
+    expect(rpcCalls).toHaveLength(4);
     expect(await db.select().from(launchesEnvioStaging).where(eq(launchesEnvioStaging.tokenAddress, testToken))).toHaveLength(1);
     expect(await db.select().from(tradesEnvioStaging).where(eq(tradesEnvioStaging.txHash, testTxHash))).toHaveLength(1);
   });
