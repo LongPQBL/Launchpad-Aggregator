@@ -2,8 +2,9 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
-import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
-import { syncV2Once } from './runSyncV2.js';
+import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
+  launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
+import { syncV2Once, syncV2ToReal } from './runSyncV2.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -21,6 +22,7 @@ const fixtureTables = {
   rawCurveTradeTable: 'envio_fixture_v2."RawCurveTrade"',
   rawCurveBuybackTable: 'envio_fixture_v2."RawCurveBuyback"',
   rawLifecycleTable: 'envio_fixture_v2."RawLifecycleTransition"',
+  progressTable: 'envio_fixture_v2.chain_metadata',
 };
 const testToken = '0xc9e9ab90654f82893d7fd18b62f694992e8cef29';
 const testTradeTxHash = '0x8147b8c06a405cd1d5314c16a25c86a0ba3aea64e490547e60afdbbff534cc28';
@@ -54,6 +56,9 @@ beforeAll(async () => {
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v2."RawLifecycleTransition" (
     id text primary key, "chainId" int, "tokenAddress" text, phase int, kind text,
     "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int)`);
+  await envioPool.query('CREATE TABLE IF NOT EXISTS envio_fixture_v2.chain_metadata (chain_id int primary key, latest_processed_block bigint, block_height bigint)');
+  await envioPool.query(`INSERT INTO envio_fixture_v2.chain_metadata VALUES (4663,27828165,90000000)
+    ON CONFLICT (chain_id) DO UPDATE SET latest_processed_block=27828165,block_height=90000000`);
   await pool.query('DELETE FROM lifecycle_transitions_envio_staging WHERE token_address = $1', [testToken]);
   await pool.query('DELETE FROM trades_envio_staging WHERE tx_hash = $1', [testTradeTxHash]);
   await pool.query('DELETE FROM venues_envio_staging WHERE token_address = $1', [testToken]);
@@ -114,5 +119,74 @@ describe('syncV2Once', () => {
     const second = await syncV2Once(envioPool, db, fixtureTables, rpcClient);
     expect(second).toEqual({ launchesWritten: 0, tradesWritten: 0, transitionsWritten: 0 });
     expect(rpcCalls).toHaveLength(5);
+    await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+  });
+});
+
+describe('syncV2ToReal', () => {
+  it('writes launch, curve trade and lifecycle into real tables and tracks Envio progress', async () => {
+    const token = '0xedededededededededededededededededededed';
+    const curve = '0xefefefefefefefefefefefefefefefefefefefef';
+    const pair = '0x1212121212121212121212121212121212121212';
+    const launchTx = '0x' + 'a'.repeat(64);
+    const tradeTx = '0x' + 'b'.repeat(64);
+    const transitionTx = '0x' + 'c'.repeat(64);
+    const blockHash = '0x' + 'd'.repeat(64);
+    for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+      await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+        startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+    }
+    await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('real',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+      [token, curve, pair, blockHash, launchTx]);
+    await envioPool.query(`INSERT INTO envio_fixture_v2."RawCurveTrade" VALUES ('real-trade',4663,$1,'buy',100,200,0,0,$2,27823668,$3,$4,19,1700000000)`,
+      [curve, token, blockHash, tradeTx]);
+    await envioPool.query(`INSERT INTO envio_fixture_v2."RawLifecycleTransition" VALUES ('real-grad',4663,$1,2,'graduated',27828161,$2,$3,36)`,
+      [token, blockHash, transitionTx]);
+    const calls: string[] = [];
+    const client = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+      calls.push(address.toLowerCase());
+      if (address.toLowerCase() === token) {
+        if (functionName === 'name') return 'Real V2';
+        if (functionName === 'symbol') return 'RV2';
+        if (functionName === 'decimals') return 18;
+      }
+      if (address.toLowerCase() === pair) {
+        if (functionName === 'symbol') return 'USDG';
+        if (functionName === 'decimals') return 6;
+      }
+      throw new Error(`${address} ${functionName}`);
+    } };
+    try {
+      const first = await syncV2ToReal(envioPool, db, fixtureTables, client);
+      expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1, transitionsWritten: 1 });
+      const [launch] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(launch.name).toBe('Real V2');
+      expect(launch.quoteAssetDecimals).toBe(6);
+      expect(launch.lifecycleStatus).toBe('graduated');
+      expect(launch.sourceLogId).toBeNull();
+      expect(launch.launchLogIndex).toBe(30);
+      const [venue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
+      expect(venue.sourceId).toBe('pons-v2-curve');
+      expect((await db.select().from(trades).where(eq(trades.txHash, tradeTx))).length).toBe(1);
+      expect((await db.select().from(lifecycleTransitions).where(eq(lifecycleTransitions.txHash, transitionTx))).length).toBe(1);
+      const [source] = await db.select().from(sources).where(eq(sources.id, 'pons-v2'));
+      expect(source.confirmedToBlock).toBe(27828165n);
+      expect(source.status).toBe('backfilling');
+      expect(calls).toHaveLength(5);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      expect((await db.select().from(lifecycleTransitions).where(eq(lifecycleTransitions.txHash, transitionTx))).length).toBe(1);
+      expect(calls).toHaveLength(5);
+      await envioPool.query('DELETE FROM envio_fixture_v2."RawLifecycleTransition" WHERE id = $1', ['real-grad']);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      expect((await db.select().from(lifecycleTransitions).where(eq(lifecycleTransitions.txHash, transitionTx))).length).toBe(0);
+      const [reverted] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(reverted.lifecycleStatus).toBe('trading');
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
   });
 });

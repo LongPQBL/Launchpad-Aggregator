@@ -1,11 +1,14 @@
 import type { Pool } from 'pg';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readV2TokenMetadata, resolveV2QuoteAsset, type V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
-import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging } from '../db/schema.js';
+import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
+  launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
+import { readEnvioProgress } from './envioDb.js';
+import { reconcileReorgWindow } from './reorgGuard.js';
 import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded, resolveKnownQuoteAsset,
   type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
 import { envioRawLifecycleToTransition, type EnvioRawLifecycleRow } from './transformLifecycle.js';
@@ -17,6 +20,7 @@ export interface EnvioV2TableNames {
   rawCurveTradeTable: string;
   rawCurveBuybackTable: string;
   rawLifecycleTable: string;
+  progressTable?: string;
 }
 
 export const DEFAULT_ENVIO_V2_TABLES: EnvioV2TableNames = {
@@ -136,5 +140,121 @@ export async function syncV2Once(
     if (rows.length > 0) transitionsWritten += 1;
   }
 
+  return { launchesWritten, tradesWritten, transitionsWritten };
+}
+
+export async function syncV2ToReal(
+  envioPool: Pool, appDb: Database, tables: EnvioV2TableNames = DEFAULT_ENVIO_V2_TABLES,
+  rpcClient: V2QuoteClient = defaultRpcClient(), reorgWindowBlocks = 500n,
+): Promise<{ launchesWritten: number; tradesWritten: number; transitionsWritten: number }> {
+  const { processedBlock, headBlock } = await readEnvioProgress(envioPool, tables.progressTable);
+  const windowStart = processedBlock > reorgWindowBlocks ? processedBlock - reorgWindowBlocks : 0n;
+  await reconcileReorgWindow(appDb, { launches, venues, trades, lifecycleTransitions }, windowStart, {
+    venueKinds: ['curve'], venueSourceIdPattern: 'pons-v2-curve%', launchSourceIds: [v2Factory.id],
+    transitionSourceIds: ['pons-v2-lifecycle'],
+  });
+
+  const existingRows = await appDb.select().from(launches).where(eq(launches.sourceId, v2Factory.id));
+  const existingByToken = new Map(existingRows.map((row) => [row.tokenAddress.toLowerCase(), row]));
+  const rawLaunches = (await envioPool.query(`SELECT * FROM ${tables.rawLaunchV2Table} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawLaunchV2Row[];
+  const launchByCurve = new Map<string, { launch: Launch; venue: Venue }>();
+  let launchesWritten = 0;
+  for (const raw of rawLaunches) {
+    const row: EnvioRawLaunchV2Row = { ...raw, blockNumber: BigInt(raw.blockNumber) };
+    const event = envioRawLaunchV2ToEvent(row);
+    const existing = existingByToken.get(event.tokenAddress.toLowerCase());
+    const metadata = existing
+      ? { name: existing.name, symbol: existing.symbol, decimals: existing.tokenDecimals }
+      : await readV2TokenMetadata(rpcClient, event.tokenAddress);
+    const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
+    const quoteAsset = knownQuoteAsset
+      ? { address: event.pairToken, ...knownQuoteAsset }
+      : existing
+        ? { address: event.pairToken, symbol: existing.quoteAssetSymbol, decimals: existing.quoteAssetDecimals }
+        : await resolveV2QuoteAsset(event.pairToken, rpcClient);
+    let launch: Launch;
+    let venue: Venue;
+    try {
+      ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, metadata, quoteAsset));
+    } catch (error) {
+      throw new Error(`Failed to sync V2 launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
+    }
+    launchByCurve.set(event.curveAddress.toLowerCase(), { launch, venue });
+    if (!existing) {
+      const inserted = await appDb.insert(launches).values({
+        chainId: launch.chainId, tokenAddress: launch.tokenAddress, sourceId: launch.sourceId, sourceLogId: null,
+        launchLogIndex: raw.logIndex, name: launch.name, symbol: launch.symbol, tokenDecimals: launch.tokenDecimals,
+        platform: launch.platform, protocolVersion: launch.protocolVersion, factoryAddress: launch.factoryAddress,
+        deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock, launchTxHash: launch.launchTxHash,
+        quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
+        quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: launch.lifecycleStatus,
+      }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
+      if (inserted.length) launchesWritten += 1;
+    }
+    await appDb.insert(venues).values({ id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress,
+      kind: venue.kind, ref: venue.ref, sourceId: 'pons-v2-curve', sourceLogId: null,
+      effectiveFromBlock: venue.effectiveFromBlock, official: venue.official }).onConflictDoNothing();
+  }
+
+  let tradesWritten = 0;
+  const rawTrades = (await envioPool.query(`SELECT * FROM ${tables.rawCurveTradeTable} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawCurveTradeRow[];
+  for (const raw of rawTrades) {
+    const context = launchByCurve.get(raw.curveAddress.toLowerCase());
+    if (!context) continue;
+    const row: EnvioRawCurveTradeRow = { ...raw, tokenAmountRaw: BigInt(raw.tokenAmountRaw), quoteAmountRaw: BigInt(raw.quoteAmountRaw),
+      feeRaw: BigInt(raw.feeRaw), taxRaw: BigInt(raw.taxRaw), blockNumber: BigInt(raw.blockNumber) };
+    const trade = hydrateCurveTradeFromDecoded(row, context.venue, context.launch);
+    const inserted = await appDb.insert(trades).values({ chainId: trade.chainId, tokenAddress: trade.tokenAddress,
+      venueId: trade.venueId, blockNumber: trade.blockNumber, blockHash: trade.blockHash, txHash: trade.txHash,
+      logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side, tokenAmountRaw: trade.tokenAmountRaw.toString(),
+      quoteAmountRaw: trade.quoteAmountRaw.toString(), quoteAssetAddress: trade.quoteAssetAddress,
+      sourceEvent: trade.sourceEvent, activityKind: trade.activityKind, sourceLogId: null,
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
+    }).onConflictDoNothing().returning({ txHash: trades.txHash });
+    if (inserted.length) tradesWritten += 1;
+  }
+  const rawBuybacks = (await envioPool.query(`SELECT * FROM ${tables.rawCurveBuybackTable} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawCurveBuybackRow[];
+  for (const raw of rawBuybacks) {
+    const context = launchByCurve.get(raw.curveAddress.toLowerCase());
+    if (!context) continue;
+    const row: EnvioRawCurveBuybackRow = { ...raw, quoteSpentRaw: BigInt(raw.quoteSpentRaw),
+      tokensLockedRaw: BigInt(raw.tokensLockedRaw), blockNumber: BigInt(raw.blockNumber) };
+    const trade = hydrateCurveBuybackFromDecoded(row, context.venue, context.launch);
+    const inserted = await appDb.insert(trades).values({ chainId: trade.chainId, tokenAddress: trade.tokenAddress,
+      venueId: trade.venueId, blockNumber: trade.blockNumber, blockHash: trade.blockHash, txHash: trade.txHash,
+      logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side, tokenAmountRaw: trade.tokenAmountRaw.toString(),
+      quoteAmountRaw: trade.quoteAmountRaw.toString(), quoteAssetAddress: trade.quoteAssetAddress,
+      sourceEvent: trade.sourceEvent, activityKind: trade.activityKind, sourceLogId: null,
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
+    }).onConflictDoNothing().returning({ txHash: trades.txHash });
+    if (inserted.length) tradesWritten += 1;
+  }
+
+  let transitionsWritten = 0;
+  const rawTransitions = (await envioPool.query(`SELECT * FROM ${tables.rawLifecycleTable} ORDER BY "blockNumber", "logIndex"`)).rows as EnvioRawLifecycleRow[];
+  for (const raw of rawTransitions) {
+    const row: EnvioRawLifecycleRow = { ...raw, blockNumber: BigInt(raw.blockNumber) };
+    const transition = envioRawLifecycleToTransition(row, 'pons-v2-lifecycle');
+    const inserted = await appDb.insert(lifecycleTransitions).values({ sourceLogId: null,
+      chainId: transition.chainId, tokenAddress: transition.tokenAddress, sourceId: 'pons-v2-lifecycle',
+      phase: transition.phase, kind: transition.kind, blockNumber: transition.blockNumber,
+      blockHash: transition.blockHash, txHash: transition.txHash, logIndex: transition.logIndex,
+    }).onConflictDoNothing().returning({ txHash: lifecycleTransitions.txHash });
+    if (inserted.length) transitionsWritten += 1;
+  }
+
+  // Rebuild the lifecycle projection after the reorg window was replaced. This also returns a
+  // graduated launch to trading if its only transition vanished from Envio's canonical raw rows.
+  await appDb.execute(sql`UPDATE launches AS l SET lifecycle_status = COALESCE((
+    SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
+    FROM lifecycle_transitions AS t WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address
+    ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
+  ), 'trading') WHERE l.source_id = ${v2Factory.id}`);
+
+  const status = processedBlock >= headBlock ? 'caught_up' : 'backfilling';
+  for (const id of [v2Factory.id, 'pons-v2-curve', 'pons-v2-lifecycle']) {
+    await appDb.update(sources).set({ confirmedToBlock: processedBlock, scannedToBlock: processedBlock, status })
+      .where(eq(sources.id, id));
+  }
   return { launchesWritten, tradesWritten, transitionsWritten };
 }
