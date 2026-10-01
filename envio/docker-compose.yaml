@@ -2,6 +2,18 @@ services:
   envio-postgres:
     image: postgres:17.5
     restart: always
+    # Bulk-ingest tuning for the historical backfill: this Postgres only mirrors HyperSync's own
+    # raw event data, which Envio can always re-fetch from the chain, so trading a few seconds of
+    # durability (synchronous_commit=off) for write throughput is an acceptable trade during
+    # backfill. Revisit if this instance ever becomes a source of unrecoverable state.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - synchronous_commit=off
+      - -c
+      - max_wal_size=4GB
     ports:
       - "${ENVIO_PG_PORT:-5433}:5432"
     volumes:
@@ -52,8 +64,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.8"
-          memory: 800M
+          cpus: "4"
+          memory: 2560M
     restart: always
     environment:
       # Not present in the upstream reference compose file — required for HyperSync access even

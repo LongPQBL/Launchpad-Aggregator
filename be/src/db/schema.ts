@@ -81,6 +81,7 @@ export const launches = pgTable('launches', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
+  index('launches_chain_block_idx').on(table.chainId, table.launchBlock, table.launchTxHash, table.launchLogIndex),
 ]);
 
 export const venues = pgTable('venues', {

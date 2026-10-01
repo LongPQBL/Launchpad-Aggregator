@@ -1,0 +1,1 @@
+CREATE INDEX "launches_chain_block_idx" ON "launches" USING btree ("chain_id","launch_block","launch_tx_hash","launch_log_index");

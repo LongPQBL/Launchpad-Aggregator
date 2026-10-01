@@ -18,10 +18,10 @@ The long-term direction is to cover the union of chains supported by the selecte
 - Join curve and official V4 trade history across lifecycle transitions. Preserve exact `(blockNumber, logIndex)` ordering, quote-asset denomination, raw integer amounts, provenance, reorg recovery, and source coverage. Do not fabricate candles or volume during a no-trade gap.
 - Include actual executed curve buybacks and hook-initiated V4 swaps in official volume exactly once, with a protocol activity label. Fee transfers, refunds, vault locks, notices, and unexecuted buybacks are not extra trades.
 - The home/list page should use official 24h volume. A launch detail/chart should reflect its official venue history and show when data is incomplete. Label the source (for example, “pons”); do not imply an official partnership.
-- Dark UI is preferred.
+- Light UI with a blue accent is preferred (changed 2026-10-01, reversing an earlier "Dark UI" decision — inspired by gol.network's palette, with Uniswap's Launches/token-detail layout patterns for the table and detail page structure).
 - Web app: Next.js, React, TypeScript, Tailwind, shadcn/ui, Lightweight Charts. Backend: Node.js >=24, TypeScript, Fastify, viem, PostgreSQL, Drizzle. Tests: Vitest, PostgreSQL integration tests, later Playwright. Docker Compose is optional for local PostgreSQL. Redis/Kafka are not currently needed. CI is in scope; CD/deployment is deferred until hosting and credentials are chosen.
 - Run locally and keep the API honest: null means unavailable/incomplete, never silently convert missing data to zero. The app must distinguish unavailable history from a real zero.
-- Frontend copy/docs should be Vietnamese. Code identifiers, tests, comments, API fields, and filenames should be English.
+- Frontend copy should be English (changed 2026-10-01, reversing an earlier "Vietnamese" decision). Code identifiers, tests, comments, API fields, and filenames should be English. Docs written for the solo developer (this file, README.md) may stay Vietnamese unless the user says otherwise.
 
 ## Future trading direction (not implemented/approved in current spec)
 
