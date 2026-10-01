@@ -2,7 +2,7 @@ import type { Address } from 'viem';
 import { parseAbi } from 'viem';
 
 export interface UsdPriceClient {
-  readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string }): Promise<unknown>;
+  readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[] }): Promise<unknown>;
 }
 
 // Verified directly against Robinhood Chain mainnet 2026-10-01 — eth_call to latestRoundData()
