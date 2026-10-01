@@ -4,6 +4,9 @@ import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
 import { launchesEnvioStaging, tradesEnvioStaging, launches, venues, trades, sources, rawLogs } from '../db/schema.js';
 import { syncV1LegacyOnce, syncV1LegacyToReal } from './runSync.js';
+import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
+
+const legacyFactory = getPonsFactorySources().find((factory) => factory.id === 'pons-v1-legacy')!.factory;
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -31,7 +34,7 @@ beforeAll(async () => {
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_v1');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v1."RawLaunch" (
     id text primary key, "chainId" int, "tokenAddress" text, "deployerAddress" text,
-    "pairTokenAddress" text, "poolAddress" text, "blockNumber" numeric, "blockHash" text,
+    "pairTokenAddress" text, "poolAddress" text, "factoryAddress" text, "blockNumber" numeric, "blockHash" text,
     "txHash" text, "logIndex" int)`);
   await envioPool.query(`CREATE TABLE IF NOT EXISTS envio_fixture_v1."RawSwap" (
     id text primary key, "chainId" int, "poolAddress" text, sender text, recipient text, "txFrom" text,
@@ -74,9 +77,10 @@ const rpcClient = { readContract: async ({ functionName }: { functionName: strin
 describe('syncV1LegacyOnce', () => {
   it('writes one launch and one trade from matching raw rows, and is idempotent on re-run', async () => {
     await envioPool.query(
-      `INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      `INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       ['l1', 4663, testToken, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0',
         '0x0bd7d308f8e1639fab988df18a8011f41eacad73', '0x10cc6bd38112cac182db90b6a71d8bb5939526ba',
+        legacyFactory,
         '8963150', '0xd18718d02fe1da449333e477bc588a41e59b1fd169a2b945a14fb17339d684a3',
         testTxHash, 45],
     );
@@ -143,8 +147,8 @@ describe('syncV1LegacyToReal', () => {
       quoteAssetAddress: '0x4200000000000000000000000000000000000006', quoteAssetSymbol: 'WETH',
       quoteAssetDecimals: 18, lifecycleStatus: 'trading' }).onConflictDoNothing();
     const insertLaunch = async (id: string, token: string, poolAddress: string, txHash: string, logIndex: number) => {
-      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
-        [id, token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, txHash, logIndex]);
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        [id, token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, txHash, logIndex]);
     };
     await insertLaunch('real', realToken, poolAddress, launchTx, 6);
     await insertLaunch('old', existingToken, existingPool, existingTx, 8);
@@ -152,7 +156,7 @@ describe('syncV1LegacyToReal', () => {
       ['real-swap', poolAddress, realToken, realToken, realToken, '100000000000000000', '-68057245261861571047346184',
         '2005366647941715384651103712059394', '36819258015569838458222', 202790, blockHash, swapTx]);
     const rpcAddresses: string[] = [];
-    const legacyFactory = '0x0c37a24F5D23A486FA692d1500881d698B1F77a4'.toLowerCase();
+    const legacyFactoryLower = legacyFactory.toLowerCase();
     const client = { readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
       rpcAddresses.push(address.toLowerCase());
       if (functionName === 'name') return 'Real';
@@ -169,7 +173,7 @@ describe('syncV1LegacyToReal', () => {
       // own readContract call targets the factory address, not the token — be/src/launchpads/pons/v1/
       // state.ts).
       expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(4);
-      expect(rpcAddresses.filter((address) => address === legacyFactory)).toHaveLength(1);
+      expect(rpcAddresses.filter((address) => address === legacyFactoryLower)).toHaveLength(1);
       const [newLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, realToken));
       expect(newLaunch.name).toBe('Real');
       expect(newLaunch.sourceLogId).toBeNull();
@@ -187,8 +191,8 @@ describe('syncV1LegacyToReal', () => {
       // Reconciliation rebuilds the recent Envio launch every cycle (its block is inside the fixture's
       // pinned window); the old RPC launch never needs metadata/graduation calls.
       expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(8);
-      expect(rpcAddresses.filter((address) => address === legacyFactory)).toHaveLength(2);
-      expect(rpcAddresses.every((address) => address === realToken || address === legacyFactory)).toBe(true);
+      expect(rpcAddresses.filter((address) => address === legacyFactoryLower)).toHaveLength(2);
+      expect(rpcAddresses.every((address) => address === realToken || address === legacyFactoryLower)).toBe(true);
     } finally {
       await db.delete(trades).where(eq(trades.txHash, swapTx));
       await db.delete(venues).where(eq(venues.tokenAddress, realToken));
@@ -201,14 +205,51 @@ describe('syncV1LegacyToReal', () => {
     }
   });
 
+  it('attributes a launch to pons-v1-active by factoryAddress, not the hardcoded legacy factory', async () => {
+    const activeFactory = getPonsFactorySources().find((factory) => factory.id === 'pons-v1-active')!.factory;
+    const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a';
+    const poolAddress = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b';
+    const launchTx = '0x' + '9c'.repeat(32);
+    const blockHash = '0x' + '9d'.repeat(32);
+    const client = { readContract: async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'name') return 'Active Token';
+      if (functionName === 'symbol') return 'ACT';
+      if (functionName === 'decimals') return 18;
+      if (functionName === 'liquidityPool') return poolAddress;
+      if (functionName === 'graduationStatus') return [0n, 0n, false];
+      throw new Error(functionName);
+    } };
+    try {
+      for (const id of ['pons-v1-active', 'pons-v1-active-trades']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v1', factoryAddress: activeFactory,
+          startBlock: 8991118n, scannedToBlock: 8991118n, confirmedToBlock: 8991118n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8991200,$7,$8,$9)`,
+        ['active', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, activeFactory, blockHash, launchTx, 3]);
+      const result = await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      expect(result.launchesWritten).toBe(1);
+      const [launch] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(launch.sourceId).toBe('pons-v1-active');
+      expect(launch.factoryAddress.toLowerCase()).toBe(activeFactory.toLowerCase());
+      const [venue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
+      expect(venue.sourceId).toBe('pons-v1-active-trades');
+      const [source] = await db.select().from(sources).where(eq(sources.id, 'pons-v1-active'));
+      expect(source).toBeDefined();
+    } finally {
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['active']);
+    }
+  });
+
   it('reads real graduation status via RPC instead of hardcoding trading (final review, Important 5)', async () => {
     const token = '0x7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a7a';
     const poolAddress = '0x7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b7b';
     const launchTx = '0x' + '7c'.repeat(32);
     const blockHash = '0x' + '7d'.repeat(32);
     try {
-      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
-        ['graduated', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, launchTx, 1]);
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        ['graduated', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, launchTx, 1]);
       const graduatedClient = { readContract: async ({ functionName }: { functionName: string }) => {
         if (functionName === 'name') return 'Graduated Token';
         if (functionName === 'symbol') return 'GRAD';
@@ -250,8 +291,8 @@ describe('syncV1LegacyToReal', () => {
     } };
     const failingClient = { readContract: async () => { throw new Error('simulated RPC failure (403/429)'); } };
     try {
-      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,8963150,$6,$7,$8)`,
-        ['atomic', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, blockHash, launchTx, 12]);
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        ['atomic', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, launchTx, 12]);
       // First cycle: succeeds, writes the launch — this launch's block (8963150) is inside every
       // subsequent cycle's reorg window too (fixture progress is pinned at 8963150, window = 500
       // blocks back), so the next cycle will always try to rebuild (not reuse) it.

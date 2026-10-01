@@ -10,6 +10,7 @@ indexer.onEvent(
       deployerAddress: event.params.deployer.toLowerCase(),
       pairTokenAddress: event.params.pairToken.toLowerCase(),
       poolAddress: event.params.pool.toLowerCase(),
+      factoryAddress: event.srcAddress.toLowerCase(),
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
@@ -20,6 +21,36 @@ indexer.onEvent(
 
 indexer.contractRegister(
   { contract: "PonsV1LegacyFactory", event: "TokenLaunched" },
+  async ({ event, context }) => {
+    context.chain.PonsV3Pool.add(event.params.pool);
+  },
+);
+
+// Same TokenLaunched event shape as PonsV1LegacyFactory, a different deployed factory instance
+// (be/src/launchpads/pons/sourceRegistry.ts's 'pons-v1-active') — shares the RawLaunch entity and
+// the PonsV3Pool wildcard pool registration; only factoryAddress differs per row, which the sync
+// layer uses to attribute each launch to the right FactorySource.
+indexer.onEvent(
+  { contract: "PonsV1ActiveFactory", event: "TokenLaunched" },
+  async ({ event, context }) => {
+    context.RawLaunch.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      deployerAddress: event.params.deployer.toLowerCase(),
+      pairTokenAddress: event.params.pairToken.toLowerCase(),
+      poolAddress: event.params.pool.toLowerCase(),
+      factoryAddress: event.srcAddress.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+indexer.contractRegister(
+  { contract: "PonsV1ActiveFactory", event: "TokenLaunched" },
   async ({ event, context }) => {
     context.chain.PonsV3Pool.add(event.params.pool);
   },

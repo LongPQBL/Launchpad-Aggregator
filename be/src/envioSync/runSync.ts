@@ -1,10 +1,10 @@
 import type { Pool } from 'pg';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import type { Address } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { hydrateV1Launch, type V1TokenMetadata } from '../launchpads/pons/v1/adapter.js';
 import { readV1TokenMetadata, readV1Graduation, type V1ReadClient } from '../launchpads/pons/v1/state.js';
-import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
+import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, launches, venues, trades, sources } from '../db/schema.js';
@@ -12,7 +12,20 @@ import { envioRawLaunchToEvent, hydrateV1SwapFromDecoded, type EnvioRawLaunchRow
 import { readAllRawLaunches, readAllRawSwaps, readEnvioProgress } from './envioDb.js';
 import { reconcileReorgWindow } from './reorgGuard.js';
 
-const legacy = getPonsFactorySources()[0];
+// Both deployed V1 factory instances (pons-v1-legacy, pons-v1-active) share this one sync module —
+// same protocol version, same event shapes, same RawLaunch/RawSwap Envio entities (disambiguated by
+// RawLaunch.factoryAddress) — matching CLAUDE.md's "one adapter per protocol version" rule rather
+// than duplicating an adapter per factory instance. Function names keep the historical "V1Legacy"
+// prefix to avoid a disruptive rename across syncAll.ts/CLIs/tests; they cover all V1 factories.
+const v1Factories = getPonsFactorySources().filter((factory) => factory.version === 'v1');
+const v1FactoryByAddress = new Map(v1Factories.map((factory) => [factory.factory.toLowerCase(), factory]));
+const v1SourceIds = v1Factories.map((factory) => factory.id);
+
+function resolveV1Factory(factoryAddress: string): FactorySource {
+  const factory = v1FactoryByAddress.get(factoryAddress.toLowerCase());
+  if (!factory) throw new Error(`Unknown V1 factory address ${factoryAddress} — not registered in sourceRegistry.ts`);
+  return factory;
+}
 
 export interface EnvioTableNames {
   rawLaunchTable: string;
@@ -27,7 +40,7 @@ export async function syncV1LegacyToReal(
   const { processedBlock, headBlock } = await readEnvioProgress(envioPool, tables.progressTable);
   const windowStart = processedBlock > reorgWindowBlocks ? processedBlock - reorgWindowBlocks : 0n;
 
-  const existingRows = await appDb.select().from(launches).where(eq(launches.sourceId, legacy.id));
+  const existingRows = await appDb.select().from(launches).where(inArray(launches.sourceId, v1SourceIds));
   const existingByToken = new Map(existingRows.map((row) => [row.tokenAddress.toLowerCase(), row]));
   const rawLaunches = await readAllRawLaunches(envioPool, tables.rawLaunchTable);
 
@@ -50,9 +63,10 @@ export async function syncV1LegacyToReal(
     const existing = existingByToken.get(tokenAddress);
     const willBeRebuilt = !existing || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
     if (!willBeRebuilt || metadataByToken.has(tokenAddress)) continue;
+    const factory = resolveV1Factory(raw.factoryAddress);
     const [metadata, graduated] = await Promise.all([
       readV1TokenMetadata(rpcClient, tokenAddress as Address),
-      readV1Graduation(rpcClient, tokenAddress as Address, legacy.factory),
+      readV1Graduation(rpcClient, tokenAddress as Address, factory.factory),
     ]);
     metadataByToken.set(tokenAddress, metadata);
     graduatedByToken.set(tokenAddress, graduated);
@@ -63,15 +77,16 @@ export async function syncV1LegacyToReal(
   let tradesWritten = 0;
   await appDb.transaction(async (tx) => {
     await reconcileReorgWindow(tx, { launches, venues, trades }, windowStart, {
-      venueKinds: ['v3_pool'], launchSourceIds: [legacy.id],
+      venueKinds: ['v3_pool'], launchSourceIds: v1SourceIds,
     });
-    const survivingRows = await tx.select().from(launches).where(eq(launches.sourceId, legacy.id));
+    const survivingRows = await tx.select().from(launches).where(inArray(launches.sourceId, v1SourceIds));
     const survivingByToken = new Map(survivingRows.map((row) => [row.tokenAddress.toLowerCase(), row]));
 
     for (const raw of rawLaunches) {
       const row: EnvioRawLaunchRow = { ...raw, blockNumber: BigInt(raw.blockNumber) };
       const event = envioRawLaunchToEvent(row);
       const tokenAddress = event.tokenAddress.toLowerCase();
+      const factory = resolveV1Factory(raw.factoryAddress);
       const surviving = survivingByToken.get(tokenAddress);
       const metadata = surviving
         ? { name: surviving.name, symbol: surviving.symbol, decimals: surviving.tokenDecimals, liquidityPool: event.poolAddress }
@@ -81,7 +96,7 @@ export async function syncV1LegacyToReal(
       let launch: Launch;
       let venue: Venue;
       try {
-        ({ launch, venue } = hydrateV1Launch(event, legacy, metadata, graduated));
+        ({ launch, venue } = hydrateV1Launch(event, factory, metadata, graduated));
       } catch (error) {
         throw new Error(`Failed to sync launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
       }
@@ -99,7 +114,7 @@ export async function syncV1LegacyToReal(
       }
       await tx.insert(venues).values({
         id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref,
-        sourceId: `${legacy.id}-trades`, sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
+        sourceId: `${factory.id}-trades`, sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
       }).onConflictDoNothing();
     }
 
@@ -128,7 +143,7 @@ export async function syncV1LegacyToReal(
     }
 
     const status = processedBlock >= headBlock ? 'caught_up' : 'backfilling';
-    for (const id of [legacy.id, `${legacy.id}-trades`]) {
+    for (const id of v1Factories.flatMap((factory) => [factory.id, `${factory.id}-trades`])) {
       await tx.update(sources).set({ confirmedToBlock: processedBlock, scannedToBlock: processedBlock, status })
         .where(eq(sources.id, id));
     }
@@ -165,12 +180,14 @@ export async function syncV1LegacyOnce(
       deployerAddress: raw.deployerAddress,
       pairTokenAddress: raw.pairTokenAddress,
       poolAddress: raw.poolAddress,
+      factoryAddress: raw.factoryAddress,
       blockNumber: BigInt(raw.blockNumber),
       blockHash: raw.blockHash,
       txHash: raw.txHash,
       logIndex: raw.logIndex,
     };
     const event = envioRawLaunchToEvent(row);
+    const factory = resolveV1Factory(raw.factoryAddress);
     const existing = existingByToken.get(event.tokenAddress.toLowerCase());
     const isNew = !existing;
     const metadata = !existing || existing.name === null || existing.symbol === null
@@ -179,7 +196,7 @@ export async function syncV1LegacyOnce(
     let launch: Launch;
     let venue: Venue;
     try {
-      ({ launch, venue } = hydrateV1Launch(event, legacy, metadata, false));
+      ({ launch, venue } = hydrateV1Launch(event, factory, metadata, false));
     } catch (error) {
       throw new Error(`Failed to sync launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
     }

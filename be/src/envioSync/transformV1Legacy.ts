@@ -9,6 +9,7 @@ export interface EnvioRawLaunchRow {
   deployerAddress: string;
   pairTokenAddress: string;
   poolAddress: string;
+  factoryAddress: string;
   blockNumber: bigint;
   blockHash: string;
   txHash: string;

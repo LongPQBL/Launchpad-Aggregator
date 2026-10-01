@@ -5,6 +5,10 @@ type RawLaunch {
   deployerAddress: String!
   pairTokenAddress: String!
   poolAddress: String!
+  # The V1 factory contract that emitted this launch (PonsV1LegacyFactory or PonsV1ActiveFactory —
+  # both share this entity since the event shape is identical; the sync layer uses this to attribute
+  # each row to the right be/src/launchpads/pons/sourceRegistry.ts FactorySource).
+  factoryAddress: String!
   blockNumber: BigInt!
   blockHash: String!
   txHash: String!

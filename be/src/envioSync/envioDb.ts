@@ -17,6 +17,7 @@ export interface EnvioRawLaunchDbRow {
   deployerAddress: string;
   pairTokenAddress: string;
   poolAddress: string;
+  factoryAddress: string;
   blockNumber: string;
   blockHash: string;
   txHash: string;
