@@ -4,6 +4,7 @@ import type { Trade } from '../domain/types.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles } from '../market/aggregate.js';
+import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import type { ApiDeps, CandleResponse, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
@@ -58,7 +59,7 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row) => T): Pag
   }) : null };
 }
 
-export function createApiStore(pool: Pool): ApiDeps['data'] {
+export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
   // "use whichever source has a reading, prefer the more current one" behavior needed here.
   // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
@@ -157,7 +158,7 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
     },
     async listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>> {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-      const result = await pool.query(`SELECT t.*, l.token_decimals, l.quote_asset_decimals
+      const result = await pool.query(`SELECT t.*, l.token_decimals, l.quote_asset_decimals, l.quote_asset_symbol
         FROM trades t JOIN venues v ON v.id = t.venue_id
         JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
@@ -165,7 +166,11 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         ORDER BY t.block_number DESC, t.tx_hash DESC, t.log_index DESC LIMIT $6`,
       [chainId, tokenAddress.toLowerCase(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
         cursor?.logIndex ?? null, query.limit + 1]);
-      return page(result.rows as Row[], query.limit, (row) => ({
+      const rows = result.rows as Row[];
+      // Same quote asset for every row of one launch's trades — one price lookup (itself cached
+      // ~60s inside usdPricing.ts), not one per trade.
+      const usdPrice = rpcClient && rows[0] ? await readUsdPrice(rpcClient, string(rows[0].quote_asset_symbol)) : null;
+      return page(rows, query.limit, (row) => ({
         venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
         logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side),
         activityKind: string(row.activity_kind), tokenAmount: formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
@@ -173,6 +178,9 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         priceQuote: row.price_numerator_raw === null || row.price_denominator_raw === null ? null
           : formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18),
         traderAddress: string(row.trader_address),
+        usdValue: usdPrice === null ? null
+          : (Number(formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals))) * usdPrice.priceUsd).toString(),
+        usdValueApprox: usdPrice !== null,
       })) as Page<TradeResponse>;
     },
     async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {

@@ -4,12 +4,14 @@ import { listenForDatabaseEvents } from '../api/pgEvents.js';
 import { createApiServer } from '../api/server.js';
 import { createApiStore } from '../api/store.js';
 import { createDatabase } from '../db/client.js';
+import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 
 const config = readApiConfig(process.env);
 const { pool } = createDatabase(config.databaseUrl);
 const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
-const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool), events });
+const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
+const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool, rpcClient), events });
 
 try {
   await app.listen({ host: config.host, port: config.port });

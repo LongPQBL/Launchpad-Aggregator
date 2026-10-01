@@ -23,6 +23,10 @@ export const trade = { type: 'object', properties: {
   logIndex: { type: 'integer' }, timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
   tokenAmount: { type: 'string' }, quoteAmount: { type: 'string' }, priceQuote: { type: 'string', nullable: true },
   traderAddress: { type: 'string' },
+  // usdValue is an approximation (current Chainlink price, not the price at trade time) —
+  // usdValueApprox is always true when usdValue is non-null. See spec
+  // docs/superpowers/specs/2026-10-01-uniswap-parity-stats-design.md §5.
+  usdValue: { type: 'string', nullable: true }, usdValueApprox: { type: 'boolean' },
 } } as const;
 
 export const candle = { type: 'object', properties: {

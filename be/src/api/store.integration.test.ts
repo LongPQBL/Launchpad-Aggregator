@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { createApiStore } from './store.js';
 
@@ -85,5 +85,74 @@ describe('safe head considers envio_chain_progress (final review, Important 3)',
 
     const afterHead = await store.getLaunch(4663, headToken);
     expect(afterHead?.coverageStatus).toBe('caught_up');
+  });
+});
+
+describe('trade USD value (Important: must be null for an unknown quote asset, never 0)', () => {
+  const usdToken = '0x1717171717171717171717171717171717171717';
+  const usdSource = 'envio-store-usd-test';
+  const venueId = `4663:curve:${usdToken}`;
+  const txHash2 = '0x' + 'c'.repeat(64);
+
+  async function seed(quoteAssetSymbol: string): Promise<void> {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v2',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [usdSource, usdToken]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'UsdTest','UT',18,'pons','v2',$1,$1,1,$3,0,$1,$4,18,'trading') ON CONFLICT DO NOTHING`,
+    [usdToken, usdSource, txHash2, quoteAssetSymbol]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'curve',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`,
+    [venueId, usdToken, usdSource]);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,1,$3,$4,0,1700000000,'buy','1000000000000000000','1000000000000000000',$1,'CurveBuy','user_trade',$1)
+      ON CONFLICT DO NOTHING`,
+    [usdToken, venueId, blockHash, txHash2]);
+  }
+
+  afterAll(async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM sources WHERE id = $1', [usdSource]);
+  });
+
+  it('returns null usdValue and usdValueApprox=false for a trade whose quote asset has no Chainlink feed', async () => {
+    await seed('SPCX');
+    const readContract = vi.fn();
+    const storeWithRpc = createApiStore(pool, { readContract });
+    const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items[0]!.usdValue).toBeNull();
+    expect(trades.items[0]!.usdValueApprox).toBe(false);
+    expect(readContract).not.toHaveBeenCalled();
+  });
+
+  it('computes an approximate usdValue for a trade whose quote asset has a known feed', async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await seed('ETH');
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      if (functionName === 'latestRoundData') return [1n, 269170223591n, 1790859457n, 1790859457n, 1n];
+      throw new Error(`unexpected ${functionName}`);
+    });
+    const storeWithRpc = createApiStore(pool, { readContract });
+    const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items[0]!.usdValue).not.toBeNull();
+    expect(Number(trades.items[0]!.usdValue)).toBeCloseTo(2691.70223591, 2);
+    expect(trades.items[0]!.usdValueApprox).toBe(true);
+  });
+
+  it('returns null usdValue when no rpcClient was given to createApiStore at all', async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await seed('ETH');
+    const trades = await store.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items[0]!.usdValue).toBeNull();
+    expect(trades.items[0]!.usdValueApprox).toBe(false);
   });
 });

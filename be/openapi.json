@@ -273,6 +273,13 @@
                           },
                           "traderAddress": {
                             "type": "string"
+                          },
+                          "usdValue": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "usdValueApprox": {
+                            "type": "boolean"
                           }
                         }
                       }
