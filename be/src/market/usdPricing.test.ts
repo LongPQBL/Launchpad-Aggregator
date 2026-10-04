@@ -66,7 +66,7 @@ describe('readUsdPrice', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, WETH_ADDRESS.toUpperCase());
+    const result = await readUsdPrice(client, WETH_ADDRESS.toUpperCase(), () => 1_790_859_457_000);
     expect(result).not.toBeNull();
   });
 });
@@ -83,7 +83,10 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, ETH_ADDRESS);
+    // Frozen clock matching the fixture's updatedAt — using the real wall clock here would make
+    // this test fail every day further past 1790859457 + 24h, since the code correctly rejects a
+    // stale feed answer (final-review Important 4).
+    const result = await readUsdPrice(client, ETH_ADDRESS, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
@@ -94,7 +97,7 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(client, WETH_ADDRESS);
+    const result = await readUsdPrice(client, WETH_ADDRESS, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
@@ -142,7 +145,8 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const [a, b] = await Promise.all([readUsdPrice(client, ETH_ADDRESS), readUsdPrice(client, ETH_ADDRESS)]);
+    const frozenNow = () => 1_790_859_457_000;
+    const [a, b] = await Promise.all([readUsdPrice(client, ETH_ADDRESS, frozenNow), readUsdPrice(client, ETH_ADDRESS, frozenNow)]);
     expect(a).toEqual(b);
     expect(calls).toBe(2); // one decimals() + one latestRoundData() call, not four
   });
