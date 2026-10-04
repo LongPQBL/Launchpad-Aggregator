@@ -7,6 +7,11 @@ import { createServer, type Server } from 'node:http';
 
 export const TOKEN_ADDRESS = '0xc9e9ab90654f82893d7fd18b62f694992e8cef29';
 export const CHAIN_ID = 4663;
+// A second, short-description launch — a real-browser negative case for the About section's
+// overflow-gated Show more control, alongside the long-description positive case above. A separate
+// token/route is required (not a query param or page.route override) because this page's initial
+// data load happens via a Next.js server-side fetch, which Playwright's page.route never sees.
+export const SHORT_DESCRIPTION_TOKEN_ADDRESS = '0xd9e9ab90654f82893d7fd18b62f694992e8cef29';
 
 const launchSummary = {
   chainId: CHAIN_ID,
@@ -27,11 +32,6 @@ const launchSummary = {
   week52High: null,
   week52Low: null,
   logoUri: null,
-  description: Array.from({ length: 8 },
-    () => 'E2E Launch is a long-form test description written specifically to exceed three lines of wrapped ' +
-      'text at both narrow mobile viewports and wide desktop viewports, so the Playwright suite can verify ' +
-      'the real browser line-clamp overflow detection end to end, independent of the jsdom unit tests that ' +
-      'mock scrollHeight and clientHeight instead of performing real layout.').join(' '),
   websiteUrl: null,
   twitterUrl: null,
   launchTimestamp: null,
@@ -43,11 +43,26 @@ const launchSummary = {
 
 const launchDetail = {
   ...launchSummary,
+  // description is only a part of the detail response (fe/src/api/server.ts's LaunchSummary/
+  // LaunchDetail split, Task 5) — kept off launchSummary so the mocked /v1/launches list response
+  // matches the real API's shape, not just the FE's observed behavior of ignoring the field.
+  description: Array.from({ length: 8 },
+    () => 'E2E Launch is a long-form test description written specifically to exceed three lines of wrapped ' +
+      'text at both narrow mobile viewports and wide desktop viewports, so the Playwright suite can verify ' +
+      'the real browser line-clamp overflow detection end to end, independent of the jsdom unit tests that ' +
+      'mock scrollHeight and clientHeight instead of performing real layout.').join(' '),
   officialVenues: [
     { id: 'pons-v2-curve:0xtoken', kind: 'curve', ref: '0xcurve', effectiveFromBlock: '100', effectiveToBlock: null },
   ],
   priceQuote: '0.0001',
   priceStale: false,
+};
+
+const shortDescriptionDetail = {
+  ...launchDetail,
+  tokenAddress: SHORT_DESCRIPTION_TOKEN_ADDRESS,
+  name: 'E2E Short Description Launch',
+  description: 'A short description that fits on one line and must not overflow three lines.',
 };
 
 const trades = {
@@ -112,6 +127,12 @@ export function startMockApi(port: number): Server {
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/trades`) {
       res.end(JSON.stringify(trades));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/candles`) {
+      res.end(JSON.stringify(candles));
+    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`) {
+      res.end(JSON.stringify(shortDescriptionDetail));
+    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/trades`) {
+      res.end(JSON.stringify(trades));
+    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/candles`) {
       res.end(JSON.stringify(candles));
     } else {
       res.statusCode = 404;

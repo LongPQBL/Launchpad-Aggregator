@@ -27,6 +27,7 @@ describe('AboutSection copy-address control', () => {
     });
     expect(screen.getByRole('alert')).toHaveTextContent(baseProps.tokenAddress);
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
+    expect(screen.getByText(baseProps.tokenAddress)).toHaveClass('break-all');
   });
 
   it('shows a manual-copy fallback when the write is rejected', async () => {
@@ -104,6 +105,13 @@ describe('AboutSection description overflow detection', () => {
     clientHeight = 0;
     Object.defineProperty(HTMLParagraphElement.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
     Object.defineProperty(HTMLParagraphElement.prototype, 'clientHeight', { configurable: true, get: () => clientHeight });
+  });
+
+  afterEach(() => {
+    // @ts-expect-error -- restoring jsdom's own default descriptor, not a real browser API
+    delete HTMLParagraphElement.prototype.scrollHeight;
+    // @ts-expect-error -- same as above
+    delete HTMLParagraphElement.prototype.clientHeight;
   });
 
   it('renders no paragraph or toggle for a null description', () => {

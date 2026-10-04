@@ -93,6 +93,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
               description={detail.description}
               tokenAddress={detail.tokenAddress}
               explorerUrl={explorerBase ? `${explorerBase}/token/${detail.tokenAddress}` : undefined}
+              explorerLabel={explorerBase ? `${chainName(detail.chainId)} Explorer` : undefined}
               websiteUrl={detail.websiteUrl}
               twitterUrl={detail.twitterUrl}
             />

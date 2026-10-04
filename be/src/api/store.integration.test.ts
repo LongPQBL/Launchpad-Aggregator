@@ -333,14 +333,39 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   });
 
   it('computes 52-week high/low and 1h/1d change from one formatting pass (no duplicate formatRational work)', async () => {
-    // Regression guard for the dedup refactor: assert the externally-observable values are
-    // unchanged, since formatRational is deterministic and a correct dedup cannot change output.
-    const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
-    const detail = await storeWithRpc.getLaunch(4663, goodToken);
-    expect(detail?.week52High).toBe('1');
-    expect(detail?.week52Low).toBe('1');
-    expect(detail?.change1h).not.toBeUndefined();
-    expect(detail?.change1d).not.toBeUndefined();
+    // Regression guard for the dedup refactor (be/src/api/store.ts's computeStats): two extra
+    // trades at distinct prices and ages give week52High/Low and change1h/change1d each a distinct,
+    // independently-verifiable expected value computed from the SAME three trades — a formatting
+    // bug that duplicated or dropped a row would show up as a wrong number here, not just a defined one.
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const pastHourTxHash = '0x' + 'e1'.repeat(32);
+    const pastDayTxHash = '0x' + 'e2'.repeat(32);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,2,$3,$4,0,$6,'buy','1000000000000000000','2000000000000000000',$5,'2','1','V3Swap','user_trade',$1)
+      ON CONFLICT DO NOTHING`,
+    [goodToken, goodVenueId, blockHash, pastHourTxHash, ETH_ADDRESS, nowSeconds - 7_200]);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,3,$3,$4,0,$6,'buy','1000000000000000000','4000000000000000000',$5,'4','1','V3Swap','user_trade',$1)
+      ON CONFLICT DO NOTHING`,
+    [goodToken, goodVenueId, blockHash, pastDayTxHash, ETH_ADDRESS, nowSeconds - 90_000]);
+    try {
+      const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
+      const detail = await storeWithRpc.getLaunch(4663, goodToken);
+      // Three priced trades for goodToken: price 1 (~100s ago, from beforeAll), price 2 (2h ago),
+      // price 4 (25h ago) — so high=4, low=1.
+      expect(detail?.week52High).toBe('4');
+      expect(detail?.week52Low).toBe('1');
+      // change1h: latest price at/before now is 1 (the ~100s-ago trade); latest at/before now-3600 is
+      // 2 (the 2h-ago trade, the only one old enough) -> (1-2)/2*100 = -50.
+      expect(detail?.change1h).toBe('-50');
+      // change1d: latest at/before now-86400 is 4 (the 25h-ago trade, the only one old enough) ->
+      // (1-4)/4*100 = -75.
+      expect(detail?.change1d).toBe('-75');
+    } finally {
+      await pool.query('DELETE FROM trades WHERE tx_hash = ANY($1)', [[pastHourTxHash, pastDayTxHash]]);
+    }
   });
 
   it('withholds FDV and 52-week extrema while the launch trade source is backfilling', async () => {

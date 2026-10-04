@@ -8,6 +8,7 @@ export interface AboutSectionProps {
   description: string | null;
   tokenAddress: string;
   explorerUrl?: string;
+  explorerLabel?: string;
   websiteUrl: string | null;
   twitterUrl: string | null;
 }
@@ -25,7 +26,7 @@ function Pill({ href, children }: { href: string; children: React.ReactNode }) {
   );
 }
 
-export function AboutSection({ description, tokenAddress, explorerUrl, websiteUrl, twitterUrl }: AboutSectionProps) {
+export function AboutSection({ description, tokenAddress, explorerUrl, explorerLabel, websiteUrl, twitterUrl }: AboutSectionProps) {
   const [expanded, setExpanded] = useState(false);
   const [canExpand, setCanExpand] = useState(false);
   const paragraphRef = useRef<HTMLParagraphElement>(null);
@@ -94,10 +95,10 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
         </button>
         {copyState === 'error' && (
           <span role="alert" className="text-sm text-destructive">
-            Could not copy automatically — select to copy: <span className="select-all font-mono">{tokenAddress}</span>
+            Could not copy automatically — select to copy: <span className="select-all break-all font-mono">{tokenAddress}</span>
           </span>
         )}
-        {explorerUrl !== undefined && <Pill href={explorerUrl}>Robinhood Explorer</Pill>}
+        {explorerUrl !== undefined && <Pill href={explorerUrl}>{explorerLabel ?? 'Explorer'}</Pill>}
         {websiteUrl !== null && isHttpUrl(websiteUrl) && <Pill href={websiteUrl}>Website</Pill>}
         {twitterUrl !== null && isHttpUrl(twitterUrl) && <Pill href={twitterUrl}>Twitter</Pill>}
       </div>

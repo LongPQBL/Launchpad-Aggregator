@@ -5,11 +5,15 @@ import { isHttpUrl } from './url';
 // resolves at all. Do not add either without re-verifying.
 const IPFS_GATEWAY = 'https://gateway.pinata.cloud/ipfs/';
 
+// A real CID (base32 or base58) is alphanumeric; an optional /subresource path may follow it.
+// Rejects path traversal (`..`), query strings, and fragments before they reach the gateway URL.
+const CID_PATH_PATTERN = /^[A-Za-z0-9]+(\/[^?#]*)?$/;
+
 export function resolveLogoUrl(uri: string | null): string | null {
   if (uri === null) return null;
   if (uri.startsWith('ipfs://')) {
     const cid = uri.slice('ipfs://'.length);
-    return cid.length > 0 ? IPFS_GATEWAY + cid : null;
+    return CID_PATH_PATTERN.test(cid) ? IPFS_GATEWAY + cid : null;
   }
   return isHttpUrl(uri) ? uri : null;
 }

@@ -136,7 +136,11 @@ describe('LaunchDetail', () => {
 
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
-    expect(screen.getByText(/Robinhood Chain/)).toBeInTheDocument();
+    // Scoped to the source line, not a bare substring match — the About section's explorer pill
+    // also renders "Robinhood Chain" (as part of "Robinhood Chain Explorer") and would otherwise
+    // make this an ambiguous "found multiple elements" match.
+    const sourceLine = screen.getByText(/Source:/).closest('p')!;
+    expect(within(sourceLine).getByText(/Robinhood Chain/)).toBeInTheDocument();
     expect(screen.getByText(/Quote asset/)).toHaveTextContent('ROBIN');
     expect(screen.getByText(/12\.5 ROBIN/)).toBeInTheDocument();
   });
@@ -480,12 +484,12 @@ describe('LaunchDetail', () => {
     expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
   });
 
-  it('always renders the token address and Robinhood Explorer pills', () => {
+  it('always renders the token address and a chain-named explorer pill', () => {
     render(
       <LaunchDetail detail={detail({ tokenAddress: '0xabc' })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
 
-    const explorerLink = screen.getByRole('link', { name: /robinhood explorer/i });
+    const explorerLink = screen.getByRole('link', { name: /robinhood chain explorer/i });
     expect(explorerLink).toHaveAttribute('href', 'https://robinhoodchain.blockscout.com/token/0xabc');
     expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
   });

@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures';
-import { CHAIN_ID, TOKEN_ADDRESS } from './mock-api';
+import { CHAIN_ID, SHORT_DESCRIPTION_TOKEN_ADDRESS, TOKEN_ADDRESS } from './mock-api';
 
 test.beforeEach(async ({ page }) => {
   await page.goto(`/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`);
@@ -48,6 +48,15 @@ test('shows and expands Show more for a long description at both mobile and desk
     await expect(toggle).toBeVisible();
     await toggle.click();
     await expect(page.getByRole('button', { name: /show less/i })).toBeVisible();
+  }
+});
+
+test('shows no Show more for a short description that does not overflow, at both widths', async ({ page }) => {
+  for (const viewport of [{ width: 375, height: 800 }, { width: 1280, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.goto(`/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`);
+    await expect(page.getByText('A short description that fits on one line and must not overflow three lines.')).toBeVisible();
+    await expect(page.getByRole('button', { name: /show more/i })).not.toBeVisible();
   }
 });
 
