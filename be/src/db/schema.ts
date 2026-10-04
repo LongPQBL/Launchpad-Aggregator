@@ -289,6 +289,14 @@ export const candleDirtyBuckets = pgTable('candle_dirty_buckets', {
   index('candle_dirty_buckets_oldest_idx').on(table.bucketStart),
 ]);
 
+export const candleUnpricedBuckets = pgTable('candle_unpriced_buckets', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  bucketStart: integer('bucket_start').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.bucketStart] }),
+]);
+
 export const candleCacheState = pgTable('candle_cache_state', {
   id: integer('id').primaryKey(),
   backfillComplete: boolean('backfill_complete').notNull().default(false),

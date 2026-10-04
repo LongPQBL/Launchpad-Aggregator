@@ -39,6 +39,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await pool.query('DELETE FROM trades WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM candle_dirty_buckets WHERE chain_id = 4663 AND token_address = $1', [token]);
+  await pool.query('DELETE FROM candle_unpriced_buckets WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM candles WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM venues WHERE id = $1', [venue]);
   await pool.query('DELETE FROM launches WHERE chain_id = 4663 AND token_address = $1', [token]);
@@ -86,5 +87,9 @@ describe('precomputed official candles', () => {
     const bucket = Math.floor((base + 120) / 60) * 60;
     const rows = await pool.query('SELECT * FROM candles WHERE token_address = $1 AND interval_seconds = 60 AND bucket_start = $2', [token, bucket]);
     expect(rows.rowCount).toBe(0);
+    expect((await pool.query('SELECT count(*)::int AS n FROM candle_unpriced_buckets WHERE token_address = $1 AND bucket_start = $2', [token, bucket])).rows[0].n).toBe(1);
+    const page = await createApiStore(pool).listCandles(4663, token, 60, bucket + 60);
+    expect(page.complete).toBe(false);
+    expect(page.items.some((item) => item.bucketStart === bucket)).toBe(false);
   });
 });

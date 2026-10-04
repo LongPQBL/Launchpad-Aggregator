@@ -4,6 +4,7 @@ import type { Trade } from '../domain/types.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
+import { read52WeekHighLowFromCandles } from '../market/candleStats.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
@@ -112,19 +113,52 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
       ? formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18) : null;
     const fdvUsd = totalSupply !== null ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
 
-    const since = Math.floor(Date.now() / 1000) - 52 * 7 * 86_400;
-    const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp FROM trades t JOIN venues v ON v.id = t.venue_id
-      WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
-        AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
-      ORDER BY t.block_number, t.log_index`, [number(row.chain_id), string(row.token_address), since]);
-    const prices = (highLowResult.rows as Row[]).map((row) =>
-      formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18));
-    const { high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price })));
-    const pricedTrades = (highLowResult.rows as Row[]).map((r) => ({
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
+    let high: string | null;
+    let low: string | null;
+    let changeRows: Row[];
+    if (cacheReady) {
+      const extrema = await read52WeekHighLowFromCandles(pool, number(row.chain_id), string(row.token_address), nowSeconds);
+      high = extrema.complete ? extrema.high : null;
+      low = extrema.complete ? extrema.low : null;
+      // Price changes need only the past day plus the last priced trade before its boundary.
+      // This keeps a 52-week trade scan out of the cached path.
+      const since1d = nowSeconds - 86_400;
+      const [baseline, recent] = await Promise.all([
+        pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
+          FROM trades t JOIN venues v ON v.id = t.venue_id
+          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+            AND t.timestamp < $3 AND t.timestamp >= $4
+            AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
+          ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`,
+        [number(row.chain_id), string(row.token_address), since1d, nowSeconds - 52 * 7 * 86_400]),
+        pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
+          FROM trades t JOIN venues v ON v.id = t.venue_id
+          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+            AND t.timestamp >= $3 AND t.timestamp <= $4
+            AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
+          ORDER BY t.block_number, t.log_index`,
+        [number(row.chain_id), string(row.token_address), since1d, nowSeconds]),
+      ]);
+      changeRows = [...baseline.rows, ...recent.rows] as Row[];
+    } else {
+      // Until the historical candle backfill finishes, preserve the existing trade-based result.
+      const since = nowSeconds - 52 * 7 * 86_400;
+      const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
+        FROM trades t JOIN venues v ON v.id = t.venue_id
+        WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
+          AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
+        ORDER BY t.block_number, t.log_index`, [number(row.chain_id), string(row.token_address), since]);
+      const prices = (highLowResult.rows as Row[]).map((priceRow) =>
+        formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18));
+      ({ high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price }))));
+      changeRows = highLowResult.rows as Row[];
+    }
+    const pricedTrades = changeRows.map((r) => ({
       timestamp: number(r.timestamp),
       price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
     }));
-    const nowSeconds = Math.floor(Date.now() / 1000);
     const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
     const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
@@ -440,10 +474,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           pool.query(`SELECT
               EXISTS (SELECT 1 FROM candle_dirty_buckets d WHERE d.chain_id = $1 AND d.token_address = $2
                 AND d.bucket_start >= $3 AND d.bucket_start < $4) AS dirty,
-              EXISTS (SELECT 1 FROM trades t JOIN venues v ON v.id = t.venue_id
-                WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-                  AND t.timestamp >= $3 AND t.timestamp < $4
-                  AND (t.price_numerator_raw IS NULL OR t.price_denominator_raw IS NULL)) AS unpriced`,
+              EXISTS (SELECT 1 FROM candle_unpriced_buckets u
+                WHERE u.chain_id = $1 AND u.token_address = $2
+                  AND u.bucket_start >= $3 AND u.bucket_start < $4) AS unpriced`,
           [chainId, tokenAddress.toLowerCase(), start, end]),
         ]);
         const state = pending.rows[0] as Row;

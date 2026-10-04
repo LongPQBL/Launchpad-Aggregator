@@ -102,7 +102,7 @@ thử lại theo lịch; contract không hỗ trợ hàm thì giữ giá trị `
 áp dụng migration bằng `npm run -w be db:migrate` trên DB đích. Chế độ staging không chạy tác vụ
 đọc lại này.
 
-**Tính nến sẵn từ giao dịch ở bảng thật:** sau migration `0024`–`0026`, mọi giao dịch
+**Tính nến sẵn từ giao dịch ở bảng thật:** sau migration `0024`–`0027`, mọi giao dịch
 được thêm/sửa/xoá trong `trades` sẽ đánh dấu phút cần tính lại. Chạy hai lệnh sau với đúng
 `DATABASE_URL` của app DB (không phải DB Envio), ở tiến trình riêng với Envio:
 
@@ -115,7 +115,10 @@ npm run -w be candles:worker
 và chỉ sau khi hoàn tất mới cho API đọc nến lưu sẵn. Đây là tác vụ nặng, nên chạy một lần sau
 migration và theo dõi tài nguyên DB. `candles:worker` xử lý các phút mới hoặc bị thay đổi theo lô
 nhỏ, thử lại khi gặp lỗi; nó không chặn Envio ghi launch/giao dịch. Nếu worker chậm, API ẩn nến
-cũ thuộc khoảng đang chờ và báo `complete: false`. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
+cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill hoàn tất, cao/thấp 52 tuần
+được lấy từ nến ngày và nến phút đã lưu. Phút có giao dịch chưa xác định được giá vẫn được ghi
+nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
+nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
 ## Chạy FE
 

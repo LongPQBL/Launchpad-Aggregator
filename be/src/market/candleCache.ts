@@ -72,10 +72,14 @@ async function rebuildInterval(client: PoolClient, dirty: readonly DirtyBucket[]
   }
 
   const candles: Candle[] = [];
+  const unpricedKeys: DirtyBucket[] = [];
   for (const item of keys) {
     const rows = byKey.get(key(item)) ?? [];
     if (rows.length === 0) continue;
     const trades = rows.map(asTrade);
+    if (intervalSeconds === 60 && trades.some((trade) => trade.priceNumeratorRaw === null || trade.priceDenominatorRaw === null)) {
+      unpricedKeys.push(item);
+    }
     const built = buildOfficialCandles(trades, intervalSeconds, {
       chainId: item.chainId, tokenAddress: item.tokenAddress as Address,
       quoteAssetAddress: String(rows[0]!.launch_quote_asset_address) as Address,
@@ -89,6 +93,16 @@ async function rebuildInterval(client: PoolClient, dirty: readonly DirtyBucket[]
     WHERE c.chain_id = a.chain_id AND c.token_address = a.token_address
       AND c.bucket_start = a.bucket_start AND c.interval_seconds = $${params.length + 1}::int`,
   [...params, intervalSeconds]);
+  if (intervalSeconds === 60) {
+    await client.query(`WITH affected(chain_id, token_address, bucket_start) AS (VALUES ${placeholders})
+      DELETE FROM candle_unpriced_buckets u USING affected a
+      WHERE u.chain_id = a.chain_id AND u.token_address = a.token_address AND u.bucket_start = a.bucket_start`, params);
+    if (unpricedKeys.length > 0) {
+      const unpriced = values(unpricedKeys);
+      await client.query(`INSERT INTO candle_unpriced_buckets (chain_id, token_address, bucket_start)
+        VALUES ${unpriced.placeholders}`, unpriced.params);
+    }
+  }
   if (candles.length === 0) return;
   const insertParams: unknown[] = [];
   const insertValues = candles.map((candle) => {
