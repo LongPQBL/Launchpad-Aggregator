@@ -4,23 +4,24 @@ import { ApiEventBus } from './events.js';
 import { InvalidVolumeCursorError } from './volumeCursor.js';
 
 const address = '0x1111111111111111111111111111111111111111';
-const launch = {
+const launchSummary = {
   chainId: 4663, tokenAddress: address, name: 'Example', symbol: 'EX', platform: 'pons', protocolVersion: 'v2',
   quoteAsset: { address: '0x2222222222222222222222222222222222222222', symbol: 'USDG', decimals: 6 },
   lifecycleStatus: 'trading', officialVolume24h: null, coverageStatus: 'backfilling',
   fdvUsd: null, marketCapUsd: null, tvlUsd: null, tvlBasis: null, tvlBlockNumber: null,
   tvlPriceSource: null, tvlPriceUpdatedAt: null, tvlUnavailableReason: 'unavailable',
   week52High: null, week52Low: null,
-  logoUri: null, description: null, websiteUrl: null, twitterUrl: null, launchTimestamp: null,
+  logoUri: null, websiteUrl: null, twitterUrl: null, launchTimestamp: null,
   change1h: null, change1d: null,
   officialVolume24hUsd: null, officialVolume24hUsdApprox: false,
 };
+const launch = { ...launchSummary, description: null };
 
 function data() {
   return {
     listSources: async () => [{ id: 'pons-v2', chainId: 4663, platform: 'pons', protocolVersion: 'v2' }],
     getCoverage: async () => ({ complete: false, pendingSourceIds: ['pons-v2-curve'], missingRanges: [] }),
-    listLaunches: async () => ({ items: [launch], nextCursor: null }),
+    listLaunches: async () => ({ items: [launchSummary], nextCursor: null }),
     getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false }),
     listTrades: async () => ({ items: [], nextCursor: null }),
     listCandles: async () => ({ items: [], complete: false }),
@@ -46,11 +47,11 @@ describe('read-only API', () => {
     const calls: Array<{ limit: number; cursor?: string; chainId?: number }> = [];
     const source = data();
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
-      ...source, listLaunches: async (query) => { calls.push(query); return { items: [launch], nextCursor: null }; },
+      ...source, listLaunches: async (query) => { calls.push(query); return { items: [launchSummary], nextCursor: null }; },
     } });
     const list = await app.inject({ method: 'GET', url: '/v1/launches?chainId=4663&limit=500' });
     expect(list.statusCode).toBe(200);
-    expect(list.json()).toEqual({ items: [launch], nextCursor: null });
+    expect(list.json()).toEqual({ items: [launchSummary], nextCursor: null });
     expect(calls).toEqual([{ chainId: 4663, limit: 100 }]);
     const detail = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}` });
     expect(detail.statusCode).toBe(200);
@@ -66,7 +67,7 @@ describe('read-only API', () => {
     const calls: Array<{ limit: number; search?: string; status?: string }> = [];
     const source = data();
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
-      ...source, listLaunches: async (query) => { calls.push(query); return { items: [launch], nextCursor: null }; },
+      ...source, listLaunches: async (query) => { calls.push(query); return { items: [launchSummary], nextCursor: null }; },
     } });
     const withSearch = await app.inject({ method: 'GET', url: '/v1/launches?search=demo' });
     expect(withSearch.statusCode).toBe(200);

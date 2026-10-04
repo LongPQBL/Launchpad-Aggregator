@@ -26,7 +26,6 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     week52High: null,
     week52Low: null,
     logoUri: null,
-    description: null,
     websiteUrl: null,
     twitterUrl: null,
     launchTimestamp: null,

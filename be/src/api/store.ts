@@ -57,7 +57,6 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
     coverageStatus,
     logoUri: row.logo_uri === null || row.logo_uri === undefined ? null : string(row.logo_uri),
-    description: row.description === null || row.description === undefined ? null : string(row.description),
     websiteUrl: row.website_url === null || row.website_url === undefined ? null : string(row.website_url),
     twitterUrl: row.twitter_url === null || row.twitter_url === undefined ? null : string(row.twitter_url),
     launchTimestamp: row.launch_timestamp === null || row.launch_timestamp === undefined ? null : string(row.launch_timestamp),
@@ -233,7 +232,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     // the same raw quote-unit official_volume_raw subquery the recency path uses, so this sort
     // doesn't silently drop that field (final review, Important 1).
     const baseResult = await pool.query(`
-      SELECT l.*, l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
+      SELECT l.chain_id, l.token_address, l.name, l.symbol, l.platform, l.protocol_version, l.token_decimals,
+        l.factory_address, l.quote_asset_address, l.quote_asset_symbol, l.quote_asset_decimals, l.lifecycle_status,
+        l.v4_pool_fee, l.v4_tick_spacing, l.logo_uri, l.website_url, l.twitter_url, l.launch_timestamp,
+        l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
         ${launchCoverageSql(5)} AS launch_coverage_complete,
         (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
          WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
@@ -368,7 +370,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       const since = Math.floor(Date.now() / 1000) - 86_400;
       const result = await pool.query(`
-        SELECT l.*, s.status AS source_status, l.launch_block AS block_number,
+        SELECT l.chain_id, l.token_address, l.name, l.symbol, l.platform, l.protocol_version, l.token_decimals,
+          l.factory_address, l.quote_asset_address, l.quote_asset_symbol, l.quote_asset_decimals, l.lifecycle_status,
+          l.v4_pool_fee, l.v4_tick_spacing, l.logo_uri, l.website_url, l.twitter_url, l.launch_timestamp,
+          s.status AS source_status, l.launch_block AS block_number,
           l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
           (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
            WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
@@ -412,7 +417,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
       const stats = await computeStats(pool, rpcClient, row, complete);
-      return { ...summary(row, complete, stats), officialVenues: venueRows.rows.map((venue: Row) => ({
+      return { ...summary(row, complete, stats),
+        description: row.description === null || row.description === undefined ? null : string(row.description),
+        officialVenues: venueRows.rows.map((venue: Row) => ({
         id: string(venue.id), kind: string(venue.kind), ref: string(venue.ref),
         effectiveFromBlock: string(venue.effective_from_block),
         effectiveToBlock: venue.effective_to_block === null ? null : string(venue.effective_to_block),

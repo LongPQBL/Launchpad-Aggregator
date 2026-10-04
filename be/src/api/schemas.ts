@@ -11,7 +11,7 @@ export const launchSummary = { type: 'object', properties: {
   tvlBlockNumber: { type: 'string', nullable: true }, tvlPriceSource: { type: 'string', nullable: true },
   tvlPriceUpdatedAt: { type: 'integer', nullable: true }, tvlUnavailableReason: { type: 'string', nullable: true },
   week52High: { type: 'string', nullable: true }, week52Low: { type: 'string', nullable: true },
-  logoUri: { type: 'string', nullable: true }, description: { type: 'string', nullable: true },
+  logoUri: { type: 'string', nullable: true },
   websiteUrl: { type: 'string', nullable: true }, twitterUrl: { type: 'string', nullable: true },
   launchTimestamp: { type: 'string', nullable: true },
   change1h: { type: 'string', nullable: true }, change1d: { type: 'string', nullable: true },
@@ -20,6 +20,7 @@ export const launchSummary = { type: 'object', properties: {
 
 export const launchDetail = { type: 'object', properties: {
   ...launchSummary.properties,
+  description: { type: 'string', nullable: true },
   officialVenues: { type: 'array', items: { type: 'object', properties: {
     id: { type: 'string' }, kind: { type: 'string' }, ref: { type: 'string' },
     effectiveFromBlock: { type: 'string' }, effectiveToBlock: { type: 'string', nullable: true },

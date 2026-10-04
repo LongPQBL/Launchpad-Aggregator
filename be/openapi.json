@@ -127,10 +127,6 @@
                             "type": "string",
                             "nullable": true
                           },
-                          "description": {
-                            "type": "string",
-                            "nullable": true
-                          },
                           "websiteUrl": {
                             "type": "string",
                             "nullable": true
@@ -287,10 +283,6 @@
                       "type": "string",
                       "nullable": true
                     },
-                    "description": {
-                      "type": "string",
-                      "nullable": true
-                    },
                     "websiteUrl": {
                       "type": "string",
                       "nullable": true
@@ -317,6 +309,10 @@
                     },
                     "officialVolume24hUsdApprox": {
                       "type": "boolean"
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
                     },
                     "officialVenues": {
                       "type": "array",

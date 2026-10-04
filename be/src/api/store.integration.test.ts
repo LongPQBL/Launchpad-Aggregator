@@ -433,6 +433,20 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     }
   });
 
+  it('omits description from list items but keeps it on launch detail', async () => {
+    await pool.query(`UPDATE launches SET description = $1 WHERE token_address = $2`, ['List vs detail description', goodToken]);
+    try {
+      const list = await store.listLaunches({ limit: 50, chainId: 4663 });
+      const item = list.items.find((i) => i.tokenAddress === goodToken);
+      expect(item).toBeDefined();
+      expect(item).not.toHaveProperty('description');
+      const detail = await store.getLaunch(4663, goodToken);
+      expect(detail?.description).toBe('List vs detail description');
+    } finally {
+      await pool.query(`UPDATE launches SET description = NULL WHERE token_address = $1`, [goodToken]);
+    }
+  });
+
   it('returns null extended-metadata fields for a launch that never had them indexed', async () => {
     const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
     const detail = await storeWithRpc.getLaunch(4663, goodToken);
