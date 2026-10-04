@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { cn } from '@/lib/utils';
 
 export interface AboutSectionProps {
@@ -26,12 +26,24 @@ function Pill({ href, children }: { href: string; children: React.ReactNode }) {
 
 export function AboutSection({ description, tokenAddress, explorerUrl, websiteUrl, twitterUrl }: AboutSectionProps) {
   const [expanded, setExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (copyResetRef.current) clearTimeout(copyResetRef.current);
+  }, []);
 
   async function copyAddress() {
-    await navigator.clipboard.writeText(tokenAddress);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    if (copyResetRef.current) clearTimeout(copyResetRef.current);
+    setCopyState('idle');
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+      await navigator.clipboard.writeText(tokenAddress);
+      setCopyState('copied');
+    } catch {
+      setCopyState('error');
+    }
+    copyResetRef.current = setTimeout(() => setCopyState('idle'), 2000);
   }
 
   return (
@@ -49,11 +61,16 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
         <button
           type="button"
           onClick={copyAddress}
-          aria-label={copied ? 'Copied' : 'Copy token address'}
+          aria-label={copyState === 'copied' ? 'Copied' : 'Copy token address'}
           className="rounded-full bg-accent px-3 py-1 text-sm text-accent-foreground hover:bg-accent/80"
         >
-          {copied ? 'Copied' : `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`}
+          {copyState === 'copied' ? 'Copied' : `${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`}
         </button>
+        {copyState === 'error' && (
+          <span role="alert" className="text-sm text-destructive">
+            Could not copy automatically — select to copy: <span className="select-all font-mono">{tokenAddress}</span>
+          </span>
+        )}
         <Pill href={explorerUrl}>Robinhood Explorer</Pill>
         {websiteUrl !== null && <Pill href={websiteUrl}>Website</Pill>}
         {twitterUrl !== null && <Pill href={twitterUrl}>Twitter</Pill>}
