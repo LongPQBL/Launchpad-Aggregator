@@ -63,6 +63,26 @@ export function compute52WeekHighLow(candles: readonly { high: string; low: stri
   return { high: highStr, low: lowStr };
 }
 
+export function computePriceChange(trades: readonly { timestamp: number; price: string }[], nowSeconds: number, windowSeconds: number): string | null {
+  const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
+  const latestAtOrBefore = (boundary: number): string | null => {
+    let result: string | null = null;
+    for (const trade of sorted) {
+      if (trade.timestamp > boundary) break;
+      result = trade.price;
+    }
+    return result;
+  };
+  const current = latestAtOrBefore(nowSeconds);
+  const past = latestAtOrBefore(nowSeconds - windowSeconds);
+  if (current === null || past === null) return null;
+  const currentNum = Number(current);
+  const pastNum = Number(past);
+  if (pastNum === 0) return null;
+  const change = ((currentNum - pastNum) / pastNum) * 100;
+  return String(change);
+}
+
 export function sumOfficialQuoteVolume(trades: readonly Trade[], since: number, market: OfficialMarket): QuoteVolume {
   if (!Number.isInteger(since)) throw new Error('Invalid volume time bound');
   const relevant = officialTrades(trades, market).filter((trade) => trade.timestamp >= since);

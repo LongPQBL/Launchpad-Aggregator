@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Address, Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
-import { buildOfficialCandles, compute52WeekHighLow, sumOfficialQuoteVolume, type OfficialMarket } from './aggregate.js';
+import { buildOfficialCandles, compute52WeekHighLow, computePriceChange, sumOfficialQuoteVolume, type OfficialMarket } from './aggregate.js';
 import { formatRational } from './price.js';
 
 const token = '0x1111111111111111111111111111111111111111' as Address;
@@ -71,5 +71,41 @@ describe('compute52WeekHighLow', () => {
       { high: '0.03', low: '0.001' },
     ];
     expect(compute52WeekHighLow(candles)).toEqual({ high: '0.08', low: '0.001' });
+  });
+});
+
+describe('computePriceChange', () => {
+  it('computes a positive percent change between the current price and the price one window ago', () => {
+    const trades = [
+      { timestamp: 1000, price: '1.0' },  // 1h ago (window = 3600)
+      { timestamp: 4600, price: '1.5' },  // now
+    ];
+    expect(computePriceChange(trades, 4600, 3600)).toBe('50');
+  });
+
+  it('computes a negative percent change', () => {
+    const trades = [
+      { timestamp: 1000, price: '2.0' },
+      { timestamp: 4600, price: '1.0' },
+    ];
+    expect(computePriceChange(trades, 4600, 3600)).toBe('-50');
+  });
+
+  it('returns null when there is no trade at or before the window start (e.g. a launch younger than the window)', () => {
+    const trades = [{ timestamp: 4000, price: '1.0' }]; // launched 600s ago, window is 3600s (1h)
+    expect(computePriceChange(trades, 4600, 3600)).toBeNull();
+  });
+
+  it('returns null when there is no trade at all', () => {
+    expect(computePriceChange([], 4600, 3600)).toBeNull();
+  });
+
+  it('uses the latest trade at or before each boundary, not the single closest trade overall', () => {
+    const trades = [
+      { timestamp: 500, price: '0.5' },   // before the window start — this is the "1h ago" price
+      { timestamp: 1000, price: '0.8' },  // still before window start, more recent — this one wins
+      { timestamp: 4600, price: '1.6' },  // now
+    ];
+    expect(computePriceChange(trades, 4600, 3600)).toBe('100'); // (1.6 - 0.8) / 0.8 * 100
   });
 });
