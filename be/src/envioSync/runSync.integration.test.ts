@@ -180,6 +180,7 @@ describe('syncV1LegacyToReal', () => {
       expect(newLaunch.name).toBe('Real');
       expect(newLaunch.sourceLogId).toBeNull();
       expect(newLaunch.launchLogIndex).toBe(6);
+      expect(newLaunch.launchBlockHash).toBe(blockHash);
       expect(newLaunch.lifecycleStatus).toBe('trading');
       const [oldLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, existingToken));
       expect(oldLaunch.sourceLogId).toBe(sourceLogId);

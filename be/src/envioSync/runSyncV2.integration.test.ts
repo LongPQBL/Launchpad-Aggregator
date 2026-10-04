@@ -167,6 +167,7 @@ describe('syncV2ToReal', () => {
       expect(launch.lifecycleStatus).toBe('graduated');
       expect(launch.sourceLogId).toBeNull();
       expect(launch.launchLogIndex).toBe(30);
+      expect(launch.launchBlockHash).toBe(blockHash);
       const [venue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
       expect(venue.sourceId).toBe('pons-v2-curve');
       expect((await db.select().from(trades).where(eq(trades.txHash, tradeTx))).length).toBe(1);

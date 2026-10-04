@@ -135,6 +135,7 @@ export const launches = pgTable('launches', {
   factoryAddress: text('factory_address').notNull(),
   deployerAddress: text('deployer_address').notNull(),
   launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
+  launchBlockHash: text('launch_block_hash'),
   launchTxHash: text('launch_tx_hash').notNull(),
   launchLogIndex: integer('launch_log_index').notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
@@ -168,6 +169,29 @@ export const launches = pgTable('launches', {
   check('launches_socials_read_state_valid', sql`${table.socialsReadState} IN ('pending', 'done')`),
   check('launches_timestamp_read_state_valid', sql`${table.timestampReadState} IN ('pending', 'done')`),
   check('launches_metadata_retry_count_valid', sql`${table.metadataRetryCount} >= 0`),
+]);
+
+export const launchParityReports = pgTable('launch_parity_reports', {
+  sourceId: text('source_id').notNull(),
+  registryVersion: integer('registry_version').notNull(),
+  fromBlock: bigint('from_block', { mode: 'bigint' }).notNull(),
+  toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
+  fenceBlock: bigint('fence_block', { mode: 'bigint' }).notNull(),
+  envioWatermark: bigint('envio_watermark', { mode: 'bigint' }).notNull(),
+  appWatermark: bigint('app_watermark', { mode: 'bigint' }).notNull(),
+  provider: text('provider').notNull(),
+  status: text('status').notNull(),
+  chainCount: integer('chain_count').notNull(),
+  envioCount: integer('envio_count').notNull(),
+  appCount: integer('app_count').notNull(),
+  firstBlock: bigint('first_block', { mode: 'bigint' }),
+  lastBlock: bigint('last_block', { mode: 'bigint' }),
+  details: jsonb('details').notNull(),
+  auditedAt: timestamp('audited_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.sourceId, table.fromBlock, table.toBlock, table.fenceBlock] }),
+  index('launch_parity_reports_latest_idx').on(table.sourceId, table.auditedAt),
+  check('launch_parity_reports_status_valid', sql`${table.status} IN ('complete', 'mismatch', 'pending')`),
 ]);
 
 export const venues = pgTable('venues', {
