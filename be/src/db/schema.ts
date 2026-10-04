@@ -59,6 +59,21 @@ export const quoteUsdFeeds = pgTable('quote_usd_feeds', {
   check('quote_usd_feeds_verification_status_valid', sql`${table.verificationStatus} IN ('verified', 'unverified', 'rejected')`),
 ]);
 
+export const quoteUsdPriceRounds = pgTable('quote_usd_price_rounds', {
+  chainId: integer('chain_id').notNull(),
+  feedAddress: text('feed_address').notNull(),
+  roundId: numeric('round_id', { precision: 30, scale: 0 }).notNull(),
+  answerRaw: numeric('answer_raw', { precision: 78, scale: 0 }).notNull(),
+  decimals: integer('decimals').notNull(),
+  startedAt: integer('started_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  logIndex: integer('log_index').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.feedAddress, table.roundId] }),
+  index('quote_usd_price_rounds_position_idx').on(table.chainId, table.feedAddress, table.blockNumber, table.logIndex),
+]);
+
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),
