@@ -40,6 +40,20 @@ describe('Envio schema migration', () => {
   });
 });
 
+describe('launches.launch_timestamp is bigint (minor-quality-fixes spec)', () => {
+  it('persists a value above the int4 maximum', async () => {
+    await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, source_log_id, name, symbol,
+      token_decimals, platform, protocol_version, factory_address, deployer_address, launch_block,
+      launch_tx_hash, launch_log_index, quote_asset_address, quote_asset_symbol, quote_asset_decimals,
+      lifecycle_status, launch_timestamp)
+      VALUES (4663,$1,$2,NULL,'BigTs','BigTs',18,'pons','v1',$1,$1,1,$3,9,$1,'ETH',18,'trading',5000000000)
+      ON CONFLICT (chain_id, token_address) DO UPDATE SET launch_timestamp = excluded.launch_timestamp`,
+    [token, sourceId, txHash]);
+    const result = await pool.query('SELECT launch_timestamp FROM launches WHERE token_address = $1', [token]);
+    expect(Number(result.rows[0].launch_timestamp)).toBe(5_000_000_000);
+  });
+});
+
 describe('envio_chain_progress table (final review, Important 3)', () => {
   it('accepts an upsert of the chain head block Envio has observed', async () => {
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 9999');

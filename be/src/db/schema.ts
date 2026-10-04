@@ -147,7 +147,7 @@ export const launches = pgTable('launches', {
   description: text('description'),
   websiteUrl: text('website_url'),
   twitterUrl: text('twitter_url'),
-  launchTimestamp: integer('launch_timestamp'),
+  launchTimestamp: bigint('launch_timestamp', { mode: 'number' }),
   logoReadState: text('logo_read_state').notNull().default('pending'),
   descriptionReadState: text('description_read_state').notNull().default('pending'),
   socialsReadState: text('socials_read_state').notNull().default('pending'),

@@ -1,0 +1,1 @@
+ALTER TABLE "launches" ALTER COLUMN "launch_timestamp" SET DATA TYPE bigint;
