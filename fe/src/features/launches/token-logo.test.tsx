@@ -46,4 +46,16 @@ describe('TokenLogo', () => {
 
     expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
   });
+
+  it('falls back to the placeholder for a malformed logo URI', () => {
+    render(<TokenLogo logoUri="javascript:alert(1)" symbol="TKA" />);
+    expect(screen.queryByRole('img', { name: /token logo/i })).not.toBeInTheDocument();
+    expect(screen.getByText('T')).toBeInTheDocument();
+  });
+
+  it('falls back to the placeholder for an empty ipfs:// CID', () => {
+    render(<TokenLogo logoUri="ipfs://" symbol="TKA" />);
+    expect(screen.queryByRole('img', { name: /token logo/i })).not.toBeInTheDocument();
+    expect(screen.getByText('T')).toBeInTheDocument();
+  });
 });

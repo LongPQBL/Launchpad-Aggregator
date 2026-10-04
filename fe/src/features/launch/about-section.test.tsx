@@ -57,3 +57,22 @@ describe('AboutSection copy-address control', () => {
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
   });
 });
+
+describe('AboutSection website/Twitter link validation', () => {
+  it('hides the website pill for an invalid URL and shows it for a valid one', () => {
+    const { rerender } = render(<AboutSection {...baseProps} websiteUrl="javascript:alert(1)" />);
+    expect(screen.queryByRole('link', { name: 'Website' })).not.toBeInTheDocument();
+    rerender(<AboutSection {...baseProps} websiteUrl="https://example.com" />);
+    expect(screen.getByRole('link', { name: 'Website' })).toHaveAttribute('href', 'https://example.com');
+  });
+
+  it('keeps any valid http(s) Twitter URL without requiring an x.com/twitter.com host', () => {
+    render(<AboutSection {...baseProps} twitterUrl="https://some-other-domain.example/profile" />);
+    expect(screen.getByRole('link', { name: 'Twitter' })).toHaveAttribute('href', 'https://some-other-domain.example/profile');
+  });
+
+  it('hides the Twitter pill for a malformed URL', () => {
+    render(<AboutSection {...baseProps} twitterUrl="not a url" />);
+    expect(screen.queryByRole('link', { name: 'Twitter' })).not.toBeInTheDocument();
+  });
+});

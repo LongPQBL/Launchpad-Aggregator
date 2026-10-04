@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { isHttpUrl } from '@/api/url';
 import { cn } from '@/lib/utils';
 
 export interface AboutSectionProps {
@@ -72,8 +73,8 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
           </span>
         )}
         <Pill href={explorerUrl}>Robinhood Explorer</Pill>
-        {websiteUrl !== null && <Pill href={websiteUrl}>Website</Pill>}
-        {twitterUrl !== null && <Pill href={twitterUrl}>Twitter</Pill>}
+        {websiteUrl !== null && isHttpUrl(websiteUrl) && <Pill href={websiteUrl}>Website</Pill>}
+        {twitterUrl !== null && isHttpUrl(twitterUrl) && <Pill href={twitterUrl}>Twitter</Pill>}
       </div>
     </div>
   );
