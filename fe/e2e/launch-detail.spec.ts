@@ -27,14 +27,17 @@ test('renders the official chart without crashing on the BE\'s real (newest-firs
   await expect(chartCanvas).toBeVisible();
 });
 
-test('shows no wallet-connect or trade-execution controls on the detail page', async ({ page }) => {
-  // Scoped to <main> (AppShell's content landmark) so Next's own dev-mode toolbar button,
-  // which lives outside it, is not mistaken for an in-app trading/wallet control. The About
-  // section's own "copy address"/"show more" buttons are legitimate non-wallet controls (added
-  // this session) — matched by name instead of asserting zero buttons on the page.
+test('the header offers wallet connection while the read-only detail content has no trade-execution controls', async ({ page }) => {
+  // <header> is a direct child of the page's top-level wrapper (not nested in <main>), so it has
+  // the implicit 'banner' landmark role — this is where AppShell renders WalletControl.
+  await expect(page.getByRole('banner').getByRole('button', { name: /connect wallet/i })).toBeVisible();
+
+  // <main> is the read-only detail content. About's own copy-address/show-more/show-less buttons
+  // are legitimate utility controls and must stay allowed; only buy/sell/swap execution verbs are
+  // forbidden here — unlike a broader "trade" substring, which would wrongly flag a future
+  // non-executing label like a "View trade" link in the trade-history table.
   const appContent = page.getByRole('main');
-  await expect(appContent.getByRole('button', { name: /wallet|connect|buy|sell|trade|swap/i })).toHaveCount(0);
-  await expect(appContent.getByText(/wallet|connect wallet|kết nối ví/i)).toHaveCount(0);
+  await expect(appContent.getByRole('button', { name: /buy|sell|swap/i })).toHaveCount(0);
 });
 
 test('shows and expands Show more for a long description at both mobile and desktop widths', async ({ page }) => {
