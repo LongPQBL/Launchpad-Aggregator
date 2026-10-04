@@ -1,6 +1,6 @@
 import { chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
-import { launchHref, type LaunchPage, type LaunchSummary, type Source } from '@/api/client';
+import { launchHref, type LaunchPage, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -22,7 +22,6 @@ const LIFECYCLE_STATUSES = ['trading', 'swept', 'graduated', 'rescued'] as const
 const TABS = [
   { value: 'all', label: 'All' },
   { value: 'recent', label: 'Recently launched' },
-  { value: 'trending', label: 'Trending' },
 ] as const;
 
 interface CurrentFilters {
@@ -52,19 +51,6 @@ function nextPageHref(cursor: string, current: CurrentFilters): string {
   if (current.platform) params.set('platform', current.platform);
   if (current.tab && current.tab !== 'all') params.set('tab', current.tab);
   return `/?${params.toString()}`;
-}
-
-// Nulls sort last regardless of direction — a launch with no 1H trade data is not "0% change",
-// it's unranked (Review Focus: never fabricate a value to make sorting work).
-function sortByTrending(items: readonly LaunchSummary[]): readonly LaunchSummary[] {
-  return [...items].sort((a, b) => {
-    const left = a.change1h === null ? null : Number(a.change1h);
-    const right = b.change1h === null ? null : Number(b.change1h);
-    if (left === null && right === null) return 0;
-    if (left === null) return 1;
-    if (right === null) return -1;
-    return right - left;
-  });
 }
 
 function formatPercentChange(value: string | null): { text: string; className: string } {
@@ -104,8 +90,10 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
   const current: CurrentFilters = { chainId, search, status, platform, tab };
   const chainIds = [...new Set(sources.map((source) => source.chainId))];
   const platforms = [...new Set(sources.map((source) => source.platform))];
-  const activeTab = tab ?? 'all';
-  const items = activeTab === 'trending' ? sortByTrending(page.items) : page.items;
+  // A stale ?tab=trending link (client-side Trending sort was removed — ranking is now
+  // server-side via `sort`) must resolve to the All tab, not silently show no active tab.
+  const activeTab = TABS.some((t) => t.value === tab) ? tab! : 'all';
+  const items = page.items;
 
   return (
     <div className="flex flex-col gap-4">
@@ -222,8 +210,8 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
                 <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
                   {formatUsd(launch.fdvUsd)}
                 </div>
-                <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                  {formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                <div role="cell" title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
+                  {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
                 </div>
                 <div role="cell" title={tvlTooltip(launch)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
                   {formatUsd(launch.tvlUsd)}

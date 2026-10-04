@@ -33,6 +33,8 @@ const launchSummary = {
   launchTimestamp: null,
   change1h: null,
   change1d: null,
+  officialVolume24hUsd: null,
+  officialVolume24hUsdApprox: false,
 };
 
 const launchDetail = {

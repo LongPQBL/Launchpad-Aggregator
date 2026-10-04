@@ -18,6 +18,7 @@ export interface LaunchQuery {
   search?: string;
   status?: string;
   platform?: string;
+  sort?: 'volume24hUsd' | 'recent';
 }
 
 // be/src/api/routes/sources.ts registers no Fastify response schema, so this shape is absent
@@ -72,6 +73,7 @@ export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
     search: query.search,
     status: query.status,
     platform: query.platform,
+    sort: query.sort,
   });
 }
 

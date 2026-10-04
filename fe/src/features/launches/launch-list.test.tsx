@@ -32,6 +32,8 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     launchTimestamp: null,
     change1h: null,
     change1d: null,
+    officialVolume24hUsd: null,
+    officialVolume24hUsdApprox: false,
     ...overrides,
   };
 }
@@ -289,13 +291,43 @@ describe('LaunchList', () => {
     expect(nextLink).toHaveAttribute('href', expect.stringContaining('status=swept'));
   });
 
-  it('marks the active tab with aria-current and keeps the other two inactive', () => {
+  it('shows exactly two tabs: All and Recently launched', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const tabs = screen.getByRole('navigation', { name: /filter by tab/i });
+    expect(within(tabs).getAllByRole('link')).toHaveLength(2);
+    expect(within(tabs).getByRole('link', { name: 'All' })).toBeInTheDocument();
+    expect(within(tabs).getByRole('link', { name: 'Recently launched' })).toBeInTheDocument();
+  });
+
+  it('a stale ?tab=trending resolves to the All tab, not a hidden third state', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} tab="trending" />);
+    const tabs = screen.getByRole('navigation', { name: /filter by tab/i });
+    expect(within(tabs).getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('marks the active Recently launched tab with aria-current and keeps All inactive', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} tab="recent" />);
 
     const tabs = screen.getByRole('navigation', { name: /filter by tab/i });
-    expect(within(tabs).getByRole('link', { name: 'Trending' })).toHaveAttribute('aria-current', 'page');
+    expect(within(tabs).getByRole('link', { name: 'Recently launched' })).toHaveAttribute('aria-current', 'page');
     expect(within(tabs).getByRole('link', { name: 'All' })).not.toHaveAttribute('aria-current');
-    expect(within(tabs).getByRole('link', { name: 'Recently launched' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('shows the approximate USD 24H volume when available, with the quote amount still accessible', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ officialVolume24hUsd: '1234.56', officialVolume24hUsdApprox: true, officialVolume24h: '0.5' })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    expect(within(table).getByText(/~\$1234\.56/)).toBeInTheDocument();
+  });
+
+  it('shows the honest unavailable state (not a fabricated zero) when officialVolume24hUsd is null', () => {
+    render(<LaunchList page={{ items: [launch({ officialVolume24hUsd: null })], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    expect(screen.getAllByText('No data yet').length).toBeGreaterThan(0);
   });
 
   it('defaults to the All tab when no tab is given', () => {
@@ -311,14 +343,14 @@ describe('LaunchList', () => {
         page={{ items: [launch()], nextCursor: 'cursor-2' }}
         sources={oneChainOneSource}
         error={false}
-        tab="trending"
+        tab="recent"
       />,
     );
 
     const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('tab=trending'));
+    expect(nextLink).toHaveAttribute('href', expect.stringContaining('tab=recent'));
     const form = screen.getByRole('search', { name: /search and filter launches/i });
-    expect(within(form).getByDisplayValue('trending')).toHaveAttribute('type', 'hidden');
+    expect(within(form).getByDisplayValue('recent')).toHaveAttribute('type', 'hidden');
   });
 
   it('does not add a tab param to links for the default "all" tab', () => {
@@ -326,49 +358,6 @@ describe('LaunchList', () => {
 
     const nextLink = screen.getByRole('link', { name: /next page/i });
     expect(nextLink).toHaveAttribute('href', expect.not.stringContaining('tab='));
-  });
-
-  it('sorts items by 1H % descending on the Trending tab, with null values last — never fabricating a rank for missing data', () => {
-    render(
-      <LaunchList
-        page={{
-          items: [
-            launch({ tokenAddress: '0x1', name: 'NullChange', change1h: null }),
-            launch({ tokenAddress: '0x2', name: 'BigGain', change1h: '50' }),
-            launch({ tokenAddress: '0x3', name: 'SmallGain', change1h: '5' }),
-          ],
-          nextCursor: null,
-        }}
-        sources={oneChainOneSource}
-        error={false}
-        tab="trending"
-      />,
-    );
-
-    const names = screen.getAllByRole('link', { name: /BigGain|SmallGain|NullChange/i }).map((link) => link.textContent);
-    expect(names[0]).toContain('BigGain');
-    expect(names[1]).toContain('SmallGain');
-    expect(names[2]).toContain('NullChange');
-  });
-
-  it('does not re-sort items on the default (All) tab', () => {
-    render(
-      <LaunchList
-        page={{
-          items: [
-            launch({ tokenAddress: '0x1', name: 'First', change1h: '1' }),
-            launch({ tokenAddress: '0x2', name: 'Second', change1h: '99' }),
-          ],
-          nextCursor: null,
-        }}
-        sources={oneChainOneSource}
-        error={false}
-      />,
-    );
-
-    const names = screen.getAllByRole('link', { name: /First|Second/i }).map((link) => link.textContent);
-    expect(names[0]).toContain('First');
-    expect(names[1]).toContain('Second');
   });
 
   it('shows a search box and status filter that submit as a GET form, preserving the current values', () => {

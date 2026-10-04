@@ -70,6 +70,8 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     launchTimestamp: null,
     change1h: null,
     change1d: null,
+    officialVolume24hUsd: null,
+    officialVolume24hUsdApprox: false,
     ...overrides,
   };
 }
@@ -89,6 +91,7 @@ function trade(overrides: Partial<Trade> = {}): Trade {
     traderAddress: '0xtrader',
     usdValue: null,
     usdValueApprox: false,
+    usdValueStatus: 'unavailable',
     ...overrides,
   };
 }

@@ -32,8 +32,10 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   let sources: readonly Source[] = [];
   let error = false;
 
+  const sort = tab === 'recent' ? 'recent' : 'volume24hUsd';
+
   try {
-    const [launchesResult, sourcesResult] = await Promise.all([getLaunches({ cursor, chainId, search, status, platform }), getSources()]);
+    const [launchesResult, sourcesResult] = await Promise.all([getLaunches({ cursor, chainId, search, status, platform, sort }), getSources()]);
     page = launchesResult;
     sources = sourcesResult.items;
   } catch {
