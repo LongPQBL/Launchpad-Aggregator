@@ -5,6 +5,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
+import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
@@ -56,6 +57,10 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
     websiteUrl: row.website_url === null || row.website_url === undefined ? null : string(row.website_url),
     twitterUrl: row.twitter_url === null || row.twitter_url === undefined ? null : string(row.twitter_url),
     launchTimestamp: row.launch_timestamp === null || row.launch_timestamp === undefined ? null : string(row.launch_timestamp),
+    // Only sort=volume24hUsd computes these (listLaunchesByVolume overrides them on its own
+    // returned items) — every other path (recency list, getLaunch) stays honestly null rather
+    // than paying for a global-ranking-shaped computation it doesn't need.
+    officialVolume24hUsd: null, officialVolume24hUsdApprox: false,
     ...stats,
   };
 }
@@ -173,6 +178,131 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     if (number(phaseResult.rows[0]?.count) > 0) pendingSourceIds.push('pons-v2-phase');
     return { complete: pendingSourceIds.length === 0 && missingRanges.length === 0, pendingSourceIds, missingRanges };
   }
+
+  async function listLaunchesByVolume(query: LaunchListQuery): Promise<Page<LaunchSummary>> {
+    const secret = process.env.VOLUME_CURSOR_SECRET;
+    if (!secret) throw new Error('VOLUME_CURSOR_SECRET is required to use sort=volume24hUsd');
+    const head = await safeHead();
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const cursorValue = query.cursor ? decodeVolumeCursor(query.cursor, secret, nowSeconds) : null;
+    const asOf = cursorValue?.asOf ?? nowSeconds;
+    const since = asOf - 86_400;
+
+    // Base set: every launch matching the filters, with its coverage-complete flag (reuses the
+    // existing per-launch coverage rule used by the recency path — same semantics, just no
+    // pagination predicate here, since the final order depends on volume, not launch position).
+    const baseResult = await pool.query(`
+      SELECT l.*, l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
+        ${launchCoverageSql(5)} AS launch_coverage_complete
+      FROM launches l JOIN sources s ON s.id = l.source_id
+      WHERE ($1::integer IS NULL OR l.chain_id = $1) AND ($2::text IS NULL OR l.platform = $2)
+        AND ($3::text IS NULL OR l.lifecycle_status = $3)
+        AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')
+    `, [query.chainId ?? null, query.platform ?? null, query.status ?? null, query.search ?? null, head?.toString() ?? null]);
+    const launchRows = baseResult.rows as Row[];
+
+    // Per-trade historical USD valuation for every official trade of every matching launch in the
+    // window — one LATERAL join against quote_usd_price_rounds, deliberately mirroring
+    // tradeValuation.ts's valueTradeUsd selection logic exactly (round at or before the trade's own
+    // (blockNumber, logIndex), rejected if stale) so the two never disagree. If this ever needs to
+    // change, change valueTradeUsd's math and this query in the same commit.
+    const tradesResult = await pool.query(`
+      SELECT l.chain_id, l.token_address, l.quote_asset_decimals, t.quote_amount_raw, t.block_number, t.log_index, t.timestamp,
+        f.feed_address, r.answer_raw, r.decimals AS price_decimals, r.updated_at AS price_updated_at
+      FROM launches l
+      JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true
+      JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
+        AND t.timestamp >= $1 AND t.timestamp <= $2
+      LEFT JOIN quote_usd_feeds f ON f.chain_id = l.chain_id AND f.quote_asset_address = l.quote_asset_address AND f.verification_status = 'verified'
+      LEFT JOIN LATERAL (
+        SELECT answer_raw, decimals, updated_at FROM quote_usd_price_rounds
+        WHERE chain_id = f.chain_id AND feed_address = f.feed_address AND (block_number, log_index) <= (t.block_number, t.log_index)
+        ORDER BY block_number DESC, log_index DESC LIMIT 1
+      ) r ON true
+      WHERE ($3::integer IS NULL OR l.chain_id = $3) AND ($4::text IS NULL OR l.platform = $4)
+        AND ($5::text IS NULL OR l.lifecycle_status = $5) AND ($6::text IS NULL OR l.name ILIKE '%' || $6 || '%' OR l.symbol ILIKE '%' || $6 || '%')
+    `, [since, asOf, query.chainId ?? null, query.platform ?? null, query.status ?? null, query.search ?? null]);
+
+    interface VolumeAgg { usdTotal: number; hasUnpriced: boolean; hasTrades: boolean }
+    const byLaunch = new Map<string, VolumeAgg>();
+    for (const row of tradesResult.rows as Row[]) {
+      const key = `${number(row.chain_id)}:${string(row.token_address)}`;
+      const agg = byLaunch.get(key) ?? { usdTotal: 0, hasUnpriced: false, hasTrades: false };
+      agg.hasTrades = true;
+      if (row.feed_address === null || row.answer_raw === null) {
+        agg.hasUnpriced = true;
+      } else {
+        const ageSeconds = number(row.timestamp) - number(row.price_updated_at);
+        if (ageSeconds < 0 || ageSeconds > 86_400) {
+          agg.hasUnpriced = true;
+        } else {
+          const quoteAmount = Number(formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)));
+          const priceUsd = Number(string(row.answer_raw)) / 10 ** number(row.price_decimals);
+          agg.usdTotal += quoteAmount * priceUsd;
+        }
+      }
+      byLaunch.set(key, agg);
+    }
+
+    interface RankedLaunch { row: Row; complete: boolean; usd: string | null; approx: boolean }
+    function rankCategory(usd: string | null): 'positive' | 'zero' | 'null' {
+      return usd === null ? 'null' : Number(usd) > 0 ? 'positive' : 'zero';
+    }
+    const categoryOrder = { positive: 0, zero: 1, null: 2 } as const;
+
+    const ranked: RankedLaunch[] = launchRows.map((row) => {
+      const complete = Boolean(row.launch_coverage_complete);
+      const agg = byLaunch.get(`${number(row.chain_id)}:${string(row.token_address)}`);
+      if (!complete) return { row, complete, usd: null, approx: false };
+      if (!agg || !agg.hasTrades) return { row, complete, usd: '0', approx: false };
+      if (agg.hasUnpriced) return { row, complete, usd: null, approx: false };
+      return { row, complete, usd: agg.usdTotal.toString(), approx: true };
+    });
+
+    ranked.sort((a, b) => {
+      const catA = rankCategory(a.usd);
+      const catB = rankCategory(b.usd);
+      if (categoryOrder[catA] !== categoryOrder[catB]) return categoryOrder[catA] - categoryOrder[catB];
+      if (catA === 'positive') {
+        const diff = Number(b.usd) - Number(a.usd);
+        if (diff !== 0) return diff;
+      }
+      const blockA = BigInt(string(a.row.block_number));
+      const blockB = BigInt(string(b.row.block_number));
+      if (blockA !== blockB) return blockA > blockB ? -1 : 1;
+      const txCompare = string(b.row.tx_hash).localeCompare(string(a.row.tx_hash));
+      if (txCompare !== 0) return txCompare;
+      return number(b.row.log_index) - number(a.row.log_index);
+    });
+
+    let startIndex = 0;
+    if (cursorValue) {
+      const pinnedIndex = ranked.findIndex((item) =>
+        rankCategory(item.usd) === cursorValue.rankCategory && (item.usd ?? null) === cursorValue.rankValue
+        && string(item.row.block_number) === cursorValue.tiebreakBlockNumber && string(item.row.tx_hash) === cursorValue.tiebreakTxHash
+        && number(item.row.log_index) === cursorValue.tiebreakLogIndex);
+      if (pinnedIndex === -1) throw new Error('Invalid cursor');
+      startIndex = pinnedIndex + 1;
+    }
+    const slice = ranked.slice(startIndex, startIndex + query.limit + 1);
+    const included = slice.slice(0, query.limit);
+    const last = included.at(-1);
+    const nextCursor = slice.length > query.limit && last
+      ? encodeVolumeCursor({ version: 1, sort: 'volume24hUsd', asOf, rankCategory: rankCategory(last.usd), rankValue: last.usd,
+        tiebreakBlockNumber: string(last.row.block_number), tiebreakTxHash: string(last.row.tx_hash), tiebreakLogIndex: number(last.row.log_index) }, secret)
+      : null;
+
+    const statsByToken = new Map(await Promise.all(included.map(async (item) =>
+      [string(item.row.token_address), await computeStats(pool, rpcClient, item.row, item.complete)] as const)));
+    return {
+      items: included.map((item) => ({
+        ...summary(item.row, item.complete, statsByToken.get(string(item.row.token_address)) ?? NULL_STATS),
+        officialVolume24hUsd: item.usd, officialVolume24hUsdApprox: item.approx,
+      })),
+      nextCursor,
+    };
+  }
+
   return {
     async listSources() {
       const result = await pool.query('SELECT id, chain_id, version FROM sources ORDER BY id');
@@ -181,6 +311,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     getCoverage: coverage,
     async listLaunches(query: LaunchListQuery) {
+      if (query.sort === 'volume24hUsd') return listLaunchesByVolume(query);
       const head = await safeHead();
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       const since = Math.floor(Date.now() / 1000) - 86_400;

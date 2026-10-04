@@ -23,12 +23,27 @@ function listQuery(value: Record<string, string | undefined>): { limit: number; 
 }
 
 function launchListQuery(value: Record<string, string | undefined>): LaunchListQuery | null {
-  const base = listQuery(value);
-  if (!base) return null;
+  const requested = value.limit === undefined ? 50 : Number(value.limit);
+  if (!Number.isSafeInteger(requested) || requested < 1) return null;
+  const id = value.chainId === undefined ? undefined : chainId(value.chainId);
+  if (id === null) return null;
   const search = value.search?.trim();
   if (value.status !== undefined && !LIFECYCLE_STATUSES.has(value.status)) return null;
   const platform = value.platform?.trim();
-  return { ...base, ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}), ...(platform ? { platform } : {}) };
+  if (value.sort !== undefined && value.sort !== 'volume24hUsd' && value.sort !== 'recent') return null;
+  const sort = value.sort as 'volume24hUsd' | 'recent' | undefined;
+  // The signed volume24hUsd cursor has a completely different shape (HMAC-signed payload, not the
+  // 3-field block/tx/log cursor every other list endpoint uses) and is validated by the store layer
+  // (decodeVolumeCursor) against VOLUME_CURSOR_SECRET, not here — this route-level check only
+  // applies to the plain recency cursor format.
+  if (value.cursor && sort !== 'volume24hUsd') {
+    try { decodeCursor(value.cursor); } catch { return null; }
+  }
+  return {
+    limit: Math.min(requested, 100), ...(value.cursor ? { cursor: value.cursor } : {}), ...(id ? { chainId: id } : {}),
+    ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}), ...(platform ? { platform } : {}),
+    ...(sort ? { sort } : {}),
+  };
 }
 
 function tokenParams(value: { chainId: string; tokenAddress: string }): { chainId: number; tokenAddress: string } | null {

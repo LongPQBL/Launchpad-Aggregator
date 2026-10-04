@@ -150,6 +150,13 @@
                           "change1d": {
                             "type": "string",
                             "nullable": true
+                          },
+                          "officialVolume24hUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "officialVolume24hUsdApprox": {
+                            "type": "boolean"
                           }
                         }
                       }
@@ -303,6 +310,13 @@
                     "change1d": {
                       "type": "string",
                       "nullable": true
+                    },
+                    "officialVolume24hUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "officialVolume24hUsdApprox": {
+                      "type": "boolean"
                     },
                     "officialVenues": {
                       "type": "array",

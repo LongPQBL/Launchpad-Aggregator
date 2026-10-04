@@ -20,6 +20,7 @@ export interface LaunchSummary {
   week52High: string | null; week52Low: string | null;
   logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null;
   launchTimestamp: string | null; change1h: string | null; change1d: string | null;
+  officialVolume24hUsd: string | null; officialVolume24hUsdApprox: boolean;
 }
 export interface LaunchDetail extends LaunchSummary {
   officialVenues: readonly { id: string; kind: string; ref: string; effectiveFromBlock: string; effectiveToBlock: string | null }[];
@@ -35,7 +36,7 @@ export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
-export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string }
+export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string; sort?: 'volume24hUsd' | 'recent' }
 
 export interface ApiDeps {
   feOrigin: string;

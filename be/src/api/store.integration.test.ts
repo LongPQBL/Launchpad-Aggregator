@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { __resetUsdPriceCacheForTests } from '../market/usdPricing.js';
+import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
+import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
 import { createApiStore } from './store.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -401,5 +403,109 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     // produce a non-null change1h/1d (no trade exists one window further back).
     expect(detail?.change1h).toBeNull();
     expect(detail?.change1d).toBeNull();
+  });
+});
+
+describe('listLaunches sort=volume24hUsd (global ranking)', () => {
+  const rankSource = 'volume-rank-test-source';
+  const rankQuote = '0xranka000000000000000000000000000000001';
+  const rankFeed = '0xrankfeed00000000000000000000000000f002';
+  const launchA = '0xa0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0'; // $300
+  const launchB = '0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0'; // $100
+  const launchC = '0xc0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0'; // zero trades, complete -> "0"
+  const launchD = '0xd0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0'; // one trade, no round at its position -> null
+  const rankBlockHash = '0x' + '9'.repeat(64);
+  let rankNow: number;
+
+  beforeAll(async () => {
+    rankNow = Math.floor(Date.now() / 1000);
+    for (const id of [rankSource, `${rankSource}-trades`]) {
+      await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+        VALUES ($1,4663,'v1',$2,0,0,2000,'caught_up') ON CONFLICT DO NOTHING`, [id, launchA]);
+    }
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (4663, 2000)
+      ON CONFLICT (chain_id) DO UPDATE SET head_block = 2000`);
+    for (const [i, token] of [launchA, launchB, launchC, launchD].entries()) {
+      await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,name,symbol,token_decimals,
+        platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+        quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+        VALUES (4663,$1,$2,$3,$3,18,'pons','v1',$1,$1,$4,$5,0,$6,'RANK',18,'trading') ON CONFLICT DO NOTHING`,
+      [token, rankSource, ['A', 'B', 'C', 'D'][i], (2000 + i).toString(), '0x' + `r${i}`.repeat(32), rankQuote]);
+      const venueId = `4663:v3_pool:${token}`;
+      await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,effective_from_block,official)
+        VALUES ($1,4663,$2,'v3_pool',$2,$3,1,true) ON CONFLICT (id) DO NOTHING`, [venueId, token, rankSource]);
+    }
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: rankQuote, feedAddress: rankFeed,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
+    await upsertPriceRounds(pool, 4663, rankFeed, [
+      { roundId: 1n, answerRaw: 100_000_000n, decimals: 8, startedAt: rankNow - 200, updatedAt: rankNow - 200, blockNumber: 1000n, logIndex: 0 },
+    ]);
+    // A: one trade, 300 quote units @ $1 = $300. Block 1001 (after the round) so it's priced.
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,1001,$3,$4,0,$5,'buy','1','300000000000000000000',$6,'V3Swap','user_trade',$1)`,
+    [launchA, `4663:v3_pool:${launchA}`, rankBlockHash, '0x' + 'ea'.repeat(32), rankNow - 100, rankQuote]);
+    // B: one trade, 100 quote units @ $1 = $100.
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,1001,$3,$4,0,$5,'buy','1','100000000000000000000',$6,'V3Swap','user_trade',$1)`,
+    [launchB, `4663:v3_pool:${launchB}`, rankBlockHash, '0x' + 'eb'.repeat(32), rankNow - 100, rankQuote]);
+    // D: one trade, but at block 500 — BEFORE the round (block 1000), so findRoundAtOrBefore finds nothing.
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,500,$3,$4,0,$5,'buy','1','50000000000000000000',$6,'V3Swap','user_trade',$1)`,
+    [launchD, `4663:v3_pool:${launchD}`, rankBlockHash, '0x' + 'ed'.repeat(32), rankNow - 100, rankQuote]);
+  });
+
+  afterAll(async () => {
+    for (const token of [launchA, launchB, launchC, launchD]) {
+      await pool.query('DELETE FROM trades WHERE token_address = $1', [token]);
+      await pool.query('DELETE FROM venues WHERE token_address = $1', [token]);
+      await pool.query('DELETE FROM launches WHERE token_address = $1', [token]);
+    }
+    await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[rankSource, `${rankSource}-trades`]]);
+    await pool.query('DELETE FROM quote_usd_feeds WHERE quote_asset_address = $1', [rankQuote]);
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE feed_address = $1', [rankFeed]);
+    await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
+  });
+
+  it('ranks launches by real USD volume descending, not by raw quote-unit amounts across different quote assets', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
+    const ranked = page.items.filter((item) => [launchA, launchB, launchC, launchD].includes(item.tokenAddress));
+    expect(ranked.map((item) => item.tokenAddress)).toEqual([launchA, launchB, launchC, launchD]);
+  });
+
+  it('gives a known zero-trade launch with complete coverage a real "0", never null', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
+    const zero = page.items.find((item) => item.tokenAddress === launchC);
+    expect(zero?.officialVolume24hUsd).toBe('0');
+    expect(zero?.officialVolume24hUsdApprox).toBe(false);
+  });
+
+  it('gives a launch with a positive trade but a missing historical round a null rank, never an understated partial sum', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
+    const partial = page.items.find((item) => item.tokenAddress === launchD);
+    expect(partial?.officialVolume24hUsd).toBeNull();
+  });
+
+  it('computes the correct real USD totals for the positive-volume launches', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
+    expect(page.items.find((item) => item.tokenAddress === launchA)?.officialVolume24hUsd).toBe('300');
+    expect(page.items.find((item) => item.tokenAddress === launchB)?.officialVolume24hUsd).toBe('100');
+  });
+
+  it('paginates with a signed cursor distinct from the recency cursor, and rejects a cursor used with the wrong sort', async () => {
+    const first = await store.listLaunches({ limit: 1, chainId: 4663, sort: 'volume24hUsd' });
+    expect(first.nextCursor).not.toBeNull();
+    const second = await store.listLaunches({ limit: 1, chainId: 4663, sort: 'volume24hUsd', cursor: first.nextCursor! });
+    expect(second.items[0]?.tokenAddress).not.toBe(first.items[0]?.tokenAddress);
+    await expect(store.listLaunches({ limit: 1, chainId: 4663, sort: 'recent', cursor: first.nextCursor! })).rejects.toThrow();
+  });
+
+  it('keeps sort=recent (default) unaffected by the new ranking fields', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663 });
+    const a = page.items.find((item) => item.tokenAddress === launchA);
+    expect(a?.officialVolume24hUsd).toBeNull();
+    expect(a?.officialVolume24hUsdApprox).toBe(false);
   });
 });

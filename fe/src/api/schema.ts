@@ -125,6 +125,8 @@ export interface paths {
                                 launchTimestamp?: string | null;
                                 change1h?: string | null;
                                 change1d?: string | null;
+                                officialVolume24hUsd?: string | null;
+                                officialVolume24hUsdApprox?: boolean;
                             }[];
                             nextCursor?: string | null;
                         };
@@ -197,6 +199,8 @@ export interface paths {
                             launchTimestamp?: string | null;
                             change1h?: string | null;
                             change1d?: string | null;
+                            officialVolume24hUsd?: string | null;
+                            officialVolume24hUsdApprox?: boolean;
                             officialVenues?: {
                                 id?: string;
                                 kind?: string;

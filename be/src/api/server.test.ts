@@ -12,6 +12,7 @@ const launch = {
   week52High: null, week52Low: null,
   logoUri: null, description: null, websiteUrl: null, twitterUrl: null, launchTimestamp: null,
   change1h: null, change1d: null,
+  officialVolume24hUsd: null, officialVolume24hUsdApprox: false,
 };
 
 function data() {
