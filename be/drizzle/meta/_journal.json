@@ -134,6 +134,13 @@
       "when": 1790850913094,
       "tag": "0018_volatile_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791100739526,
+      "tag": "0019_wakeful_spencer_smythe",
+      "breakpoints": true
     }
   ]
 }

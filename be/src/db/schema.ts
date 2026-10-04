@@ -78,6 +78,11 @@ export const launches = pgTable('launches', {
   lifecycleStatus: text('lifecycle_status').notNull(),
   v4PoolFee: integer('v4_pool_fee'),
   v4TickSpacing: integer('v4_tick_spacing'),
+  logoUri: text('logo_uri'),
+  description: text('description'),
+  websiteUrl: text('website_url'),
+  twitterUrl: text('twitter_url'),
+  launchTimestamp: integer('launch_timestamp'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
