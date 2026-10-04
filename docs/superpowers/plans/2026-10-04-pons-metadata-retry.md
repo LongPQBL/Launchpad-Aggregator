@@ -4,7 +4,7 @@
 
 **Goal:** Persist new launches through optional RPC failures and eventually fill missing Pons metadata and launch timestamps, including historical rows.
 
-**Architecture:** Four per-function read states and retry/lease fields live on `launches`. A typed reader distinguishes terminal contract failures from retryable RPC failures. A DB-backed minute budget lets one bounded worker claim due rows across all processes, read only pending functions, and update the same launch identity; both indexer modes and Envio real sync drive it.
+**Architecture:** Four per-function read states and retry/lease fields live on `launches`. A typed reader distinguishes terminal contract failures from retryable RPC failures. A DB-backed minute budget lets one bounded worker claim due rows across all processes, read only pending functions, and update the same launch identity; the Envio real-table sync loop and one-shot command drive it.
 
 **Tech Stack:** Node.js >=24, TypeScript, viem, PostgreSQL, Drizzle, Vitest.
 
@@ -37,7 +37,7 @@
 - `be/src/launchpads/pons/metadataEnrichmentStore.ts`: bounded, fair DB claim and fenced update.
 - `be/src/launchpads/pons/metadataEnrichment.ts`: one-pass RPC worker and retry timing.
 - `be/src/envioSync/runSync.ts`, `runSyncV2.ts`: persist immediate read states alongside new Envio launches.
-- `be/src/cli/runFactoryIndexer.ts`, `syncEnvioStagingLoop.ts`: run enrichment without coupling its failures to indexing.
+- `be/src/cli/syncEnvioStagingLoop.ts`, `syncEnvioStaging.ts`: run enrichment with Envio real-table sync without coupling failures to indexing.
 
 ### Task 1: Persist metadata read state
 
@@ -87,18 +87,18 @@
 - [ ] **Step 4: Verify.** Targeted integration tests, Task 2 unit test, and `cd be && npm run typecheck` pass.
 - [ ] **Step 5: Commit.** `git add be/src/envioSync/runSync.ts be/src/envioSync/runSyncV2.ts be/src/envioSync/*.integration.test.ts be/src/launchpads/pons/extendedMetadata* && git commit -m "feat: retain retry state for Envio metadata reads"`.
 
-### Task 5: Run bounded enrichment in both indexers
+### Task 5: Run bounded enrichment with Envio sync
 
-**Files:** Create `be/src/launchpads/pons/metadataEnrichment.ts` and `.test.ts`; modify `be/src/cli/runFactoryIndexer.ts`, `syncEnvioStagingLoop.ts`.
+**Files:** Create `be/src/launchpads/pons/metadataEnrichment.ts` and `.test.ts`; modify `be/src/cli/syncEnvioStagingLoop.ts`, `syncEnvioStaging.ts`.
 
-**Interfaces:** Export `enrichMetadataOnce(db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date, limit = 10): Promise<{ claimed: number; completed: number; pending: number }>`; call Task 3 claim/finish and Task 2 reader. Export `enrichMetadataSafely(db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date, log: (event: { kind: string; claimed?: number; completed?: number; pending?: number }) => void): Promise<void>` as the shared logging/error boundary used by both CLIs. Run at most once per minute in jobs mode, after each sequential cycle, and after each Envio real sync. Local catches report sanitized counts/categories and do not fail scanning.
+**Interfaces:** Export `enrichMetadataOnce(db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date, limit = 10): Promise<{ claimed: number; completed: number; pending: number }>`; call Task 3 claim/finish and Task 2 reader. Export `enrichMetadataSafely(db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date, log: (event: { kind: string; claimed?: number; completed?: number; pending?: number }) => void): Promise<void>` as the shared logging/error boundary used by both CLIs. In the Envio real-table loop, schedule it once per minute independently of the sync cycle; the one-shot real-table CLI runs one pass after sync. Staging-only mode skips enrichment. The DB minute budget prevents duplicate work across processes. Local catches report sanitized counts/categories and do not fail Envio sync.
 
 - [ ] **Step 1: Write failing worker tests.** Assert only pending functions are called, a recovered field updates while another times out, old rows beyond the 500-block window are processed, and `enrichMetadataSafely` catches an error and logs only its sanitized category.
 - [ ] **Step 2: Run and confirm failure.** `cd be && npx vitest run src/launchpads/pons/metadataEnrichment.test.ts`.
-- [ ] **Step 3: Implement worker and wire all three paths.** Keep one worker and the default 10/minute budget; do not consume scan-job worker slots or change cursors. In jobs mode, stop the worker on the existing abort signal.
+- [ ] **Step 3: Implement worker and wire the two Envio CLIs.** Keep one worker and the default 10/minute budget; do not change Envio or app DB sync cursors. In loop mode, stop the worker on the existing SIGINT/SIGTERM signal and await its in-flight pass before closing the DB pools.
 - [ ] **Step 4: Verify.** Run targeted tests, `cd be && npm run typecheck && npm run lint && npm run build`, then `cd be && npm test` and `cd be && npm run test:integration`; all pass.
 - [ ] **Step 5: Commit.** Stage only Task 5 files and commit `feat: retry missing Pons metadata in bounded batches`.
 
 ## Completion check
 
-Confirm migration applies to a copy of the test DB with pre-existing launches, metadata repairs after a retry, old rows are eventually eligible, and no optional failure aborts either indexer. Report any provider throughput limit rather than claiming all historical metadata is already filled.
+Confirm migration applies to a copy of the test DB with pre-existing launches, metadata repairs after a retry, old rows are eventually eligible, and no optional failure aborts Envio sync. Report any provider throughput limit rather than claiming all historical metadata is already filled.

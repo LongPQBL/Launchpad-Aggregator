@@ -13,8 +13,7 @@ function must still index successfully with a null value.
 `readExtendedTokenMetadata` converts every rejected `readContract` call to
 `null`. The Envio V1/V2 sync writes those nulls to `launches` and only reads
 extended metadata for new launches or launches being rebuilt in the last 500
-blocks. `getBlock` failures similarly become a null `launchTimestamp`. The RPC
-scan indexer does not currently read these optional fields at all. Thus a
+blocks. `getBlock` failures similarly become a null `launchTimestamp`. Thus a
 temporary failure and a genuine empty/unsupported field become
 indistinguishable once stored. Old launches are not selected again.
 
@@ -43,9 +42,9 @@ batch is 10 launches per minute; an unused half can be filled from the other
 side. It calls only pending functions, updates successful fields and states
 independently, and backs off transient errors exponentially from one minute to
 one hour. The batch limit is configurable and one RPC worker protects provider
-quota. Invoke this runner continuously alongside the
-RPC scan indexer's jobs mode, once after each sequential cycle, and after each
-Envio real-table sync. A short DB transaction claims due rows with a persisted
+quota. Run this worker alongside the Envio real-table sync loop at one-minute
+intervals, including while a sync cycle is in progress. The one-shot Envio
+real-table sync also runs one enrichment pass. A short DB transaction claims due rows with a persisted
 lease ID and expiry, so the network read holds no DB lock. A result updates the
 row only when its lease ID and original launch identity still match, preventing
 two runners or a reorg replacement from accepting a stale result. Envio
@@ -53,8 +52,9 @@ staging-only sync does not enrich real rows. Runner failures are logged and
 contained; they do not fail a scan/sync cycle.
 
 Envio V1/V2 keep their current immediate reads, but their results must
-carry `done`/`pending` state into the launch insert. The RPC scan path can rely
-on the default `pending` state; enrichment handles its launches too. Retrying
+carry `done`/`pending` state into the launch insert. The migration marks
+previously stored launches with missing values as pending, including rows
+written by the retired RPC indexer. Retrying
 metadata never rolls back launch or trade indexing and never changes scan
 cursors. Reorg deletion and reinsertion naturally resets state for an Envio
 launch; enrichment updates should apply only to the current launch row.
