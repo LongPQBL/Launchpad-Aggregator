@@ -65,11 +65,16 @@ async function readOne<T>(read: () => Promise<T>): Promise<ReadOutcome<T>> {
 
 export async function readExtendedTokenMetadataOutcomes(
   client: ExtendedMetadataReadClient, token: Address,
+  functions: readonly ('logo' | 'description' | 'socials')[] = ['logo', 'description', 'socials'],
 ): Promise<ExtendedMetadataReadResults> {
+  const skipped = { state: 'done', value: null } as const;
   const [logo, description, socials] = await Promise.all([
-    readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'logo' })),
-    readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'description' })),
-    readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'socials' })),
+    functions.includes('logo')
+      ? readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'logo' })) : skipped,
+    functions.includes('description')
+      ? readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'description' })) : skipped,
+    functions.includes('socials')
+      ? readOne(() => client.readContract({ address: token, abi: ponsExtendedMetadataAbi, functionName: 'socials' })) : skipped,
   ]);
   const socialsTuple = Array.isArray(socials.value) ? socials.value : [];
   return {

@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
+import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { resolveSyncTablesFromEnv, runAllSyncsOnce } from '../envioSync/syncAll.js';
+import { enrichMetadataSafely } from '../launchpads/pons/metadataEnrichment.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -18,6 +20,10 @@ try {
   console.log(`Synced V1-legacy from Envio into ${syncTarget}:`, v1Result);
   console.log(`Synced V2 from Envio into ${syncTarget}:`, v2Result);
   console.log(`Synced V4 from Envio into ${syncTarget}:`, v4Result);
+  if (syncTarget === 'real') {
+    const metadataClient = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com');
+    await enrichMetadataSafely(db, metadataClient, new Date(), (event) => console.log('Envio metadata enrichment:', event));
+  }
 } finally {
   await pool.end();
   await envioPool.end();

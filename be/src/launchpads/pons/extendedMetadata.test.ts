@@ -66,4 +66,14 @@ describe('retryable extended metadata outcomes', () => {
     expect(await readLaunchTimestamp({ getBlock: async () => ({ timestamp: 1_700_000_000n }) }, 123n))
       .toEqual({ state: 'done', value: 1_700_000_000 });
   });
+
+  it('calls only requested functions when enriching a partially complete launch', async () => {
+    const calls: string[] = [];
+    const result = await readExtendedTokenMetadataOutcomes({ readContract: async ({ functionName }) => {
+      calls.push(functionName);
+      return 'ipfs://new-logo';
+    } }, TOKEN, ['logo']);
+    expect(calls).toEqual(['logo']);
+    expect(result.logo).toEqual({ state: 'done', value: 'ipfs://new-logo' });
+  });
 });

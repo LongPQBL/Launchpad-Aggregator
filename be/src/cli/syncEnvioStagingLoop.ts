@@ -1,6 +1,8 @@
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
+import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { resolveSyncTablesFromEnv, runAllSyncsOnce } from '../envioSync/syncAll.js';
+import { enrichMetadataSafely, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -13,10 +15,16 @@ if (syncTarget !== 'staging' && syncTarget !== 'real') throw new Error('ENVIO_SY
 const { db, pool } = createDatabase(databaseUrl);
 const envioPool = new Pool({ connectionString: envioDatabaseUrl });
 const tables = resolveSyncTablesFromEnv();
+const metadataClient = syncTarget === 'real'
+  ? createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com') : null;
 
 let stopping = false;
 process.on('SIGINT', () => { stopping = true; });
 process.on('SIGTERM', () => { stopping = true; });
+const metadataLoop = metadataClient
+  ? startMetadataEnrichmentLoop(() => enrichMetadataSafely(db, metadataClient, new Date(), (event) => {
+    if (event.kind === 'enrichment_error' || (event.claimed ?? 0) > 0) console.log('Envio metadata enrichment:', event);
+  })) : null;
 
 // Checked in 1s steps rather than one setTimeout(intervalMs) so SIGINT/SIGTERM during the wait is
 // honored within ~1s instead of up to the full interval.
@@ -47,6 +55,7 @@ while (!stopping) {
   await interruptibleSleep(intervalMs);
 }
 
+await metadataLoop?.stop();
 await pool.end();
 await envioPool.end();
 console.log('Envio staging sync loop stopped.');
