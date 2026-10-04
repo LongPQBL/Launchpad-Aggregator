@@ -51,9 +51,9 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
               <TableCell className="text-right font-mono">{formatQuote(trade.priceQuote, quoteSymbol)}</TableCell>
               <TableCell
                 className="text-right font-mono"
-                title={trade.usdValueApprox ? 'Approximate — converted at the current price, not the price at trade time' : undefined}
+                title={trade.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
-                {formatUsd(trade.usdValue)}
+                {trade.usdValueStatus === 'pending' ? 'Calculating…' : formatUsd(trade.usdValue)}
               </TableCell>
               <TableCell>
                 {explorerBase ? (

@@ -42,13 +42,14 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
     getLaunchTrades(chainId, tokenAddress).catch(() => null),
     getLaunchCandles(chainId, tokenAddress).catch(() => null),
   ]);
+  const hasPendingTrade = trades?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 
   return (
     <AppShell>
       {/* Launch-only (not chainResourceKey): matchesResourceKeys() already lets a launch key
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
-      <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} />
+      <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
       <LaunchDetail detail={detail} trades={trades} candles={candles} />
     </AppShell>
   );

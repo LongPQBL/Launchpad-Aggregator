@@ -169,6 +169,44 @@ describe('useLiveRefresh', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it('retries a bounded number of times while retryWhilePending is true, even when SSE is live', () => {
+    const refresh = vi.fn();
+    const { result } = renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh, { retryWhilePending: true }));
+    const source = latestSource();
+
+    act(() => {
+      source.onopen?.();
+    });
+    expect(result.current).toBe('live');
+
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+
+    // Bounded — a fixed number of retries, not an unbounded poll that runs forever.
+    expect(refresh.mock.calls.length).toBeGreaterThan(0);
+    const countAfterFirstMinute = refresh.mock.calls.length;
+    refresh.mockClear();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(refresh).not.toHaveBeenCalled();
+    expect(countAfterFirstMinute).toBeGreaterThan(0);
+  });
+
+  it('does not retry on a pending-row timer when retryWhilePending is false', () => {
+    const refresh = vi.fn();
+    renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh, { retryWhilePending: false }));
+    const source = latestSource();
+
+    act(() => {
+      source.onopen?.();
+      vi.advanceTimersByTime(60_000);
+    });
+
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it('closes the EventSource and clears timers on unmount', () => {
     const refresh = vi.fn();
     const { unmount } = renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));

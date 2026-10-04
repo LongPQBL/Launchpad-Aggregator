@@ -367,16 +367,16 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('Buy')).toBeInTheDocument();
   });
 
-  it('shows the approximate USD value for a trade, with a tooltip that it is not the historical price', () => {
+  it('shows the historical USD value for a priced trade, with a tooltip explaining it is historical not current', () => {
     render(
       <LaunchDetail
         detail={detail()}
-        trades={{ items: [trade({ usdValue: '5.25', usdValueApprox: true })], nextCursor: null }}
+        trades={{ items: [trade({ usdValue: '5.25', usdValueApprox: true, usdValueStatus: 'priced' })], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
     expect(screen.getByText(/5\.25/)).toBeInTheDocument();
-    expect(screen.getByTitle(/current price, not the price at trade time/i)).toBeInTheDocument();
+    expect(screen.getByTitle(/historical.*not the current price/i)).toBeInTheDocument();
   });
 
   it('shows "No data yet" for a trade USD value instead of a fabricated number when usdValue is null', () => {

@@ -11,11 +11,12 @@ const STATUS_LABELS = {
 
 export interface LiveRefreshIndicatorProps {
   resourceKeys: readonly string[];
+  retryWhilePending?: boolean;
 }
 
-export function LiveRefreshIndicator({ resourceKeys }: LiveRefreshIndicatorProps) {
+export function LiveRefreshIndicator({ resourceKeys, retryWhilePending }: LiveRefreshIndicatorProps) {
   const router = useRouter();
-  const status = useLiveRefresh(resourceKeys, () => router.refresh());
+  const status = useLiveRefresh(resourceKeys, () => router.refresh(), { retryWhilePending });
 
   return (
     <p role="status" className="text-xs text-muted-foreground">

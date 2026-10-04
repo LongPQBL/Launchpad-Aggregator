@@ -62,6 +62,7 @@ const trades = {
       traderAddress: '0xtrader',
       usdValue: null,
       usdValueApprox: false,
+      usdValueStatus: 'unavailable',
     },
   ],
   nextCursor: null,

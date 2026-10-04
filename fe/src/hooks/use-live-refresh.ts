@@ -11,10 +11,20 @@ export type LiveStatus = 'connecting' | 'live' | 'polling';
 const SSE_EVENT_TYPES = ['launch.changed', 'trade.created', 'coverage.changed'] as const;
 const COALESCE_WINDOW_MS = 300;
 const POLL_INTERVAL_MS = 15_000;
+// A `pending` trade USD value (verified feed, round not backfilled yet) resolves via a
+// background job with no SSE event of its own — no `trade.created`/`launch.changed` fires when
+// the round backfill completes. Retry a few times at a shorter interval, then give up; this is
+// deliberately bounded, not an open-ended poll, so a job that never completes doesn't poll forever.
+const PENDING_RETRY_INTERVAL_MS = 5_000;
+const MAX_PENDING_RETRIES = 6;
 
 const NEXT_PUBLIC_BE_API_URL = process.env.NEXT_PUBLIC_BE_API_URL ?? 'http://127.0.0.1:3001';
 
-export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => void): LiveStatus {
+export interface UseLiveRefreshOptions {
+  retryWhilePending?: boolean;
+}
+
+export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => void, options?: UseLiveRefreshOptions): LiveStatus {
   const [status, setStatus] = useState<LiveStatus>('connecting');
   const refreshRef = useRef(refresh);
   const resourceKeysRef = useRef(resourceKeys);
@@ -23,6 +33,20 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
     resourceKeysRef.current = resourceKeys;
   });
   const key = resourceKeys.join(',');
+  const retryWhilePending = options?.retryWhilePending ?? false;
+
+  // Independent of the SSE connection/outage-polling effect below — this is a fixed-count retry
+  // schedule, not a fallback for a dropped connection, so it runs even while SSE reports 'live'.
+  useEffect(() => {
+    if (!retryWhilePending) return;
+    let retriesLeft = MAX_PENDING_RETRIES;
+    const timer = setInterval(() => {
+      retriesLeft -= 1;
+      refreshRef.current();
+      if (retriesLeft <= 0) clearInterval(timer);
+    }, PENDING_RETRY_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [retryWhilePending]);
 
   useEffect(() => {
     let coalesceTimer: ReturnType<typeof setTimeout> | null = null;
