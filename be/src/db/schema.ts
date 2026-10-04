@@ -46,6 +46,19 @@ export const metadataEnrichmentBudget = pgTable('metadata_enrichment_budget', {
   lastStartedAt: timestamp('last_started_at', { withTimezone: true }),
 }, (table) => [check('metadata_enrichment_budget_singleton', sql`${table.id} = 1`)]);
 
+export const quoteUsdFeeds = pgTable('quote_usd_feeds', {
+  chainId: integer('chain_id').notNull(),
+  quoteAssetAddress: text('quote_asset_address').notNull(),
+  feedAddress: text('feed_address').notNull(),
+  aggregatorAddress: text('aggregator_address'),
+  discoverySource: text('discovery_source').notNull(),
+  verificationStatus: text('verification_status').notNull(),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.quoteAssetAddress] }),
+  check('quote_usd_feeds_verification_status_valid', sql`${table.verificationStatus} IN ('verified', 'unverified', 'rejected')`),
+]);
+
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),
