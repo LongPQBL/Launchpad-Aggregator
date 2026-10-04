@@ -207,23 +207,31 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
                     <span>{launch.platform} {launch.protocolVersion}</span>
                   </span>
                 </div>
-                <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                  {formatUsd(launch.fdvUsd)}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">FDV</span>
+                  <span className="font-mono">{formatUsd(launch.fdvUsd)}</span>
                 </div>
-                <div role="cell" title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                  {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">24H volume</span>
+                  <span className="font-mono" title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
+                    {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                  </span>
                 </div>
-                <div role="cell" title={tvlTooltip(launch)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                  {formatUsd(launch.tvlUsd)}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>
+                  <span className="font-mono" title={tvlTooltip(launch)}>{formatUsd(launch.tvlUsd)}</span>
                 </div>
-                <div role="cell" className={cn('font-mono md:table-cell md:p-4 md:text-right md:align-middle', change1h.className)}>
-                  {change1h.text}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">1H %</span>
+                  <span className={cn('font-mono', change1h.className)}>{change1h.text}</span>
                 </div>
-                <div role="cell" className={cn('font-mono md:table-cell md:p-4 md:text-right md:align-middle', change1d.className)}>
-                  {change1d.text}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">1D %</span>
+                  <span className={cn('font-mono', change1d.className)}>{change1d.text}</span>
                 </div>
-                <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:text-right md:align-middle">
-                  {formatAge(launch.launchTimestamp)}
+                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">Age</span>
+                  <span className="text-muted-foreground">{formatAge(launch.launchTimestamp)}</span>
                 </div>
               </div>
             );

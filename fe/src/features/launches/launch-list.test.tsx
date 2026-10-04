@@ -198,6 +198,24 @@ describe('LaunchList', () => {
     expect(within(table).queryByText('0%')).not.toBeInTheDocument();
   });
 
+  it('shows a visible label next to each metric value for mobile layouts', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ fdvUsd: '1000', officialVolume24h: '50', tvlUsd: '200', change1h: '12.5', change1d: '-5' })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    const row = within(table).getAllByRole('row')[1];
+    expect(within(row).getByText('FDV')).toBeInTheDocument();
+    expect(within(row).getByText('24H volume')).toBeInTheDocument();
+    expect(within(row).getByText('Liquidity')).toBeInTheDocument();
+    expect(within(row).getByText('1H %')).toBeInTheDocument();
+    expect(within(row).getByText('1D %')).toBeInTheDocument();
+    expect(within(row).getByText('Age')).toBeInTheDocument();
+  });
+
   it('falls back to a placeholder avatar when logoUri is null', () => {
     render(
       <LaunchList
