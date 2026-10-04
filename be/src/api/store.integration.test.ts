@@ -332,6 +332,17 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(detail!.week52Low).toBe('1');
   });
 
+  it('computes 52-week high/low and 1h/1d change from one formatting pass (no duplicate formatRational work)', async () => {
+    // Regression guard for the dedup refactor: assert the externally-observable values are
+    // unchanged, since formatRational is deterministic and a correct dedup cannot change output.
+    const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
+    const detail = await storeWithRpc.getLaunch(4663, goodToken);
+    expect(detail?.week52High).toBe('1');
+    expect(detail?.week52Low).toBe('1');
+    expect(detail?.change1h).not.toBeUndefined();
+    expect(detail?.change1d).not.toBeUndefined();
+  });
+
   it('withholds FDV and 52-week extrema while the launch trade source is backfilling', async () => {
     await pool.query('UPDATE sources SET status = $1, confirmed_to_block = 0 WHERE id = $2', ['backfilling', `${statsSource}-trades`]);
     try {

@@ -117,7 +117,7 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
     let high: string | null;
     let low: string | null;
-    let changeRows: Row[];
+    let pricedTrades: { timestamp: number; price: string }[];
     if (cacheReady) {
       const extrema = await read52WeekHighLowFromCandles(pool, number(row.chain_id), string(row.token_address), nowSeconds);
       high = extrema.complete ? extrema.high : null;
@@ -141,7 +141,10 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
           ORDER BY t.block_number, t.log_index`,
         [number(row.chain_id), string(row.token_address), since1d, nowSeconds]),
       ]);
-      changeRows = [...baseline.rows, ...recent.rows] as Row[];
+      pricedTrades = [...baseline.rows, ...recent.rows].map((r: Row) => ({
+        timestamp: number(r.timestamp),
+        price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
+      }));
     } else {
       // Until the historical candle backfill finishes, preserve the existing trade-based result.
       const since = nowSeconds - 52 * 7 * 86_400;
@@ -150,15 +153,14 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
           AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number, t.log_index`, [number(row.chain_id), string(row.token_address), since]);
-      const prices = (highLowResult.rows as Row[]).map((priceRow) =>
-        formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18));
-      ({ high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price }))));
-      changeRows = highLowResult.rows as Row[];
+      // Format once and reuse for both high/low and 1h/1d change — this branch used to format
+      // every row twice (once into `prices`, once into `pricedTrades`).
+      pricedTrades = (highLowResult.rows as Row[]).map((r) => ({
+        timestamp: number(r.timestamp),
+        price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
+      }));
+      ({ high, low } = compute52WeekHighLow(pricedTrades.map((t) => ({ high: t.price, low: t.price }))));
     }
-    const pricedTrades = changeRows.map((r) => ({
-      timestamp: number(r.timestamp),
-      price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
-    }));
     const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
     const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
