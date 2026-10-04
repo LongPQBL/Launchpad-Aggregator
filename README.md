@@ -27,6 +27,20 @@
 
 Cần Node.js 24, npm và PostgreSQL 16+; Docker Compose là tùy chọn cho PostgreSQL.
 
+### Biến môi trường (.env)
+
+Mỗi phần (`be/`, `fe/`, `envio/`) có file biến môi trường riêng, theo đúng quy ước của từng công cụ — không gộp chung 1 file ở thư mục gốc được (Next.js chỉ tự đọc `.env.local` trong chính `fe/`, Docker Compose chỉ tự đọc `.env` trong chính `envio/`):
+
+| File | Công cụ đọc | Sao chép từ |
+|---|---|---|
+| `be/.env` | Node (`--env-file-if-exists`, cờ gốc của Node ≥20.6, không cần thư viện ngoài) | `be/.env.example` |
+| `fe/.env.local` | Next.js (tự động) | `fe/.env.example` |
+| `envio/.env` | Docker Compose (tự động) | `envio/.env.example` |
+
+Sao chép cả 3 file `.example` thành file thật (`.env`/`.env.local`) rồi điền giá trị trước khi chạy local. Cả 3 đều nằm trong `.gitignore`, không commit.
+
+Các lệnh `npm run ... -w be` bên dưới vẫn ghi rõ biến môi trường ở đầu dòng để tài liệu hoá chính xác lệnh đó cần gì — nhưng nếu `be/.env` đã có sẵn `DATABASE_URL`/`FE_ORIGIN`, phần ghi đè ở đầu dòng là tùy chọn, không bắt buộc nữa.
+
 ```sh
 docker compose up -d postgres
 npm ci
