@@ -2,6 +2,7 @@ import { chainExplorerBase, chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { AboutSection } from './about-section';
 import { CoverageBadge } from './coverage-badge';
 import { OfficialChart } from './official-chart';
 import { TradeList } from './trade-list';
@@ -78,6 +79,20 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
           )}
         </CardContent>
       </Card>
+
+      <section aria-label="About">
+        <Card>
+          <CardContent className="pt-4">
+            <AboutSection
+              description={detail.description}
+              tokenAddress={detail.tokenAddress}
+              explorerUrl={`${explorerBase ?? 'https://robinhoodchain.blockscout.com'}/token/${detail.tokenAddress}`}
+              websiteUrl={detail.websiteUrl}
+              twitterUrl={detail.twitterUrl}
+            />
+          </CardContent>
+        </Card>
+      </section>
 
       <section aria-label="Official trading venues">
         <Card>

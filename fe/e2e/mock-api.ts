@@ -26,6 +26,13 @@ const launchSummary = {
   tvlUsd: null,
   week52High: null,
   week52Low: null,
+  logoUri: null,
+  description: null,
+  websiteUrl: null,
+  twitterUrl: null,
+  launchTimestamp: null,
+  change1h: null,
+  change1d: null,
 };
 
 const launchDetail = {

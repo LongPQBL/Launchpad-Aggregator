@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Candle, LaunchDetail as LaunchDetailData, OfficialVenue, Trade } from '@/api/client';
 import { LaunchDetail } from './launch-detail';
@@ -417,5 +417,53 @@ describe('LaunchDetail', () => {
     );
 
     expect(screen.getByText('123.456789')).toBeInTheDocument();
+  });
+
+  it('renders the About section with description, truncated with Show more when long', () => {
+    const longDescription = 'A'.repeat(260);
+    render(
+      <LaunchDetail
+        detail={detail({ description: longDescription })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    const showMore = screen.getByRole('button', { name: /show more/i });
+    expect(screen.getByText(longDescription)).toHaveClass('line-clamp-3');
+    fireEvent.click(showMore);
+    expect(screen.getByText(longDescription)).not.toHaveClass('line-clamp-3');
+  });
+
+  it('hides the About section description entirely when null', () => {
+    render(
+      <LaunchDetail detail={detail({ description: null })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+    );
+
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
+  });
+
+  it('always renders the token address and Robinhood Explorer pills', () => {
+    render(
+      <LaunchDetail detail={detail({ tokenAddress: '0xabc' })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+    );
+
+    const explorerLink = screen.getByRole('link', { name: /robinhood explorer/i });
+    expect(explorerLink).toHaveAttribute('href', 'https://robinhoodchain.blockscout.com/token/0xabc');
+    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+  });
+
+  it('hides the Website pill when websiteUrl is null, and the Twitter pill when twitterUrl is null', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ websiteUrl: null, twitterUrl: 'https://x.com/example' })}
+        trades={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: /website/i })).not.toBeInTheDocument();
+    const twitterLink = screen.getByRole('link', { name: /twitter/i });
+    expect(twitterLink).toHaveAttribute('href', 'https://x.com/example');
   });
 });
