@@ -222,6 +222,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   const brokenToken = '0x1919191919191919191919191919191919191919';
   const statsSource = 'envio-store-stats-test';
   const goodVenueId = `4663:v3_pool:${goodToken}`;
+  const statsEthFeed = '0x78f3556b67e17df817d51ef5a990cdaf09e8d3a9';
 
   beforeAll(async () => {
     await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
@@ -247,6 +248,10 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       VALUES (4663,$1,$2,1,$3,$4,0,$6,'buy','1000000000000000000','1000000000000000000',$5,'1','1','V3Swap','user_trade',$1)
       ON CONFLICT DO NOTHING`,
     [goodToken, goodVenueId, blockHash, '0x' + 'd'.repeat(64), ETH_ADDRESS, Math.floor(Date.now() / 1000) - 100]);
+    // Self-contained, not reliant on another test file's quote_usd_feeds seed — readUsdPrice
+    // resolves through the persisted registry now, not a hardcoded map.
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: ETH_ADDRESS as `0x${string}`, feedAddress: statsEthFeed,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
   });
   afterAll(async () => {
     await pool.query('DELETE FROM trades WHERE token_address = $1', [goodToken]);
@@ -254,6 +259,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     await pool.query('DELETE FROM launches WHERE token_address = ANY($1)', [[goodToken, brokenToken]]);
     await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[statsSource, `${statsSource}-trades`]]);
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
+    await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [ETH_ADDRESS]);
   });
 
   function rpcClient() {
@@ -330,11 +336,16 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
 
   it('shows curve TVL from current real USDG reserve even while historical coverage is incomplete', async () => {
     const usdg = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
+    const usdgFeed = '0x61b7e5650328764b076a108eff5fa7282a1b9ad2';
     const curve = '0xf17871c268122408f677073066bb36fecddc1ba0';
     await pool.query(`UPDATE launches SET protocol_version='v2', quote_asset_address=$1,
       quote_asset_symbol='USDG', quote_asset_decimals=6 WHERE token_address=$2`, [usdg, goodToken]);
     await pool.query("UPDATE venues SET kind='curve',ref=$1 WHERE id=$2", [curve, goodVenueId]);
     await pool.query("UPDATE sources SET status='backfilling',confirmed_to_block=0 WHERE id=$1", [statsSource]);
+    // This test is self-contained, not reliant on any other test file's quote_usd_feeds seed —
+    // readUsdPrice resolves through the persisted registry now, not a hardcoded map.
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: usdg as `0x${string}`, feedAddress: usdgFeed as `0x${string}`,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
     try {
       const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
         if (functionName === 'decimals') return 8;
@@ -358,6 +369,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
         quote_asset_symbol='ETH',quote_asset_decimals=18 WHERE token_address=$2`, [ETH_ADDRESS, goodToken]);
       await pool.query("UPDATE venues SET kind='v3_pool',ref=$1 WHERE id=$2", [goodToken, goodVenueId]);
       await pool.query("UPDATE sources SET status='caught_up',confirmed_to_block=2000 WHERE id=$1", [statsSource]);
+      await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [usdg]);
     }
   });
 

@@ -81,7 +81,7 @@ async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Prom
     const kind = current?.kind;
     const venue = current && (kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')
       ? { kind: kind as VenueAmountInput['kind'], ref: string(current.ref) } : null;
-    return await readCurrentTvl(rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
+    return await readCurrentTvl(pool, rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
       quote: string(row.quote_asset_address), tokenDecimals: number(row.token_decimals),
       quoteDecimals: number(row.quote_asset_decimals), protocolVersion: string(row.protocol_version),
       factory: string(row.factory_address), lifecycleStatus: string(row.lifecycle_status), venue,
@@ -100,7 +100,7 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
   if (!rpcClient || !complete) return { ...NULL_STATS, ...tvl };
   try {
     const [usdPrice, totalSupply, priceResult] = await Promise.all([
-      readUsdPrice(rpcClient, string(row.quote_asset_address)),
+      readUsdPrice(pool, rpcClient, string(row.quote_asset_address)),
       readTotalSupply(rpcClient, string(row.token_address) as Address),
       pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true

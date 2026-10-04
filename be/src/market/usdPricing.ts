@@ -1,6 +1,7 @@
 import type { Address } from 'viem';
 import { parseAbi } from 'viem';
-import { quoteFeedRegistry } from './quoteFeedRegistry.js';
+import type { Pool } from 'pg';
+import { resolveVerifiedFeed } from './quotePricing/feedRegistry.js';
 
 export interface UsdPriceClient {
   readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[];
@@ -9,24 +10,6 @@ export interface UsdPriceClient {
 }
 
 export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainlink' }
-
-// Keyed by lowercase quote-asset ADDRESS, not symbol — final-review Critical 1: 166,479 real
-// launches (2026-10-01 live DB) use the WETH quote-asset address, not the literal string 'ETH',
-// and a symbol-keyed map silently priced none of them. Pons' zero-address convention for native
-// ETH is also included. Feed address verified directly against Robinhood Chain mainnet
-// 2026-10-01 — eth_call to latestRoundData() returned a live, sane ETH/USD price. Source of
-// truth for the feed address: https://docs.chain.link/data-feeds/price-feeds/addresses?network=robinhood
-// Other Stock Token quotes are discovered from Robinhood's canonical asset-address directory
-// and the Chainlink feed directory. A newly introduced quote outside those verified sources
-// remains unpriced until its address/feed pair is independently verified.
-const ETH_USD_FEED: Address = '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9';
-const USDG_ADDRESS = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
-const FEEDS: Record<string, Address> = {
-  '0x0000000000000000000000000000000000000000': ETH_USD_FEED, // native ETH (Pons' quote-asset convention)
-  '0x0bd7d308f8e1639fab988df18a8011f41eacad73': ETH_USD_FEED, // WETH — the actual quote-asset address real V1 launches use
-  [USDG_ADDRESS]: '0x61B7e5650328764B076A108EFF5fa7282a1B9aD2', // USDG/USD on Robinhood Chain
-  '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec': '0x379EC4f7C378F34a1B47E4F3cbeBCbAC3E8E9F15', // NVDA Stock Token
-};
 
 const aggregatorAbi = parseAbi([
   'function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -77,12 +60,12 @@ export function __resetUsdPriceCacheForTests(): void {
   inFlight.clear();
 }
 
-export async function readUsdPrice(client: UsdPriceClient, quoteAssetAddress: string, now: () => number = Date.now,
-  registry: { resolve(address: string): Promise<Address | null> } = quoteFeedRegistry):
-Promise<UsdPrice | null> {
+export async function readUsdPrice(pool: Pool, client: UsdPriceClient, quoteAssetAddress: string,
+  now: () => number = Date.now): Promise<UsdPrice | null> {
   const key = quoteAssetAddress.toLowerCase();
-  const feedAddress = FEEDS[key] ?? await registry.resolve(key);
-  if (!feedAddress) return null;
+  const feed = await resolveVerifiedFeed(pool, 4663, key);
+  if (!feed) return null;
+  const feedAddress = feed.feedAddress;
   const cached = cache.get(key);
   if (cached && now() - cached.fetchedAt < CACHE_TTL_MS) return { priceUsd: cached.priceUsd, updatedAt: cached.updatedAt, source: 'chainlink' };
 

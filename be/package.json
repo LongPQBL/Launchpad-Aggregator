@@ -19,6 +19,7 @@
     "compare:envio-staging": "tsx --env-file-if-exists=.env src/cli/compareEnvioStaging.ts",
     "openapi:write": "tsx src/cli/openapi.ts --write",
     "openapi:check": "tsx src/cli/openapi.ts --check",
+    "seed:known-quote-feeds": "tsx --env-file-if-exists=.env src/cli/seedKnownQuoteFeeds.ts",
     "candles:backfill": "tsx --env-file-if-exists=.env src/cli/backfillCandles.ts",
     "candles:worker": "tsx --env-file-if-exists=.env src/cli/runCandleWorker.ts"
   },
