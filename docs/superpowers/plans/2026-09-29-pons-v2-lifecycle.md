@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Work directly on `main`; do not create a worktree. Do not push or deploy without a separate instruction.
-- Scope is Pons V2 on Robinhood Chain ID `4663`, official curve and Pons-created V4 pool only. Never add “Pools khác”.
+- Historical task scope is Pons V2 lifecycle on Robinhood Chain ID `4663`, its curve and Pons-created V4 pool. The former product-wide ban on “Pools khác” was revoked by the owner on 2026-10-04; other pools belong to a separate Envio-based Pools work unit.
 - Documents/user-facing copy are Vietnamese; code names, comments, tests and API fields are English.
 - No real trading, wallet connection, Redis, Kafka or new chain in this plan.
 - Use raw integer quantities/rational prices; do not use floating-point arithmetic for money.

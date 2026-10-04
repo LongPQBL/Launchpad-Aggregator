@@ -14,8 +14,8 @@ The long-term direction is to cover the union of chains supported by the selecte
 - Start with Pons on Robinhood Chain (`chainId=4663`) because its launch/factory and official trading history have been investigated and implemented first. This is a proving slice, not the final aggregator scope.
 - A launchpad/protocol adapter belongs to each venue/protocol version; chain RPC/indexing configuration is a separate concern. One launchpad may need more than one adapter/version, and one chain may host multiple launchpads.
 - Aggregate launches from every selected launchpad/chain and keep `platform`/protocol version visible to users.
-- For the current Pons launch slice, use only official trading venues. Pons V1 remains on its official V3 pool. Pons V2 uses its bonding curve until sweep and then the Pons-created, verified Uniswap V4 pool. This slice does not implement or display “Pools khác” (other pools), pool discovery, or alternate-pool pages.
-- Updated 2026-10-04: the owner now wants a future `Pools` section like Uniswap's that includes other verified/indexed pools. The earlier “no Pools khác” rule applies to the current Pons launch slice, not the future product. Design pool discovery/ingestion/UI separately and use Envio for new indexing. Share the verified quote/USD oracle registry and historical price rounds with launch metrics. Keep official launch volume scoped to official venues unless the owner explicitly changes that metric; show per-pool volume separately and label any future all-pools token volume distinctly.
+- Pons V1's protocol-designated venue is its V3 pool. Pons V2's protocol-designated venue is its bonding curve until sweep and then its verified V4 pool. Preserve that designation so protocol-specific launch metrics can be identified accurately.
+- Corrected 2026-10-04: the earlier decision to exclude “Pools khác” was wrong and is revoked. The product includes a `Pools` section like Uniswap's with other indexed pools, their swaps, and per-pool USD metrics. Design pool discovery/ingestion/UI as its own work unit and use Envio for new indexing. Share the verified quote/USD oracle registry and historical price rounds with launch metrics. Keep protocol-designated venue volume and all-indexed-pools token volume distinct and clearly labeled; do not double-count a swap.
 - Join curve and official V4 trade history across lifecycle transitions. Preserve exact `(blockNumber, logIndex)` ordering, quote-asset denomination, raw integer amounts, provenance, reorg recovery, and source coverage. Do not fabricate candles or volume during a no-trade gap.
 - Include actual executed curve buybacks and hook-initiated V4 swaps in official volume exactly once, with a protocol activity label. Fee transfers, refunds, vault locks, notices, and unexecuted buybacks are not extra trades.
 - The home/list page should use official 24h volume. A launch detail/chart should reflect its official venue history and show when data is incomplete. Label the source (for example, “pons”); do not imply an official partnership.
@@ -74,13 +74,15 @@ Not implemented: wallet connection, live trading, bridging, platform fees, other
 
 ### 1. Finish the Pons read-only product slice
 
-Continue from `docs/superpowers/plans/2026-09-28-pons-frontend-implementation.md`. Implement the dark responsive app shell, typed API client generated from `be/openapi.json`, launch list and filters, token detail, official lifecycle/chart/trade table, source/coverage labels, refresh via SSE with polling fallback, tests and CI. The UI must show incomplete coverage honestly. Do not add “Pools khác”, wallet, test-buy or live-buy controls in this phase.
+Continue from `docs/superpowers/plans/2026-09-28-pons-frontend-implementation.md` for the original Pons launch flow. The UI must show incomplete coverage honestly. The old plan's ban on “Pools khác” is revoked; design and implement the `Pools` section in a separate work unit. Do not infer that the original Pons launch implementation already indexes those other pools.
 
 Before calling this slice production-ready, run a measured bounded backfill, finish or explicitly document history limitations, test API responses against verified real launches, and report realtime lag/provider limits. Historical state access may require an archive-capable RPC provider; first evaluate free/local options and estimate load/cost, then ask the user only if a paid provider is materially necessary.
 
 ### 2. Stabilize the adapter/chain seams
 
 After the Pons UI works end-to-end, review whether source coverage and metric completeness can be calculated per token/relevant source instead of the current conservative global Pons coverage. Add indexes/materialized candles only if measured query latency requires them. Keep migrations additive and preserve user data. Add explicit source metadata and chain registry/config without scattering chain IDs or venue logic.
+
+Design and add the `Pools` section for other verified pools. Index each pool and its swaps through Envio, record both token legs, and use the shared quote/USD price history for per-pool volume and transactions. Define pool discovery and all-pools token metrics in a dedicated spec before implementation; keep protocol-designated launch venue metrics separately labeled.
 
 ### 3. Research and add launchpads incrementally
 

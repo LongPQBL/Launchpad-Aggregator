@@ -2,7 +2,7 @@
 
 **Ngày:** 29/09/2026
 
-**Trạng thái:** Đã duyệt; backend đã triển khai, lịch sử toàn chain và giá curve cũ chưa xác minh đủ
+**Trạng thái:** Đã duyệt cho vòng đời Pons V2; backend đã triển khai, lịch sử toàn chain và giá curve cũ chưa xác minh đủ. Quyết định loại hẳn “Pools khác” trong tài liệu cũ đã bị chủ dự án hủy ngày 04/10/2026.
 
 **Phụ thuộc:** [Đặc tả Pons chỉ đọc](2026-09-28-pons-readonly-design.md). Tài liệu này cụ thể hóa phần backend còn thiếu; không mở rộng sang mua/bán hoặc sàn/chain khác.
 
@@ -10,7 +10,7 @@
 
 Với một token Pons V2 trên Robinhood, app phải hiển thị đúng chuỗi `Trading on curve → Swept → PoolCreated` hoặc `Trading on curve → Swept → Rescued`; kết hợp giao dịch curve và pool V4 **chính thức** thành lịch sử token, chart và volume không đếm trùng. `Swept` có thể kéo dài không xác định; khoảng không có giao dịch không được sinh nến hoặc volume giả. Giá giao dịch cuối, nếu hiển thị, phải ghi rõ là giá cũ.
 
-**Không làm “Pools khác”:** không khám phá, lập chỉ mục, liệt kê, mở trang hay tính giao dịch của pool phụ/không chính thức. Việc giữ pool V4 do chính Pons tạo là một phần bắt buộc của luồng tốt nghiệp, không phải tính năng “Pools khác”. Không dựng một trang pool phụ hoặc bộ lọc pool phụ trong FE.
+**Phạm vi của phần vòng đời Pons V2:** phần này chỉ xác minh và ghép curve với pool V4 do Pons tạo. Mục Pools của sản phẩm sẽ khám phá, lập chỉ mục và hiển thị các pool khác trong một phần việc riêng, dùng Envio và hệ thống giá USD chung. Không trộn giao dịch pool khác vào metric được gắn nhãn venue do Pons chỉ định; metric toàn bộ pool, nếu hiển thị, phải có nhãn riêng.
 
 ## 2. Phương án được chọn
 

@@ -2,7 +2,7 @@
 
 **Ngày:** 28/09/2026
 
-**Trạng thái:** Đặc tả gốc đã duyệt; phần cập nhật vòng đời v2 và bỏ “Pools khác” ngày 29/09/2026 chờ duyệt tài liệu
+**Trạng thái:** Đặc tả lịch sử cho lát cắt Pons ban đầu. Quyết định bỏ hẳn “Pools khác” đã bị chủ dự án hủy ngày 04/10/2026; sản phẩm sẽ có mục Pools riêng, dùng Envio và chung hệ thống định giá USD. Các giới hạn bên dưới chỉ mô tả phạm vi triển khai ban đầu.
 
 **Bối cảnh:** Một lập trình viên, ưu tiên chạy local trước
 
@@ -12,7 +12,7 @@ Xây dựng một lát cắt sản phẩm hoàn chỉnh, có thể kiểm chứn
 
 Hoàn thành nghĩa là người dùng tìm được một token pons và xem được sàn xuất phát, phiên bản giao thức, tài sản ghép cặp dùng để định giá, trạng thái vòng đời, biểu đồ chính thức, giao dịch chính thức, volume chính thức trong 24 giờ và trạng thái đồng bộ dữ liệu. Đặc tả 1 không bao gồm mua/bán thật hoặc mô phỏng.
 
-**Trong phạm vi:** Hai factory v1 (cũ và hiện hành), factory v2, toàn bộ launch từ block triển khai đã kiểm chứng, lịch sử giao dịch tại nơi giao dịch chính thức trước/sau tốt nghiệp, quét lịch sử, cập nhật gần realtime, khôi phục sau mất kết nối, API và FE tối thiểu. **Ngoài phạm vi:** Tạo token, kết nối ví, mua/bán, phí nền tảng, dữ liệu holder, chấm điểm rủi ro, sàn/chain khác, chuyển tiền khác chain và triển khai production. **Bỏ hẳn tính năng “Pools khác”:** không tìm, lập chỉ mục, hiển thị danh sách hay mở trang riêng cho pool phụ/không chính thức; chúng cũng không góp vào chart và volume của launch. Pool V3/v4 do pons chỉ định là nơi giao dịch chính thức vẫn thuộc phạm vi.
+**Trong phạm vi của lát cắt ban đầu:** Hai factory v1 (cũ và hiện hành), factory v2, toàn bộ launch từ block triển khai đã kiểm chứng, lịch sử giao dịch tại nơi giao dịch chính thức trước/sau tốt nghiệp, quét lịch sử, cập nhật gần realtime, khôi phục sau mất kết nối, API và FE tối thiểu. **Ngoài phạm vi của lát cắt ban đầu:** Tạo token, kết nối ví, mua/bán, phí nền tảng, dữ liệu holder, chấm điểm rủi ro, sàn/chain khác, chuyển tiền khác chain và triển khai production. Việc chưa triển khai “Pools khác” ở lát cắt này không loại chúng khỏi sản phẩm: mục Pools riêng sẽ tìm, lập chỉ mục và hiển thị các pool khác. Pool V3/v4 do Pons chỉ định vẫn được ghi nhận riêng để xác định metric giao dịch của venue được Pons chỉ định.
 
 ## 2. Công nghệ đã chọn
 
@@ -104,7 +104,7 @@ FE dùng dashboard giao dịch nền tối, tương phản rõ, lấy các block
 
 Trong phạm vi đặc tả này, làm danh mục nguồn/mô hình dữ liệu và fixture test trước; sau đó tích hợp launch/pool v1 để chứng minh luồng từ đầu đến cuối theo cách đơn giản hơn; tiếp theo là v2 curve/tốt nghiệp/V4; rồi API và FE tối thiểu; cuối cùng là đối chiếu và tăng độ bền. Có thể phát triển UI song song bằng response fixture có kiểu dữ liệu, nhưng chỉ nghiệm thu khi hiển thị dữ liệu thật đã được lập chỉ mục.
 
-Kế hoạch backend và frontend cho Đặc tả 1 đã được viết. Phần còn lại của v2 cần kế hoạch riêng để triển khai chuyển trạng thái, pool V4, chart/volume và kiểm thử reorg trước khi hoàn thiện FE. Các đặc tả sau bao gồm full.fun trên Robinhood/Arc/BNB với đối chiếu lịch sử đủ cả ba chain; holder/rủi ro đã kiểm chứng; mua/bán thử và thật tại nơi giao dịch chính thức đã chọn với phí nền tảng ban đầu bằng 0 và có thể cấu hình; chuyển tiền khác chain. Không đưa “Pools khác” trở lại roadmap nếu người dùng chưa yêu cầu đổi phạm vi. Khi thêm sàn hoặc chain, mở rộng adapter/danh mục cấu hình và test mà không làm thay đổi hành vi pons hiện có.
+Kế hoạch backend và frontend cho Đặc tả 1 đã được viết. Phần còn lại của v2 cần kế hoạch riêng để triển khai chuyển trạng thái, pool V4, chart/volume và kiểm thử reorg trước khi hoàn thiện FE. Các đặc tả sau bao gồm mục Pools với các pool khác và metric riêng; full.fun trên Robinhood/Arc/BNB với đối chiếu lịch sử đủ cả ba chain; holder/rủi ro đã kiểm chứng; mua/bán thử và thật với phí nền tảng ban đầu bằng 0 và có thể cấu hình; chuyển tiền khác chain. Khi thêm sàn hoặc chain, mở rộng adapter/danh mục cấu hình và test mà không làm thay đổi lịch sử Pons đã xác minh.
 
 ## Tài liệu tham khảo
 

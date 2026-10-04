@@ -4,7 +4,7 @@
 
 **Trạng thái:** Đã chốt hướng thiết kế qua brainstorming (`/superpowers:brainstorming`); triển khai theo yêu cầu người dùng.
 
-**Phạm vi:** Thay thế lớp thu thập dữ liệu tự viết hiện tại (`be/src/indexer/*`, `be/src/cli/runFactoryIndexer.ts`) bằng Envio HyperIndex tự host, cho đúng phạm vi Pons trên Robinhood Chain (`chainId=4663`) đang có. Không mở rộng sang launchpad/chain khác, không đổi API công khai hay frontend.
+**Phạm vi của lần migration này:** Thay thế lớp thu thập dữ liệu tự viết hiện tại (`be/src/indexer/*`, `be/src/cli/runFactoryIndexer.ts`) bằng Envio HyperIndex tự host, cho đúng phạm vi Pons trên Robinhood Chain (`chainId=4663`) đang có. Không mở rộng sang launchpad/chain khác, không đổi API công khai hay frontend. Quyết định cũ loại hẳn “Pools khác” đã bị hủy ngày 04/10/2026; mục Pools là phần sản phẩm riêng và dùng Envio khi triển khai.
 
 ## 1. Bối cảnh và động lực
 
@@ -74,7 +74,7 @@ Indexer tự viết hiện tại (`jobScheduler.ts`, `scan.ts`, `runFactoryIndex
 
 - Pons V1 legacy + active: factory → launch → pool V3 chính thức → `Swap`.
 - Pons V2: factory → launch → bonding curve (`CurveBuy`/`CurveSell`/`CurveBuyback`) → `Sweep` → `Graduated`/`Rescued` → nếu graduated: pool V4 do Pons tạo, chỉ chấp nhận sau khi khớp `PoolGraduated` với `PoolManager.Initialize` **cùng transaction/block** và xác minh pool ID/key/hook/manager → `Swap` V4.
-- Không thêm launchpad khác, không thêm chain khác, không thêm "Pools khác" (giữ nguyên nguyên tắc chỉ pool chính thức).
+- Lần migration này giữ tập nguồn Pons đang có, chưa thêm launchpad, chain hay pool khác. Đây là ranh giới công việc migration, không phải nguyên tắc loại pool khác khỏi sản phẩm; mục Pools riêng sẽ mở rộng Envio sau đó.
 - Không đổi hành vi API: coverage theo từng launch (đã có ở Task 5 kế hoạch song song), null khi thiếu dữ liệu, không tự tạo nến/volume giả trong khoảng không có trade.
 
 ## 4. Envio: entity và handler cần viết
