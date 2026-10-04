@@ -58,7 +58,33 @@ export interface paths {
                     headers: {
                         [name: string]: unknown;
                     };
-                    content?: never;
+                    content: {
+                        "application/json": {
+                            complete?: boolean;
+                            pendingSourceIds?: string[];
+                            missingRanges?: {
+                                sourceId?: string;
+                                fromBlock?: string;
+                                toBlock?: string;
+                                reason?: string;
+                            }[];
+                            latestFinalizedFence?: string | null;
+                            launchParity?: {
+                                sourceId?: string;
+                                /** @enum {string} */
+                                status?: "complete" | "mismatch" | "pending" | "unverified";
+                                auditedToBlock?: string | null;
+                                finalizedTargetBlock?: string | null;
+                                envioWatermark?: string | null;
+                                appWatermark?: string | null;
+                            }[];
+                            parityAlerts?: {
+                                mismatchedSources?: number;
+                                stalledSources?: number;
+                                pendingRepairs?: number;
+                            };
+                        };
+                    };
                 };
             };
         };

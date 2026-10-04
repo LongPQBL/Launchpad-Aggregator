@@ -6,6 +6,7 @@ import { registerCoverageRoutes } from './routes/coverage.js';
 import { registerLaunchRoutes } from './routes/launches.js';
 import { registerEventsRoute } from './routes/events.js';
 import { ApiEventBus } from './events.js';
+import type { LaunchParityCoverage } from '../coverage/repairRanges.js';
 
 export interface Page<T> { items: readonly T[]; nextCursor: string | null }
 export interface LaunchSummary {
@@ -44,7 +45,9 @@ export interface ApiDeps {
   events?: ApiEventBus;
   data: {
     listSources(): Promise<readonly { id: string; chainId: number; platform: string; protocolVersion: string }[]>;
-    getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[] }>;
+    getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[];
+      latestFinalizedFence?: string | null; launchParity?: readonly LaunchParityCoverage[];
+      parityAlerts?: { mismatchedSources: number; stalledSources: number; pendingRepairs: number } }>;
     listLaunches(query: LaunchListQuery): Promise<Page<LaunchSummary>>;
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;

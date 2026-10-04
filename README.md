@@ -123,6 +123,20 @@ cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill ho
 nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
 nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
+## Kiểm toán độ phủ launch Pons
+
+`GET /v1/coverage` báo riêng độ phủ từ source và `launchParity` cho ba factory Pons.
+`complete` chỉ có thể là `true` khi các khoảng finalized đã có báo cáo đối chiếu liên tục,
+không có sai khác, và các nguồn giao dịch/lifecycle cũng đã bắt kịp. `latestFinalizedFence`
+loại 500 block mới nhất. `parityAlerts` đếm source sai khác, watermark chậm và yêu cầu sửa
+đang chờ. Một báo cáo chưa chạy hoặc bị lỗi giữ trạng thái chưa đầy đủ.
+
+`launch_parity_reports` lưu kết quả đối chiếu; `launch_parity_repairs` lưu yêu cầu sửa theo
+khoảng block và theo lớp lỗi (`envio_reindex` hoặc `app_promotion`). Yêu cầu sửa là hàng đợi
+vận hành, không tự kích hoạt Envio reindex. Chỉ đánh dấu đã sửa sau khi chạy lại audit và
+đối chiếu thành công. Lệnh `be/src/cli/auditLaunchParity.ts` hiện đọc bằng chứng chain theo
+khoảng block cố định; phần đối chiếu ba lớp được thêm trong bước tiếp theo của plan coverage.
+
 ## Chạy FE
 
 Cần backend API (`dev:api`) đang chạy trước. Sao chép biến môi trường rồi khởi động FE ở terminal riêng:

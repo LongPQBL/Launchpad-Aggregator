@@ -2,6 +2,23 @@ const quoteAsset = { type: 'object', properties: {
   address: { type: 'string' }, symbol: { type: 'string' }, decimals: { type: 'integer' },
 } } as const;
 
+export const coverageSchema = { type: 'object', properties: {
+  complete: { type: 'boolean' },
+  pendingSourceIds: { type: 'array', items: { type: 'string' } },
+  missingRanges: { type: 'array', items: { type: 'object', properties: {
+    sourceId: { type: 'string' }, fromBlock: { type: 'string' }, toBlock: { type: 'string' }, reason: { type: 'string' },
+  } } },
+  latestFinalizedFence: { type: 'string', nullable: true },
+  launchParity: { type: 'array', items: { type: 'object', properties: {
+    sourceId: { type: 'string' }, status: { type: 'string', enum: ['complete', 'mismatch', 'pending', 'unverified'] },
+    auditedToBlock: { type: 'string', nullable: true }, finalizedTargetBlock: { type: 'string', nullable: true },
+    envioWatermark: { type: 'string', nullable: true }, appWatermark: { type: 'string', nullable: true },
+  } } },
+  parityAlerts: { type: 'object', properties: {
+    mismatchedSources: { type: 'integer' }, stalledSources: { type: 'integer' }, pendingRepairs: { type: 'integer' },
+  } },
+} } as const;
+
 export const launchSummary = { type: 'object', properties: {
   chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' },
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,

@@ -17,13 +17,13 @@ function parseFactories(config: string): ConfiguredFactory[] {
   const chain = split[1]!;
   const chainStart = BigInt(chain.match(/^\s+start_block:\s*(\d+)\s*$/m)?.[1] ?? '0');
   const definitionByName = new Map<string, string>();
-  for (const block of definitions.split(/^  - name: /m).slice(1)) {
+  for (const block of definitions.split(/^ {2}- name: /m).slice(1)) {
     const newline = block.indexOf('\n');
     if (newline < 0) continue;
     definitionByName.set(block.slice(0, newline).trim(), block.slice(newline + 1));
   }
   const result: ConfiguredFactory[] = [];
-  for (const block of chain.split(/^      - name: /m).slice(1)) {
+  for (const block of chain.split(/^ {6}- name: /m).slice(1)) {
     const newline = block.indexOf('\n');
     if (newline < 0) continue;
     const name = block.slice(0, newline).trim();

@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { formatUnits, type Address, type Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
+import { readLaunchParityCoverage } from '../coverage/repairRanges.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
 import { read52WeekHighLowFromCandles } from '../market/candleStats.js';
@@ -214,7 +215,19 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       .map((row: Row) => ({ sourceId: string(row.source_id),
       fromBlock: string(row.from_block), toBlock: string(row.to_block), reason: string(row.reason) }));
     if (number(phaseResult.rows[0]?.count) > 0) pendingSourceIds.push('pons-v2-phase');
-    return { complete: pendingSourceIds.length === 0 && missingRanges.length === 0, pendingSourceIds, missingRanges };
+    const finalizedTarget = head === null || head < 500n ? null : head - 500n;
+    const launchParity = await Promise.all(getPonsFactorySources().filter((source) => source.enabled)
+      .map((source) => readLaunchParityCoverage(pool, source, finalizedTarget)));
+    for (const item of launchParity) {
+      if (item.status !== 'complete' && !pendingSourceIds.includes(item.sourceId)) pendingSourceIds.push(item.sourceId);
+    }
+    const pendingRepairs = await pool.query("SELECT count(*)::int AS count FROM launch_parity_repairs WHERE status = 'pending'");
+    const parityAlerts = { mismatchedSources: launchParity.filter((item) => item.status === 'mismatch').length,
+      stalledSources: launchParity.filter((item) => item.envioWatermark !== null && finalizedTarget !== null
+        && BigInt(item.envioWatermark) < finalizedTarget).length,
+      pendingRepairs: number(pendingRepairs.rows[0]?.count) };
+    return { complete: pendingSourceIds.length === 0 && missingRanges.length === 0, pendingSourceIds, missingRanges,
+      latestFinalizedFence: finalizedTarget?.toString() ?? null, launchParity, parityAlerts };
   }
 
   async function listLaunchesByVolume(query: LaunchListQuery): Promise<Page<LaunchSummary>> {

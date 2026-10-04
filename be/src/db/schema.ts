@@ -194,6 +194,22 @@ export const launchParityReports = pgTable('launch_parity_reports', {
   check('launch_parity_reports_status_valid', sql`${table.status} IN ('complete', 'mismatch', 'pending')`),
 ]);
 
+export const launchParityRepairs = pgTable('launch_parity_repairs', {
+  sourceId: text('source_id').notNull(),
+  fromBlock: bigint('from_block', { mode: 'bigint' }).notNull(),
+  toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
+  failureLayer: text('failure_layer').notNull(),
+  action: text('action').notNull(),
+  status: text('status').notNull().default('pending'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.sourceId, table.fromBlock, table.toBlock, table.failureLayer] }),
+  index('launch_parity_repairs_pending_idx').on(table.status, table.createdAt),
+  check('launch_parity_repairs_layer_valid', sql`${table.failureLayer} IN ('envio', 'app')`),
+  check('launch_parity_repairs_action_valid', sql`${table.action} IN ('envio_reindex', 'app_promotion')`),
+  check('launch_parity_repairs_status_valid', sql`${table.status} IN ('pending', 'done')`),
+]);
+
 export const venues = pgTable('venues', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),
