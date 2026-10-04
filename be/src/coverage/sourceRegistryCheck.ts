@@ -46,6 +46,9 @@ export function validateLaunchSourceConfig(
   const seen = new Set<string>();
   for (const source of sources.filter((item) => item.enabled)) {
     const address = source.factory.toLowerCase();
+    if (toEventSelector(source.launchEventSignature).toLowerCase() !== source.launchTopic.toLowerCase()) {
+      issues.push({ code: 'wrong_topic', sourceId: source.id });
+    }
     if (seen.has(address)) issues.push({ code: 'duplicate_factory', sourceId: source.id });
     seen.add(address);
     const match = configured.find((item) => item.address.toLowerCase() === address && item.name === source.envioContractName);

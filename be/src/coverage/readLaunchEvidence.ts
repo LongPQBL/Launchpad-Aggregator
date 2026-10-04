@@ -50,7 +50,7 @@ export async function readLaunchEvidence(
 ): Promise<LaunchEventKey[]> {
   if (fromBlock < source.startBlock) throw new Error('Range begins before source start');
   if (toBlock > (options.finalizedFence ?? toBlock)) throw new Error('Range exceeds finalized fence');
-  if (toBlock < fromBlock || maxRange < 1n) throw new Error('Invalid bounded launch range');
+  if (toBlock < fromBlock || maxRange < 1n || maxRange > 2000n) throw new Error('Invalid bounded launch range');
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const events: LaunchEventKey[] = [];
   const seen = new Set<string>();

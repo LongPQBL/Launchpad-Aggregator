@@ -28,6 +28,8 @@ describe('bounded launch evidence', () => {
       .rejects.toThrow('source start');
     await expect(readLaunchEvidence(client, sources[0]!, sources[0]!.startBlock, sources[0]!.startBlock + 1n, 2n,
       { finalizedFence: sources[0]!.startBlock })).rejects.toThrow('finalized fence');
+    await expect(readLaunchEvidence(client, sources[0]!, sources[0]!.startBlock, sources[0]!.startBlock, 2001n))
+      .rejects.toThrow('bounded launch range');
   });
 
   it('deduplicates responses, excludes wrong address/topic, and sorts by block/log', async () => {

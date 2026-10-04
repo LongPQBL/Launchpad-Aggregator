@@ -30,5 +30,7 @@ describe('Pons launch source registry', () => {
       .some((i) => i.code === 'missing_config')).toBe(true);
     expect(validateLaunchSourceConfig(sources, config, handlers.replaceAll('PonsV2Factory', 'RemovedV2Factory'))
       .some((i) => i.code === 'missing_handler')).toBe(true);
+    expect(validateLaunchSourceConfig([{ ...sources[0]!, launchEventSignature: sources[2]!.launchEventSignature },
+      ...sources.slice(1)], config, handlers).some((i) => i.code === 'wrong_topic')).toBe(true);
   });
 });
