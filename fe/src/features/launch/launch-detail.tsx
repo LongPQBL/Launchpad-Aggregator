@@ -92,7 +92,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
             <AboutSection
               description={detail.description}
               tokenAddress={detail.tokenAddress}
-              explorerUrl={`${explorerBase ?? 'https://robinhoodchain.blockscout.com'}/token/${detail.tokenAddress}`}
+              explorerUrl={explorerBase ? `${explorerBase}/token/${detail.tokenAddress}` : undefined}
               websiteUrl={detail.websiteUrl}
               twitterUrl={detail.twitterUrl}
             />

@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 export interface AboutSectionProps {
   description: string | null;
   tokenAddress: string;
-  explorerUrl: string;
+  explorerUrl?: string;
   websiteUrl: string | null;
   twitterUrl: string | null;
 }
@@ -72,7 +72,7 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
             Could not copy automatically — select to copy: <span className="select-all font-mono">{tokenAddress}</span>
           </span>
         )}
-        <Pill href={explorerUrl}>Robinhood Explorer</Pill>
+        {explorerUrl !== undefined && <Pill href={explorerUrl}>Robinhood Explorer</Pill>}
         {websiteUrl !== null && isHttpUrl(websiteUrl) && <Pill href={websiteUrl}>Website</Pill>}
         {twitterUrl !== null && isHttpUrl(twitterUrl) && <Pill href={twitterUrl}>Twitter</Pill>}
       </div>

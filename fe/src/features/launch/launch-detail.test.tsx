@@ -126,6 +126,11 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('other')).toBeInTheDocument();
   });
 
+  it('hides the About section explorer pill for a chain with no registered explorer', () => {
+    render(<LaunchDetail detail={detail({ chainId: 999999 })} trades={null} candles={null} />);
+    expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();
+  });
+
   it('shows source, protocol version, chain, quote asset, and 24h volume', () => {
     render(<LaunchDetail detail={detail()} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
 
