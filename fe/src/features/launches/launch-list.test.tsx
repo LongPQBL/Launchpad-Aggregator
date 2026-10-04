@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { LaunchSummary, Source } from '@/api/client';
 import { LaunchList } from './launch-list';
@@ -131,12 +131,81 @@ describe('LaunchList', () => {
     expect(within(table).getByText(/\$269\.17/)).toBeInTheDocument();
   });
 
-  it('shows TVL in the list with the correct phase explanation', () => {
+  it('shows TVL in the list, under the Liquidity column, with the correct phase explanation', () => {
     render(<LaunchList page={{ items: [launch({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })], nextCursor: null }}
       sources={oneChainOneSource} error={false} />);
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByRole('columnheader', { name: 'TVL' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Liquidity' })).toBeInTheDocument();
     expect(within(table).getByText('$15.7')).toHaveAttribute('title', expect.stringContaining('real quote'));
+  });
+
+  it('renders FDV, 24H volume, Liquidity, 1H%, 1D%, and Age columns with real values', () => {
+    const twoDaysAgo = Math.floor(Date.now() / 1000) - 2 * 86_400;
+    render(
+      <LaunchList
+        page={{
+          items: [launch({
+            fdvUsd: '1000', officialVolume24h: '50', tvlUsd: '200',
+            change1h: '12.5', change1d: '-5', launchTimestamp: String(twoDaysAgo),
+          })],
+          nextCursor: null,
+        }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    expect(within(table).getByRole('columnheader', { name: 'FDV' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '24H volume' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Liquidity' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '1H %' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '1D %' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
+    expect(within(table).getByText('$1000')).toBeInTheDocument();
+    expect(within(table).getByText('+12.5%')).toBeInTheDocument();
+    expect(within(table).getByText('-5%')).toBeInTheDocument();
+    expect(within(table).getByText('2d')).toBeInTheDocument();
+  });
+
+  it('renders a dash for null 1H/1D change instead of 0% or blank', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ change1h: null, change1d: null })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    expect(within(table).getAllByText('—').length).toBeGreaterThanOrEqual(2);
+    expect(within(table).queryByText('0%')).not.toBeInTheDocument();
+  });
+
+  it('falls back to a placeholder avatar when logoUri is null', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ logoUri: null, symbol: 'TKA' })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    expect(within(table).queryByRole('img', { name: /token logo/i })).not.toBeInTheDocument();
+    expect(within(table).getByText('T')).toBeInTheDocument();
+  });
+
+  it('hides the row-specific logo image and shows the placeholder when the image fails to load', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ logoUri: 'ipfs://bafkreitest', symbol: 'TKA' })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const table = screen.getByRole('table', { name: /launch list/i });
+    const img = within(table).getByRole('img', { name: /token logo/i });
+    fireEvent.error(img);
+    expect(within(table).queryByRole('img', { name: /token logo/i })).not.toBeInTheDocument();
+    expect(within(table).getByText('T')).toBeInTheDocument();
   });
 
   it('hides the chain filter when every source shares the same chain', () => {

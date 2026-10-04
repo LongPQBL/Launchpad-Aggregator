@@ -1,9 +1,10 @@
 import { chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
-import { launchHref, type LaunchPage, type Source } from '@/api/client';
+import { launchHref, type LaunchPage, type LaunchSummary, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { TokenLogo } from './token-logo';
 
 export interface LaunchListProps {
   page: LaunchPage | null;
@@ -12,14 +13,21 @@ export interface LaunchListProps {
   chainId?: number;
   search?: string;
   status?: string;
+  tab?: string;
 }
 
 const LIFECYCLE_STATUSES = ['trading', 'swept', 'graduated', 'rescued'] as const;
+const TABS = [
+  { value: 'all', label: 'All' },
+  { value: 'recent', label: 'Recently launched' },
+  { value: 'trending', label: 'Trending' },
+] as const;
 
 interface CurrentFilters {
   chainId?: number;
   search?: string;
   status?: string;
+  tab?: string;
 }
 
 function filterHref(current: CurrentFilters, overrides: CurrentFilters): string {
@@ -28,6 +36,7 @@ function filterHref(current: CurrentFilters, overrides: CurrentFilters): string 
   if (merged.chainId !== undefined) params.set('chainId', String(merged.chainId));
   if (merged.search) params.set('search', merged.search);
   if (merged.status) params.set('status', merged.status);
+  if (merged.tab && merged.tab !== 'all') params.set('tab', merged.tab);
   return `/?${params.toString()}`;
 }
 
@@ -36,10 +45,45 @@ function nextPageHref(cursor: string, current: CurrentFilters): string {
   if (current.chainId !== undefined) params.set('chainId', String(current.chainId));
   if (current.search) params.set('search', current.search);
   if (current.status) params.set('status', current.status);
+  if (current.tab && current.tab !== 'all') params.set('tab', current.tab);
   return `/?${params.toString()}`;
 }
 
-export function LaunchList({ page, sources, error, chainId, search, status }: LaunchListProps) {
+// Nulls sort last regardless of direction — a launch with no 1H trade data is not "0% change",
+// it's unranked (Review Focus: never fabricate a value to make sorting work).
+function sortByTrending(items: readonly LaunchSummary[]): readonly LaunchSummary[] {
+  return [...items].sort((a, b) => {
+    const left = a.change1h === null ? null : Number(a.change1h);
+    const right = b.change1h === null ? null : Number(b.change1h);
+    if (left === null && right === null) return 0;
+    if (left === null) return 1;
+    if (right === null) return -1;
+    return right - left;
+  });
+}
+
+function formatPercentChange(value: string | null): { text: string; className: string } {
+  if (value === null) return { text: '—', className: 'text-muted-foreground' };
+  const numeric = Number(value);
+  if (numeric > 0) return { text: `+${value}%`, className: 'text-emerald-600' };
+  if (numeric < 0) return { text: `${value}%`, className: 'text-red-600' };
+  return { text: `${value}%`, className: 'text-muted-foreground' };
+}
+
+// No date library dependency for a single relative-age cell — see plan Task 7 Step 7.
+function formatAge(launchTimestamp: string | null): string {
+  if (launchTimestamp === null) return '—';
+  const diffSeconds = Math.floor(Date.now() / 1000) - Number(launchTimestamp);
+  if (diffSeconds < 60) return `${Math.max(diffSeconds, 0)}s`;
+  const minutes = Math.floor(diffSeconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(diffSeconds / 3600);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(diffSeconds / 86_400);
+  return `${days}d`;
+}
+
+export function LaunchList({ page, sources, error, chainId, search, status, tab }: LaunchListProps) {
   if (error || !page) {
     return (
       <div role="alert">
@@ -52,11 +96,26 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
     );
   }
 
-  const current: CurrentFilters = { chainId, search, status };
+  const current: CurrentFilters = { chainId, search, status, tab };
   const chainIds = [...new Set(sources.map((source) => source.chainId))];
+  const activeTab = tab ?? 'all';
+  const items = activeTab === 'trending' ? sortByTrending(page.items) : page.items;
 
   return (
     <div className="flex flex-col gap-4">
+      <nav aria-label="Filter by tab" className="flex gap-2">
+        {TABS.map(({ value, label }) => (
+          <a
+            key={value}
+            href={filterHref(current, { tab: value })}
+            aria-current={activeTab === value ? 'page' : undefined}
+            className={cn('rounded-md px-3 py-1 text-sm', activeTab === value ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:underline')}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+
       <form method="get" role="search" aria-label="Search and filter launches" className="flex flex-wrap gap-2">
         <Input
           type="search"
@@ -80,6 +139,7 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
           ))}
         </select>
         {chainId !== undefined && <input type="hidden" name="chainId" value={chainId} />}
+        {activeTab !== 'all' && <input type="hidden" name="tab" value={activeTab} />}
         <Button type="submit">Search</Button>
       </form>
 
@@ -96,54 +156,68 @@ export function LaunchList({ page, sources, error, chainId, search, status }: La
       <div role="table" aria-label="Launch list" className="w-full overflow-hidden rounded-lg border border-border md:table md:border-separate md:border-spacing-0">
         <div role="rowgroup" className="hidden bg-muted md:table-header-group">
           <div role="row" className="md:table-row">
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
             <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Token</div>
             <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Launchpad</div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Chain</div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">
-              Quote asset
-            </div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Lifecycle</div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">
-              Volume 24h
-            </div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">
-              FDV
-            </div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">TVL</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">FDV</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">24H volume</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Liquidity</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">1H %</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">1D %</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Age</div>
           </div>
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-          {page.items.map((launch) => (
-            <div
-              key={`${launch.chainId}-${launch.tokenAddress}`}
-              role="row"
-              className={cn(
-                'rounded-lg border border-border bg-card p-3',
-                'md:table-row md:rounded-none md:border-0 md:border-b md:border-border md:bg-transparent md:p-0 md:transition-colors md:hover:bg-muted/60',
-              )}
-            >
-              <div role="cell" className="md:table-cell md:p-4 md:align-middle">
-                <a href={launchHref(launch.chainId, launch.tokenAddress)} className="font-medium text-foreground hover:text-primary hover:underline">
-                  {launch.name} <span className="text-muted-foreground">({launch.symbol})</span>
-                </a>
+          {items.map((launch, index) => {
+            const change1h = formatPercentChange(launch.change1h);
+            const change1d = formatPercentChange(launch.change1d);
+            return (
+              <div
+                key={`${launch.chainId}-${launch.tokenAddress}`}
+                role="row"
+                className={cn(
+                  'rounded-lg border border-border bg-card p-3',
+                  'md:table-row md:rounded-none md:border-0 md:border-b md:border-border md:bg-transparent md:p-0 md:transition-colors md:hover:bg-muted/60',
+                )}
+              >
+                <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:align-middle">{index + 1}</div>
+                <div role="cell" className="md:table-cell md:p-4 md:align-middle">
+                  <div className="flex items-center gap-3">
+                    <TokenLogo logoUri={launch.logoUri} symbol={launch.symbol} />
+                    <div className="flex flex-col">
+                      <a href={launchHref(launch.chainId, launch.tokenAddress)} className="font-medium text-foreground hover:text-primary hover:underline">
+                        {launch.name} <span className="text-muted-foreground">({launch.symbol})</span>
+                      </a>
+                      <span className="text-xs text-muted-foreground">
+                        <span>{chainName(launch.chainId)}</span> · <span>{formatLifecycleStatus(launch.lifecycleStatus)}</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div role="cell" className="md:table-cell md:p-4 md:align-middle">
+                  {launch.platform} {launch.protocolVersion}
+                </div>
+                <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
+                  {formatUsd(launch.fdvUsd)}
+                </div>
+                <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
+                  {formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                </div>
+                <div role="cell" title={tvlTooltip(launch)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
+                  {formatUsd(launch.tvlUsd)}
+                </div>
+                <div role="cell" className={cn('font-mono md:table-cell md:p-4 md:text-right md:align-middle', change1h.className)}>
+                  {change1h.text}
+                </div>
+                <div role="cell" className={cn('font-mono md:table-cell md:p-4 md:text-right md:align-middle', change1d.className)}>
+                  {change1d.text}
+                </div>
+                <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:text-right md:align-middle">
+                  {formatAge(launch.launchTimestamp)}
+                </div>
               </div>
-              <div role="cell" className="md:table-cell md:p-4 md:align-middle">
-                {launch.platform} {launch.protocolVersion}
-              </div>
-              <div role="cell" className="md:table-cell md:p-4 md:align-middle">{chainName(launch.chainId)}</div>
-              <div role="cell" className="md:table-cell md:p-4 md:align-middle">{launch.quoteAsset.symbol}</div>
-              <div role="cell" className="md:table-cell md:p-4 md:align-middle">{formatLifecycleStatus(launch.lifecycleStatus)}</div>
-              <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                {formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
-              </div>
-              <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                {formatUsd(launch.fdvUsd)}
-              </div>
-              <div role="cell" title={tvlTooltip(launch)} className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
-                {formatUsd(launch.tvlUsd)}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
