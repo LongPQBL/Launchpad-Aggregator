@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { Address } from 'viem';
-import { readExtendedTokenMetadata } from './extendedMetadata.js';
+import { ContractFunctionExecutionError, ContractFunctionRevertedError, ContractFunctionZeroDataError, HttpRequestError, TimeoutError, type Address } from 'viem';
+import { ponsExtendedMetadataAbi, readExtendedTokenMetadata, readExtendedTokenMetadataOutcomes, readLaunchTimestamp } from './extendedMetadata.js';
 
 const TOKEN = '0xadd59906506bf2149212421e9d23db399f588efe' as Address;
 
@@ -53,5 +53,56 @@ describe('readExtendedTokenMetadata', () => {
     });
     const result = await readExtendedTokenMetadata({ readContract }, TOKEN);
     expect(result).toEqual({ logoUri: null, description: 'Real description', websiteUrl: null, twitterUrl: 'https://x.com/real' });
+  });
+});
+
+describe('retryable extended metadata outcomes', () => {
+  const contractError = (cause: Error, functionName: string) => new ContractFunctionExecutionError(cause as HttpRequestError, {
+    abi: ponsExtendedMetadataAbi, functionName, contractAddress: TOKEN,
+  });
+
+  it('marks empty successful strings and socials as done without inventing values', async () => {
+    const result = await readExtendedTokenMetadataOutcomes({ readContract: async ({ functionName }) =>
+      functionName === 'socials' ? ['', '', '', '', ''] : '' }, TOKEN);
+    expect(result.logo).toEqual({ state: 'done', value: null });
+    expect(result.description).toEqual({ state: 'done', value: null });
+    expect(result.socials).toEqual({ state: 'done', value: { twitterUrl: null, websiteUrl: null } });
+  });
+
+  it('finishes typed contract failures for only the affected functions', async () => {
+    const readContract = async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'logo') throw contractError(new ContractFunctionRevertedError({ abi: ponsExtendedMetadataAbi, functionName }), functionName);
+      if (functionName === 'description') throw contractError(new ContractFunctionZeroDataError({ functionName }), functionName);
+      return ['https://x.com/real', '', '', 'https://real.example', ''];
+    };
+    const result = await readExtendedTokenMetadataOutcomes({ readContract }, TOKEN);
+    expect(result.logo).toEqual({ state: 'done', value: null });
+    expect(result.description).toEqual({ state: 'done', value: null });
+    expect(result.socials).toEqual({ state: 'done', value: { twitterUrl: 'https://x.com/real', websiteUrl: 'https://real.example' } });
+  });
+
+  it('retries wrapped HTTP rate limits and timeouts, including when one other field succeeds', async () => {
+    const readContract = async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'logo') throw contractError(new HttpRequestError({ url: 'https://rpc.example/key', status: 429 }), functionName);
+      if (functionName === 'socials') throw contractError(new TimeoutError({ body: {}, url: 'https://rpc.example/key' }), functionName);
+      return 'Saved description';
+    };
+    const result = await readExtendedTokenMetadataOutcomes({ readContract }, TOKEN);
+    expect(result.logo).toEqual({ state: 'pending', value: null, errorKind: 'transport' });
+    expect(result.description).toEqual({ state: 'done', value: 'Saved description' });
+    expect(result.socials).toEqual({ state: 'pending', value: null, errorKind: 'transport' });
+  });
+
+  it('retries unknown errors rather than assuming the function is unsupported', async () => {
+    const result = await readExtendedTokenMetadataOutcomes({ readContract: async () => { throw new Error('unknown RPC fault'); } }, TOKEN);
+    expect(result.logo).toEqual({ state: 'pending', value: null, errorKind: 'unknown' });
+  });
+
+  it('retries a failed timestamp read and retains a successful timestamp', async () => {
+    const timeout = new TimeoutError({ body: {}, url: 'https://rpc.example/key' });
+    expect(await readLaunchTimestamp({ getBlock: async () => { throw timeout; } }, 123n))
+      .toEqual({ state: 'pending', value: null, errorKind: 'transport' });
+    expect(await readLaunchTimestamp({ getBlock: async () => ({ timestamp: 1_700_000_000n }) }, 123n))
+      .toEqual({ state: 'done', value: 1_700_000_000 });
   });
 });
