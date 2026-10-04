@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/client.js';
-import { __resetUsdPriceCacheForTests } from '../market/usdPricing.js';
 import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
 import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
 import { createApiStore } from './store.js';
@@ -116,6 +115,7 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
   const usdSource = 'envio-store-usd-test';
   const venueId = `4663:curve:${usdToken}`;
   const txHash2 = '0x' + 'c'.repeat(64);
+  const historicalFeed: `0x${string}` = `0x${'f'.repeat(40)}`;
 
   async function seed(quoteAssetAddress: string, quoteAssetSymbol: string): Promise<void> {
     await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
@@ -140,6 +140,9 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
     await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM sources WHERE id = $1', [usdSource]);
+    await pool.query('DELETE FROM price_jobs WHERE chain_id = 4663 AND feed_address = $1', [historicalFeed]);
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = 4663 AND feed_address = $1', [historicalFeed]);
+    await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [ETH_ADDRESS]);
   });
 
   it('returns null usdValue and usdValueApprox=false for a trade whose quote asset has no Chainlink feed', async () => {
@@ -149,50 +152,68 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
     const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
     expect(trades.items[0]!.usdValue).toBeNull();
     expect(trades.items[0]!.usdValueApprox).toBe(false);
+    expect(trades.items[0]!.usdValueStatus).toBe('unavailable');
     expect(readContract).not.toHaveBeenCalled();
   });
 
-  it('computes an approximate usdValue for a trade whose quote asset has a known feed', async () => {
+  it('values a trade at its own historical quote price, never the current/latest price, and never changes when the latest price moves', async () => {
     await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
-    await seed(ETH_ADDRESS, 'ETH'); // real zero-address convention for native ETH — matches FEEDS
-    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
-      if (functionName === 'decimals') return 8;
-      if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
-      throw new Error(`unexpected ${functionName}`);
-    });
-    const storeWithRpc = createApiStore(pool, { readContract });
-    const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
-    expect(trades.items[0]!.usdValue).not.toBeNull();
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = 4663 AND feed_address = $1', [historicalFeed]);
+    await seed(ETH_ADDRESS, 'ETH'); // real zero-address convention for native ETH; trade sits at (block_number=1, log_index=0), timestamp=1700000000
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: ETH_ADDRESS as `0x${string}`, feedAddress: historicalFeed,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
+    await upsertPriceRounds(pool, 4663, historicalFeed, [
+      // A decoy round at an EARLIER chain position with a wildly different price — proves position,
+      // not recency of insertion or "the latest round", drives selection.
+      { roundId: 1n, answerRaw: 999999999999n, decimals: 8, startedAt: 1_600_000_000, updatedAt: 1_600_000_000, blockNumber: 0n, logIndex: 0 },
+      // The round at-or-before the trade's own (blockNumber, logIndex) — this is the one that must win.
+      { roundId: 2n, answerRaw: 269170223591n, decimals: 8, startedAt: 1_699_999_000, updatedAt: 1_699_999_000, blockNumber: 1n, logIndex: 0 },
+    ]);
+
+    const trades = await store.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items[0]!.usdValueStatus).toBe('priced');
     expect(Number(trades.items[0]!.usdValue)).toBeCloseTo(2691.70223591, 2);
     expect(trades.items[0]!.usdValueApprox).toBe(true);
   });
 
-  it('keeps trades available with null USD values when the price feed RPC fails', async () => {
+  it('returns usdValueStatus: pending (not a silently-approximated value) and enqueues a round-backfill job when the historical round is missing', async () => {
     await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = 4663 AND feed_address = $1', [historicalFeed]);
+    await pool.query(`DELETE FROM price_jobs WHERE chain_id = 4663 AND job_type = 'round_backfill' AND feed_address = $1`, [historicalFeed]);
     await seed(ETH_ADDRESS, 'ETH');
-    __resetUsdPriceCacheForTests();
-    const readContract = vi.fn().mockRejectedValue(new Error('RPC unavailable'));
-    const storeWithRpc = createApiStore(pool, { readContract });
-    const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
-    expect(trades.items).toHaveLength(1);
-    expect(trades.items[0]!.quoteAmount).toBe('1');
-    expect(trades.items[0]!.usdValue).toBeNull();
-    expect(trades.items[0]!.usdValueApprox).toBe(false);
-    expect(readContract).toHaveBeenCalled();
-  });
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: ETH_ADDRESS as `0x${string}`, feedAddress: historicalFeed,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
+    // No rounds at all — the feed is verified but has no backfilled history yet.
 
-  it('returns null usdValue when no rpcClient was given to createApiStore at all', async () => {
-    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
-    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
-    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
-    await seed(ETH_ADDRESS, 'ETH');
     const trades = await store.listTrades(4663, usdToken, { limit: 10 });
     expect(trades.items[0]!.usdValue).toBeNull();
-    expect(trades.items[0]!.usdValueApprox).toBe(false);
+    expect(trades.items[0]!.usdValueStatus).toBe('pending');
+
+    const jobs = await pool.query(`SELECT range_start, range_end FROM price_jobs
+      WHERE chain_id = 4663 AND job_type = 'round_backfill' AND feed_address = $1`, [historicalFeed]);
+    expect(jobs.rows.length).toBeGreaterThan(0);
+    expect(jobs.rows.some((row) => Number(row.range_start) <= 1_700_000_000 && Number(row.range_end) >= 1_700_000_000)).toBe(true);
+  });
+
+  it('returns usdValueStatus: unavailable when there is no verified feed for the quote asset at all, and enqueues no round-backfill job', async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [usdToken]);
+    const before = await pool.query(`SELECT count(*)::int AS count FROM price_jobs WHERE job_type = 'round_backfill'`);
+    await seed(usdToken, 'SPCX'); // same placeholder-address convention as the no-feed test above — a feed_resolution
+    // job may already exist for this address from the Task 6 sync-path hook; that's fine and expected.
+
+    const trades = await store.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items[0]!.usdValue).toBeNull();
+    expect(trades.items[0]!.usdValueStatus).toBe('unavailable');
+
+    const after = await pool.query(`SELECT count(*)::int AS count FROM price_jobs WHERE job_type = 'round_backfill'`);
+    expect(after.rows[0].count).toBe(before.rows[0].count);
   });
 });
 

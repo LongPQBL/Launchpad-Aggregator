@@ -33,10 +33,14 @@ export const trade = { type: 'object', properties: {
   logIndex: { type: 'integer' }, timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
   tokenAmount: { type: 'string' }, quoteAmount: { type: 'string' }, priceQuote: { type: 'string', nullable: true },
   traderAddress: { type: 'string' },
-  // usdValue is an approximation (current Chainlink price, not the price at trade time) —
-  // usdValueApprox is always true when usdValue is non-null. See spec
-  // docs/superpowers/specs/2026-10-01-uniswap-parity-stats-design.md §5.
+  // usdValue is the trade's OWN historical quote-asset price at its exact (blockNumber, logIndex)
+  // position, never the current/latest price — usdValueApprox is always true when usdValue is
+  // non-null (the Chainlink round is itself an approximation of the true market price at that
+  // moment). usdValueStatus explains a null usdValue: 'pending' means a verified feed exists but
+  // the historical round isn't backfilled yet (a backfill job has been enqueued); 'unavailable'
+  // means no verified feed exists for this quote asset at all.
   usdValue: { type: 'string', nullable: true }, usdValueApprox: { type: 'boolean' },
+  usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
 } } as const;
 
 export const candle = { type: 'object', properties: {

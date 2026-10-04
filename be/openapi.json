@@ -430,6 +430,14 @@
                           },
                           "usdValueApprox": {
                             "type": "boolean"
+                          },
+                          "usdValueStatus": {
+                            "type": "string",
+                            "enum": [
+                              "priced",
+                              "pending",
+                              "unavailable"
+                            ]
                           }
                         }
                       }

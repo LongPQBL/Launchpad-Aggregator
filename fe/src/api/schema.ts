@@ -263,6 +263,8 @@ export interface paths {
                                 traderAddress?: string;
                                 usdValue?: string | null;
                                 usdValueApprox?: boolean;
+                                /** @enum {string} */
+                                usdValueStatus?: "priced" | "pending" | "unavailable";
                             }[];
                             nextCursor?: string | null;
                         };

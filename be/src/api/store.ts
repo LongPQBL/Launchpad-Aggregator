@@ -5,6 +5,9 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
+import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
+import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
+import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
 import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
@@ -131,7 +134,7 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
   }
 }
 
-function page<T>(rows: readonly Row[], limit: number, map: (row: Row) => T): Page<T> {
+function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: number) => T): Page<T> {
   const included = rows.slice(0, limit);
   const last = included.at(-1);
   return { items: included.map(map), nextCursor: rows.length > limit && last ? encodeCursor({
@@ -380,12 +383,28 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       [chainId, tokenAddress.toLowerCase(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
         cursor?.logIndex ?? null, query.limit + 1]);
       const rows = result.rows as Row[];
-      // Same quote asset for every row of one launch's trades — one price lookup (itself cached
-      // ~60s inside usdPricing.ts), not one per trade.
-      const usdPrice = rpcClient && rows[0]
-        ? await readUsdPrice(rpcClient, string(rows[0].launch_quote_asset_address)).catch(() => null)
-        : null;
-      return page(rows, query.limit, (row) => ({
+      // Every row on one launch's trade page shares the same quote asset, so this calls
+      // resolveVerifiedFeed (inside valueTradeUsd) once per row redundantly — bounded by
+      // query.limit (≤100), acceptable for now; if Task 11's benchmark shows this dominating,
+      // resolve the feed once above this loop and thread it into a valueTradeUsd overload.
+      const valuations = await Promise.all(rows.map((row) => valueTradeUsd(pool, chainId, string(row.launch_quote_asset_address), {
+        timestamp: number(row.timestamp), quoteAmountRaw: BigInt(string(row.quote_amount_raw)),
+        quoteAssetDecimals: number(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
+      })));
+      // Demand-driven backfill: a `pending` row means a verified feed exists but this trade's exact
+      // round isn't backfilled yet — enqueue one bounded, deduplicated job covering a window around
+      // this trade's timestamp. Fire-and-forget after the response data is already computed; never
+      // block the page on it.
+      const feed = rows[0] ? await resolveVerifiedFeed(pool, chainId, string(rows[0].launch_quote_asset_address)) : null;
+      if (feed) {
+        for (const [i, valuation] of valuations.entries()) {
+          if (valuation.status === 'pending') {
+            const t = number(rows[i]!.timestamp);
+            void enqueueRoundBackfillJob(pool, chainId, feed.feedAddress, t - 3600, t + 3600).catch(() => {});
+          }
+        }
+      }
+      return page(rows, query.limit, (row, i) => ({
         venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
         logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side),
         activityKind: string(row.activity_kind), tokenAmount: formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
@@ -393,9 +412,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         priceQuote: row.price_numerator_raw === null || row.price_denominator_raw === null ? null
           : formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18),
         traderAddress: string(row.trader_address),
-        usdValue: usdPrice === null ? null
-          : (Number(formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals))) * usdPrice.priceUsd).toString(),
-        usdValueApprox: usdPrice !== null,
+        usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
+        usdValueApprox: valuations[i]!.status === 'priced',
+        usdValueStatus: valuations[i]!.status,
       })) as Page<TradeResponse>;
     },
     async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
