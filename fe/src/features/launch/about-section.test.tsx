@@ -56,6 +56,24 @@ describe('AboutSection copy-address control', () => {
     expect(screen.getByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copied' })).not.toBeInTheDocument();
   });
+
+  it('keeps the manual-copy fallback visible until the next attempt, not auto-dismissed like Copied', async () => {
+    vi.useFakeTimers();
+    try {
+      setClipboard({ writeText: () => Promise.reject(new Error('denied')) });
+      render(<AboutSection {...baseProps} />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /copy token address/i }));
+      });
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(5000);
+      });
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('AboutSection website/Twitter link validation', () => {

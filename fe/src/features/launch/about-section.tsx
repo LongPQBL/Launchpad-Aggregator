@@ -56,10 +56,13 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
       await navigator.clipboard.writeText(tokenAddress);
       setCopyState('copied');
+      // Only the transient success state auto-dismisses. A failure's fallback (the full address,
+      // selectable for manual copying) must stay up until the next attempt — a 2s disappearance
+      // would cut off a user mid-selection, especially a mobile long-press (final review, Important 1).
+      copyResetRef.current = setTimeout(() => setCopyState('idle'), 2000);
     } catch {
       setCopyState('error');
     }
-    copyResetRef.current = setTimeout(() => setCopyState('idle'), 2000);
   }
 
   return (

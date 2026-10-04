@@ -386,7 +386,7 @@ describe('syncV2ToReal', () => {
     }
   });
 
-  it('starts metadata, quote-asset, and extended-metadata reads concurrently, not sequentially', async () => {
+  it('starts metadata, quote-asset, extended-metadata, and launch-timestamp reads concurrently, not sequentially', async () => {
     const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9c';
     const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9e';
     const pair = '0x9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9f';
@@ -396,9 +396,11 @@ describe('syncV2ToReal', () => {
     let releaseMetadata!: () => void;
     let releaseQuote!: () => void;
     let releaseExtended!: () => void;
+    let releaseBlock!: () => void;
     const metadataGate = new Promise<void>((resolve) => { releaseMetadata = resolve; });
     const quoteGate = new Promise<void>((resolve) => { releaseQuote = resolve; });
     const extendedGate = new Promise<void>((resolve) => { releaseExtended = resolve; });
+    const blockGate = new Promise<void>((resolve) => { releaseBlock = resolve; });
     const client = {
       readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
         const addr = address.toLowerCase();
@@ -412,7 +414,7 @@ describe('syncV2ToReal', () => {
         if (addr === pair && functionName === 'decimals') return 18;
         throw new Error(`unexpected ${address} ${functionName}`);
       },
-      getBlock: async () => ({ timestamp: 1_700_000_000n }),
+      getBlock: async () => { started.push('getBlock'); await blockGate; return { timestamp: 1_700_000_000n }; },
     };
     try {
       for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
@@ -424,15 +426,15 @@ describe('syncV2ToReal', () => {
       const syncPromise = syncV2ToReal(envioPool, db, fixtureTables, client);
       // Wait for the pre-fetch's own setup queries (readEnvioProgress/existingRows/rawLaunches —
       // real Postgres round trips, not microtasks) to finish and the per-launch RPC reads to start.
-      // Once any one of the three independent reads has registered, a concurrent implementation has
-      // already registered all three in the same synchronous turn (each is invoked while building
+      // Once any one of the four independent reads has registered, a concurrent implementation has
+      // already registered all four in the same synchronous turn (each is invoked while building
       // the Promise.all argument array, before any of them is awaited) — a sequential-await
       // implementation would only ever have registered the first one by this point.
       for (let attempt = 0; attempt < 200 && started.length === 0; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
-      expect(started.sort()).toEqual(['logo', 'name', 'quoteSymbol']);
-      releaseMetadata(); releaseQuote(); releaseExtended();
+      expect(started.sort()).toEqual(['getBlock', 'logo', 'name', 'quoteSymbol']);
+      releaseMetadata(); releaseQuote(); releaseExtended(); releaseBlock();
       await syncPromise;
     } finally {
       await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
