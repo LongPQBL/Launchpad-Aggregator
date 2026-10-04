@@ -1,0 +1,1 @@
+ALTER TABLE "candle_cache_state" ADD COLUMN "next_timestamp" integer;

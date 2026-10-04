@@ -5,7 +5,7 @@
 ## Trạng thái hiện tại
 
 - Backend có schema PostgreSQL, adapter Pons v1/v2, API Fastify và SSE qua PostgreSQL `LISTEN/NOTIFY`.
-- Việc index Pons (launch, lifecycle, trade chính thức, pool V4 đã xác thực) chạy qua **Envio** (xem phần “Envio HyperIndex” bên dưới) — đây là đường ghi dữ liệu thật duy nhất hiện tại. API dựng nến từ trade ở các venue đó theo trang thời gian; chart không sinh nến trong khoảng `Swept`, trả `complete: false` khi thiếu giá hoặc nguồn chưa quét đủ.
+- Việc index Pons (launch, lifecycle, trade chính thức, pool V4 đã xác thực) chạy qua **Envio** (xem phần “Envio HyperIndex” bên dưới) — đây là đường ghi dữ liệu thật duy nhất hiện tại. API đọc nến đã lưu sau khi backfill nến hoàn tất; trước đó vẫn dựng nến từ trade. Chart không sinh nến trong khoảng `Swept`, trả `complete: false` khi thiếu giá, nến đang tính lại hoặc nguồn chưa quét đủ.
 - **Đã gỡ bỏ (2026-10-04):** bộ indexer cũ quét trực tiếp qua RPC (`dev:indexer`/`runFactoryIndexer.ts`, bộ lập lịch job-queue song song, `scan_jobs`, và các công cụ benchmark/seed/trạng thái đi kèm). Toàn bộ các ghi chú đo đạc/benchmark của bộ indexer đó (tốc độ quét, giới hạn RPC công khai, song song hoá...) cũng đã gỡ cùng, vì không còn áp dụng — Envio đảm nhiệm toàn bộ việc này theo cách khác.
 - Buyback khớp lệnh trên curve hoặc V4 là giao dịch tính vào volume chính thức, nhưng gắn `activityKind` riêng; phí chuyển khoản, refund và khóa vault không tạo giao dịch/volume thứ hai. Xem [thiết kế Pons](docs/superpowers/specs/2026-09-28-pons-readonly-design.md).
 - Audit có giới hạn ngày 29/09/2026 đã so sánh receipt RPC với fixture của token `0xc9e9ab90654f82893d7fd18b62f694992e8cef29`: launch `(27823666, 0xd7b79e93…45ab6, 30)`, curve buy `(27823668, 0x8147b8c0…cc28, 19)`, sweep `(27823772, 0xcdf59f4c…f3f, 52)`, `Initialize` `(27828161, 0x98dfda11…d6a3, 16)`, graduation `(27828161, cùng tx, 36)` và V4 swap `(27828165, 0x9f9e6779…0977, 108)`: cả 6 log khớp address/topic/data/block hash; swap có quote amount thô `5620497268881825819`, giá sau swap `0.000000152480063034` NVDA/token. Đây là đối chiếu **một token**, không chứng minh mọi launch đã được thu thập.
@@ -101,6 +101,21 @@ Có thể chỉnh giới hạn từ 1 đến 100 qua `ENVIO_METADATA_BATCH_LIMIT
 thử lại theo lịch; contract không hỗ trợ hàm thì giữ giá trị `null`. Chỉ bật bản code mới sau khi
 áp dụng migration bằng `npm run -w be db:migrate` trên DB đích. Chế độ staging không chạy tác vụ
 đọc lại này.
+
+**Tính nến sẵn từ giao dịch ở bảng thật:** sau migration `0024`–`0026`, mọi giao dịch
+được thêm/sửa/xoá trong `trades` sẽ đánh dấu phút cần tính lại. Chạy hai lệnh sau với đúng
+`DATABASE_URL` của app DB (không phải DB Envio), ở tiến trình riêng với Envio:
+
+```sh
+npm run -w be candles:backfill
+npm run -w be candles:worker
+```
+
+`candles:backfill` quét lại lịch sử theo từng ngày, tiếp tục từ ngày đã hoàn thành nếu bị dừng,
+và chỉ sau khi hoàn tất mới cho API đọc nến lưu sẵn. Đây là tác vụ nặng, nên chạy một lần sau
+migration và theo dõi tài nguyên DB. `candles:worker` xử lý các phút mới hoặc bị thay đổi theo lô
+nhỏ, thử lại khi gặp lỗi; nó không chặn Envio ghi launch/giao dịch. Nếu worker chậm, API ẩn nến
+cũ thuộc khoảng đang chờ và báo `complete: false`. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
 ## Chạy FE
 

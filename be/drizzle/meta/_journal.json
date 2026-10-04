@@ -169,6 +169,27 @@
       "when": 1791119524252,
       "tag": "0023_clear_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791137446331,
+      "tag": "0024_nifty_rafael_vega",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791137837941,
+      "tag": "0025_sad_polaris",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1791137907807,
+      "tag": "0026_cute_arachne",
+      "breakpoints": true
     }
   ]
 }

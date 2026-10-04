@@ -427,6 +427,32 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       if (!launch) return { items: [], complete: false };
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
       const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
+      const cacheState = await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1');
+      if (cacheState.rows[0]?.backfill_complete === true) {
+        const [cached, pending] = await Promise.all([
+          pool.query(`SELECT c.bucket_start, c.open, c.high, c.low, c.close, c.quote_volume_raw
+            FROM candles c WHERE c.chain_id = $1 AND c.token_address = $2 AND c.interval_seconds = $3
+              AND c.bucket_start >= $4 AND c.bucket_start < $5
+              AND NOT EXISTS (SELECT 1 FROM candle_dirty_buckets d
+                WHERE d.chain_id = c.chain_id AND d.token_address = c.token_address
+                  AND d.bucket_start >= c.bucket_start AND d.bucket_start < c.bucket_start + $3)
+            ORDER BY c.bucket_start DESC LIMIT 500`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end]),
+          pool.query(`SELECT
+              EXISTS (SELECT 1 FROM candle_dirty_buckets d WHERE d.chain_id = $1 AND d.token_address = $2
+                AND d.bucket_start >= $3 AND d.bucket_start < $4) AS dirty,
+              EXISTS (SELECT 1 FROM trades t JOIN venues v ON v.id = t.venue_id
+                WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+                  AND t.timestamp >= $3 AND t.timestamp < $4
+                  AND (t.price_numerator_raw IS NULL OR t.price_denominator_raw IS NULL)) AS unpriced`,
+          [chainId, tokenAddress.toLowerCase(), start, end]),
+        ]);
+        const state = pending.rows[0] as Row;
+        return { complete: Boolean(launch.launch_coverage_complete) && !state.dirty && !state.unpriced,
+          items: (cached.rows as Row[]).map((row) => ({ intervalSeconds, bucketStart: number(row.bucket_start),
+            open: string(row.open), high: string(row.high), low: string(row.low), close: string(row.close),
+            quoteVolume: formatUnits(BigInt(string(row.quote_volume_raw)), number(launch.quote_asset_decimals)),
+          })) };
+      }
       const result = await pool.query(`SELECT t.* FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
           AND t.timestamp >= $3 AND t.timestamp < $4

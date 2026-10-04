@@ -280,6 +280,21 @@ export const envioChainProgress = pgTable('envio_chain_progress', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+export const candleDirtyBuckets = pgTable('candle_dirty_buckets', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  bucketStart: integer('bucket_start').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.bucketStart] }),
+  index('candle_dirty_buckets_oldest_idx').on(table.bucketStart),
+]);
+
+export const candleCacheState = pgTable('candle_cache_state', {
+  id: integer('id').primaryKey(),
+  backfillComplete: boolean('backfill_complete').notNull().default(false),
+  nextTimestamp: integer('next_timestamp'),
+}, (table) => [check('candle_cache_state_singleton', sql`${table.id} = 1`)]);
+
 // Isolated shadow copies of launches/venues/trades, written only by the Envio sync layer
 // (be/src/envioSync/) during the Phase 1 parallel-run slice — never read by the real API, no
 // foreign keys to the real tables. See docs/superpowers/specs/2026-09-30-envio-indexer-migration-design.md.
