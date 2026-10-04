@@ -30,7 +30,7 @@ export function buildSyntheticTradeBatch(params: {
 // (be/src/db/chunk.ts, deleted with the old RPC-scan indexer, had this same logic — reimplemented
 // locally here rather than reviving that file, per the plan's own instruction).
 async function bulkInsertTrades(pool: { query(text: string, params: readonly unknown[]): Promise<unknown> }, rows: readonly SyntheticTrade[]): Promise<void> {
-  const columnsPerRow = 13;
+  const columnsPerRow = 14;
   const maxRowsPerChunk = Math.floor(60_000 / columnsPerRow);
   for (let start = 0; start < rows.length; start += maxRowsPerChunk) {
     const chunk = rows.slice(start, start + maxRowsPerChunk);
@@ -38,12 +38,12 @@ async function bulkInsertTrades(pool: { query(text: string, params: readonly unk
     const placeholders = chunk.map((row, i) => {
       const base = i * columnsPerRow;
       values.push(row.chainId, row.tokenAddress, row.venueId, row.blockNumber.toString(), row.blockHash, row.txHash,
-        row.logIndex, row.timestamp, row.side, row.tokenAmountRaw, row.quoteAmountRaw, row.quoteAssetAddress, 'user_trade');
+        row.logIndex, row.timestamp, row.side, row.tokenAmountRaw, row.quoteAmountRaw, row.quoteAssetAddress, 'SyntheticTrade', 'user_trade');
       return `(${Array.from({ length: columnsPerRow }, (_, j) => `$${base + j + 1}`).join(',')})`;
     });
     await pool.query(
       `INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp, side,
-        token_amount_raw, quote_amount_raw, quote_asset_address, activity_kind)
+        token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind)
        VALUES ${placeholders.join(',')} ON CONFLICT DO NOTHING`,
       values,
     );
@@ -102,7 +102,14 @@ async function main() {
        VALUES ($1,$2,$3,'v3_pool',$3,$4,0,true) ON CONFLICT DO NOTHING`,
       [venueId, chainId, tokenAddress, sourceId],
     );
-    const startTimestamp = windowStart + (launchIndex % 86_400);
+    // Spread launches' trade windows evenly across the full 30-day span (not just day 1) — this
+    // way a representative fraction of launches land their trades inside the real last-24h window
+    // the volume24hUsd query actually scans, instead of every launch's trades sitting ~29-30 days
+    // in the past and never matching that query's WHERE clause at all (found empirically: the first
+    // seed run put zero synthetic trades inside the 24h window, so the benchmark measured the
+    // all-empty path, not the real one).
+    const totalWindowSeconds = 30 * 86_400;
+    const startTimestamp = windowStart + Math.floor((launchIndex / launchCount) * (totalWindowSeconds - tradesPerLaunch));
     const trades = buildSyntheticTradeBatch({ chainId, tokenAddress, venueId, quoteAssetAddress: quoteAsset,
       startBlock: BigInt(launchIndex * 100_000), count: tradesPerLaunch, startTimestamp });
     await bulkInsertTrades(pool, trades);
