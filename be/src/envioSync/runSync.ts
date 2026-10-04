@@ -123,7 +123,7 @@ export async function syncV1LegacyToReal(
       const context = launchByPool.get(raw.poolAddress.toLowerCase());
       if (!context) continue;
       const row: EnvioRawSwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
-        sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
+        sqrtPriceX96: BigInt(raw.sqrtPriceX96), blockNumber: BigInt(raw.blockNumber) };
       let trade;
       try {
         trade = hydrateV1SwapFromDecoded(row, context.venue, context.launch, raw.txFrom as Address);
@@ -231,9 +231,9 @@ export async function syncV1LegacyOnce(
     const context = launchByPool.get(raw.poolAddress.toLowerCase());
     if (!context) continue;
     const row: EnvioRawSwapRow = {
-      poolAddress: raw.poolAddress, sender: raw.sender, recipient: raw.recipient,
+      poolAddress: raw.poolAddress,
       amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1), sqrtPriceX96: BigInt(raw.sqrtPriceX96),
-      liquidity: BigInt(raw.liquidity), tick: raw.tick, blockNumber: BigInt(raw.blockNumber),
+      blockNumber: BigInt(raw.blockNumber),
       blockHash: raw.blockHash, txHash: raw.txHash, logIndex: raw.logIndex, timestamp: raw.timestamp,
     };
     let trade;

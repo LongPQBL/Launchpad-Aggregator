@@ -39,14 +39,10 @@ export interface EnvioRawSwapDbRow {
   id: string;
   chainId: number;
   poolAddress: string;
-  sender: string;
-  recipient: string;
   txFrom: string;
   amount0: string;
   amount1: string;
   sqrtPriceX96: string;
-  liquidity: string;
-  tick: number;
   blockNumber: string;
   blockHash: string;
   txHash: string;

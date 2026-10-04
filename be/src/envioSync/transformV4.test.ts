@@ -95,8 +95,6 @@ describe('hydrateV4SwapFromDecoded', () => {
       amount0: -31880381102749799957318148n,
       amount1: 5620497268881825819n,
       sqrtPriceX96: 30937564032784793309170036n,
-      liquidity: 92140088551983424601325n,
-      tick: -156971,
       blockNumber: 27828165n, blockHash: swapLog.blockHash as string, txHash: swapLog.transactionHash as string,
       logIndex: 108, timestamp: 1_700_000_000,
     };
@@ -111,7 +109,7 @@ describe('hydrateV4SwapFromDecoded', () => {
       poolId: '0x6eb457f0729bd458608099505990f03d8a6af91202f936124f72ad76c96f6fe1',
       sender: hook, txFrom: hook,
       amount0: 1_000_000_000_000_000_000n, amount1: -500_000_000_000_000_000n,
-      sqrtPriceX96: 30937564032784793309170036n, liquidity: 92140088551983424601325n, tick: -156971,
+      sqrtPriceX96: 30937564032784793309170036n,
       blockNumber: 27829000n, blockHash: '0x' + 'f'.repeat(64), txHash: '0x' + '6'.repeat(64),
       logIndex: 2, timestamp: 1_700_000_500,
     };
@@ -125,7 +123,7 @@ describe('hydrateV4SwapFromDecoded', () => {
       poolId: '0x6eb457f0729bd458608099505990f03d8a6af91202f936124f72ad76c96f6fe1',
       sender: hook, txFrom: hook,
       amount0: -1_000_000_000_000_000_000n, amount1: 500_000_000_000_000_000n,
-      sqrtPriceX96: 30937564032784793309170036n, liquidity: 92140088551983424601325n, tick: -156971,
+      sqrtPriceX96: 30937564032784793309170036n,
       blockNumber: 27829001n, blockHash: '0x' + 'f'.repeat(64), txHash: '0x' + '7'.repeat(64),
       logIndex: 3, timestamp: 1_700_000_501,
     };
@@ -143,8 +141,6 @@ describe('hydrateV4SwapFromDecoded', () => {
       amount0: -31880381102749799957318148n,
       amount1: 5620497268881825819n,
       sqrtPriceX96: 30937564032784793309170036n,
-      liquidity: 92140088551983424601325n,
-      tick: -156971,
       blockNumber: 27828165n, blockHash: swapLog.blockHash as string, txHash: swapLog.transactionHash as string,
       logIndex: 108, timestamp: 1_700_000_000,
     };
@@ -190,7 +186,7 @@ describe('hydrateV4SwapFromDecoded', () => {
     );
 
     const row: EnvioRawV4SwapRow = {
-      poolId: reversePoolId, sender, txFrom: sender, amount0, amount1, sqrtPriceX96, liquidity, tick,
+      poolId: reversePoolId, sender, txFrom: sender, amount0, amount1, sqrtPriceX96,
       blockNumber, blockHash, txHash, logIndex, timestamp,
     };
     const trade = hydrateV4SwapFromDecoded(row, reverseVenue, reverseLaunch, reverseLaunch.quoteAsset.decimals);

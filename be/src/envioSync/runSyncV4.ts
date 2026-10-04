@@ -146,7 +146,7 @@ export async function syncV4Once(
         effectiveFromBlock: venueRow.effectiveFromBlock, effectiveToBlock: null, official: venueRow.official,
       };
       const row: EnvioRawV4SwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
-        sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
+        sqrtPriceX96: BigInt(raw.sqrtPriceX96), blockNumber: BigInt(raw.blockNumber) };
       const trade = hydrateV4SwapFromDecoded(row, venue, cached.launch, cached.quoteAssetDecimals);
       if (!trade) continue;
       const tradeRows = await appDb.insert(tradesEnvioStaging).values({
@@ -257,7 +257,7 @@ export async function syncV4ToReal(
           sourceId: venueRow.sourceId, sourceLogId: '', effectiveFromBlock: venueRow.effectiveFromBlock,
           effectiveToBlock: venueRow.effectiveToBlock, official: venueRow.official };
         const row: EnvioRawV4SwapRow = { ...raw, amount0: BigInt(raw.amount0), amount1: BigInt(raw.amount1),
-          sqrtPriceX96: BigInt(raw.sqrtPriceX96), liquidity: BigInt(raw.liquidity), blockNumber: BigInt(raw.blockNumber) };
+          sqrtPriceX96: BigInt(raw.sqrtPriceX96), blockNumber: BigInt(raw.blockNumber) };
         const trade = hydrateV4SwapFromDecoded(row, venue, launch, launch.quoteAsset.decimals);
         if (!trade) continue;
         const inserted = await tx.insert(trades).values({ chainId: trade.chainId, tokenAddress: trade.tokenAddress,

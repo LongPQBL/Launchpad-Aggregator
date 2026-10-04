@@ -53,13 +53,9 @@ describe('hydrateV1SwapFromDecoded', () => {
     const expected = decodeV1Swap(asLog(reference.swap as Record<string, unknown>), venue, launch, 1_700_000_000, trader);
     const row: EnvioRawSwapRow = {
       poolAddress: reference.poolAddress as string,
-      sender: '0xcaf681a66d020601342297493863e78c959e5cb2',
-      recipient: '0xf89f3858bc7bac05a83ec284e3e9acdb58bf892a',
       amount0: 100_000_000_000_000_000n,
       amount1: -68057245261861571047346184n,
       sqrtPriceX96: 2005366647941715384651103712059394n,
-      liquidity: 36819258015569838458222n,
-      tick: 202790,
       blockNumber: 8963150n,
       blockHash: (reference.swap as Record<string, unknown>).blockHash as string,
       txHash: '0x1f54f25fec2d963dcb338ecb8b46a6eb123198a5c7a746d34cb2dbe78d074af8',
@@ -80,15 +76,11 @@ describe('hydrateV1SwapFromDecoded', () => {
     }, true);
     const row: EnvioRawSwapRow = {
       poolAddress: reference.poolAddress as string,
-      sender: '0xcaf681a66d020601342297493863e78c959e5cb2',
-      recipient: '0xf89f3858bc7bac05a83ec284e3e9acdb58bf892a',
       amount0: 0n,
       amount1: 25654359n,
-      // sqrtPriceX96/liquidity/tick are irrelevant here: hydrateV1SwapFromDecoded returns null as
-      // soon as it sees a zero leg, before these fields are ever read.
+      // sqrtPriceX96 is irrelevant here: hydrateV1SwapFromDecoded returns null as soon as it sees a
+      // zero leg, before this field is ever read.
       sqrtPriceX96: 2005366647941715384651103712059394n,
-      liquidity: 36819258015569838458222n,
-      tick: 202790,
       blockNumber: 9265305n,
       blockHash: '0x' + '9'.repeat(64),
       txHash: '0xba1e0cde96648343c22aea642b45fccbd4a8d3fdcea940fdc770ad5835b4348f',

@@ -66,8 +66,6 @@ export interface EnvioRawV4SwapRow {
   amount0: bigint;
   amount1: bigint;
   sqrtPriceX96: bigint;
-  liquidity: bigint;
-  tick: number;
   blockNumber: bigint;
   blockHash: string;
   txHash: string;

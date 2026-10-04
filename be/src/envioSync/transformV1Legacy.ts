@@ -32,13 +32,9 @@ export function envioRawLaunchToEvent(row: EnvioRawLaunchRow): V1LaunchEvent {
 
 export interface EnvioRawSwapRow {
   poolAddress: string;
-  sender: string;
-  recipient: string;
   amount0: bigint;
   amount1: bigint;
   sqrtPriceX96: bigint;
-  liquidity: bigint;
-  tick: number;
   blockNumber: bigint;
   blockHash: string;
   txHash: string;
