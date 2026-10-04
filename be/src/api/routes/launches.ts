@@ -27,7 +27,8 @@ function launchListQuery(value: Record<string, string | undefined>): LaunchListQ
   if (!base) return null;
   const search = value.search?.trim();
   if (value.status !== undefined && !LIFECYCLE_STATUSES.has(value.status)) return null;
-  return { ...base, ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}) };
+  const platform = value.platform?.trim();
+  return { ...base, ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}), ...(platform ? { platform } : {}) };
 }
 
 function tokenParams(value: { chainId: string; tokenAddress: string }): { chainId: number; tokenAddress: string } | null {

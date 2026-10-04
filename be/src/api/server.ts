@@ -35,7 +35,7 @@ export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
-export interface LaunchListQuery extends ListQuery { search?: string; status?: string }
+export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string }
 
 export interface ApiDeps {
   feOrigin: string;

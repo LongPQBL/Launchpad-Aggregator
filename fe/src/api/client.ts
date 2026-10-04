@@ -17,6 +17,7 @@ export interface LaunchQuery {
   limit?: number;
   search?: string;
   status?: string;
+  platform?: string;
 }
 
 // be/src/api/routes/sources.ts registers no Fastify response schema, so this shape is absent
@@ -70,6 +71,7 @@ export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
     limit: query.limit,
     search: query.search,
     status: query.status,
+    platform: query.platform,
   });
 }
 

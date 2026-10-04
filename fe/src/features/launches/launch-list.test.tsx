@@ -220,10 +220,33 @@ describe('LaunchList', () => {
     expect(screen.getByRole('navigation', { name: /filter by chain/i })).toBeInTheDocument();
   });
 
-  it('never renders a source/platform filter, since be/src/api/routes/launches.ts has no platform query param to back it', () => {
+  it('renders a real Launchpad filter populated from distinct platforms in sources, even with a single option', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+
+    const select = screen.getByRole('combobox', { name: /filter by launchpad/i });
+    expect(within(select).getByRole('option', { name: /pons/i })).toBeInTheDocument();
+  });
+
+  it('lists every distinct platform from sources in the Launchpad filter, deduped', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={twoChainsTwoPlatforms} error={false} />);
 
-    expect(screen.queryByRole('navigation', { name: /filter by launchpad/i })).not.toBeInTheDocument();
+    const select = screen.getByRole('combobox', { name: /filter by launchpad/i });
+    expect(within(select).getAllByRole('option')).toHaveLength(3); // "All launchpads" + pons + other
+    expect(within(select).getByRole('option', { name: /other/i })).toBeInTheDocument();
+  });
+
+  it('keeps the selected Launchpad filter on the next-page link', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch()], nextCursor: 'cursor-2' }}
+        sources={oneChainOneSource}
+        error={false}
+        platform="pons"
+      />,
+    );
+
+    const nextLink = screen.getByRole('link', { name: /next page/i });
+    expect(nextLink).toHaveAttribute('href', expect.stringContaining('platform=pons'));
   });
 
   it('shows a next-page link built from nextCursor when more launches are available', () => {
@@ -247,6 +270,88 @@ describe('LaunchList', () => {
     const nextLink = screen.getByRole('link', { name: /next page/i });
     expect(nextLink).toHaveAttribute('href', expect.stringContaining('search=demo'));
     expect(nextLink).toHaveAttribute('href', expect.stringContaining('status=swept'));
+  });
+
+  it('marks the active tab with aria-current and keeps the other two inactive', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} tab="trending" />);
+
+    const tabs = screen.getByRole('navigation', { name: /filter by tab/i });
+    expect(within(tabs).getByRole('link', { name: 'Trending' })).toHaveAttribute('aria-current', 'page');
+    expect(within(tabs).getByRole('link', { name: 'All' })).not.toHaveAttribute('aria-current');
+    expect(within(tabs).getByRole('link', { name: 'Recently launched' })).not.toHaveAttribute('aria-current');
+  });
+
+  it('defaults to the All tab when no tab is given', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+
+    const tabs = screen.getByRole('navigation', { name: /filter by tab/i });
+    expect(within(tabs).getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('keeps the active non-default tab on the next-page link and when submitting the search form', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch()], nextCursor: 'cursor-2' }}
+        sources={oneChainOneSource}
+        error={false}
+        tab="trending"
+      />,
+    );
+
+    const nextLink = screen.getByRole('link', { name: /next page/i });
+    expect(nextLink).toHaveAttribute('href', expect.stringContaining('tab=trending'));
+    const form = screen.getByRole('search', { name: /search and filter launches/i });
+    expect(within(form).getByDisplayValue('trending')).toHaveAttribute('type', 'hidden');
+  });
+
+  it('does not add a tab param to links for the default "all" tab', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: 'cursor-2' }} sources={oneChainOneSource} error={false} />);
+
+    const nextLink = screen.getByRole('link', { name: /next page/i });
+    expect(nextLink).toHaveAttribute('href', expect.not.stringContaining('tab='));
+  });
+
+  it('sorts items by 1H % descending on the Trending tab, with null values last — never fabricating a rank for missing data', () => {
+    render(
+      <LaunchList
+        page={{
+          items: [
+            launch({ tokenAddress: '0x1', name: 'NullChange', change1h: null }),
+            launch({ tokenAddress: '0x2', name: 'BigGain', change1h: '50' }),
+            launch({ tokenAddress: '0x3', name: 'SmallGain', change1h: '5' }),
+          ],
+          nextCursor: null,
+        }}
+        sources={oneChainOneSource}
+        error={false}
+        tab="trending"
+      />,
+    );
+
+    const names = screen.getAllByRole('link', { name: /BigGain|SmallGain|NullChange/i }).map((link) => link.textContent);
+    expect(names[0]).toContain('BigGain');
+    expect(names[1]).toContain('SmallGain');
+    expect(names[2]).toContain('NullChange');
+  });
+
+  it('does not re-sort items on the default (All) tab', () => {
+    render(
+      <LaunchList
+        page={{
+          items: [
+            launch({ tokenAddress: '0x1', name: 'First', change1h: '1' }),
+            launch({ tokenAddress: '0x2', name: 'Second', change1h: '99' }),
+          ],
+          nextCursor: null,
+        }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+
+    const names = screen.getAllByRole('link', { name: /First|Second/i }).map((link) => link.textContent);
+    expect(names[0]).toContain('First');
+    expect(names[1]).toContain('Second');
   });
 
   it('shows a search box and status filter that submit as a GET form, preserving the current values', () => {

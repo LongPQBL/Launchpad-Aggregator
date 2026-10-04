@@ -13,6 +13,7 @@ export interface LaunchListProps {
   chainId?: number;
   search?: string;
   status?: string;
+  platform?: string;
   tab?: string;
 }
 
@@ -27,6 +28,7 @@ interface CurrentFilters {
   chainId?: number;
   search?: string;
   status?: string;
+  platform?: string;
   tab?: string;
 }
 
@@ -36,6 +38,7 @@ function filterHref(current: CurrentFilters, overrides: CurrentFilters): string 
   if (merged.chainId !== undefined) params.set('chainId', String(merged.chainId));
   if (merged.search) params.set('search', merged.search);
   if (merged.status) params.set('status', merged.status);
+  if (merged.platform) params.set('platform', merged.platform);
   if (merged.tab && merged.tab !== 'all') params.set('tab', merged.tab);
   return `/?${params.toString()}`;
 }
@@ -45,6 +48,7 @@ function nextPageHref(cursor: string, current: CurrentFilters): string {
   if (current.chainId !== undefined) params.set('chainId', String(current.chainId));
   if (current.search) params.set('search', current.search);
   if (current.status) params.set('status', current.status);
+  if (current.platform) params.set('platform', current.platform);
   if (current.tab && current.tab !== 'all') params.set('tab', current.tab);
   return `/?${params.toString()}`;
 }
@@ -83,7 +87,7 @@ function formatAge(launchTimestamp: string | null): string {
   return `${days}d`;
 }
 
-export function LaunchList({ page, sources, error, chainId, search, status, tab }: LaunchListProps) {
+export function LaunchList({ page, sources, error, chainId, search, status, platform, tab }: LaunchListProps) {
   if (error || !page) {
     return (
       <div role="alert">
@@ -96,8 +100,9 @@ export function LaunchList({ page, sources, error, chainId, search, status, tab 
     );
   }
 
-  const current: CurrentFilters = { chainId, search, status, tab };
+  const current: CurrentFilters = { chainId, search, status, platform, tab };
   const chainIds = [...new Set(sources.map((source) => source.chainId))];
+  const platforms = [...new Set(sources.map((source) => source.platform))];
   const activeTab = tab ?? 'all';
   const items = activeTab === 'trending' ? sortByTrending(page.items) : page.items;
 
@@ -135,6 +140,19 @@ export function LaunchList({ page, sources, error, chainId, search, status, tab 
           {LIFECYCLE_STATUSES.map((value) => (
             <option key={value} value={value}>
               {formatLifecycleStatus(value)}
+            </option>
+          ))}
+        </select>
+        <select
+          name="platform"
+          defaultValue={platform ?? ''}
+          aria-label="Filter by launchpad"
+          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
+          <option value="">All launchpads</option>
+          {platforms.map((value) => (
+            <option key={value} value={value}>
+              {value}
             </option>
           ))}
         </select>
