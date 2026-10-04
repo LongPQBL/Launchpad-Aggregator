@@ -43,6 +43,15 @@ export async function claimDueMetadataLaunches(db: Database, now: Date, limit: n
       await client.query('COMMIT');
       return [];
     }
+    // Existing row leases also mark a pass that is still making RPC calls. The budget-row lock
+    // serializes this check with new claims across Envio processes, without a session DB lock.
+    const activePass = await client.query(`SELECT 1 FROM launches
+      WHERE chain_id = 4663 AND platform = 'pons' AND protocol_version IN ('v1', 'v2')
+        AND metadata_lease_until > $1 LIMIT 1`, [now]);
+    if (activePass.rowCount) {
+      await client.query('COMMIT');
+      return [];
+    }
     const selected: DueRow[] = [];
     async function pick(direction: 'ASC' | 'DESC', count: number) {
       if (count <= 0) return;

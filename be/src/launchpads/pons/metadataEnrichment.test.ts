@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Database } from '../../db/client.js';
-import { enrichMetadataSafely, startMetadataEnrichmentLoop } from './metadataEnrichment.js';
+import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from './metadataEnrichment.js';
 
 afterEach(() => vi.useRealTimers());
 
@@ -30,4 +30,11 @@ it('runs on its own minute schedule, never overlaps passes, and waits for a pass
   await loop.stop();
   await vi.advanceTimersByTimeAsync(60_000);
   expect(run).toHaveBeenCalledTimes(2);
+});
+
+it('uses a ten-launch default and accepts a bounded operator override', () => {
+  expect(resolveMetadataBatchLimit(undefined)).toBe(10);
+  expect(resolveMetadataBatchLimit('25')).toBe(25);
+  expect(() => resolveMetadataBatchLimit('0')).toThrow('Invalid metadata batch limit');
+  expect(() => resolveMetadataBatchLimit('101')).toThrow('Invalid metadata batch limit');
 });

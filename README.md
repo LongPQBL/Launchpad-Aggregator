@@ -140,6 +140,15 @@ công, riêng, khi nào bạn muốn xem khác biệt.
 `docs/superpowers/specs/2026-10-01-envio-cutover-design.md` (mục 6), không bật tùy tiện vì nó thay
 thế vai trò ghi dữ liệu thật của indexer RPC-scan.
 
+Sau migration `0020`, chế độ `ENVIO_SYNC_TARGET=real` còn tự đọc lại metadata Pons bị thiếu:
+`logo`, `description`, `socials` (website/Twitter) và timestamp của block tạo token. Vòng sync
+liên tục chạy tác vụ này mỗi phút, độc lập với chu kỳ đồng bộ Envio; lệnh sync một lần chạy một lượt
+sau khi đồng bộ. Mặc định xử lý tối đa 10 launch/phút trên toàn DB, ưu tiên cả launch mới lẫn cũ.
+Có thể chỉnh giới hạn từ 1 đến 100 qua `ENVIO_METADATA_BATCH_LIMIT`. Timeout/rate limit sẽ được
+thử lại theo lịch; contract không hỗ trợ hàm thì giữ giá trị `null`. Chỉ bật bản code mới sau khi
+áp dụng migration bằng `npm run -w be db:migrate` trên DB đích. Chế độ staging không chạy tác vụ
+đọc lại này.
+
 ## Chạy FE
 
 Cần backend API (`dev:api`) đang chạy trước. Sao chép biến môi trường rồi khởi động FE ở terminal riêng:
