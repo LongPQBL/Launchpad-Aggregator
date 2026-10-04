@@ -74,6 +74,38 @@ export const quoteUsdPriceRounds = pgTable('quote_usd_price_rounds', {
   index('quote_usd_price_rounds_position_idx').on(table.chainId, table.feedAddress, table.blockNumber, table.logIndex),
 ]);
 
+export const priceJobs = pgTable('price_jobs', {
+  id: text('id').primaryKey(),
+  chainId: integer('chain_id').notNull(),
+  jobType: text('job_type').notNull(),
+  quoteAssetAddress: text('quote_asset_address'),
+  feedAddress: text('feed_address'),
+  rangeStart: integer('range_start'),
+  rangeEnd: integer('range_end'),
+  status: text('status').notNull().default('pending'),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+  leaseId: text('lease_id'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  // Postgres treats NULL as distinct from NULL in a plain unique index — every feed_resolution row
+  // has feedAddress/rangeStart/rangeEnd all NULL, so a bare column-list unique index would never
+  // actually dedupe two feed_resolution jobs for the same quote asset (verified empirically before
+  // writing this comment). coalesce() each nullable column to a sentinel so NULL participates in
+  // the uniqueness comparison like any other value.
+  uniqueIndex('price_jobs_dedup_idx').on(table.chainId, table.jobType, sql`coalesce(${table.quoteAssetAddress}, '')`,
+    sql`coalesce(${table.feedAddress}, '')`, sql`coalesce(${table.rangeStart}, -1)`, sql`coalesce(${table.rangeEnd}, -1)`),
+  index('price_jobs_claim_idx').on(table.status, table.nextAttemptAt, table.leaseUntil),
+  check('price_jobs_valid_type', sql`${table.jobType} IN ('feed_resolution', 'round_backfill')`),
+  check('price_jobs_valid_status', sql`${table.status} IN ('pending', 'done', 'failed')`),
+  check('price_jobs_type_shape', sql`
+    (${table.jobType} = 'feed_resolution' AND ${table.quoteAssetAddress} IS NOT NULL AND ${table.feedAddress} IS NULL)
+    OR (${table.jobType} = 'round_backfill' AND ${table.feedAddress} IS NOT NULL AND ${table.rangeStart} IS NOT NULL AND ${table.rangeEnd} IS NOT NULL)
+  `),
+]);
+
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),

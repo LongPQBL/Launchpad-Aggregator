@@ -162,6 +162,13 @@
       "when": 1791119370457,
       "tag": "0022_jazzy_valkyrie",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791119524252,
+      "tag": "0023_clear_caretaker",
+      "breakpoints": true
     }
   ]
 }
