@@ -118,6 +118,13 @@ export interface paths {
                                 tvlUnavailableReason?: string | null;
                                 week52High?: string | null;
                                 week52Low?: string | null;
+                                logoUri?: string | null;
+                                description?: string | null;
+                                websiteUrl?: string | null;
+                                twitterUrl?: string | null;
+                                launchTimestamp?: string | null;
+                                change1h?: string | null;
+                                change1d?: string | null;
                             }[];
                             nextCursor?: string | null;
                         };
@@ -183,6 +190,13 @@ export interface paths {
                             tvlUnavailableReason?: string | null;
                             week52High?: string | null;
                             week52Low?: string | null;
+                            logoUri?: string | null;
+                            description?: string | null;
+                            websiteUrl?: string | null;
+                            twitterUrl?: string | null;
+                            launchTimestamp?: string | null;
+                            change1h?: string | null;
+                            change1d?: string | null;
                             officialVenues?: {
                                 id?: string;
                                 kind?: string;

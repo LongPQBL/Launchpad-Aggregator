@@ -122,6 +122,34 @@
                           "week52Low": {
                             "type": "string",
                             "nullable": true
+                          },
+                          "logoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "description": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "websiteUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "twitterUrl": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "launchTimestamp": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1h": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1d": {
+                            "type": "string",
+                            "nullable": true
                           }
                         }
                       }
@@ -245,6 +273,34 @@
                       "nullable": true
                     },
                     "week52Low": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "logoUri": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "description": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "websiteUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "twitterUrl": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "launchTimestamp": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "change1h": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "change1d": {
                       "type": "string",
                       "nullable": true
                     },

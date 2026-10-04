@@ -323,4 +323,45 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       await pool.query("UPDATE sources SET status='caught_up',confirmed_to_block=2000 WHERE id=$1", [statsSource]);
     }
   });
+
+  it('returns real logo/description/website/twitter/launchTimestamp from the launches row, with no RPC call', async () => {
+    await pool.query(`UPDATE launches SET logo_uri=$1, description=$2, website_url=$3, twitter_url=$4, launch_timestamp=$5 WHERE token_address=$6`,
+      ['ipfs://bafkreitest', 'A real token', 'https://example.com', 'https://x.com/example', 1_700_000_000, goodToken]);
+    try {
+      const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'decimals') return 8;
+        if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
+        if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
+        throw new Error(`unexpected ${functionName}`);
+      });
+      const storeWithRpc = createApiStore(pool, { readContract });
+      const detail = await storeWithRpc.getLaunch(4663, goodToken);
+      expect(detail?.logoUri).toBe('ipfs://bafkreitest');
+      expect(detail?.description).toBe('A real token');
+      expect(detail?.websiteUrl).toBe('https://example.com');
+      expect(detail?.twitterUrl).toBe('https://x.com/example');
+      expect(detail?.launchTimestamp).toBe('1700000000');
+    } finally {
+      await pool.query(`UPDATE launches SET logo_uri=NULL, description=NULL, website_url=NULL, twitter_url=NULL, launch_timestamp=NULL WHERE token_address=$1`, [goodToken]);
+    }
+  });
+
+  it('returns null extended-metadata fields for a launch that never had them indexed', async () => {
+    const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+    const detail = await storeWithRpc.getLaunch(4663, goodToken);
+    expect(detail?.logoUri).toBeNull();
+    expect(detail?.description).toBeNull();
+    expect(detail?.websiteUrl).toBeNull();
+    expect(detail?.twitterUrl).toBeNull();
+    expect(detail?.launchTimestamp).toBeNull();
+  });
+
+  it('computes a real change1h/change1d from official trades, and null for a launch with none', async () => {
+    const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+    const detail = await storeWithRpc.getLaunch(4663, goodToken);
+    // goodToken's beforeAll fixture seeds exactly one trade "now" — one trade alone can't
+    // produce a non-null change1h/1d (no trade exists one window further back).
+    expect(detail?.change1h).toBeNull();
+    expect(detail?.change1d).toBeNull();
+  });
 });

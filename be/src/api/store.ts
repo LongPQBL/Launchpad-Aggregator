@@ -3,7 +3,7 @@ import { formatUnits, type Address, type Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { formatRational } from '../market/price.js';
-import { buildOfficialCandles, compute52WeekHighLow } from '../market/aggregate.js';
+import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
@@ -50,12 +50,18 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
     lifecycleStatus: string(row.lifecycle_status),
     officialVolume24h: complete && row.official_volume_raw !== undefined
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
-    coverageStatus, ...stats,
+    coverageStatus,
+    logoUri: row.logo_uri === null || row.logo_uri === undefined ? null : string(row.logo_uri),
+    description: row.description === null || row.description === undefined ? null : string(row.description),
+    websiteUrl: row.website_url === null || row.website_url === undefined ? null : string(row.website_url),
+    twitterUrl: row.twitter_url === null || row.twitter_url === undefined ? null : string(row.twitter_url),
+    launchTimestamp: row.launch_timestamp === null || row.launch_timestamp === undefined ? null : string(row.launch_timestamp),
+    ...stats,
   };
 }
 
-interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null }
-const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, ...NULL_TVL };
+interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
+const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
 
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
   try {
@@ -99,14 +105,21 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
     const fdvUsd = totalSupply !== null ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
 
     const since = Math.floor(Date.now() / 1000) - 52 * 7 * 86_400;
-    const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
+    const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp FROM trades t JOIN venues v ON v.id = t.venue_id
       WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
         AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL`, [number(row.chain_id), string(row.token_address), since]);
     const prices = (highLowResult.rows as Row[]).map((row) =>
       formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18));
     const { high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price })));
+    const pricedTrades = (highLowResult.rows as Row[]).map((r) => ({
+      timestamp: number(r.timestamp),
+      price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
+    }));
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
+    const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
-    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, ...tvl };
+    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, change1h, change1d, ...tvl };
   } catch {
     return { ...NULL_STATS, ...tvl };
   }
