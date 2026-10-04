@@ -108,4 +108,23 @@ describe('computePriceChange', () => {
     ];
     expect(computePriceChange(trades, 4600, 3600)).toBe('100'); // (1.6 - 0.8) / 0.8 * 100
   });
+
+  it('rounds a long repeating-decimal change to a fixed precision instead of a 16-digit float string', () => {
+    const trades = [
+      { timestamp: 1000, price: '3' },
+      { timestamp: 4600, price: '4' }, // (4-3)/3*100 = 33.333333333333336 in raw floating point
+    ];
+    const result = computePriceChange(trades, 4600, 3600)!;
+    expect(result).toBe('33.3333');
+    expect(result).not.toContain('e'); // never scientific/exponent notation
+  });
+
+  it('never returns exponent notation for a very small change', () => {
+    const trades = [
+      { timestamp: 1000, price: '1000000000' },
+      { timestamp: 4600, price: '1000000000.0000001' }, // a tiny fractional move
+    ];
+    const result = computePriceChange(trades, 4600, 3600)!;
+    expect(result).not.toMatch(/e[+-]/i);
+  });
 });

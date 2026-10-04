@@ -63,6 +63,12 @@ export function compute52WeekHighLow(candles: readonly { high: string; low: stri
   return { high: highStr, low: lowStr };
 }
 
+// The sort below is a *stable* sort by timestamp alone (JS's Array.sort has been required to be
+// stable since ES2019) — when two trades share a timestamp, this function keeps the caller's
+// input order for them. Callers MUST pass trades pre-ordered by (blockNumber, logIndex) ascending
+// so same-second ties resolve deterministically to the chronologically-latest trade, matching
+// CLAUDE.md's exact (blockNumber, logIndex) ordering rule — see store.ts's highLowResult query
+// (final-review Important 2).
 export function computePriceChange(trades: readonly { timestamp: number; price: string }[], nowSeconds: number, windowSeconds: number): string | null {
   const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
   const latestAtOrBefore = (boundary: number): string | null => {
@@ -80,7 +86,11 @@ export function computePriceChange(trades: readonly { timestamp: number; price: 
   const pastNum = Number(past);
   if (pastNum === 0) return null;
   const change = ((currentNum - pastNum) / pastNum) * 100;
-  return String(change);
+  // Fixed precision, never scientific/exponent notation: a raw `String(change)` can produce a
+  // 16-digit float or "1e-8"-style notation for a real trade price, which is unusable as a
+  // displayed percentage (final-review Important 1).
+  const trimmed = change.toFixed(4).replace(/\.?0+$/, '') || '0';
+  return trimmed === '-0' ? '0' : trimmed;
 }
 
 export function sumOfficialQuoteVolume(trades: readonly Trade[], since: number, market: OfficialMarket): QuoteVolume {

@@ -107,7 +107,8 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
     const since = Math.floor(Date.now() / 1000) - 52 * 7 * 86_400;
     const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp FROM trades t JOIN venues v ON v.id = t.venue_id
       WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
-        AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL`, [number(row.chain_id), string(row.token_address), since]);
+        AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
+      ORDER BY t.block_number, t.log_index`, [number(row.chain_id), string(row.token_address), since]);
     const prices = (highLowResult.rows as Row[]).map((row) =>
       formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18));
     const { high, low } = compute52WeekHighLow(prices.map((price) => ({ high: price, low: price })));
@@ -195,9 +196,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
           AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
           AND ($8::text IS NULL OR l.lifecycle_status = $8)
+          AND ($10::text IS NULL OR l.platform = $10)
         ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5`,
       [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
-        query.search ?? null, query.status ?? null, head?.toString() ?? null]);
+        query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform ?? null]);
       const rows = result.rows as Row[];
       const statsByToken = new Map(await Promise.all(rows.slice(0, query.limit).map(async (row) =>
         [string(row.token_address), await computeStats(pool, rpcClient, row,

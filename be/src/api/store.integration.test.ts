@@ -52,6 +52,20 @@ describe('listLaunches without raw log provenance', () => {
     const third = await store.listLaunches({ limit: 1, chainId: 4663, cursor: second.nextCursor! });
     expect(third.items[0].tokenAddress).toBe(tokens[2]);
   });
+
+  it('filters by platform — a real (if currently one-option) filter per the spec\'s confirmed decision', async () => {
+    await pool.query('UPDATE launches SET platform = $1 WHERE token_address = $2', ['other-launchpad', tokens[1]]);
+    try {
+      const ponsOnly = await store.listLaunches({ limit: 10, chainId: 4663, platform: 'pons' });
+      expect(ponsOnly.items.map((item) => item.tokenAddress)).not.toContain(tokens[1]);
+      expect(ponsOnly.items.map((item) => item.tokenAddress)).toContain(tokens[0]);
+
+      const otherOnly = await store.listLaunches({ limit: 10, chainId: 4663, platform: 'other-launchpad' });
+      expect(otherOnly.items.map((item) => item.tokenAddress)).toEqual([tokens[1]]);
+    } finally {
+      await pool.query('UPDATE launches SET platform = $1 WHERE token_address = $2', ['pons', tokens[1]]);
+    }
+  });
 });
 
 describe('safe head considers envio_chain_progress (final review, Important 3)', () => {
@@ -354,6 +368,30 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(detail?.websiteUrl).toBeNull();
     expect(detail?.twitterUrl).toBeNull();
     expect(detail?.launchTimestamp).toBeNull();
+  });
+
+  it('picks the chronologically-latest trade by (blockNumber, logIndex) as "current" when two trades share a timestamp', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,0,$3,$4,0,$5,'buy','1','1',$6,'1','1','V3Swap','user_trade',$1)`,
+    [goodToken, goodVenueId, blockHash, '0x' + 'e'.repeat(64), now - 7200, ETH_ADDRESS]);
+    // Two trades at the SAME second but different (blockNumber, logIndex) — the one with the
+    // higher pair must win as "current", regardless of the order Postgres happens to return rows
+    // in (final-review Important 2).
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,11,$3,$4,0,$5,'buy','1','1',$6,'4','1','V3Swap','user_trade',$1),
+             (4663,$1,$2,10,$3,$7,0,$5,'buy','1','1',$6,'2','1','V3Swap','user_trade',$1)`,
+    [goodToken, goodVenueId, blockHash, '0x' + 'f'.repeat(64), now - 10, ETH_ADDRESS, '0x' + '1'.repeat(64)]);
+    try {
+      const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+      const detail = await storeWithRpc.getLaunch(4663, goodToken);
+      // (4 - 1) / 1 * 100 = 300 — using block 11's price (4), never block 10's price (2), as "current".
+      expect(detail?.change1h).toBe('300');
+    } finally {
+      await pool.query(`DELETE FROM trades WHERE token_address = $1 AND block_number IN (0, 10, 11)`, [goodToken]);
+    }
   });
 
   it('computes a real change1h/change1d from official trades, and null for a launch with none', async () => {
