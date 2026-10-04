@@ -60,6 +60,31 @@ describe('pons v1 launch adapter', () => {
       name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: quote,
     }, false)).toThrow(/pool/i);
   });
+
+  it('carries extended metadata and launch timestamp through onto the Launch object when provided', () => {
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const extended = { logoUri: 'ipfs://bafkreitest', description: 'A real token', websiteUrl: 'https://example.com', twitterUrl: 'https://x.com/example' };
+    const { launch } = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address,
+    }, false, { ...extended, launchTimestamp: 1_700_000_000 });
+    expect(launch.logoUri).toBe('ipfs://bafkreitest');
+    expect(launch.description).toBe('A real token');
+    expect(launch.websiteUrl).toBe('https://example.com');
+    expect(launch.twitterUrl).toBe('https://x.com/example');
+    expect(launch.launchTimestamp).toBe(1_700_000_000);
+  });
+
+  it('defaults extended metadata and launch timestamp to null when the 5th argument is omitted', () => {
+    const event = decodeV1Launch(asLog(reference.launch as Record<string, unknown>), legacy);
+    const { launch } = hydrateV1Launch(event, legacy, {
+      name: 'Pons', symbol: 'PONS', decimals: 18, liquidityPool: reference.poolAddress as Address,
+    }, false);
+    expect(launch.logoUri).toBeNull();
+    expect(launch.description).toBeNull();
+    expect(launch.websiteUrl).toBeNull();
+    expect(launch.twitterUrl).toBeNull();
+    expect(launch.launchTimestamp).toBeNull();
+  });
 });
 
 describe('pons v1 V3 trades', () => {

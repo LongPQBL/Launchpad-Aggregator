@@ -31,6 +31,11 @@ export interface Launch {
   lifecycleStatus: LifecycleStatus;
   v4PoolFee?: number | null;
   v4TickSpacing?: number | null;
+  logoUri?: string | null;
+  description?: string | null;
+  websiteUrl?: string | null;
+  twitterUrl?: string | null;
+  launchTimestamp?: number | null;
 }
 
 export interface Venue {

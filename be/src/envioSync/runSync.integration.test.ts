@@ -169,10 +169,10 @@ describe('syncV1LegacyToReal', () => {
     try {
       const first = await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
       expect(first).toEqual({ launchesWritten: 1, tradesWritten: 1 });
-      // 4 metadata calls to the token, plus 1 graduation-status call to the FACTORY (readV1Graduation's
-      // own readContract call targets the factory address, not the token — be/src/launchpads/pons/v1/
-      // state.ts).
-      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(4);
+      // 4 metadata calls + 3 extended-metadata calls (logo/description/socials) to the token, plus 1
+      // graduation-status call to the FACTORY (readV1Graduation's own readContract call targets the
+      // factory address, not the token — be/src/launchpads/pons/v1/state.ts).
+      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(7);
       expect(rpcAddresses.filter((address) => address === legacyFactoryLower)).toHaveLength(1);
       const [newLaunch] = await db.select().from(launches).where(eq(launches.tokenAddress, realToken));
       expect(newLaunch.name).toBe('Real');
@@ -190,7 +190,7 @@ describe('syncV1LegacyToReal', () => {
       expect((await db.select().from(launches).where(eq(launches.tokenAddress, existingToken))).length).toBe(1);
       // Reconciliation rebuilds the recent Envio launch every cycle (its block is inside the fixture's
       // pinned window); the old RPC launch never needs metadata/graduation calls.
-      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(8);
+      expect(rpcAddresses.filter((address) => address === realToken)).toHaveLength(14);
       expect(rpcAddresses.filter((address) => address === legacyFactoryLower)).toHaveLength(2);
       expect(rpcAddresses.every((address) => address === realToken || address === legacyFactoryLower)).toBe(true);
     } finally {
@@ -266,6 +266,73 @@ describe('syncV1LegacyToReal', () => {
       await db.delete(venues).where(eq(venues.tokenAddress, token));
       await db.delete(launches).where(eq(launches.tokenAddress, token));
       await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['graduated']);
+    }
+  });
+
+  it('reads and persists extended metadata and launch timestamp alongside the required V1 fields', async () => {
+    const token = '0x5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e';
+    const poolAddress = '0x6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f';
+    const launchTx = '0x' + '5e'.repeat(32);
+    const blockHash = '0x' + '5f'.repeat(32);
+    const client = {
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'name') return 'Test Token';
+        if (functionName === 'symbol') return 'TEST';
+        if (functionName === 'decimals') return 18;
+        if (functionName === 'liquidityPool') return poolAddress;
+        if (functionName === 'graduationStatus') return [0n, 0n, false];
+        if (functionName === 'logo') return 'ipfs://bafkreitest';
+        if (functionName === 'description') return 'A real token';
+        if (functionName === 'socials') return ['https://x.com/example', '', '', 'https://example.com', ''];
+        throw new Error(`unexpected functionName ${functionName}`);
+      },
+      getBlock: async () => ({ timestamp: 1_700_000_000n }),
+    };
+    try {
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        ['extended', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, launchTx, 2]);
+      await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      const [row] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(row.logoUri).toBe('ipfs://bafkreitest');
+      expect(row.description).toBe('A real token');
+      expect(row.websiteUrl).toBe('https://example.com');
+      expect(row.twitterUrl).toBe('https://x.com/example');
+      expect(row.launchTimestamp).toBe(1_700_000_000);
+    } finally {
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['extended']);
+    }
+  });
+
+  it('still indexes the launch with null extended fields when extended-metadata and timestamp reads fail', async () => {
+    const token = '0x4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e';
+    const poolAddress = '0x4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f';
+    const launchTx = '0x' + '4e'.repeat(32);
+    const blockHash = '0x' + '4f'.repeat(32);
+    const client = {
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'name') return 'Test Token';
+        if (functionName === 'symbol') return 'TEST';
+        if (functionName === 'decimals') return 18;
+        if (functionName === 'liquidityPool') return poolAddress;
+        if (functionName === 'graduationStatus') return [0n, 0n, false];
+        throw new Error('execution reverted'); // logo/description/socials all fail
+      },
+      getBlock: async () => { throw new Error('timeout'); },
+    };
+    try {
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        ['nullextended', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, launchTx, 3]);
+      await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      const [row] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(row.name).toBe('Test Token'); // required fields still indexed
+      expect(row.logoUri).toBeNull();
+      expect(row.launchTimestamp).toBeNull();
+    } finally {
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['nullextended']);
     }
   });
 

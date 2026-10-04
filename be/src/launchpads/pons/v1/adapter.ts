@@ -61,7 +61,8 @@ export function decodeV1Launch(log: RpcLog, factory: FactorySource): V1LaunchEve
   };
 }
 
-export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, metadata: V1TokenMetadata, graduated: boolean): LaunchWithVenue {
+export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, metadata: V1TokenMetadata, graduated: boolean,
+  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }): LaunchWithVenue {
   if (metadata.liquidityPool.toLowerCase() !== event.poolAddress.toLowerCase()) throw new Error('Token pool does not match factory log');
   if (event.pairToken.toLowerCase() !== weth.toLowerCase()) throw new Error('Unsupported pons v1 quote asset');
   const launch: Launch = {
@@ -80,6 +81,11 @@ export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, me
     launchTxHash: event.transactionHash,
     quoteAsset: { address: weth, symbol: 'WETH', decimals: 18 },
     lifecycleStatus: graduated ? 'graduated' : 'trading',
+    logoUri: extended?.logoUri ?? null,
+    description: extended?.description ?? null,
+    websiteUrl: extended?.websiteUrl ?? null,
+    twitterUrl: extended?.twitterUrl ?? null,
+    launchTimestamp: extended?.launchTimestamp ?? null,
   };
   const venue: Venue = {
     id: venueKey(factory.chainId, 'v3_pool', event.poolAddress),

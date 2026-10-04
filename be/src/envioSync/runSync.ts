@@ -4,6 +4,7 @@ import type { Address } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { hydrateV1Launch, type V1TokenMetadata } from '../launchpads/pons/v1/adapter.js';
 import { readV1TokenMetadata, readV1Graduation, type V1ReadClient } from '../launchpads/pons/v1/state.js';
+import { readExtendedTokenMetadata } from '../launchpads/pons/extendedMetadata.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
@@ -33,9 +34,11 @@ export interface EnvioTableNames {
   progressTable?: string;
 }
 
+type SyncV1RpcClient = V1ReadClient & { getBlock?(parameters: { blockNumber: bigint }): Promise<{ timestamp: bigint }> };
+
 export async function syncV1LegacyToReal(
   envioPool: Pool, appDb: Database, tables: EnvioTableNames = DEFAULT_ENVIO_TABLES,
-  rpcClient: V1ReadClient = defaultRpcClient(), reorgWindowBlocks = 500n,
+  rpcClient: SyncV1RpcClient = defaultRpcClient(), reorgWindowBlocks = 500n,
 ): Promise<{ launchesWritten: number; tradesWritten: number }> {
   const { processedBlock, headBlock } = await readEnvioProgress(envioPool, tables.progressTable);
   const windowStart = processedBlock > reorgWindowBlocks ? processedBlock - reorgWindowBlocks : 0n;
@@ -58,18 +61,26 @@ export async function syncV1LegacyToReal(
   // 'trading' — a fabricated value, not a null, which CLAUDE.md's "null means unavailable" rule
   // never permits (final review, Important 5).
   const graduatedByToken = new Map<string, boolean>();
+  const extendedByToken = new Map<string, { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }>();
   for (const raw of rawLaunches) {
     const tokenAddress = raw.tokenAddress.toLowerCase();
     const existing = existingByToken.get(tokenAddress);
     const willBeRebuilt = !existing || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
     if (!willBeRebuilt || metadataByToken.has(tokenAddress)) continue;
     const factory = resolveV1Factory(raw.factoryAddress);
-    const [metadata, graduated] = await Promise.all([
+    const [metadata, graduated, extended] = await Promise.all([
       readV1TokenMetadata(rpcClient, tokenAddress as Address),
       readV1Graduation(rpcClient, tokenAddress as Address, factory.factory),
+      readExtendedTokenMetadata(rpcClient, tokenAddress as Address),
     ]);
+    let launchTimestamp: number | null = null;
+    try {
+      const block = await rpcClient.getBlock?.({ blockNumber: BigInt(raw.blockNumber) });
+      if (block) launchTimestamp = Number(block.timestamp);
+    } catch { /* stays null — a timestamp read failure must not block indexing the launch */ }
     metadataByToken.set(tokenAddress, metadata);
     graduatedByToken.set(tokenAddress, graduated);
+    extendedByToken.set(tokenAddress, { ...extended, launchTimestamp });
   }
 
   const launchByPool = new Map<string, { launch: Launch; venue: Venue }>();
@@ -96,7 +107,7 @@ export async function syncV1LegacyToReal(
       let launch: Launch;
       let venue: Venue;
       try {
-        ({ launch, venue } = hydrateV1Launch(event, factory, metadata, graduated));
+        ({ launch, venue } = hydrateV1Launch(event, factory, metadata, graduated, extendedByToken.get(tokenAddress)));
       } catch (error) {
         throw new Error(`Failed to sync launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
       }
@@ -109,6 +120,9 @@ export async function syncV1LegacyToReal(
           deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock, launchTxHash: launch.launchTxHash,
           quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
           quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: launch.lifecycleStatus,
+          logoUri: launch.logoUri ?? null, description: launch.description ?? null,
+          websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
+          launchTimestamp: launch.launchTimestamp ?? null,
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
         if (inserted.length) launchesWritten += 1;
       }
