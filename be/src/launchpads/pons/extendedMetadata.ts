@@ -101,14 +101,3 @@ export function mapMetadataReadResults(results: MetadataReadResults) {
     timestampReadState: results.timestamp.state,
   };
 }
-
-// Compatibility for existing Envio callers; they switch to the outcome reader in Task 4.
-export async function readExtendedTokenMetadata(client: ExtendedMetadataReadClient, token: Address): Promise<ExtendedTokenMetadata> {
-  const results = await readExtendedTokenMetadataOutcomes(client, token);
-  return {
-    logoUri: results.logo.value,
-    description: results.description.value,
-    websiteUrl: results.socials.value?.websiteUrl ?? null,
-    twitterUrl: results.socials.value?.twitterUrl ?? null,
-  };
-}

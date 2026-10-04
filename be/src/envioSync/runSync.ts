@@ -4,7 +4,8 @@ import type { Address } from 'viem';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { hydrateV1Launch, type V1TokenMetadata } from '../launchpads/pons/v1/adapter.js';
 import { readV1TokenMetadata, readV1Graduation, type V1ReadClient } from '../launchpads/pons/v1/state.js';
-import { readExtendedTokenMetadata } from '../launchpads/pons/extendedMetadata.js';
+import { mapMetadataReadResults, readExtendedTokenMetadataOutcomes, readLaunchTimestamp,
+  type ReadOutcome } from '../launchpads/pons/extendedMetadata.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
@@ -61,7 +62,7 @@ export async function syncV1LegacyToReal(
   // 'trading' — a fabricated value, not a null, which CLAUDE.md's "null means unavailable" rule
   // never permits (final review, Important 5).
   const graduatedByToken = new Map<string, boolean>();
-  const extendedByToken = new Map<string, { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }>();
+  const extendedByToken = new Map<string, ReturnType<typeof mapMetadataReadResults>>();
   for (const raw of rawLaunches) {
     const tokenAddress = raw.tokenAddress.toLowerCase();
     const existing = existingByToken.get(tokenAddress);
@@ -71,16 +72,14 @@ export async function syncV1LegacyToReal(
     const [metadata, graduated, extended] = await Promise.all([
       readV1TokenMetadata(rpcClient, tokenAddress as Address),
       readV1Graduation(rpcClient, tokenAddress as Address, factory.factory),
-      readExtendedTokenMetadata(rpcClient, tokenAddress as Address),
+      readExtendedTokenMetadataOutcomes(rpcClient, tokenAddress as Address),
     ]);
-    let launchTimestamp: number | null = null;
-    try {
-      const block = await rpcClient.getBlock?.({ blockNumber: BigInt(raw.blockNumber) });
-      if (block) launchTimestamp = Number(block.timestamp);
-    } catch { /* stays null — a timestamp read failure must not block indexing the launch */ }
+    const timestamp: ReadOutcome<number> = rpcClient.getBlock
+      ? await readLaunchTimestamp({ getBlock: rpcClient.getBlock.bind(rpcClient) }, BigInt(raw.blockNumber))
+      : { state: 'pending', value: null, errorKind: 'unknown' };
     metadataByToken.set(tokenAddress, metadata);
     graduatedByToken.set(tokenAddress, graduated);
-    extendedByToken.set(tokenAddress, { ...extended, launchTimestamp });
+    extendedByToken.set(tokenAddress, mapMetadataReadResults({ ...extended, timestamp }));
   }
 
   const launchByPool = new Map<string, { launch: Launch; venue: Venue }>();
@@ -123,6 +122,10 @@ export async function syncV1LegacyToReal(
           logoUri: launch.logoUri ?? null, description: launch.description ?? null,
           websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
           launchTimestamp: launch.launchTimestamp ?? null,
+          logoReadState: extendedByToken.get(tokenAddress)?.logoReadState ?? 'pending',
+          descriptionReadState: extendedByToken.get(tokenAddress)?.descriptionReadState ?? 'pending',
+          socialsReadState: extendedByToken.get(tokenAddress)?.socialsReadState ?? 'pending',
+          timestampReadState: extendedByToken.get(tokenAddress)?.timestampReadState ?? 'pending',
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
         if (inserted.length) launchesWritten += 1;
       }

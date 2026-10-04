@@ -4,7 +4,8 @@ import { eq, sql } from 'drizzle-orm';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readV2TokenMetadata, resolveV2QuoteAsset, type V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
-import { readExtendedTokenMetadata } from '../launchpads/pons/extendedMetadata.js';
+import { mapMetadataReadResults, readExtendedTokenMetadataOutcomes, readLaunchTimestamp,
+  type ReadOutcome } from '../launchpads/pons/extendedMetadata.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
@@ -164,7 +165,7 @@ export async function syncV2ToReal(
   // launchBlock >= windowStart).
   const metadataByToken = new Map<string, { name: string; symbol: string; decimals: number }>();
   const quoteAssetByToken = new Map<string, { address: Address; symbol: string; decimals: number }>();
-  const extendedByToken = new Map<string, { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }>();
+  const extendedByToken = new Map<string, ReturnType<typeof mapMetadataReadResults>>();
   for (const raw of rawLaunches) {
     const row: EnvioRawLaunchV2Row = { ...raw, blockNumber: BigInt(raw.blockNumber) };
     const event = envioRawLaunchV2ToEvent(row);
@@ -177,13 +178,11 @@ export async function syncV2ToReal(
     quoteAssetByToken.set(tokenAddress, knownQuoteAsset
       ? { address: event.pairToken, ...knownQuoteAsset }
       : await resolveV2QuoteAsset(event.pairToken, rpcClient));
-    const extended = await readExtendedTokenMetadata(rpcClient, event.tokenAddress);
-    let launchTimestamp: number | null = null;
-    try {
-      const block = await rpcClient.getBlock?.({ blockNumber: row.blockNumber });
-      if (block) launchTimestamp = Number(block.timestamp);
-    } catch { /* stays null — a timestamp read failure must not block indexing the launch */ }
-    extendedByToken.set(tokenAddress, { ...extended, launchTimestamp });
+    const extended = await readExtendedTokenMetadataOutcomes(rpcClient, event.tokenAddress);
+    const timestamp: ReadOutcome<number> = rpcClient.getBlock
+      ? await readLaunchTimestamp({ getBlock: rpcClient.getBlock.bind(rpcClient) }, row.blockNumber)
+      : { state: 'pending', value: null, errorKind: 'unknown' };
+    extendedByToken.set(tokenAddress, mapMetadataReadResults({ ...extended, timestamp }));
   }
 
   const launchByCurve = new Map<string, { launch: Launch; venue: Venue }>();
@@ -229,6 +228,10 @@ export async function syncV2ToReal(
           logoUri: launch.logoUri ?? null, description: launch.description ?? null,
           websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
           launchTimestamp: launch.launchTimestamp ?? null,
+          logoReadState: extendedByToken.get(tokenAddress)?.logoReadState ?? 'pending',
+          descriptionReadState: extendedByToken.get(tokenAddress)?.descriptionReadState ?? 'pending',
+          socialsReadState: extendedByToken.get(tokenAddress)?.socialsReadState ?? 'pending',
+          timestampReadState: extendedByToken.get(tokenAddress)?.timestampReadState ?? 'pending',
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
         if (inserted.length) launchesWritten += 1;
       }

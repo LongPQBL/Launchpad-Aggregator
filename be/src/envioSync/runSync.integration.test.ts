@@ -1,9 +1,11 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
+import { ContractFunctionRevertedError, HttpRequestError } from 'viem';
 import { createDatabase } from '../db/client.js';
 import { launchesEnvioStaging, tradesEnvioStaging, launches, venues, trades, sources, rawLogs } from '../db/schema.js';
 import { syncV1LegacyOnce, syncV1LegacyToReal } from './runSync.js';
+import { ponsExtendedMetadataAbi } from '../launchpads/pons/extendedMetadata.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 
 const legacyFactory = getPonsFactorySources().find((factory) => factory.id === 'pons-v1-legacy')!.factory;
@@ -305,7 +307,7 @@ describe('syncV1LegacyToReal', () => {
     }
   });
 
-  it('still indexes the launch with null extended fields when extended-metadata and timestamp reads fail', async () => {
+  it('indexes through a transient optional read failure while retaining per-function retry state', async () => {
     const token = '0x4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e';
     const poolAddress = '0x4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f';
     const launchTx = '0x' + '4e'.repeat(32);
@@ -317,9 +319,12 @@ describe('syncV1LegacyToReal', () => {
         if (functionName === 'decimals') return 18;
         if (functionName === 'liquidityPool') return poolAddress;
         if (functionName === 'graduationStatus') return [0n, 0n, false];
-        throw new Error('execution reverted'); // logo/description/socials all fail
+        if (functionName === 'logo') throw new HttpRequestError({ url: 'https://rpc.example', status: 429 });
+        if (functionName === 'description') throw new ContractFunctionRevertedError({ abi: ponsExtendedMetadataAbi, functionName });
+        if (functionName === 'socials') return ['', '', '', '', ''];
+        throw new Error(`unexpected ${functionName}`);
       },
-      getBlock: async () => { throw new Error('timeout'); },
+      getBlock: async () => { throw new HttpRequestError({ url: 'https://rpc.example', status: 503 }); },
     };
     try {
       await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
@@ -329,6 +334,10 @@ describe('syncV1LegacyToReal', () => {
       expect(row.name).toBe('Test Token'); // required fields still indexed
       expect(row.logoUri).toBeNull();
       expect(row.launchTimestamp).toBeNull();
+      expect(row.logoReadState).toBe('pending');
+      expect(row.descriptionReadState).toBe('done');
+      expect(row.socialsReadState).toBe('done');
+      expect(row.timestampReadState).toBe('pending');
     } finally {
       await db.delete(venues).where(eq(venues.tokenAddress, token));
       await db.delete(launches).where(eq(launches.tokenAddress, token));

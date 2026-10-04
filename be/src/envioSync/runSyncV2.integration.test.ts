@@ -1,7 +1,9 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { Pool } from 'pg';
+import { ContractFunctionRevertedError, HttpRequestError } from 'viem';
 import { createDatabase } from '../db/client.js';
+import { ponsExtendedMetadataAbi } from '../launchpads/pons/extendedMetadata.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
   launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { syncV2Once, syncV2ToReal } from './runSyncV2.js';
@@ -291,7 +293,7 @@ describe('syncV2ToReal', () => {
     }
   });
 
-  it('still indexes the V2 launch with null extended fields when extended-metadata and timestamp reads fail', async () => {
+  it('indexes V2 through a transient optional read failure while retaining per-function retry state', async () => {
     const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9b';
     const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9c';
     const pair = '0x9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9d';
@@ -303,7 +305,10 @@ describe('syncV2ToReal', () => {
           if (functionName === 'name') return 'Null Extended V2';
           if (functionName === 'symbol') return 'NUL2';
           if (functionName === 'decimals') return 18;
-          throw new Error('execution reverted'); // logo/description/socials all fail
+          if (functionName === 'logo') throw new HttpRequestError({ url: 'https://rpc.example', status: 429 });
+          if (functionName === 'description') throw new ContractFunctionRevertedError({ abi: ponsExtendedMetadataAbi, functionName });
+          if (functionName === 'socials') return ['', '', '', '', ''];
+          throw new Error(`unexpected ${functionName}`);
         }
         if (address.toLowerCase() === pair) {
           if (functionName === 'symbol') return 'USDG';
@@ -311,7 +316,7 @@ describe('syncV2ToReal', () => {
         }
         throw new Error(`${address} ${functionName}`);
       },
-      getBlock: async () => { throw new Error('timeout'); },
+      getBlock: async () => { throw new HttpRequestError({ url: 'https://rpc.example', status: 503 }); },
     };
     try {
       for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
@@ -325,6 +330,10 @@ describe('syncV2ToReal', () => {
       expect(row.name).toBe('Null Extended V2'); // required fields still indexed
       expect(row.logoUri).toBeNull();
       expect(row.launchTimestamp).toBeNull();
+      expect(row.logoReadState).toBe('pending');
+      expect(row.descriptionReadState).toBe('done');
+      expect(row.socialsReadState).toBe('done');
+      expect(row.timestampReadState).toBe('pending');
     } finally {
       await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
       await db.delete(trades).where(eq(trades.tokenAddress, token));
