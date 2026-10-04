@@ -6,6 +6,11 @@ services:
     # raw event data, which Envio can always re-fetch from the chain, so trading a few seconds of
     # durability (synchronous_commit=off) for write throughput is an acceptable trade during
     # backfill. Revisit if this instance ever becomes a source of unrecoverable state.
+    # checkpoint_timeout/max_wal_size: measured via Postgres's own logs that checkpoints were
+    # firing every ~5 minutes (the default checkpoint_timeout) and each one took ~270s to write —
+    # almost back-to-back, saturating write I/O (envio_storage_write_seconds was 87% of indexer
+    # runtime). Spreading checkpoints out further gives Postgres more time to write smoothly
+    # instead of bursting near-continuously.
     command:
       - postgres
       - -c
@@ -13,7 +18,11 @@ services:
       - -c
       - synchronous_commit=off
       - -c
-      - max_wal_size=4GB
+      - max_wal_size=8GB
+      - -c
+      - checkpoint_timeout=30min
+      - -c
+      - checkpoint_completion_target=0.9
     ports:
       - "${ENVIO_PG_PORT:-5433}:5432"
     volumes:
