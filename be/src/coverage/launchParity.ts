@@ -68,6 +68,16 @@ export function compareLaunchRange(input: ParityInput): ParityReport {
   };
 }
 
+export function repairLayers(report: ParityReport): ('envio' | 'app')[] {
+  if (report.status !== 'mismatch') return [];
+  const layers: ('envio' | 'app')[] = [];
+  if (report.missingEnvio.length || report.extraEnvio.length || report.hashMismatches.some((item) => item.layer === 'envio')
+    || report.duplicateKeys.some((item) => item.layer === 'envio')) layers.push('envio');
+  if (report.missingApp.length || report.extraApp.length || report.hashMismatches.some((item) => item.layer === 'app')
+    || report.duplicateKeys.some((item) => item.layer === 'app')) layers.push('app');
+  return layers;
+}
+
 function rowToEvent(row: Record<string, unknown>, source: FactorySource): ParityEvent {
   return {
     chainId: Number(row.chain_id ?? row.chainId), factoryAddress: String(row.factory_address ?? row.factoryAddress ?? source.factory),

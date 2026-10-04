@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { createApiStore } from '../api/store.js';
-import { enqueueParityRepair, readLaunchParityCoverage } from './repairRanges.js';
+import { enqueueParityRepair, readLaunchParityCoverage, resolveParityRepairs } from './repairRanges.js';
 import { compareLaunchRange } from './launchParity.js';
 import { saveParityReport } from './parityStore.js';
 
@@ -39,6 +39,8 @@ describe('launch parity coverage and bounded repair requests', () => {
       provider: 'fixture' });
     await saveParityReport(pool, report);
     expect((await readLaunchParityCoverage(pool, source, start + 1n)).status).toBe('mismatch');
+    await expect(resolveParityRepairs(pool, source.id, start + 1n, start + 1n))
+      .rejects.toThrow('successful parity audit');
     await enqueueParityRepair(pool, source.id, start + 1n, start + 1n, 'envio');
     await enqueueParityRepair(pool, source.id, start + 1n, start + 1n, 'envio');
     await enqueueParityRepair(pool, source.id, start + 1n, start + 1n, 'app');
@@ -61,6 +63,10 @@ describe('launch parity coverage and bounded repair requests', () => {
       fence: start + 503n, chainEvents: [event], envioRows: [event], appRows: [event],
       envioWatermark: start + 1n, appWatermark: start + 1n, provider: 'fixture' }));
     expect((await readLaunchParityCoverage(pool, source, start + 1n)).status).toBe('complete');
+    await enqueueParityRepair(pool, source.id, start + 1n, start + 1n, 'envio');
+    await resolveParityRepairs(pool, source.id, start + 1n, start + 1n);
+    const status = await pool.query('SELECT status FROM launch_parity_repairs WHERE source_id = $1', [source.id]);
+    expect(status.rows).toEqual([{ status: 'done' }]);
   });
 
   it('does not claim global coverage complete without finalized parity', async () => {

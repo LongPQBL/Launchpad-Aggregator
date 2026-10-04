@@ -35,7 +35,13 @@ export function parseAuditRangeArgs(args: readonly string[]): AuditRangeArgs {
   const maxRange = decimal('max-range', '2000');
   if (toBlock > finalizedFence) throw new Error('Range exceeds finalized fence');
   if (toBlock < fromBlock || maxRange < 1n || maxRange > 2000n) throw new Error('Invalid bounded audit range');
+  if (toBlock - fromBlock + 1n > 20_000n) throw new Error('Audit command is limited to 20,000 blocks');
   return { sourceId, fromBlock, toBlock, finalizedFence, maxRange };
+}
+
+export function validateAuditFence(toBlock: bigint, fence: bigint, observedHead: bigint): void {
+  if (fence > observedHead) throw new Error('Audit fence exceeds observed head');
+  if (toBlock > fence - 500n) throw new Error('Audit range includes provisional blocks');
 }
 
 export async function readLaunchEvidence(

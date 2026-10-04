@@ -48,3 +48,13 @@ export async function enqueueParityRepair(
     VALUES ($1,$2,$3,$4,$5,'pending') ON CONFLICT (source_id,from_block,to_block,failure_layer) DO NOTHING`,
   [sourceId, fromBlock.toString(), toBlock.toString(), failureLayer, action]);
 }
+
+export async function resolveParityRepairs(pool: Pool, sourceId: string, fromBlock: bigint, toBlock: bigint): Promise<void> {
+  const latest = await pool.query(`SELECT status FROM launch_parity_reports
+    WHERE source_id = $1 AND from_block = $2 AND to_block = $3
+    ORDER BY fence_block DESC, audited_at DESC LIMIT 1`, [sourceId, fromBlock.toString(), toBlock.toString()]);
+  if (latest.rows[0]?.status !== 'complete') throw new Error('Cannot resolve repair before successful parity audit');
+  await pool.query(`UPDATE launch_parity_repairs SET status = 'done'
+    WHERE source_id = $1 AND from_block = $2 AND to_block = $3 AND status = 'pending'`,
+  [sourceId, fromBlock.toString(), toBlock.toString()]);
+}

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
-import { compareLaunchRange, type ParityEvent } from './launchParity.js';
+import { compareLaunchRange, repairLayers, type ParityEvent } from './launchParity.js';
 import { saveParityReport } from './parityStore.js';
 
 const source = getPonsFactorySources()[0]!;
@@ -29,8 +29,12 @@ describe('three-way launch parity', () => {
   });
 
   it('locates missing raw versus missing app events', () => {
-    expect(compareLaunchRange({ ...input, envioRows: [], appRows: [] }).missingEnvio).toHaveLength(1);
-    expect(compareLaunchRange({ ...input, appRows: [] }).missingApp).toHaveLength(1);
+    const missingRaw = compareLaunchRange({ ...input, envioRows: [], appRows: [] });
+    expect(missingRaw.missingEnvio).toHaveLength(1);
+    expect(repairLayers(missingRaw)).toEqual(['envio']);
+    const missingApp = compareLaunchRange({ ...input, appRows: [] });
+    expect(missingApp.missingApp).toHaveLength(1);
+    expect(repairLayers(missingApp)).toEqual(['app']);
   });
 
   it('reports extra and duplicate keys rather than inflating counts', () => {

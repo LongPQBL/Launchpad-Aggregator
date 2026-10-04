@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
-import { parseAuditRangeArgs, readLaunchEvidence, type LaunchLogFilter } from './readLaunchEvidence.js';
+import { parseAuditRangeArgs, readLaunchEvidence, validateAuditFence, type LaunchLogFilter } from './readLaunchEvidence.js';
 
 const sources = getPonsFactorySources();
 const hash = '0x' + 'a'.repeat(64);
@@ -59,5 +59,10 @@ describe('bounded launch evidence', () => {
     });
     expect(() => parseAuditRangeArgs(['--source', 'pons-v1-legacy', '--from', '8600612', '--to', '8600614',
       '--fence', '8600613'])).toThrow('finalized fence');
+    expect(() => parseAuditRangeArgs(['--source', 'pons-v1-legacy', '--from', '8600612', '--to', '8620612',
+      '--fence', '8621112'])).toThrow('20,000');
+    expect(() => validateAuditFence(8600612n, 8601112n, 8601111n)).toThrow('observed head');
+    expect(() => validateAuditFence(8600613n, 8601112n, 8601112n)).toThrow('provisional');
+    expect(() => validateAuditFence(8600612n, 8601112n, 8601112n)).not.toThrow();
   });
 });

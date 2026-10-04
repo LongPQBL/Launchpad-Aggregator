@@ -134,8 +134,24 @@ loại 500 block mới nhất. `parityAlerts` đếm source sai khác, watermark
 `launch_parity_reports` lưu kết quả đối chiếu; `launch_parity_repairs` lưu yêu cầu sửa theo
 khoảng block và theo lớp lỗi (`envio_reindex` hoặc `app_promotion`). Yêu cầu sửa là hàng đợi
 vận hành, không tự kích hoạt Envio reindex. Chỉ đánh dấu đã sửa sau khi chạy lại audit và
-đối chiếu thành công. Lệnh `be/src/cli/auditLaunchParity.ts` hiện đọc bằng chứng chain theo
-khoảng block cố định; phần đối chiếu ba lớp được thêm trong bước tiếp theo của plan coverage.
+đối chiếu thành công.
+
+Trong `be/`, đặt `DATABASE_URL`, `ENVIO_DATABASE_URL`, `RH_HTTP_RPC_URL` vào `.env`, chọn
+`AUDIT_FENCE` là block head quan sát được ở lúc audit, rồi chạy một khoảng nhỏ đã finalized:
+
+```sh
+AUDIT_FENCE=... # số block head thật từ RPC; audit từ chối fence vượt head hoặc 500 block mới nhất
+npx tsx --env-file-if-exists=.env src/cli/auditLaunchParity.ts \
+  --source pons-v1-legacy --from 8600612 --to 8602611 --fence "$AUDIT_FENCE" --max-range 2000
+```
+
+Lặp với `pons-v1-active` từ block `8991118` và `pons-v2` từ block `26841846`.
+Mỗi lệnh giới hạn 20.000 block, mỗi truy vấn tối đa 2.000 block; tiếp tục các khoảng liền kề
+để phủ toàn lịch sử. Lệnh mặc định **chỉ đọc**, in JSON từng khoảng gồm số sự kiện chain,
+Envio, app, event thiếu/thừa, block hash sai và watermark của từng lớp. Chỉ dùng
+`--persist yes` để ghi báo cáo/hàng đợi sửa; trên DB không có hậu tố `_test`, lệnh còn yêu cầu
+`AUDIT_ALLOW_LIVE_WRITE=1`. Xem trạng thái baseline tại
+`docs/operations/2026-10-05-launch-parity-baseline.md`.
 
 ## Chạy FE
 
