@@ -14,7 +14,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --env-file-if-exists=.env src/cli/migrate.ts",
     "dev:api": "tsx --env-file-if-exists=.env src/cli/api.ts",
-    "export:v4-pool-whitelist": "tsx --env-file-if-exists=.env src/cli/exportV4PoolWhitelist.ts",
     "sync:envio-staging": "tsx --env-file-if-exists=.env src/cli/syncEnvioStaging.ts",
     "sync:envio-staging:loop": "tsx --env-file-if-exists=.env src/cli/syncEnvioStagingLoop.ts",
     "compare:envio-staging": "tsx --env-file-if-exists=.env src/cli/compareEnvioStaging.ts",
