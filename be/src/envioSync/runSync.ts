@@ -13,6 +13,7 @@ import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, launches,
 import { envioRawLaunchToEvent, hydrateV1SwapFromDecoded, type EnvioRawLaunchRow, type EnvioRawSwapRow } from './transformV1Legacy.js';
 import { readAllRawLaunches, readAllRawSwaps, readEnvioProgress } from './envioDb.js';
 import { reconcileReorgWindow } from './reorgGuard.js';
+import { enqueueFeedResolutionJob } from '../market/quotePricing/priceJobStore.js';
 
 // Both deployed V1 factory instances (pons-v1-legacy, pons-v1-active) share this one sync module —
 // same protocol version, same event shapes, same RawLaunch/RawSwap Envio entities (disambiguated by
@@ -85,6 +86,11 @@ export async function syncV1LegacyToReal(
   const launchByPool = new Map<string, { launch: Launch; venue: Venue }>();
   let launchesWritten = 0;
   let tradesWritten = 0;
+  // Quote assets to enqueue a feed-resolution job for once the transaction commits — deliberately
+  // outside the transaction (enqueueFeedResolutionJob needs a raw pool, not the DbOrTx-shaped `tx`
+  // this transaction's callback receives) and best-effort: a failure to enqueue must never roll
+  // back the real launch/trade insert it rode in on.
+  const newQuoteAssets: { chainId: number; quoteAssetAddress: string }[] = [];
   await appDb.transaction(async (tx) => {
     await reconcileReorgWindow(tx, { launches, venues, trades }, windowStart, {
       venueKinds: ['v3_pool'], launchSourceIds: v1SourceIds,
@@ -127,7 +133,10 @@ export async function syncV1LegacyToReal(
           socialsReadState: extendedByToken.get(tokenAddress)?.socialsReadState ?? 'pending',
           timestampReadState: extendedByToken.get(tokenAddress)?.timestampReadState ?? 'pending',
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
-        if (inserted.length) launchesWritten += 1;
+        if (inserted.length) {
+          launchesWritten += 1;
+          newQuoteAssets.push({ chainId: launch.chainId, quoteAssetAddress: launch.quoteAsset.address });
+        }
       }
       await tx.insert(venues).values({
         id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref,
@@ -165,6 +174,9 @@ export async function syncV1LegacyToReal(
         .where(eq(sources.id, id));
     }
   });
+  for (const asset of newQuoteAssets) {
+    await enqueueFeedResolutionJob(appDb.$client, asset.chainId, asset.quoteAssetAddress).catch(() => { /* best-effort; a later cycle's launch sharing the same quote asset will enqueue again */ });
+  }
   return { launchesWritten, tradesWritten };
 }
 

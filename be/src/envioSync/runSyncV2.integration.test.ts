@@ -293,6 +293,48 @@ describe('syncV2ToReal', () => {
     }
   });
 
+  it('enqueues a feed-resolution job for a newly-inserted V2 launch\'s novel quote asset', async () => {
+    const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a';
+    const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b';
+    const pair = '0x9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c';
+    const launchTx = '0x' + '9d'.repeat(32);
+    const blockHash = '0x' + '9e'.repeat(32);
+    const client = {
+      readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+        if (address.toLowerCase() === token) {
+          if (functionName === 'name') return 'Job Token V2';
+          if (functionName === 'symbol') return 'JOB2';
+          if (functionName === 'decimals') return 18;
+          throw new Error('execution reverted');
+        }
+        if (address.toLowerCase() === pair) {
+          if (functionName === 'symbol') return 'NOVEL';
+          if (functionName === 'decimals') return 18;
+        }
+        throw new Error(`${address} ${functionName}`);
+      },
+      getBlock: async () => { throw new Error('timeout'); },
+    };
+    try {
+      for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+          startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('jobtest',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const jobs = await pool.query("SELECT quote_asset_address FROM price_jobs WHERE job_type = 'feed_resolution' AND quote_asset_address = $1", [pair]);
+      expect(jobs.rows).toHaveLength(1);
+    } finally {
+      await pool.query('DELETE FROM price_jobs WHERE quote_asset_address = $1', [pair]);
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
+
   it('indexes V2 through a transient optional read failure while retaining per-function retry state', async () => {
     const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9b';
     const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9c';

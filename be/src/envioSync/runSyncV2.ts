@@ -12,6 +12,7 @@ import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycle
   launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { readEnvioProgress } from './envioDb.js';
 import { reconcileReorgWindow } from './reorgGuard.js';
+import { enqueueFeedResolutionJob } from '../market/quotePricing/priceJobStore.js';
 import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded, resolveKnownQuoteAsset,
   type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
 import { envioRawLifecycleToTransition, type EnvioRawLifecycleRow } from './transformLifecycle.js';
@@ -189,6 +190,9 @@ export async function syncV2ToReal(
   let launchesWritten = 0;
   let tradesWritten = 0;
   let transitionsWritten = 0;
+  // See runSync.ts's syncV1LegacyToReal for why this is collected here and enqueued after the
+  // transaction commits, not inside it.
+  const newQuoteAssets: { chainId: number; quoteAssetAddress: string }[] = [];
   await appDb.transaction(async (tx) => {
     await reconcileReorgWindow(tx, { launches, venues, trades, lifecycleTransitions }, windowStart, {
       venueKinds: ['curve'], launchSourceIds: [v2Factory.id],
@@ -233,7 +237,10 @@ export async function syncV2ToReal(
           socialsReadState: extendedByToken.get(tokenAddress)?.socialsReadState ?? 'pending',
           timestampReadState: extendedByToken.get(tokenAddress)?.timestampReadState ?? 'pending',
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
-        if (inserted.length) launchesWritten += 1;
+        if (inserted.length) {
+          launchesWritten += 1;
+          newQuoteAssets.push({ chainId: launch.chainId, quoteAssetAddress: launch.quoteAsset.address });
+        }
       }
       await tx.insert(venues).values({ id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress,
         kind: venue.kind, ref: venue.ref, sourceId: 'pons-v2-curve', sourceLogId: null,
@@ -312,5 +319,8 @@ export async function syncV2ToReal(
         .where(eq(sources.id, id));
     }
   });
+  for (const asset of newQuoteAssets) {
+    await enqueueFeedResolutionJob(appDb.$client, asset.chainId, asset.quoteAssetAddress).catch(() => { /* best-effort; a later cycle's launch sharing the same quote asset will enqueue again */ });
+  }
   return { launchesWritten, tradesWritten, transitionsWritten };
 }

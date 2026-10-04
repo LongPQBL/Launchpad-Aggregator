@@ -307,6 +307,37 @@ describe('syncV1LegacyToReal', () => {
     }
   });
 
+  it('enqueues a feed-resolution job for a newly-inserted launch\'s quote asset', async () => {
+    const token = '0x7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e';
+    const poolAddress = '0x7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f';
+    const launchTx = '0x' + '7e'.repeat(32);
+    const blockHash = '0x' + '7f'.repeat(32);
+    const client = {
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'name') return 'Job Token';
+        if (functionName === 'symbol') return 'JOB';
+        if (functionName === 'decimals') return 18;
+        if (functionName === 'liquidityPool') return poolAddress;
+        if (functionName === 'graduationStatus') return [0n, 0n, false];
+        throw new Error('execution reverted');
+      },
+      getBlock: async () => { throw new Error('timeout'); },
+    };
+    try {
+      await pool.query("DELETE FROM price_jobs WHERE job_type = 'feed_resolution' AND quote_asset_address = '0x0bd7d308f8e1639fab988df18a8011f41eacad73'");
+      await envioPool.query(`INSERT INTO envio_fixture_v1."RawLaunch" VALUES ($1,4663,$2,$3,$4,$5,$6,8963150,$7,$8,$9)`,
+        ['jobtest', token, token, '0x0bd7d308f8e1639fab988df18a8011f41eacad73', poolAddress, legacyFactory, blockHash, launchTx, 4]);
+      await syncV1LegacyToReal(envioPool, db, fixtureTables, client);
+      const jobs = await pool.query("SELECT quote_asset_address FROM price_jobs WHERE job_type = 'feed_resolution' AND quote_asset_address = '0x0bd7d308f8e1639fab988df18a8011f41eacad73'");
+      expect(jobs.rows).toHaveLength(1);
+    } finally {
+      await pool.query("DELETE FROM price_jobs WHERE job_type = 'feed_resolution' AND quote_asset_address = '0x0bd7d308f8e1639fab988df18a8011f41eacad73'");
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('DELETE FROM envio_fixture_v1."RawLaunch" WHERE id = $1', ['jobtest']);
+    }
+  });
+
   it('indexes through a transient optional read failure while retaining per-function retry state', async () => {
     const token = '0x4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e';
     const poolAddress = '0x4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f';
