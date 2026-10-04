@@ -4,6 +4,7 @@ import { launchHref, type LaunchPage, type LaunchSummary, type Source } from '@/
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
+import { LaunchpadIcon } from './launchpad-icon';
 import { TokenLogo } from './token-logo';
 
 export interface LaunchListProps {
@@ -201,7 +202,7 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
                 <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:align-middle">{index + 1}</div>
                 <div role="cell" className="md:table-cell md:p-4 md:align-middle">
                   <div className="flex items-center gap-3">
-                    <TokenLogo logoUri={launch.logoUri} symbol={launch.symbol} />
+                    <TokenLogo logoUri={launch.logoUri} symbol={launch.symbol} chainId={launch.chainId} />
                     <div className="flex flex-col">
                       <a href={launchHref(launch.chainId, launch.tokenAddress)} className="font-medium text-foreground hover:text-primary hover:underline">
                         {launch.name} <span className="text-muted-foreground">({launch.symbol})</span>
@@ -213,7 +214,10 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
                   </div>
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:align-middle">
-                  {launch.platform} {launch.protocolVersion}
+                  <span className="inline-flex items-center gap-1">
+                    <LaunchpadIcon platform={launch.platform} />
+                    <span>{launch.platform} {launch.protocolVersion}</span>
+                  </span>
                 </div>
                 <div role="cell" className="font-mono md:table-cell md:p-4 md:text-right md:align-middle">
                   {formatUsd(launch.fdvUsd)}

@@ -107,6 +107,22 @@ function candle(overrides: Partial<Candle> = {}): Candle {
 }
 
 describe('LaunchDetail', () => {
+  it('shows token, Robinhood Chain, and Pons brand images in the header', () => {
+    render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} trades={null} candles={null} />);
+
+    expect(screen.getByRole('img', { name: 'Token logo' })).toHaveAttribute('src', 'https://example.com/token.png');
+    expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Pons logo' })).toBeInTheDocument();
+  });
+
+  it('does not show Robinhood or Pons branding for another source', () => {
+    render(<LaunchDetail detail={detail({ chainId: 1, platform: 'other' })} trades={null} candles={null} />);
+
+    expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Pons logo' })).not.toBeInTheDocument();
+    expect(screen.getByText('other')).toBeInTheDocument();
+  });
+
   it('shows source, protocol version, chain, quote asset, and 24h volume', () => {
     render(<LaunchDetail detail={detail()} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
 

@@ -30,4 +30,20 @@ describe('TokenLogo', () => {
 
     expect(screen.getByRole('img', { name: /token logo/i })).toBeInTheDocument();
   });
+
+  it('shows the Robinhood Chain badge even when the token logo is unavailable', () => {
+    render(<TokenLogo logoUri={null} symbol="TKA" chainId={4663} />);
+
+    expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/images/chains/robinhood-chain.png'),
+    );
+    expect(screen.getByText('T')).toBeInTheDocument();
+  });
+
+  it('does not show a Robinhood badge for another chain', () => {
+    render(<TokenLogo logoUri={null} symbol="TKA" chainId={1} />);
+
+    expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
+  });
 });

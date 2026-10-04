@@ -2,6 +2,8 @@ import { chainExplorerBase, chainName } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
+import { TokenLogo } from '@/features/launches/token-logo';
 import { AboutSection } from './about-section';
 import { CoverageBadge } from './coverage-badge';
 import { OfficialChart } from './official-chart';
@@ -35,17 +37,21 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <TokenLogo logoUri={detail.logoUri} symbol={detail.symbol} chainId={detail.chainId} />
             <h1 className="text-xl font-semibold leading-none">
               {detail.name} <span className="text-muted-foreground">({detail.symbol})</span>
             </h1>
           </div>
-          <p className="text-sm text-muted-foreground">
-            Source:{' '}
-            <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="underline hover:text-primary">
-              pons
-            </a>{' '}
-            · {detail.protocolVersion} · {chainName(detail.chainId)}
+          <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+            <span>Source:</span>
+            {detail.platform === 'pons' ? (
+              <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 underline hover:text-primary">
+                <LaunchpadIcon platform={detail.platform} />
+                {detail.platform}
+              </a>
+            ) : <span>{detail.platform}</span>}
+            <span>· {detail.protocolVersion} · {chainName(detail.chainId)}</span>
           </p>
         </CardHeader>
         <CardContent>

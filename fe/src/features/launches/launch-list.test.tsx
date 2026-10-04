@@ -47,6 +47,23 @@ const twoChainsTwoPlatforms: readonly Source[] = [
 ];
 
 describe('LaunchList', () => {
+  it('shows the Pons icon only for Pons launch rows', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch(), launch({ tokenAddress: '0xother', platform: 'other', chainId: 1 })], nextCursor: null }}
+        sources={twoChainsTwoPlatforms}
+        error={false}
+      />,
+    );
+
+    const rows = screen.getAllByRole('row').slice(1);
+    expect(within(rows[0]).getByRole('img', { name: 'Pons logo' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/images/launchpads/pons.webp'),
+    );
+    expect(within(rows[1]).queryByRole('img', { name: 'Pons logo' })).not.toBeInTheDocument();
+  });
+
   it('shows a human-readable lifecycle label and chain name instead of raw enum/id values', () => {
     render(
       <LaunchList
