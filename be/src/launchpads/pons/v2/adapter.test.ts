@@ -67,6 +67,27 @@ describe('pons v2 launch and phase', () => {
     expect(phaseToLifecycle(2)).toBe('graduated');
   });
 
+  it('carries extended metadata and launch timestamp through onto the Launch object when provided', () => {
+    const event = decodeV2Launch(launchLog, factory);
+    const extended = { logoUri: 'ipfs://bafkreitest', description: 'A real token', websiteUrl: 'https://example.com', twitterUrl: 'https://x.com/example' };
+    const { launch } = hydrateV2Launch(event, factory, record, metadata, quote, { ...extended, launchTimestamp: 1_700_000_000 });
+    expect(launch.logoUri).toBe('ipfs://bafkreitest');
+    expect(launch.description).toBe('A real token');
+    expect(launch.websiteUrl).toBe('https://example.com');
+    expect(launch.twitterUrl).toBe('https://x.com/example');
+    expect(launch.launchTimestamp).toBe(1_700_000_000);
+  });
+
+  it('defaults extended metadata and launch timestamp to null when the 6th argument is omitted', () => {
+    const event = decodeV2Launch(launchLog, factory);
+    const { launch } = hydrateV2Launch(event, factory, record, metadata, quote);
+    expect(launch.logoUri).toBeNull();
+    expect(launch.description).toBeNull();
+    expect(launch.websiteUrl).toBeNull();
+    expect(launch.twitterUrl).toBeNull();
+    expect(launch.launchTimestamp).toBeNull();
+  });
+
   it('reads a six-decimal ERC-20 quote asset instead of assuming ETH units', async () => {
     const pairToken = '0x0000000000000000000000000000000000000002' as Address;
     const asset = await resolveV2QuoteAsset(pairToken, { readContract: async ({ functionName }: { functionName: string }) => functionName === 'symbol' ? 'USDC' : 6 });

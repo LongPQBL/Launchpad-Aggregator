@@ -35,12 +35,13 @@ export function hydrateV2LaunchFromEnvio(
   event: V2LaunchEvent, factory: FactorySource,
   metadata: { name: string; symbol: string; decimals: number },
   quoteAsset: { address: Address; symbol: string; decimals: number },
+  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null },
 ): V2LaunchWithVenue {
   const record: V2LaunchRecord = {
     token: event.tokenAddress, curve: event.curveAddress, deployer: event.deployerAddress,
     pairToken: event.pairToken, poolFee: 0, tickSpacing: 60, phase: 0, exists: true,
   };
-  return hydrateV2Launch(event, factory, record, metadata, quoteAsset);
+  return hydrateV2Launch(event, factory, record, metadata, quoteAsset, extended);
 }
 
 // Same zero-address-means-native-ETH rule as resolveV2QuoteAsset (be/src/launchpads/pons/v2/adapter.ts)

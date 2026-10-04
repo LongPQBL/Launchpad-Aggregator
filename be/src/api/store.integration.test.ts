@@ -17,6 +17,9 @@ const rawLogId = `4663:${blockHash}:${txHash}:4`;
 // Real zero-address convention for native ETH (Pons' quote-asset convention) — matches
 // usdPricing.ts's FEEDS map, which is keyed by address, not symbol (final-review Critical 1).
 const ETH_ADDRESS = '0x0000000000000000000000000000000000000000';
+// Computed at test-run time, not hardcoded, so this never drifts into readUsdPrice's 24h staleness
+// rejection as real wall-clock time passes — same fix applied to usdPricing.test.ts this session.
+const FRESH_FEED_UPDATED_AT = BigInt(Math.floor(Date.now() / 1000) - 60);
 
 beforeAll(async () => {
   await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
@@ -140,7 +143,7 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
     await seed(ETH_ADDRESS, 'ETH'); // real zero-address convention for native ETH — matches FEEDS
     const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
       if (functionName === 'decimals') return 8;
-      if (functionName === 'latestRoundData') return [1n, 269170223591n, 1790859457n, 1790859457n, 1n];
+      if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
       throw new Error(`unexpected ${functionName}`);
     });
     const storeWithRpc = createApiStore(pool, { readContract });
@@ -219,7 +222,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   function rpcClient() {
     return vi.fn(async ({ address, functionName }: { address: string; functionName: string }) => {
       if (functionName === 'decimals') return 8;
-      if (functionName === 'latestRoundData') return [1n, 269170223591n, 1790859457n, 1790859457n, 1n];
+      if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
       if (functionName === 'totalSupply') {
         if (address.toLowerCase() === brokenToken.toLowerCase()) throw new Error('execution reverted');
         return 1_000_000n * 10n ** 18n;

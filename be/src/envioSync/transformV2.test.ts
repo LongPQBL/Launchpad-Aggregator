@@ -72,6 +72,54 @@ describe('hydrateV2LaunchFromEnvio', () => {
     expect(venue.ref).toBe(fixture.curveAddress as string);
     expect(venue.official).toBe(true);
   });
+
+  it('carries extended metadata and launch timestamp through onto the Launch object when provided', () => {
+    const row: EnvioRawLaunchV2Row = {
+      chainId: 4663,
+      tokenAddress: fixture.tokenAddress as string,
+      curveAddress: fixture.curveAddress as string,
+      deployerAddress: '0xcce4f7805b3a5f03fe3ec7f02231d08b03cc35d2',
+      pairTokenAddress: fixture.quoteAddress as string,
+      blockNumber: 27823666n,
+      blockHash: (fixture.launch as Record<string, unknown>).blockHash as string,
+      txHash: (fixture.launch as Record<string, unknown>).transactionHash as string,
+      logIndex: 30,
+    };
+    const event = envioRawLaunchV2ToEvent(row);
+    const extended = { logoUri: 'ipfs://bafkreitest', description: 'A real token', websiteUrl: 'https://example.com', twitterUrl: 'https://x.com/example' };
+    const { launch } = hydrateV2LaunchFromEnvio(event, v2Factory,
+      { name: 'Real Name', symbol: 'REAL', decimals: 18 },
+      { address: event.pairToken, symbol: 'USDG', decimals: 6 },
+      { ...extended, launchTimestamp: 1_700_000_000 });
+    expect(launch.logoUri).toBe('ipfs://bafkreitest');
+    expect(launch.description).toBe('A real token');
+    expect(launch.websiteUrl).toBe('https://example.com');
+    expect(launch.twitterUrl).toBe('https://x.com/example');
+    expect(launch.launchTimestamp).toBe(1_700_000_000);
+  });
+
+  it('defaults extended metadata and launch timestamp to null when the 5th argument is omitted', () => {
+    const row: EnvioRawLaunchV2Row = {
+      chainId: 4663,
+      tokenAddress: fixture.tokenAddress as string,
+      curveAddress: fixture.curveAddress as string,
+      deployerAddress: '0xcce4f7805b3a5f03fe3ec7f02231d08b03cc35d2',
+      pairTokenAddress: fixture.quoteAddress as string,
+      blockNumber: 27823666n,
+      blockHash: (fixture.launch as Record<string, unknown>).blockHash as string,
+      txHash: (fixture.launch as Record<string, unknown>).transactionHash as string,
+      logIndex: 30,
+    };
+    const event = envioRawLaunchV2ToEvent(row);
+    const { launch } = hydrateV2LaunchFromEnvio(event, v2Factory,
+      { name: 'Real Name', symbol: 'REAL', decimals: 18 },
+      { address: event.pairToken, symbol: 'USDG', decimals: 6 });
+    expect(launch.logoUri).toBeNull();
+    expect(launch.description).toBeNull();
+    expect(launch.websiteUrl).toBeNull();
+    expect(launch.twitterUrl).toBeNull();
+    expect(launch.launchTimestamp).toBeNull();
+  });
 });
 
 const { launch, venue } = hydrateV2LaunchFromEnvio(

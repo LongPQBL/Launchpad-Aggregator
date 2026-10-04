@@ -172,10 +172,12 @@ describe('syncV2ToReal', () => {
       const [source] = await db.select().from(sources).where(eq(sources.id, 'pons-v2'));
       expect(source.confirmedToBlock).toBe(27828165n);
       expect(source.status).toBe('backfilling');
-      expect(calls).toHaveLength(5);
+      // 3 metadata + 3 extended-metadata (logo/description/socials) calls to the token, plus 2 quote
+      // asset (symbol/decimals) calls to the pair.
+      expect(calls).toHaveLength(8);
       await syncV2ToReal(envioPool, db, fixtureTables, client);
       expect((await db.select().from(lifecycleTransitions).where(eq(lifecycleTransitions.txHash, transitionTx))).length).toBe(1);
-      expect(calls).toHaveLength(5);
+      expect(calls).toHaveLength(8);
       await envioPool.query('DELETE FROM envio_fixture_v2."RawLifecycleTransition" WHERE id = $1', ['real-grad']);
       await syncV2ToReal(envioPool, db, fixtureTables, client);
       expect((await db.select().from(lifecycleTransitions).where(eq(lifecycleTransitions.txHash, transitionTx))).length).toBe(0);
@@ -233,6 +235,96 @@ describe('syncV2ToReal', () => {
       await syncV2ToReal(envioPool, db, fixtureTables, client);
       const [reopenedVenue] = await db.select().from(venues).where(eq(venues.tokenAddress, token));
       expect(reopenedVenue.effectiveToBlock).toBeNull();
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
+
+  it('reads and persists extended metadata and launch timestamp alongside the required V2 fields', async () => {
+    const token = '0x8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a8a';
+    const curve = '0x8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b8b';
+    const pair = '0x8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c8c';
+    const launchTx = '0x' + '8d'.repeat(32);
+    const blockHash = '0x' + '8e'.repeat(32);
+    const client = {
+      readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+        if (address.toLowerCase() === token) {
+          if (functionName === 'name') return 'Extended V2';
+          if (functionName === 'symbol') return 'EXT2';
+          if (functionName === 'decimals') return 18;
+          if (functionName === 'logo') return 'ipfs://bafkreitest';
+          if (functionName === 'description') return 'A real token';
+          if (functionName === 'socials') return ['https://x.com/example', '', '', 'https://example.com', ''];
+        }
+        if (address.toLowerCase() === pair) {
+          if (functionName === 'symbol') return 'USDG';
+          if (functionName === 'decimals') return 6;
+        }
+        throw new Error(`${address} ${functionName}`);
+      },
+      getBlock: async () => ({ timestamp: 1_700_000_000n }),
+    };
+    try {
+      for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+          startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('extended',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const [row] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(row.logoUri).toBe('ipfs://bafkreitest');
+      expect(row.description).toBe('A real token');
+      expect(row.websiteUrl).toBe('https://example.com');
+      expect(row.twitterUrl).toBe('https://x.com/example');
+      expect(row.launchTimestamp).toBe(1_700_000_000);
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
+
+  it('still indexes the V2 launch with null extended fields when extended-metadata and timestamp reads fail', async () => {
+    const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9b';
+    const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9c';
+    const pair = '0x9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9d';
+    const launchTx = '0x' + '9d'.repeat(32);
+    const blockHash = '0x' + '9e'.repeat(32);
+    const client = {
+      readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+        if (address.toLowerCase() === token) {
+          if (functionName === 'name') return 'Null Extended V2';
+          if (functionName === 'symbol') return 'NUL2';
+          if (functionName === 'decimals') return 18;
+          throw new Error('execution reverted'); // logo/description/socials all fail
+        }
+        if (address.toLowerCase() === pair) {
+          if (functionName === 'symbol') return 'USDG';
+          if (functionName === 'decimals') return 6;
+        }
+        throw new Error(`${address} ${functionName}`);
+      },
+      getBlock: async () => { throw new Error('timeout'); },
+    };
+    try {
+      for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+          startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('nullextended',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      await syncV2ToReal(envioPool, db, fixtureTables, client);
+      const [row] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+      expect(row.name).toBe('Null Extended V2'); // required fields still indexed
+      expect(row.logoUri).toBeNull();
+      expect(row.launchTimestamp).toBeNull();
     } finally {
       await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
       await db.delete(trades).where(eq(trades.tokenAddress, token));

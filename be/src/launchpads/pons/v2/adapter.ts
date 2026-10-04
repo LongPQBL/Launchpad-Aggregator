@@ -42,7 +42,8 @@ export function phaseToLifecycle(phase: 0 | 1 | 2 | 3): LifecycleStatus {
 }
 
 export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, record: V2LaunchRecord,
-  metadata: { name: string; symbol: string; decimals: number }, quoteAsset: QuoteAsset): V2LaunchWithVenue {
+  metadata: { name: string; symbol: string; decimals: number }, quoteAsset: QuoteAsset,
+  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }): V2LaunchWithVenue {
   if (!record.exists || !same(record.token, event.tokenAddress) || !same(record.curve, event.curveAddress)
     || !same(record.deployer, event.deployerAddress) || !same(record.pairToken, event.pairToken)) {
     throw new Error('Pons v2 launch record does not match factory event');
@@ -55,6 +56,11 @@ export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, re
     launchBlock: event.blockNumber, launchTxHash: event.transactionHash, quoteAsset,
     lifecycleStatus: 'trading',
     v4PoolFee: record.poolFee, v4TickSpacing: record.tickSpacing,
+    logoUri: extended?.logoUri ?? null,
+    description: extended?.description ?? null,
+    websiteUrl: extended?.websiteUrl ?? null,
+    twitterUrl: extended?.twitterUrl ?? null,
+    launchTimestamp: extended?.launchTimestamp ?? null,
   };
   const venue: Venue = {
     id: venueKey(factory.chainId, 'curve', event.curveAddress), chainId: factory.chainId,

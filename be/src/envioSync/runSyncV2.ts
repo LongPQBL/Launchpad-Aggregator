@@ -4,6 +4,7 @@ import { eq, sql } from 'drizzle-orm';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readV2TokenMetadata, resolveV2QuoteAsset, type V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
+import { readExtendedTokenMetadata } from '../launchpads/pons/extendedMetadata.js';
 import type { Database } from '../db/client.js';
 import type { Launch, Venue } from '../domain/types.js';
 import { launchesEnvioStaging, venuesEnvioStaging, tradesEnvioStaging, lifecycleTransitionsEnvioStaging,
@@ -144,9 +145,11 @@ export async function syncV2Once(
   return { launchesWritten, tradesWritten, transitionsWritten };
 }
 
+type SyncV2RpcClient = V2QuoteClient & { getBlock?(parameters: { blockNumber: bigint }): Promise<{ timestamp: bigint }> };
+
 export async function syncV2ToReal(
   envioPool: Pool, appDb: Database, tables: EnvioV2TableNames = DEFAULT_ENVIO_V2_TABLES,
-  rpcClient: V2QuoteClient = defaultRpcClient(), reorgWindowBlocks = 500n,
+  rpcClient: SyncV2RpcClient = defaultRpcClient(), reorgWindowBlocks = 500n,
 ): Promise<{ launchesWritten: number; tradesWritten: number; transitionsWritten: number }> {
   const { processedBlock, headBlock } = await readEnvioProgress(envioPool, tables.progressTable);
   const windowStart = processedBlock > reorgWindowBlocks ? processedBlock - reorgWindowBlocks : 0n;
@@ -161,6 +164,7 @@ export async function syncV2ToReal(
   // launchBlock >= windowStart).
   const metadataByToken = new Map<string, { name: string; symbol: string; decimals: number }>();
   const quoteAssetByToken = new Map<string, { address: Address; symbol: string; decimals: number }>();
+  const extendedByToken = new Map<string, { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }>();
   for (const raw of rawLaunches) {
     const row: EnvioRawLaunchV2Row = { ...raw, blockNumber: BigInt(raw.blockNumber) };
     const event = envioRawLaunchV2ToEvent(row);
@@ -173,6 +177,13 @@ export async function syncV2ToReal(
     quoteAssetByToken.set(tokenAddress, knownQuoteAsset
       ? { address: event.pairToken, ...knownQuoteAsset }
       : await resolveV2QuoteAsset(event.pairToken, rpcClient));
+    const extended = await readExtendedTokenMetadata(rpcClient, event.tokenAddress);
+    let launchTimestamp: number | null = null;
+    try {
+      const block = await rpcClient.getBlock?.({ blockNumber: row.blockNumber });
+      if (block) launchTimestamp = Number(block.timestamp);
+    } catch { /* stays null — a timestamp read failure must not block indexing the launch */ }
+    extendedByToken.set(tokenAddress, { ...extended, launchTimestamp });
   }
 
   const launchByCurve = new Map<string, { launch: Launch; venue: Venue }>();
@@ -202,7 +213,7 @@ export async function syncV2ToReal(
       let launch: Launch;
       let venue: Venue;
       try {
-        ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, metadata, quoteAsset));
+        ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, metadata, quoteAsset, extendedByToken.get(tokenAddress)));
       } catch (error) {
         throw new Error(`Failed to sync V2 launch at tx ${raw.txHash} log ${raw.logIndex}: ${(error as Error).message}`, { cause: error });
       }
@@ -215,6 +226,9 @@ export async function syncV2ToReal(
           deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock, launchTxHash: launch.launchTxHash,
           quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
           quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: launch.lifecycleStatus,
+          logoUri: launch.logoUri ?? null, description: launch.description ?? null,
+          websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
+          launchTimestamp: launch.launchTimestamp ?? null,
         }).onConflictDoNothing().returning({ tokenAddress: launches.tokenAddress });
         if (inserted.length) launchesWritten += 1;
       }
