@@ -2,6 +2,7 @@ import { zeroAddress, type Address, type Hash } from 'viem';
 import { logKey } from '../domain/ids.js';
 import { hydrateV2Launch, type V2LaunchEvent, type V2LaunchRecord, type V2LaunchWithVenue } from '../launchpads/pons/v2/adapter.js';
 import type { FactorySource } from '../launchpads/pons/sourceRegistry.js';
+import type { ExtendedLaunchMetadata } from '../launchpads/pons/extendedMetadata.js';
 import type { Launch, Trade, Venue } from '../domain/types.js';
 
 export interface EnvioRawLaunchV2Row {
@@ -35,7 +36,7 @@ export function hydrateV2LaunchFromEnvio(
   event: V2LaunchEvent, factory: FactorySource,
   metadata: { name: string; symbol: string; decimals: number },
   quoteAsset: { address: Address; symbol: string; decimals: number },
-  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null },
+  extended?: ExtendedLaunchMetadata,
 ): V2LaunchWithVenue {
   const record: V2LaunchRecord = {
     token: event.tokenAddress, curve: event.curveAddress, deployer: event.deployerAddress,

@@ -4,6 +4,7 @@ import type { IndexBatch, Launch, RawLog, Venue, Trade } from '../../../domain/t
 import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/concurrency.js';
 import type { GetBlocksData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
+import type { ExtendedLaunchMetadata } from '../extendedMetadata.js';
 import { v1LaunchEvent, v3SwapEvent } from './abi.js';
 
 export interface RpcLog {
@@ -62,7 +63,7 @@ export function decodeV1Launch(log: RpcLog, factory: FactorySource): V1LaunchEve
 }
 
 export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, metadata: V1TokenMetadata, graduated: boolean,
-  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }): LaunchWithVenue {
+  extended?: ExtendedLaunchMetadata): LaunchWithVenue {
   if (metadata.liquidityPool.toLowerCase() !== event.poolAddress.toLowerCase()) throw new Error('Token pool does not match factory log');
   if (event.pairToken.toLowerCase() !== weth.toLowerCase()) throw new Error('Unsupported pons v1 quote asset');
   const launch: Launch = {

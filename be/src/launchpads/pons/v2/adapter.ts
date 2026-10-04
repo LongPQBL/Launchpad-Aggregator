@@ -5,6 +5,7 @@ import { mapWithConcurrency, RPC_FETCH_CONCURRENCY } from '../../../indexer/conc
 import type { GetBlocksData } from '../../../indexer/blockData.js';
 import type { FactorySource } from '../sourceRegistry.js';
 import type { RpcLog } from '../v1/adapter.js';
+import type { ExtendedLaunchMetadata } from '../extendedMetadata.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent, v2FactoryStateAbi, v2LaunchEvent } from './abi.js';
 import type { CurveReserves } from './curve.js';
 
@@ -43,7 +44,7 @@ export function phaseToLifecycle(phase: 0 | 1 | 2 | 3): LifecycleStatus {
 
 export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, record: V2LaunchRecord,
   metadata: { name: string; symbol: string; decimals: number }, quoteAsset: QuoteAsset,
-  extended?: { logoUri: string | null; description: string | null; websiteUrl: string | null; twitterUrl: string | null; launchTimestamp: number | null }): V2LaunchWithVenue {
+  extended?: ExtendedLaunchMetadata): V2LaunchWithVenue {
   if (!record.exists || !same(record.token, event.tokenAddress) || !same(record.curve, event.curveAddress)
     || !same(record.deployer, event.deployerAddress) || !same(record.pairToken, event.pairToken)) {
     throw new Error('Pons v2 launch record does not match factory event');

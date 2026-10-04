@@ -16,6 +16,10 @@ export interface ExtendedTokenMetadata {
   twitterUrl: string | null;
 }
 
+export interface ExtendedLaunchMetadata extends ExtendedTokenMetadata {
+  launchTimestamp: number | null;
+}
+
 export interface ExtendedMetadataReadClient {
   readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string }): Promise<unknown>;
 }
