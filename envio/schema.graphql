@@ -1,4 +1,10 @@
-type RawLaunch {
+# Each Raw* entity below carries the same (chainId, blockNumber, logIndex) index: be/src/envioSync's
+# incrementalPage.ts reads every stream as a bounded (chainId, blockNumber, logIndex, id) keyset page
+# (docs/superpowers/specs/2026-10-05-envio-near-realtime-sync-design.md), which this index supports —
+# `id`'s own index already exists as the primary key. Added through this schema (a supported Envio
+# migration that builds the index in the background before future reads need it), not live DDL against
+# Envio's managed Postgres.
+type RawLaunch @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   tokenAddress: String!
@@ -15,7 +21,7 @@ type RawLaunch {
   logIndex: Int!
 }
 
-type RawSwap {
+type RawSwap @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   poolAddress: String!
@@ -37,7 +43,7 @@ type RawSwap {
   timestamp: Int!
 }
 
-type RawLaunchV2 {
+type RawLaunchV2 @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   tokenAddress: String!
@@ -50,7 +56,7 @@ type RawLaunchV2 {
   logIndex: Int!
 }
 
-type RawLifecycleTransition {
+type RawLifecycleTransition @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   tokenAddress: String!
@@ -62,7 +68,7 @@ type RawLifecycleTransition {
   logIndex: Int!
 }
 
-type RawCurveTrade {
+type RawCurveTrade @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   curveAddress: String!
@@ -79,7 +85,7 @@ type RawCurveTrade {
   timestamp: Int!
 }
 
-type RawCurveBuyback {
+type RawCurveBuyback @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   curveAddress: String!
@@ -95,7 +101,7 @@ type RawCurveBuyback {
   timestamp: Int!
 }
 
-type RawV4Initialize {
+type RawV4Initialize @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   poolId: String!
@@ -112,7 +118,7 @@ type RawV4Initialize {
   logIndex: Int!
 }
 
-type RawV4Swap {
+type RawV4Swap @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
   poolId: String!

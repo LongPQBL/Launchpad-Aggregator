@@ -218,6 +218,13 @@
       "when": 1791149717437,
       "tag": "0030_sudden_wasp",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1791157981610,
+      "tag": "0031_envio_sync_cursors",
+      "breakpoints": true
     }
   ]
 }

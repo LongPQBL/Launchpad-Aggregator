@@ -320,6 +320,28 @@ export const envioChainProgress = pgTable('envio_chain_progress', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// Durable per-(chain, Envio raw stream, lane) read position for the incremental near-realtime sync
+// (be/src/envioSync/incrementalCursor.ts). "tail" starts near Envio's current head for fresh activity,
+// "history" resumes the earliest unsynced block — see docs/superpowers/specs/2026-10-05-envio-near-realtime-sync-design.md.
+// block_number/log_index/raw_id together are the last applied row's position (genesis: 0/-1/'');
+// processed_watermark is the pass's own Envio fence, advanced even on an empty range so staleness is
+// observable without a new row ever arriving.
+export const envioSyncCursors = pgTable('envio_sync_cursors', {
+  chainId: integer('chain_id').notNull(),
+  stream: text('stream').notNull(),
+  lane: text('lane').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  logIndex: integer('log_index').notNull(),
+  rawId: text('raw_id').notNull(),
+  processedWatermark: bigint('processed_watermark', { mode: 'bigint' }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.stream, table.lane] }),
+  check('envio_sync_cursors_valid_stream', sql`${table.stream} IN
+    ('v1-launch', 'v1-swap', 'v2-launch', 'v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap')`),
+  check('envio_sync_cursors_valid_lane', sql`${table.lane} IN ('tail', 'history')`),
+]);
+
 export const candleDirtyBuckets = pgTable('candle_dirty_buckets', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
