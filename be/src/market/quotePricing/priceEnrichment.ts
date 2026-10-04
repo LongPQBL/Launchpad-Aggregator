@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { Address } from 'viem';
-import { claimDuePriceJobs, finishPriceJob } from './priceJobStore.js';
+import { claimDuePriceJobs, enqueueRoundBackfillJob, finishPriceJob } from './priceJobStore.js';
 import { discoverAndVerifyFeed, type DiscoveryClient } from './feedDiscovery.js';
 import { upsertQuoteFeed } from './feedRegistry.js';
 import { backfillRoundsForFeed, type BackfillRpcClient } from './roundBackfill.js';
@@ -20,6 +20,10 @@ export async function enrichPricesOnce(
       if (result) {
         await upsertQuoteFeed(pool, { chainId: CHAIN_ID, quoteAssetAddress: job.quoteAssetAddress as Address,
           feedAddress: result.feedAddress, aggregatorAddress: result.aggregatorAddress, discoverySource: 'directory', verificationStatus: 'verified', now });
+        // Don't make a caller wait for the next rolling-window tick (maintainRollingWindows) —
+        // a newly verified feed gets its last-24h history backfilled immediately.
+        const nowSeconds = Math.floor(now.getTime() / 1000);
+        await enqueueRoundBackfillJob(pool, CHAIN_ID, result.feedAddress, nowSeconds - 86_400, nowSeconds);
         await finishPriceJob(pool, job, { ok: true }, now);
         done++;
       } else {
@@ -43,6 +47,29 @@ export async function enrichPricesOnce(
     }
   }
   return { claimed: claims.length, done, pending };
+}
+
+// Keeps the rolling 24h volume/trade-valuation window populated even when nothing happens to
+// enqueue it otherwise (a quiet feed with no new feed_resolution and no /trades page view). Each
+// call enqueues one round_backfill job per verified feed, bucketed to a stable 5-minute window —
+// repeated calls within the same bucket dedupe via price_jobs' existing unique index, so this is
+// safe to call on every loop tick without piling up jobs. backfillRoundsForFeed's own 24h
+// lookback (see roundBackfill.ts) guarantees the predecessor round is captured even on a feed
+// quiet enough that no new round falls inside this particular 5-minute slice.
+const ROLLING_WINDOW_BUCKET_SECONDS = 300;
+
+export async function maintainRollingWindows(pool: Pool, chainId: number, now: Date): Promise<number> {
+  const nowSeconds = Math.floor(now.getTime() / 1000);
+  const bucketEnd = Math.floor(nowSeconds / ROLLING_WINDOW_BUCKET_SECONDS) * ROLLING_WINDOW_BUCKET_SECONDS;
+  const bucketStart = bucketEnd - ROLLING_WINDOW_BUCKET_SECONDS;
+  const result = await pool.query(
+    `SELECT DISTINCT feed_address FROM quote_usd_feeds WHERE chain_id = $1 AND verification_status = 'verified'`,
+    [chainId],
+  );
+  for (const row of result.rows as { feed_address: string }[]) {
+    await enqueueRoundBackfillJob(pool, chainId, row.feed_address, bucketStart, bucketEnd);
+  }
+  return result.rows.length;
 }
 
 export function startPriceEnrichmentLoop(run: () => Promise<void>): { stop(): Promise<void> } {

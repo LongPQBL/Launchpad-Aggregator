@@ -9,7 +9,7 @@ import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
-import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
+import { decodeVolumeCursor, encodeVolumeCursor, InvalidVolumeCursorError } from './volumeCursor.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
@@ -227,15 +227,20 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
 
     // Base set: every launch matching the filters, with its coverage-complete flag (reuses the
     // existing per-launch coverage rule used by the recency path — same semantics, just no
-    // pagination predicate here, since the final order depends on volume, not launch position).
+    // pagination predicate here, since the final order depends on volume, not launch position) and
+    // the same raw quote-unit official_volume_raw subquery the recency path uses, so this sort
+    // doesn't silently drop that field (final review, Important 1).
     const baseResult = await pool.query(`
       SELECT l.*, l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
-        ${launchCoverageSql(5)} AS launch_coverage_complete
+        ${launchCoverageSql(5)} AS launch_coverage_complete,
+        (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
+         WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
+           AND t.timestamp >= $6) AS official_volume_raw
       FROM launches l JOIN sources s ON s.id = l.source_id
       WHERE ($1::integer IS NULL OR l.chain_id = $1) AND ($2::text IS NULL OR l.platform = $2)
         AND ($3::text IS NULL OR l.lifecycle_status = $3)
         AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')
-    `, [query.chainId ?? null, query.platform ?? null, query.status ?? null, query.search ?? null, head?.toString() ?? null]);
+    `, [query.chainId ?? null, query.platform ?? null, query.status ?? null, query.search ?? null, head?.toString() ?? null, since]);
     const launchRows = baseResult.rows as Row[];
 
     // Per-trade historical USD valuation for every official trade of every matching launch in the
@@ -260,11 +265,18 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         AND ($5::text IS NULL OR l.lifecycle_status = $5) AND ($6::text IS NULL OR l.name ILIKE '%' || $6 || '%' OR l.symbol ILIKE '%' || $6 || '%')
     `, [since, asOf, query.chainId ?? null, query.platform ?? null, query.status ?? null, query.search ?? null]);
 
-    interface VolumeAgg { usdTotal: number; hasUnpriced: boolean; hasTrades: boolean }
+    // Fixed-point bigint accumulation, never floating point: float addition is not associative, so
+    // the exact same set of trades could sum to a different string depending on row order (a real
+    // Postgres LATERAL join gives no row-order guarantee) — breaking both the cursor's exact-match
+    // reseek and giving the same launch a different volume on every request (final review,
+    // Important 2 / Minor). USD_SCALE is far beyond any realistic quoteDecimals+priceDecimals
+    // combination, so each row's own scaled contribution is computed exactly before summing.
+    const USD_SCALE = 10n ** 30n;
+    interface VolumeAgg { usdTotalScaled: bigint; hasUnpriced: boolean; hasTrades: boolean }
     const byLaunch = new Map<string, VolumeAgg>();
     for (const row of tradesResult.rows as Row[]) {
       const key = `${number(row.chain_id)}:${string(row.token_address)}`;
-      const agg = byLaunch.get(key) ?? { usdTotal: 0, hasUnpriced: false, hasTrades: false };
+      const agg = byLaunch.get(key) ?? { usdTotalScaled: 0n, hasUnpriced: false, hasTrades: false };
       agg.hasTrades = true;
       if (row.feed_address === null || row.answer_raw === null) {
         agg.hasUnpriced = true;
@@ -273,9 +285,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         if (ageSeconds < 0 || ageSeconds > 86_400) {
           agg.hasUnpriced = true;
         } else {
-          const quoteAmount = Number(formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)));
-          const priceUsd = Number(string(row.answer_raw)) / 10 ** number(row.price_decimals);
-          agg.usdTotal += quoteAmount * priceUsd;
+          const quoteAmountRaw = BigInt(string(row.quote_amount_raw));
+          const answerRaw = BigInt(string(row.answer_raw));
+          const divisor = 10n ** BigInt(number(row.quote_asset_decimals)) * 10n ** BigInt(number(row.price_decimals));
+          agg.usdTotalScaled += (quoteAmountRaw * answerRaw * USD_SCALE) / divisor;
         }
       }
       byLaunch.set(key, agg);
@@ -293,7 +306,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       if (!complete) return { row, complete, usd: null, approx: false };
       if (!agg || !agg.hasTrades) return { row, complete, usd: '0', approx: false };
       if (agg.hasUnpriced) return { row, complete, usd: null, approx: false };
-      return { row, complete, usd: agg.usdTotal.toString(), approx: true };
+      return { row, complete, usd: formatUnits(agg.usdTotalScaled, 30), approx: true };
     });
 
     ranked.sort((a, b) => {
@@ -318,7 +331,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         rankCategory(item.usd) === cursorValue.rankCategory && (item.usd ?? null) === cursorValue.rankValue
         && string(item.row.block_number) === cursorValue.tiebreakBlockNumber && string(item.row.tx_hash) === cursorValue.tiebreakTxHash
         && number(item.row.log_index) === cursorValue.tiebreakLogIndex);
-      if (pinnedIndex === -1) throw new Error('Invalid cursor');
+      if (pinnedIndex === -1) throw new InvalidVolumeCursorError('Invalid cursor');
       startIndex = pinnedIndex + 1;
     }
     const slice = ranked.slice(startIndex, startIndex + query.limit + 1);
@@ -426,16 +439,23 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         quoteAssetDecimals: number(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
       })));
       // Demand-driven backfill: a `pending` row means a verified feed exists but this trade's exact
-      // round isn't backfilled yet — enqueue one bounded, deduplicated job covering a window around
-      // this trade's timestamp. Fire-and-forget after the response data is already computed; never
-      // block the page on it.
+      // round isn't backfilled yet. Coalesce every pending row on this page into ONE bounded,
+      // deduplicated job covering [earliest-3600, latest+3600] — one job per feed per page, never
+      // one per row (final review, Important 5: up to 100 rows/page would otherwise mean up to 100
+      // jobs, each re-running its own pair of binary-searched block lookups for the same feed).
+      // Fire-and-forget after the response data is already computed; never block the page on it.
       const feed = rows[0] ? await resolveVerifiedFeed(pool, chainId, string(rows[0].launch_quote_asset_address)) : null;
       if (feed) {
-        for (const [i, valuation] of valuations.entries()) {
-          if (valuation.status === 'pending') {
-            const t = number(rows[i]!.timestamp);
-            void enqueueRoundBackfillJob(pool, chainId, feed.feedAddress, t - 3600, t + 3600).catch(() => {});
-          }
+        const pendingTimestamps = valuations
+          .map((valuation, i) => (valuation.status === 'pending' ? number(rows[i]!.timestamp) : null))
+          .filter((t): t is number => t !== null);
+        if (pendingTimestamps.length > 0) {
+          const rangeStart = Math.min(...pendingTimestamps) - 3600;
+          const rangeEnd = Math.max(...pendingTimestamps) + 3600;
+          // Coalesced to one insert per page (not per row), so awaiting it adds negligible latency
+          // — and avoids a real race where a fire-and-forget insert on one pooled connection isn't
+          // yet visible to a client that immediately re-queries price_jobs on a different one.
+          await enqueueRoundBackfillJob(pool, chainId, feed.feedAddress, rangeStart, rangeEnd).catch(() => {});
         }
       }
       return page(rows, query.limit, (row, i) => ({

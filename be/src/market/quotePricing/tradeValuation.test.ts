@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as feedRegistry from './feedRegistry.js';
 import * as priceRounds from './priceRounds.js';
+import * as priceJobStore from './priceJobStore.js';
 import { valueTradeUsd } from './tradeValuation.js';
 
 vi.mock('./feedRegistry.js');
 vi.mock('./priceRounds.js');
+vi.mock('./priceJobStore.js');
 
 const chainId = 4663;
 const quote = '0xquote00000000000000000000000000000f001';
@@ -17,20 +19,40 @@ describe('valueTradeUsd', () => {
     expect(result).toEqual({ status: 'unavailable' });
   });
 
-  it('returns pending when a verified feed exists but no round is backfilled at or before this trade yet', async () => {
+  it('returns pending when a verified feed exists but no round is backfilled at or before this trade yet, and backfill has not yet covered it', async () => {
     vi.mocked(feedRegistry.resolveVerifiedFeed).mockResolvedValue({ chainId, quoteAssetAddress: quote as never,
       feedAddress: '0xfeed' as never, aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified' });
     vi.mocked(priceRounds.findRoundAtOrBefore).mockResolvedValue(null);
+    vi.mocked(priceJobStore.hasCompletedRoundBackfillCovering).mockResolvedValue(false);
     expect(await valueTradeUsd({} as never, chainId, quote, trade)).toEqual({ status: 'pending' });
   });
 
-  it('returns pending (not a fabricated value) when the found round is older than the 24h freshness ceiling at trade time', async () => {
+  it('returns unavailable (not pending forever) when no round exists and a completed backfill already covered this trade\'s timestamp', async () => {
+    vi.mocked(feedRegistry.resolveVerifiedFeed).mockResolvedValue({ chainId, quoteAssetAddress: quote as never,
+      feedAddress: '0xfeed' as never, aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified' });
+    vi.mocked(priceRounds.findRoundAtOrBefore).mockResolvedValue(null);
+    vi.mocked(priceJobStore.hasCompletedRoundBackfillCovering).mockResolvedValue(true);
+    expect(await valueTradeUsd({} as never, chainId, quote, trade)).toEqual({ status: 'unavailable' });
+  });
+
+  it('returns pending (not a fabricated value) when the found round is older than the 24h freshness ceiling and backfill has not confirmed that is final', async () => {
     vi.mocked(feedRegistry.resolveVerifiedFeed).mockResolvedValue({ chainId, quoteAssetAddress: quote as never,
       feedAddress: '0xfeed' as never, aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified' });
     vi.mocked(priceRounds.findRoundAtOrBefore).mockResolvedValue({ roundId: 1n, answerRaw: 100_000_000n, decimals: 8,
       startedAt: 0, updatedAt: 0, blockNumber: 1n, logIndex: 0 });
+    vi.mocked(priceJobStore.hasCompletedRoundBackfillCovering).mockResolvedValue(false);
     const staleTrade = { ...trade, timestamp: 2000 + 25 * 3600 };
     expect(await valueTradeUsd({} as never, chainId, quote, staleTrade)).toEqual({ status: 'pending' });
+  });
+
+  it('returns unavailable (not pending forever) when the found round is stale and a completed backfill already confirmed nothing fresher exists', async () => {
+    vi.mocked(feedRegistry.resolveVerifiedFeed).mockResolvedValue({ chainId, quoteAssetAddress: quote as never,
+      feedAddress: '0xfeed' as never, aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified' });
+    vi.mocked(priceRounds.findRoundAtOrBefore).mockResolvedValue({ roundId: 1n, answerRaw: 100_000_000n, decimals: 8,
+      startedAt: 0, updatedAt: 0, blockNumber: 1n, logIndex: 0 });
+    vi.mocked(priceJobStore.hasCompletedRoundBackfillCovering).mockResolvedValue(true);
+    const staleTrade = { ...trade, timestamp: 2000 + 25 * 3600 };
+    expect(await valueTradeUsd({} as never, chainId, quote, staleTrade)).toEqual({ status: 'unavailable' });
   });
 
   it('prices the trade using the found round, never the latest/current price', async () => {

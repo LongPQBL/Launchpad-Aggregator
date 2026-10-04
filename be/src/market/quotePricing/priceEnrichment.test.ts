@@ -22,6 +22,17 @@ describe('enrichPricesOnce', () => {
     expect(report).toEqual({ claimed: 1, done: 1, pending: 0 });
   });
 
+  it('enqueues an immediate round-backfill job covering the last 24h when a feed is newly verified, so a caller does not have to wait for the next rolling-window tick', async () => {
+    const now = new Date('2026-10-05T00:00:00Z');
+    vi.mocked(priceJobStore.claimDuePriceJobs).mockResolvedValue([
+      { id: 'j1', jobType: 'feed_resolution', quoteAssetAddress: '0xquote', feedAddress: null, rangeStart: null, rangeEnd: null, attempts: 0, leaseId: 'l1' },
+    ]);
+    vi.mocked(feedDiscovery.discoverAndVerifyFeed).mockResolvedValue({ feedAddress: '0xfeed' as never, aggregatorAddress: '0xagg' as never });
+    await enrichPricesOnce({} as never, {} as never, now, vi.fn());
+    const nowSeconds = Math.floor(now.getTime() / 1000);
+    expect(priceJobStore.enqueueRoundBackfillJob).toHaveBeenCalledWith(expect.anything(), 4663, '0xfeed', nowSeconds - 86_400, nowSeconds);
+  });
+
   it('marks a feed-resolution job rejected (not retried) when no trustworthy feed is found, without writing a fabricated quote_usd_feeds row', async () => {
     vi.mocked(priceJobStore.claimDuePriceJobs).mockResolvedValue([
       { id: 'j2', jobType: 'feed_resolution', quoteAssetAddress: '0xquote2', feedAddress: null, rangeStart: null, rangeEnd: null, attempts: 0, leaseId: 'l2' },

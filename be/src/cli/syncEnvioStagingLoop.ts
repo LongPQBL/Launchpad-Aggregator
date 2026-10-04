@@ -3,7 +3,7 @@ import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { resolveSyncTablesFromEnv, runAllSyncsOnce } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
-import { enrichPricesOnce, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
+import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -27,7 +27,9 @@ const metadataLoop = metadataClient
     if (event.kind === 'enrichment_error' || (event.claimed ?? 0) > 0) console.log('Envio metadata enrichment:', event);
   }, metadataBatchLimit)) : null;
 const priceLoop = metadataClient
-  ? startPriceEnrichmentLoop(() => enrichPricesOnce(pool, metadataClient, new Date(), quoteFeedRegistry.resolve)
+  ? startPriceEnrichmentLoop(() => maintainRollingWindows(pool, 4663, new Date())
+    .catch((error) => console.error('Rolling-window maintenance failed, will retry next tick:', error))
+    .then(() => enrichPricesOnce(pool, metadataClient, new Date(), quoteFeedRegistry.resolve))
     .then((report) => { if (report.claimed > 0) console.log('Price enrichment:', report); })
     .catch((error) => console.error('Price enrichment cycle failed, will retry next tick:', error))) : null;
 let metadataStop: Promise<void> | null = null;

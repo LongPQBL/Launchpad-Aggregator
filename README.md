@@ -32,8 +32,11 @@ Các lệnh `npm run ... -w be` bên dưới vẫn ghi rõ biến môi trường
 docker compose up -d postgres
 npm ci
 DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad npm run db:migrate -w be
-DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad FE_ORIGIN=http://localhost:3000 npm run dev:api -w be
+DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad npm run seed:known-quote-feeds -w be
+DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad FE_ORIGIN=http://localhost:3000 VOLUME_CURSOR_SECRET=<openssl rand -hex 32> npm run dev:api -w be
 ```
+
+`VOLUME_CURSOR_SECRET` là bắt buộc (API không khởi động nếu thiếu, `be/src/api/config.ts`) — sinh một chuỗi bí mật bất kỳ bằng `openssl rand -hex 32`, không dùng lại giá trị ví dụ trong `be/.env.example` ở môi trường thật. `seed:known-quote-feeds` chỉ cần chạy một lần (idempotent) để phần tính giá USD (TVL/FDV/volume24hUsd) hoạt động ngay với 4 quote asset đã biết sẵn, trước khi vòng lặp nền (`sync:envio-staging:loop`) tự resolve thêm các quote asset mới.
 
 Ở terminal khác, chạy Envio để index Pons (xem phần "Envio HyperIndex" bên dưới — đây là đường index thật hiện tại, không còn `dev:indexer`/RPC-scan).
 

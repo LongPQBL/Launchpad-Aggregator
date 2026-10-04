@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
+import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { candle, launchDetail, launchSummary, pageSchema, trade } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
@@ -56,7 +57,17 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
   app.get<{ Querystring: Record<string, string | undefined> }>('/v1/launches', { schema: { response: { 200: pageSchema(launchSummary) } } }, async (request, reply) => {
     const query = launchListQuery(request.query);
     if (!query) return reply.code(400).send({ error: 'Invalid launch query' });
-    return deps.data.listLaunches(query);
+    try {
+      return await deps.data.listLaunches(query);
+    } catch (error) {
+      // The signed volume24hUsd cursor's format/tamper/expiry/sort-mismatch validation, and the
+      // "pinned row no longer exists in the current ranking" case, both happen inside the store
+      // (decodeVolumeCursor needs VOLUME_CURSOR_SECRET, not available to this route-level parser) —
+      // either throws InvalidVolumeCursorError, which is the client's fault, never a 500
+      // (final review, Important 2).
+      if (error instanceof InvalidVolumeCursorError) return reply.code(400).send({ error: 'Invalid cursor' });
+      throw error;
+    }
   });
 
   app.get<{ Params: { chainId: string; tokenAddress: string } }>('/v1/launches/:chainId/:tokenAddress',

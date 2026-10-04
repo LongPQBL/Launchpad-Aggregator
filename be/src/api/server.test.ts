@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createApiServer } from './server.js';
 import { ApiEventBus } from './events.js';
+import { InvalidVolumeCursorError } from './volumeCursor.js';
 
 const address = '0x1111111111111111111111111111111111111111';
 const launch = {
@@ -74,6 +75,16 @@ describe('read-only API', () => {
     expect(calls).toEqual([{ limit: 50, search: 'demo' }, { limit: 50, status: 'swept' }]);
     const withUnknownStatus = await app.inject({ method: 'GET', url: '/v1/launches?status=not-a-status' });
     expect(withUnknownStatus.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('maps an invalid/stale volume24hUsd cursor to 400, never an unhandled 500', async () => {
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async () => { throw new InvalidVolumeCursorError('Invalid cursor'); },
+    } });
+    const response = await app.inject({ method: 'GET', url: '/v1/launches?sort=volume24hUsd&cursor=tampered' });
+    expect(response.statusCode).toBe(400);
     await app.close();
   });
 

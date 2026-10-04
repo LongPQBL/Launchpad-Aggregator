@@ -59,6 +59,22 @@ export async function claimDuePriceJobs(pool: Pool, now: Date, limit: number, le
   }
 }
 
+const REJECTED_RETRY_MS = 24 * 60 * 60 * 1000;
+
+// Distinguishes "no fresher round exists because backfill hasn't run yet" (pending — will resolve
+// once the job completes) from "backfill already ran across this exact window and still found
+// nothing fresher" (unavailable — re-running the same job would find the same answer forever).
+// Used by tradeValuation.ts to stop reporting a genuinely stale/missing round as `pending` forever
+// (final review, Important 6).
+export async function hasCompletedRoundBackfillCovering(pool: Pool, chainId: number, feedAddress: string, windowStart: number, windowEnd: number): Promise<boolean> {
+  const result = await pool.query(
+    `SELECT 1 FROM price_jobs WHERE chain_id = $1 AND job_type = 'round_backfill' AND feed_address = $2
+       AND status = 'done' AND range_start <= $3 AND range_end >= $4 LIMIT 1`,
+    [chainId, feedAddress.toLowerCase(), windowStart, windowEnd],
+  );
+  return result.rows.length > 0;
+}
+
 function nextPriceJobRetryAt(now: Date, attempts: number): Date {
   return new Date(now.getTime() + Math.min(60 * 2 ** Math.min(attempts, 6), 3600) * 1000);
 }
@@ -72,9 +88,14 @@ export async function finishPriceJob(
     return result.rowCount === 1;
   }
   if (outcome.errorKind === 'rejected') {
+    // Stays 'pending' (not permanently 'failed') so the live Robinhood asset/Chainlink feed
+    // directories get another look once they might plausibly have changed — a flat, infrequent
+    // interval (not exponential backoff; this isn't a transport failure), matching the spec's
+    // "retry when the source directories refresh" while still never re-verifying every tick,
+    // which is what the Review Focus actually warns against ("never fabricate a match").
     const result = await pool.query(
-      `UPDATE price_jobs SET status = 'failed', last_error = $1, next_attempt_at = NULL, lease_id = NULL, lease_until = NULL WHERE id = $2 AND lease_id = $3`,
-      [outcome.error, job.id, job.leaseId]);
+      `UPDATE price_jobs SET status = 'pending', last_error = $1, next_attempt_at = $2, lease_id = NULL, lease_until = NULL WHERE id = $3 AND lease_id = $4`,
+      [outcome.error, new Date(now.getTime() + REJECTED_RETRY_MS), job.id, job.leaseId]);
     return result.rowCount === 1;
   }
   const attempts = job.attempts + 1;

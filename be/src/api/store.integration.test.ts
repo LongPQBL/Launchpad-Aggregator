@@ -199,6 +199,33 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
     expect(jobs.rows.some((row) => Number(row.range_start) <= 1_700_000_000 && Number(row.range_end) >= 1_700_000_000)).toBe(true);
   });
 
+  it('coalesces every pending row on one page into a single round-backfill job per feed, not one job per row', async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [usdToken]);
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = 4663 AND feed_address = $1', [historicalFeed]);
+    await pool.query(`DELETE FROM price_jobs WHERE chain_id = 4663 AND job_type = 'round_backfill' AND feed_address = $1`, [historicalFeed]);
+    await seed(ETH_ADDRESS, 'ETH'); // seeds one trade at timestamp 1,700,000,000
+    // A second trade, far enough from the first that one ±3600s job per row would need two jobs —
+    // coalescing into [min-3600, max+3600] must still produce exactly one.
+    const farApartTimestamp = 1_700_100_000;
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,2,$3,$4,0,$5,'buy','1','1',$1,'CurveBuy','user_trade',$1) ON CONFLICT DO NOTHING`,
+    [usdToken, venueId, blockHash, '0x' + 'c2'.repeat(32), farApartTimestamp]);
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: ETH_ADDRESS as `0x${string}`, feedAddress: historicalFeed,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
+
+    const trades = await store.listTrades(4663, usdToken, { limit: 10 });
+    expect(trades.items.every((item) => item.usdValueStatus === 'pending')).toBe(true);
+
+    const jobs = await pool.query(`SELECT range_start, range_end FROM price_jobs
+      WHERE chain_id = 4663 AND job_type = 'round_backfill' AND feed_address = $1`, [historicalFeed]);
+    expect(jobs.rows).toHaveLength(1);
+    expect(Number(jobs.rows[0].range_start)).toBeLessThanOrEqual(1_700_000_000 - 3600);
+    expect(Number(jobs.rows[0].range_end)).toBeGreaterThanOrEqual(farApartTimestamp + 3600);
+  });
+
   it('returns usdValueStatus: unavailable when there is no verified feed for the quote asset at all, and enqueues no round-backfill job', async () => {
     await pool.query('DELETE FROM trades WHERE token_address = $1', [usdToken]);
     await pool.query('DELETE FROM venues WHERE token_address = $1', [usdToken]);
