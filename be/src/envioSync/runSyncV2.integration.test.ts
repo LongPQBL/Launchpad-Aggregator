@@ -385,6 +385,63 @@ describe('syncV2ToReal', () => {
     }
   });
 
+  it('starts metadata, quote-asset, and extended-metadata reads concurrently, not sequentially', async () => {
+    const token = '0x9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9c';
+    const curve = '0x9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9b9e';
+    const pair = '0x9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9c9f';
+    const launchTx = '0x' + '9f'.repeat(32);
+    const blockHash = '0x' + 'a0'.repeat(32);
+    const started: string[] = [];
+    let releaseMetadata!: () => void;
+    let releaseQuote!: () => void;
+    let releaseExtended!: () => void;
+    const metadataGate = new Promise<void>((resolve) => { releaseMetadata = resolve; });
+    const quoteGate = new Promise<void>((resolve) => { releaseQuote = resolve; });
+    const extendedGate = new Promise<void>((resolve) => { releaseExtended = resolve; });
+    const client = {
+      readContract: async ({ address, functionName }: { address: string; functionName: string }) => {
+        const addr = address.toLowerCase();
+        if (addr === token && functionName === 'name') { started.push('name'); await metadataGate; return 'Concurrent V2'; }
+        if (addr === token && functionName === 'symbol') return 'CONC2';
+        if (addr === token && functionName === 'decimals') return 18;
+        if (addr === token && functionName === 'logo') { started.push('logo'); await extendedGate; return null; }
+        if (addr === token && functionName === 'description') return null;
+        if (addr === token && functionName === 'socials') return ['', '', '', '', ''];
+        if (addr === pair && functionName === 'symbol') { started.push('quoteSymbol'); await quoteGate; return 'NOVELQ'; }
+        if (addr === pair && functionName === 'decimals') return 18;
+        throw new Error(`unexpected ${address} ${functionName}`);
+      },
+      getBlock: async () => ({ timestamp: 1_700_000_000n }),
+    };
+    try {
+      for (const id of ['pons-v2', 'pons-v2-curve', 'pons-v2-lifecycle']) {
+        await db.insert(sources).values({ id, chainId: 4663, version: 'v2', factoryAddress: token,
+          startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
+      }
+      await envioPool.query(`INSERT INTO envio_fixture_v2."RawLaunchV2" VALUES ('concurrent',4663,$1,$2,$1,$3,27823666,$4,$5,30)`,
+        [token, curve, pair, blockHash, launchTx]);
+      const syncPromise = syncV2ToReal(envioPool, db, fixtureTables, client);
+      // Wait for the pre-fetch's own setup queries (readEnvioProgress/existingRows/rawLaunches —
+      // real Postgres round trips, not microtasks) to finish and the per-launch RPC reads to start.
+      // Once any one of the three independent reads has registered, a concurrent implementation has
+      // already registered all three in the same synchronous turn (each is invoked while building
+      // the Promise.all argument array, before any of them is awaited) — a sequential-await
+      // implementation would only ever have registered the first one by this point.
+      for (let attempt = 0; attempt < 200 && started.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      expect(started.sort()).toEqual(['logo', 'name', 'quoteSymbol']);
+      releaseMetadata(); releaseQuote(); releaseExtended();
+      await syncPromise;
+    } finally {
+      await db.delete(lifecycleTransitions).where(eq(lifecycleTransitions.tokenAddress, token));
+      await db.delete(trades).where(eq(trades.tokenAddress, token));
+      await db.delete(venues).where(eq(venues.tokenAddress, token));
+      await db.delete(launches).where(eq(launches.tokenAddress, token));
+      await envioPool.query('TRUNCATE envio_fixture_v2."RawLaunchV2", envio_fixture_v2."RawCurveTrade", envio_fixture_v2."RawCurveBuyback", envio_fixture_v2."RawLifecycleTransition"');
+    }
+  });
+
   it('leaves the reorg window untouched when an RPC call fails mid-rebuild (final review, Critical 2)', async () => {
     const token = '0x6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a';
     const curve = '0x6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b';

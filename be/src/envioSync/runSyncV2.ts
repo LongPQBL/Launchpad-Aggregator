@@ -174,12 +174,17 @@ export async function syncV2ToReal(
     const existing = existingByToken.get(tokenAddress);
     const willBeRebuilt = !existing || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
     if (!willBeRebuilt || metadataByToken.has(tokenAddress)) continue;
-    metadataByToken.set(tokenAddress, await readV2TokenMetadata(rpcClient, event.tokenAddress));
     const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
-    quoteAssetByToken.set(tokenAddress, knownQuoteAsset
-      ? { address: event.pairToken, ...knownQuoteAsset }
-      : await resolveV2QuoteAsset(event.pairToken, rpcClient));
-    const extended = await readExtendedTokenMetadataOutcomes(rpcClient, event.tokenAddress);
+    // Independent RPC reads — none needs another's result — started together and awaited as one
+    // group, matching syncV1LegacyToReal's metadata+graduated+extended grouping. The known-native-ETH
+    // fast path still makes zero RPC calls for the quote asset.
+    const [metadata, quoteAsset, extended] = await Promise.all([
+      readV2TokenMetadata(rpcClient, event.tokenAddress),
+      knownQuoteAsset ? Promise.resolve({ address: event.pairToken, ...knownQuoteAsset }) : resolveV2QuoteAsset(event.pairToken, rpcClient),
+      readExtendedTokenMetadataOutcomes(rpcClient, event.tokenAddress),
+    ]);
+    metadataByToken.set(tokenAddress, metadata);
+    quoteAssetByToken.set(tokenAddress, quoteAsset);
     const timestamp: ReadOutcome<number> = rpcClient.getBlock
       ? await readLaunchTimestamp({ getBlock: rpcClient.getBlock.bind(rpcClient) }, row.blockNumber)
       : { state: 'pending', value: null, errorKind: 'unknown' };
