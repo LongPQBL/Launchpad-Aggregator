@@ -27,7 +27,11 @@ const launchSummary = {
   week52High: null,
   week52Low: null,
   logoUri: null,
-  description: null,
+  description: Array.from({ length: 8 },
+    () => 'E2E Launch is a long-form test description written specifically to exceed three lines of wrapped ' +
+      'text at both narrow mobile viewports and wide desktop viewports, so the Playwright suite can verify ' +
+      'the real browser line-clamp overflow detection end to end, independent of the jsdom unit tests that ' +
+      'mock scrollHeight and clientHeight instead of performing real layout.').join(' '),
   websiteUrl: null,
   twitterUrl: null,
   launchTimestamp: null,

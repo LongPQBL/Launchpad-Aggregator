@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AboutSection } from './about-section';
 
 const baseProps = {
@@ -74,5 +74,55 @@ describe('AboutSection website/Twitter link validation', () => {
   it('hides the Twitter pill for a malformed URL', () => {
     render(<AboutSection {...baseProps} twitterUrl="not a url" />);
     expect(screen.queryByRole('link', { name: 'Twitter' })).not.toBeInTheDocument();
+  });
+});
+
+describe('AboutSection description overflow detection', () => {
+  let scrollHeight = 0;
+  let clientHeight = 0;
+
+  beforeEach(() => {
+    scrollHeight = 0;
+    clientHeight = 0;
+    Object.defineProperty(HTMLParagraphElement.prototype, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+    Object.defineProperty(HTMLParagraphElement.prototype, 'clientHeight', { configurable: true, get: () => clientHeight });
+  });
+
+  it('renders no paragraph or toggle for a null description', () => {
+    render(<AboutSection {...baseProps} description={null} />);
+    expect(screen.queryByText(/show more/i)).not.toBeInTheDocument();
+  });
+
+  it('renders no paragraph or toggle for a whitespace-only description', () => {
+    render(<AboutSection {...baseProps} description={'   \n  '} />);
+    expect(screen.queryByText(/show more/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show Show more when the collapsed paragraph does not overflow', () => {
+    scrollHeight = 40;
+    clientHeight = 60;
+    render(<AboutSection {...baseProps} description="Short description." />);
+    expect(screen.getByText('Short description.')).toBeInTheDocument();
+    expect(screen.queryByText(/show more/i)).not.toBeInTheDocument();
+  });
+
+  it('shows Show more when the collapsed paragraph overflows, and toggles to Show less', () => {
+    scrollHeight = 120;
+    clientHeight = 60;
+    render(<AboutSection {...baseProps} description="A very long description that wraps past three lines." />);
+    const toggle = screen.getByRole('button', { name: /show more/i });
+    expect(toggle).toBeInTheDocument();
+    fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: /show less/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /show less/i }));
+    expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument();
+  });
+
+  it('preserves manual newlines via whitespace-pre-wrap', () => {
+    scrollHeight = 40;
+    clientHeight = 60;
+    render(<AboutSection {...baseProps} description={'Line one\nLine two'} />);
+    const paragraph = screen.getByText((_, node) => node?.tagName === 'P' && node.textContent === 'Line one\nLine two');
+    expect(paragraph).toHaveClass('whitespace-pre-wrap');
   });
 });

@@ -445,18 +445,31 @@ describe('LaunchDetail', () => {
 
   it('renders the About section with description, truncated with Show more when long', () => {
     const longDescription = 'A'.repeat(260);
-    render(
-      <LaunchDetail
-        detail={detail({ description: longDescription })}
-        trades={{ items: [], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
+    // jsdom never computes real layout, so the About section's overflow-gated Show more control
+    // (fe/src/features/launch/about-section.tsx) needs a mocked scrollHeight/clientHeight to
+    // simulate a collapsed paragraph that overflows three lines — see about-section.test.tsx for
+    // the full matrix of overflow-detection cases; this test only exercises the integration.
+    Object.defineProperty(HTMLParagraphElement.prototype, 'scrollHeight', { configurable: true, get: () => 120 });
+    Object.defineProperty(HTMLParagraphElement.prototype, 'clientHeight', { configurable: true, get: () => 60 });
+    try {
+      render(
+        <LaunchDetail
+          detail={detail({ description: longDescription })}
+          trades={{ items: [], nextCursor: null }}
+          candles={{ items: [], complete: true }}
+        />,
+      );
 
-    const showMore = screen.getByRole('button', { name: /show more/i });
-    expect(screen.getByText(longDescription)).toHaveClass('line-clamp-3');
-    fireEvent.click(showMore);
-    expect(screen.getByText(longDescription)).not.toHaveClass('line-clamp-3');
+      const showMore = screen.getByRole('button', { name: /show more/i });
+      expect(screen.getByText(longDescription)).toHaveClass('line-clamp-3');
+      fireEvent.click(showMore);
+      expect(screen.getByText(longDescription)).not.toHaveClass('line-clamp-3');
+    } finally {
+      // @ts-expect-error -- restoring jsdom's own default descriptor, not a real browser API
+      delete HTMLParagraphElement.prototype.scrollHeight;
+      // @ts-expect-error -- same as above
+      delete HTMLParagraphElement.prototype.clientHeight;
+    }
   });
 
   it('hides the About section description entirely when null', () => {

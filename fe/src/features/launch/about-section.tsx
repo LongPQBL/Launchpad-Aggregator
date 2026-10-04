@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isHttpUrl } from '@/api/url';
 import { cn } from '@/lib/utils';
 
@@ -27,12 +27,27 @@ function Pill({ href, children }: { href: string; children: React.ReactNode }) {
 
 export function AboutSection({ description, tokenAddress, explorerUrl, websiteUrl, twitterUrl }: AboutSectionProps) {
   const [expanded, setExpanded] = useState(false);
+  const [canExpand, setCanExpand] = useState(false);
+  const paragraphRef = useRef<HTMLParagraphElement>(null);
+  const hasDescription = description !== null && description.trim() !== '';
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
   const copyResetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
     if (copyResetRef.current) clearTimeout(copyResetRef.current);
   }, []);
+
+  useLayoutEffect(() => {
+    if (!hasDescription || expanded) return;
+    const node = paragraphRef.current;
+    if (!node) return;
+    const measure = () => setCanExpand(node.scrollHeight > node.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [description, hasDescription, expanded]);
 
   async function copyAddress() {
     if (copyResetRef.current) clearTimeout(copyResetRef.current);
@@ -49,12 +64,19 @@ export function AboutSection({ description, tokenAddress, explorerUrl, websiteUr
 
   return (
     <div className="flex flex-col gap-3">
-      {description !== null && (
+      {hasDescription && (
         <div>
-          <p className={cn('whitespace-pre-wrap text-sm text-muted-foreground', !expanded && 'line-clamp-3')}>{description}</p>
-          <button type="button" onClick={() => setExpanded((value) => !value)} className="text-sm font-medium text-primary hover:underline">
-            {expanded ? 'Show less' : 'Show more'}
-          </button>
+          <p
+            ref={paragraphRef}
+            className={cn('whitespace-pre-wrap text-sm text-muted-foreground', !expanded && 'line-clamp-3')}
+          >
+            {description}
+          </p>
+          {(canExpand || expanded) && (
+            <button type="button" onClick={() => setExpanded((value) => !value)} className="text-sm font-medium text-primary hover:underline">
+              {expanded ? 'Show less' : 'Show more'}
+            </button>
+          )}
         </div>
       )}
 

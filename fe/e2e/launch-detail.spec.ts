@@ -37,6 +37,17 @@ test('shows no wallet-connect or trade-execution controls on the detail page', a
   await expect(appContent.getByText(/wallet|connect wallet|kết nối ví/i)).toHaveCount(0);
 });
 
+test('shows and expands Show more for a long description at both mobile and desktop widths', async ({ page }) => {
+  for (const viewport of [{ width: 375, height: 800 }, { width: 1280, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.reload();
+    const toggle = page.getByRole('button', { name: /show more/i });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    await expect(page.getByRole('button', { name: /show less/i })).toBeVisible();
+  }
+});
+
 test('returns not-found for an invalid token route', async ({ page }) => {
   const response = await page.goto(`/launches/${CHAIN_ID}/not-an-address`);
   expect(response?.status()).toBe(404);
