@@ -33,6 +33,13 @@ export function TokenLogo({ logoUri, symbol }: TokenLogoProps) {
       alt="Token logo"
       className="h-8 w-8 rounded-full object-cover"
       onError={() => setFailed(true)}
+      // The server-rendered <img> can start loading from the raw HTML stream before React
+      // hydrates and attaches onError; if it already failed by then, the native error event
+      // fired too early for onError to ever catch it. This ref callback runs at mount/commit
+      // time and checks for that already-settled failure directly (final-review Important 4).
+      ref={(node) => {
+        if (node && node.complete && node.naturalWidth === 0) setFailed(true);
+      }}
     />
   );
 }
