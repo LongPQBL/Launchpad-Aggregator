@@ -41,6 +41,11 @@ export const scanJobs = pgTable('scan_jobs', {
   check('scan_jobs_valid_lane', sql`${table.lane} IN ('certified', 'provisional')`),
 ]);
 
+export const metadataEnrichmentBudget = pgTable('metadata_enrichment_budget', {
+  id: integer('id').primaryKey(),
+  lastStartedAt: timestamp('last_started_at', { withTimezone: true }),
+}, (table) => [check('metadata_enrichment_budget_singleton', sql`${table.id} = 1`)]);
+
 export const rawLogs = pgTable('raw_logs', {
   id: text('id').primaryKey(),
   chainId: integer('chain_id').notNull(),
@@ -83,10 +88,26 @@ export const launches = pgTable('launches', {
   websiteUrl: text('website_url'),
   twitterUrl: text('twitter_url'),
   launchTimestamp: integer('launch_timestamp'),
+  logoReadState: text('logo_read_state').notNull().default('pending'),
+  descriptionReadState: text('description_read_state').notNull().default('pending'),
+  socialsReadState: text('socials_read_state').notNull().default('pending'),
+  timestampReadState: text('timestamp_read_state').notNull().default('pending'),
+  metadataRetryAt: timestamp('metadata_retry_at', { withTimezone: true }),
+  metadataRetryCount: integer('metadata_retry_count').notNull().default(0),
+  metadataLeaseId: text('metadata_lease_id'),
+  metadataLeaseUntil: timestamp('metadata_lease_until', { withTimezone: true }),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
   index('launches_chain_block_idx').on(table.chainId, table.launchBlock, table.launchTxHash, table.launchLogIndex),
+  index('launches_metadata_due_idx').on(table.metadataRetryAt, table.launchBlock).where(sql`${table.platform} = 'pons' AND
+    (${table.logoReadState} = 'pending' OR ${table.descriptionReadState} = 'pending' OR
+     ${table.socialsReadState} = 'pending' OR ${table.timestampReadState} = 'pending')`),
+  check('launches_logo_read_state_valid', sql`${table.logoReadState} IN ('pending', 'done')`),
+  check('launches_description_read_state_valid', sql`${table.descriptionReadState} IN ('pending', 'done')`),
+  check('launches_socials_read_state_valid', sql`${table.socialsReadState} IN ('pending', 'done')`),
+  check('launches_timestamp_read_state_valid', sql`${table.timestampReadState} IN ('pending', 'done')`),
+  check('launches_metadata_retry_count_valid', sql`${table.metadataRetryCount} >= 0`),
 ]);
 
 export const venues = pgTable('venues', {
