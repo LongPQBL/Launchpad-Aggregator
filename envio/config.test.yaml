@@ -64,6 +64,9 @@ chains:
     rpc:
       - url: ${ENVIO_RH_HTTP_RPC_URL}
         for: fallback
+      - url: ${ENVIO_RH_HTTP_RPC_URL}
+        ws: ${ENVIO_RH_WS_RPC_URL}
+        for: realtime
     start_block: 81062234
     contracts:
       - name: PonsV1LegacyFactory
