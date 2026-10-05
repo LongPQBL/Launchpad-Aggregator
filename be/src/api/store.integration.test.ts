@@ -1,15 +1,20 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
 import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
 import { refreshDueLaunchVolumes } from '../market/launchVolume/worker.js';
 import { markVolumeBackfillComplete, recordVolumeWorkerHeartbeat } from '../market/launchVolume/state.js';
 import { createApiStore } from './store.js';
+import { refreshLaunchStatsOnce } from './launchStatsWorker.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
 const { pool } = createDatabase(databaseUrl);
 const store = createApiStore(pool);
+
+beforeEach(async () => {
+  await pool.query('DELETE FROM launch_stats');
+});
 const source = 'envio-store-test';
 const tokens = ['0x1313131313131313131313131313131313131313', '0x1414141414141414141414141414141414141414',
   '0x1515151515151515151515151515151515151515'];
@@ -227,7 +232,7 @@ describe('trade USD value (Important: must be null for an unknown quote asset, n
   it('returns null usdValue and usdValueApprox=false for a trade whose quote asset has no Chainlink feed', async () => {
     await seed(usdToken, 'SPCX'); // no real feed matches this placeholder address — exercises the no-feed path
     const readContract = vi.fn();
-    const storeWithRpc = createApiStore(pool, { readContract });
+    const storeWithRpc = createApiStore(pool);
     const trades = await storeWithRpc.listTrades(4663, usdToken, { limit: 10 });
     expect(trades.items[0]!.usdValue).toBeNull();
     expect(trades.items[0]!.usdValueApprox).toBe(false);
@@ -382,7 +387,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
 
   it('returns null stats for a launch whose totalSupply() reverts, while a sibling launch keeps its real name/symbol and gets a real fdvUsd', async () => {
     const readContract = rpcClient();
-    const storeWithRpc = createApiStore(pool, { readContract });
+    await pool.query('DELETE FROM launch_stats');
+    await refreshLaunchStatsOnce(pool, { readContract } as never, 100000, new Date());
+    const storeWithRpc = createApiStore(pool);
     const page = await storeWithRpc.listLaunches({ limit: 50, chainId: 4663 });
     const good = page.items.find((item) => item.tokenAddress === goodToken);
     const broken = page.items.find((item) => item.tokenAddress === brokenToken);
@@ -401,7 +408,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
 
   it('getLaunch also returns real stats for a single launch (final-review Important 8)', async () => {
     const readContract = rpcClient();
-    const storeWithRpc = createApiStore(pool, { readContract });
+    await pool.query('DELETE FROM launch_stats');
+    await refreshLaunchStatsOnce(pool, { readContract } as never, 100000, new Date());
+    const storeWithRpc = createApiStore(pool);
     const detail = await storeWithRpc.getLaunch(4663, goodToken);
     expect(detail).not.toBeNull();
     expect(detail!.fdvUsd).not.toBeNull();
@@ -430,7 +439,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       ON CONFLICT DO NOTHING`,
     [goodToken, goodVenueId, blockHash, pastDayTxHash, ETH_ADDRESS, nowSeconds - 90_000]);
     try {
-      const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, { readContract: rpcClient() } as never, 100000, new Date());
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       // Three priced trades for goodToken: price 1 (~100s ago, from beforeAll), price 2 (2h ago),
       // price 4 (25h ago) — so high=4, low=1.
@@ -450,7 +461,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   it('withholds FDV and 52-week extrema while the launch trade source is backfilling', async () => {
     await pool.query('UPDATE sources SET status = $1, confirmed_to_block = 0 WHERE id = $2', ['backfilling', `${statsSource}-trades`]);
     try {
-      const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.coverageStatus).toBe('backfilling');
       expect(detail?.priceQuote).toBeNull();
@@ -466,7 +477,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   it('withholds USD valuations for an unknown quote address even if its symbol says ETH', async () => {
     await pool.query('UPDATE launches SET quote_asset_address = $1 WHERE token_address = $2', [goodToken, goodToken]);
     try {
-      const storeWithRpc = createApiStore(pool, { readContract: rpcClient() });
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.coverageStatus).toBe('caught_up');
       expect(detail?.fdvUsd).toBeNull();
@@ -500,7 +511,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
         if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
         throw new Error(functionName);
       });
-      const storeWithRpc = createApiStore(pool, { readContract, getBlockNumber: async () => 77_455_470n });
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, { readContract, getBlockNumber: async () => 77_455_470n } as never, 100000, new Date());
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.coverageStatus).toBe('backfilling');
       expect(detail?.tvlUsd).toBe('15.700717');
@@ -519,13 +532,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     await pool.query(`UPDATE launches SET logo_uri=$1, description=$2, website_url=$3, twitter_url=$4, launch_timestamp=$5 WHERE token_address=$6`,
       ['ipfs://bafkreitest', 'A real token', 'https://example.com', 'https://x.com/example', 1_700_000_000, goodToken]);
     try {
-      const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
-        if (functionName === 'decimals') return 8;
-        if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
-        if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
-        throw new Error(`unexpected ${functionName}`);
-      });
-      const storeWithRpc = createApiStore(pool, { readContract });
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.logoUri).toBe('ipfs://bafkreitest');
       expect(detail?.description).toBe('A real token');
@@ -552,7 +559,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   });
 
   it('returns null extended-metadata fields for a launch that never had them indexed', async () => {
-    const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+    const storeWithRpc = createApiStore(pool);
     const detail = await storeWithRpc.getLaunch(4663, goodToken);
     expect(detail?.logoUri).toBeNull();
     expect(detail?.description).toBeNull();
@@ -576,7 +583,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
              (4663,$1,$2,10,$3,$7,0,$5,'buy','1','1',$6,'2','1','V3Swap','user_trade',$1)`,
     [goodToken, goodVenueId, blockHash, '0x' + 'f'.repeat(64), now - 10, ETH_ADDRESS, '0x' + '1'.repeat(64)]);
     try {
-      const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, { readContract: vi.fn() } as never, 100000, new Date());
+      const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       // (4 - 1) / 1 * 100 = 300 — using block 11's price (4), never block 10's price (2), as "current".
       expect(detail?.change1h).toBe('300');
@@ -586,7 +595,8 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   });
 
   it('computes a real change1h/change1d from official trades, and null for a launch with none', async () => {
-    const storeWithRpc = createApiStore(pool, { readContract: vi.fn() });
+    await refreshLaunchStatsOnce(pool, { readContract: vi.fn() } as never, 100000, new Date());
+    const storeWithRpc = createApiStore(pool);
     const detail = await storeWithRpc.getLaunch(4663, goodToken);
     // goodToken's beforeAll fixture seeds exactly one trade "now" — one trade alone can't
     // produce a non-null change1h/1d (no trade exists one window further back).

@@ -12,7 +12,7 @@ const { pool } = createDatabase(config.databaseUrl);
 const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
-const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool, rpcClient),
+const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool),
   pools: createPoolApiStore(pool, rpcClient), events });
 
 try {

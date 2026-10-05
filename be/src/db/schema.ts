@@ -253,6 +253,16 @@ export const launchVolume24hUsd = pgTable('launch_volume24h_usd', {
   check('launch_volume24h_usd_reason_valid', sql`${table.completenessReason} IN ('complete', 'incomplete_coverage', 'unpriced_trade', 'updating')`),
 ]);
 
+export const launchStats = pgTable('launch_stats', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  stats: jsonb('stats').$type<Record<string, unknown>>().notNull(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+]);
+
 export const usdCandles = pgTable('usd_candles', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),

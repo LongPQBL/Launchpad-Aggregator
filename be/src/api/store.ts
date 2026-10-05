@@ -16,6 +16,7 @@ import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { ttlMemo } from './ttlMemo.js';
+import { readLaunchStats } from './launchStatsStore.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
@@ -54,7 +55,7 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
   };
 }
 
-interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
+export interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
 const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
 
 // The launch page recomputes these per request; the RPC answers change on the scale of minutes, and
@@ -83,6 +84,15 @@ function cachedTotalSupply(client: UsdPriceClient, tokenAddress: string) {
   return memo(tokenAddress);
 }
 
+// Stored figures were computed while coverage was complete; coverage can lapse later, so the read
+// applies the same rule as computeStats: FDV, extrema, and changes are withheld, TVL is kept.
+function statsForCoverage(stored: StatsFields | undefined, complete: boolean): StatsFields {
+  if (!stored) return NULL_STATS;
+  if (complete) return stored;
+  const tvl = Object.fromEntries(Object.keys(NULL_TVL).map((key) => [key, (stored as unknown as Record<string, unknown>)[key]]));
+  return { ...NULL_STATS, ...tvl } as StatsFields;
+}
+
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
   if (row.token_decimals === null || row.quote_asset_decimals === null) {
     // A near-realtime-synced launch awaiting core-metadata enrichment — no fabricated decimals.
@@ -108,7 +118,7 @@ async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Prom
 
 // TVL reads current chain state independently of historical trade coverage. FDV and 52W extrema
 // retain their existing coverage gate. An RPC error in either path cannot erase the other.
-async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, row: Row,
+export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, row: Row,
   complete: boolean): Promise<StatsFields> {
   // Started now so the TVL reads run alongside the price and supply reads below, not after them.
   const tvlPromise = rpcClient ? cachedTvl(pool, rpcClient, row) : Promise.resolve(NULL_TVL);
@@ -195,7 +205,7 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
   }) : null };
 }
 
-export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
+export function createApiStore(pool: Pool): ApiDeps['data'] {
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
   // "use whichever source has a reading, prefer the more current one" behavior needed here.
   // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
@@ -292,11 +302,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     const nextCursor = page.nextCursor
       ? encodeVolumeCursor({ version: 2, sort: 'volume24hUsd', issuedAt: nowSeconds, ...page.nextCursor }, secret)
       : null;
-    const statsByToken = new Map(await Promise.all(page.rows.map(async (item) =>
-      [string(item.raw.token_address), await computeStats(pool, rpcClient, item.raw, item.coverageComplete)] as const)));
+    const statsByToken = await readLaunchStats(pool, page.rows.map((item) => ({ chainId: number(item.raw.chain_id), tokenAddress: string(item.raw.token_address) })));
     return {
       items: page.rows.map((item) => ({
-        ...summary(item.raw, item.coverageComplete, statsByToken.get(string(item.raw.token_address)) ?? NULL_STATS),
+        ...summary(item.raw, item.coverageComplete, statsForCoverage(statsByToken.get(`${number(item.raw.chain_id)}:${string(item.raw.token_address)}`), item.coverageComplete)),
         officialVolume24hUsd: item.volumeUsd,
         officialVolume24hUsdApprox: item.rankCategory === 'positive',
         officialVolume24hUsdAsOf: item.rankCategory === 'null' ? null : new Date(item.windowEnd * 1000).toISOString(),
@@ -337,11 +346,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
         query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform ?? null]);
       const rows = result.rows as Row[];
-      const statsByToken = new Map(await Promise.all(rows.slice(0, query.limit).map(async (row) =>
-        [string(row.token_address), await computeStats(pool, rpcClient, row,
-          Boolean(row.launch_coverage_complete))] as const)));
+      const statsByToken = await readLaunchStats(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
       return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),
-        statsByToken.get(string(row.token_address)) ?? NULL_STATS));
+        statsForCoverage(statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`), Boolean(row.launch_coverage_complete))));
     },
     async getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
       const head = await safeHead();
@@ -364,7 +371,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         AND v.official = true AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
-      const stats = await computeStats(pool, rpcClient, row, complete);
+      const stats = statsForCoverage((await readLaunchStats(pool, [{ chainId, tokenAddress: tokenAddress.toLowerCase() }])).get(`${chainId}:${tokenAddress.toLowerCase()}`), complete);
       return { ...summary(row, complete, stats),
         description: row.description === null || row.description === undefined ? null : string(row.description),
         officialVenues: venueRows.rows.map((venue: Row) => ({
