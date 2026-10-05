@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
-import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle } from '../envioSync/syncAll.js';
+import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepairCycle } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
@@ -82,22 +82,29 @@ if (syncTarget === 'staging') {
   // The 'real' target replaces the old full-table reread loop with bounded incremental tail+history
   // passes on a short interruptible cadence (spec target: 1s). `runAllSyncsOnce` above remains the
   // offline full-table reconciliation command — it is not called from this live loop for 'real'.
-  if (!metadataClient) throw new Error('metadataClient is required for the real-target incremental loop');
+  // No RPC client is needed for ingestion itself (metadataClient still drives the separate extended/
+  // core-metadata enrichment loops started above).
   const tailIntervalMs = Number(process.env.ENVIO_TAIL_PASS_INTERVAL_MS ?? 1000);
   const limit = Number(process.env.ENVIO_INCREMENTAL_PAGE_LIMIT ?? 500);
-  console.log(`Starting Envio incremental sync loop (target: real, tail interval ${tailIntervalMs}ms, page limit ${limit}). `
-    + 'Ctrl+C or SIGTERM stops it after the current cycle.');
+  // Reorg repair compares a whole ~500-block window per stream — materially heavier than one bounded
+  // tail page, so it runs far less often than every tick, not on every pass.
+  const repairEveryTicks = Number(process.env.ENVIO_REPAIR_EVERY_TICKS ?? 30);
+  console.log(`Starting Envio incremental sync loop (target: real, tail interval ${tailIntervalMs}ms, page limit ${limit}, `
+    + `repair every ${repairEveryTicks} ticks). Ctrl+C or SIGTERM stops it after the current cycle.`);
   let failureStreak = 0;
+  let tick = 0;
   while (!stopping) {
     const startedAt = new Date().toISOString();
     try {
-      const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, {
-        v1RpcClient: metadataClient, v2RpcClient: metadataClient,
-        limit, progressTable: tables.v1.progressTable,
-      });
+      const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable });
       failureStreak = 0;
       console.log(`[${startedAt}] Envio tail pass:`, tail.results);
       console.log(`[${startedAt}] Envio history pass:`, history.results);
+      tick += 1;
+      if (tick % repairEveryTicks === 0) {
+        const repairReport = await runRepairCycle(envioPool, db, 4663, { progressTable: tables.v1.progressTable });
+        console.log(`[${startedAt}] Envio reorg repair: ${repairReport.changedLaunchKeys.length} launch(es) affected`);
+      }
     } catch (error) {
       failureStreak += 1;
       console.error(`[${startedAt}] Envio incremental sync cycle failed (streak ${failureStreak}), backing off:`, error);

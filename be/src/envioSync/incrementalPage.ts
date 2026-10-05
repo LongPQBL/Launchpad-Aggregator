@@ -36,6 +36,25 @@ export async function readRawRowById(envioPool: Pool, table: string, id: string)
   return (result.rows[0] as Record<string, unknown> | undefined) ?? null;
 }
 
+export interface CanonicalEventKey { txHash: string; logIndex: number; blockHash: string }
+
+/**
+ * Every canonical event key Envio currently has in a bounded block window — used by
+ * incrementalRepair.ts to diff against the app's own rows in the same (narrow, ~500-block) window.
+ * Unlike readRawPage this is not cursor-paginated: the window is small by construction (the reorg
+ * safety margin), so reading it whole is the point — repair needs the complete current picture, not
+ * one page of it.
+ */
+export async function readRawWindowKeys(envioPool: Pool, table: string, chainId: number, windowStart: bigint, fence: bigint): Promise<CanonicalEventKey[]> {
+  assertSafeTable(table);
+  const result = await envioPool.query(
+    `SELECT "txHash", "logIndex", "blockHash" FROM ${table} WHERE "chainId" = $1 AND "blockNumber" >= $2 AND "blockNumber" <= $3`,
+    [chainId, windowStart.toString(), fence.toString()],
+  );
+  return (result.rows as { txHash: string; logIndex: number; blockHash: string }[])
+    .map((row) => ({ txHash: String(row.txHash).toLowerCase(), logIndex: Number(row.logIndex), blockHash: String(row.blockHash).toLowerCase() }));
+}
+
 /**
  * Reads the next bounded page of an Envio raw-event table in strict (blockNumber, logIndex, id)
  * order, never past `fence` — the pass's own observed Envio-processed block. Ties on

@@ -5,9 +5,8 @@ import { syncV2Once, syncV2ToReal, DEFAULT_ENVIO_V2_TABLES, type EnvioV2TableNam
 import { syncV4Once, syncV4ToReal, DEFAULT_ENVIO_V4_TABLES, type EnvioV4TableNames } from './runSyncV4.js';
 import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
 import { runTailPass, runHistoryPass, type SyncReport } from './incrementalSync.js';
+import { repairEnvioWindow, type RepairReport } from './incrementalRepair.js';
 import type { Stream } from './incrementalCursor.js';
-import type { V1ReadClient } from '../launchpads/pons/v1/state.js';
-import type { V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
 
 export interface AllSyncTables {
   v1: EnvioTableNames;
@@ -56,8 +55,6 @@ export async function runAllSyncsOnce(envioPool: Pool, appDb: Database, tables: 
 }
 
 export interface IncrementalSyncDeps {
-  v1RpcClient: V1ReadClient;
-  v2RpcClient: V2QuoteClient;
   tables?: Partial<Record<Stream, string>>;
   limit?: number;
   progressTable?: string;
@@ -67,19 +64,29 @@ export interface IncrementalSyncDeps {
  * One bounded tail pass (fresh activity) plus one bounded history pass (backfill), replacing
  * `runAllSyncsOnce`'s full-table reread as the live loop's unit of work — see
  * docs/superpowers/specs/2026-10-05-envio-near-realtime-sync-design.md. `runAllSyncsOnce` remains for
- * offline reconciliation; this is additive, not a replacement of that function.
+ * offline reconciliation; this is additive, not a replacement of that function. No RPC client is
+ * needed here — a new launch's name/symbol/decimals are deferred to the core-metadata enrichment job.
  */
 export async function runIncrementalCycle(
-  envioPool: Pool, appDb: Database, chainId: number, deps: IncrementalSyncDeps,
+  envioPool: Pool, appDb: Database, chainId: number, deps: IncrementalSyncDeps = {},
 ): Promise<{ tail: SyncReport; history: SyncReport }> {
   const { processedBlock, headBlock } = await readEnvioProgress(envioPool, deps.progressTable);
   const limit = deps.limit ?? 500;
-  const passInput = {
-    chainId, envioPool, appDb, fence: processedBlock, limit, tables: deps.tables,
-    v1RpcClient: deps.v1RpcClient, v2RpcClient: deps.v2RpcClient,
-  };
+  const passInput = { chainId, envioPool, appDb, fence: processedBlock, limit, tables: deps.tables };
   const tail = await runTailPass(passInput);
   const history = await runHistoryPass(passInput);
   await recordEnvioChainProgress(appDb, chainId, headBlock);
   return { tail, history };
+}
+
+export interface RepairCycleDeps {
+  tables?: Partial<Record<Stream, string>>;
+  depth?: bigint;
+  progressTable?: string;
+}
+
+/** Bounded reorg repair over the last `depth` blocks (default 500 — the standard reorg safety margin). */
+export async function runRepairCycle(envioPool: Pool, appDb: Database, chainId: number, deps: RepairCycleDeps = {}): Promise<RepairReport> {
+  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+  return repairEnvioWindow(envioPool, appDb, { chainId, fence: processedBlock, depth: deps.depth ?? 500n, tables: deps.tables });
 }
