@@ -7,6 +7,7 @@ import { launches, venues, trades, lifecycleTransitions, sources } from '../db/s
 import { claimSyncCursor, advanceSyncCursor, STREAMS, type Stream, type Lane, type CursorPosition, type SyncCursor } from './incrementalCursor.js';
 import { readRawPage, readRawRowById } from './incrementalPage.js';
 import { claimDueUnresolvedEvents, earliestUnresolvedBlock, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
+import { notifyChanged, type ChangeNotification } from './notifyChanges.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
 import { hydrateV1Launch } from '../launchpads/pons/v1/adapter.js';
 import { envioRawLaunchToEvent, hydrateV1SwapFromDecoded, type EnvioRawLaunchRow, type EnvioRawSwapRow } from './transformV1Legacy.js';
@@ -85,7 +86,9 @@ function int(value: unknown): number { return Number(value); }
 // (be/src/launchpads/pons/coreMetadata.ts) — see docs/superpowers/specs/
 // 2026-10-05-envio-near-realtime-sync-design.md's "Immediate launch records and enrichment". V1's
 // quote asset is always WETH (zero RPC calls, enforced inside hydrateV1Launch itself).
-async function applyV1Launch(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[]): Promise<ApplyOutcome> {
+async function applyV1Launch(
+  tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[], changes: ChangeNotification[],
+): Promise<ApplyOutcome> {
   const row: EnvioRawLaunchRow = {
     chainId, tokenAddress: str(raw.tokenAddress), deployerAddress: str(raw.deployerAddress),
     pairTokenAddress: str(raw.pairTokenAddress), poolAddress: str(raw.poolAddress), factoryAddress: str(raw.factoryAddress),
@@ -115,11 +118,12 @@ async function applyV1Launch(tx: DbOrTx, chainId: number, raw: Record<string, un
     sourceId: `${factory.id}-trades`, sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
   }).onConflictDoNothing();
   newQuoteAssets.push({ chainId: launch.chainId, quoteAssetAddress: launch.quoteAsset.address });
+  changes.push({ kind: 'launch.changed', chainId, tokenAddress });
   return 'applied';
 }
 
 // ---- v1-swap ----
-async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const poolAddress = str(raw.poolAddress).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'v3_pool', poolAddress);
   if (!venue) return 'unresolved';
@@ -145,6 +149,7 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     sourceLogId: null, priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
     priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing();
+  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 
@@ -153,7 +158,9 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
 // asset's address is always known from the event itself; its symbol/decimals are known for free only
 // on the native-ETH fast path (resolveKnownQuoteAsset) — an unknown real ERC20 pair defers those two
 // fields to the same enrichment job.
-async function applyV2Launch(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[]): Promise<ApplyOutcome> {
+async function applyV2Launch(
+  tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[], changes: ChangeNotification[],
+): Promise<ApplyOutcome> {
   const row: EnvioRawLaunchV2Row = {
     chainId, tokenAddress: str(raw.tokenAddress), curveAddress: str(raw.curveAddress), deployerAddress: str(raw.deployerAddress),
     pairTokenAddress: str(raw.pairTokenAddress), blockNumber: num(raw.blockNumber), blockHash: str(raw.blockHash),
@@ -184,11 +191,12 @@ async function applyV2Launch(tx: DbOrTx, chainId: number, raw: Record<string, un
     sourceId: 'pons-v2-curve', sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
   }).onConflictDoNothing();
   newQuoteAssets.push({ chainId: launch.chainId, quoteAssetAddress: launch.quoteAsset.address });
+  changes.push({ kind: 'launch.changed', chainId, tokenAddress });
   return 'applied';
 }
 
 // ---- v2-curve / v2-buyback ----
-async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const curveAddress = str(raw.curveAddress).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'curve', curveAddress);
   if (!venue) return 'unresolved';
@@ -208,9 +216,10 @@ async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unk
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing();
+  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
-async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const curveAddress = str(raw.curveAddress).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'curve', curveAddress);
   if (!venue) return 'unresolved';
@@ -229,12 +238,13 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing();
+  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 
 // ---- v2-lifecycle ----
 const LIFECYCLE_STATUS_BY_PHASE: Record<1 | 2 | 3, LifecycleStatus> = { 1: 'swept', 2: 'graduated', 3: 'rescued' };
-async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const row: EnvioRawLifecycleRow = {
     chainId, tokenAddress: str(raw.tokenAddress), phase: int(raw.phase) as 1 | 2 | 3, kind: str(raw.kind) as EnvioRawLifecycleRow['kind'],
     blockNumber: num(raw.blockNumber), blockHash: str(raw.blockHash), txHash: str(raw.txHash), logIndex: int(raw.logIndex),
@@ -254,11 +264,12 @@ async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string,
     await tx.update(venues).set({ effectiveToBlock: transition.blockNumber, effectiveToLogIndex: transition.logIndex })
       .where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, transition.tokenAddress), eq(venues.kind, 'curve')));
   }
+  changes.push({ kind: 'launch.changed', chainId, tokenAddress: transition.tokenAddress });
   return 'applied';
 }
 
 // ---- v4-initialize ----
-async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const txHash = str(raw.txHash).toLowerCase();
   const [graduation] = await tx.select().from(lifecycleTransitions)
     .where(and(eq(lifecycleTransitions.chainId, chainId), eq(lifecycleTransitions.kind, 'graduated'), eq(lifecycleTransitions.txHash, txHash)));
@@ -285,11 +296,12 @@ async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string
     id: venue.id, chainId: venue.chainId, tokenAddress: venue.tokenAddress, kind: venue.kind, ref: venue.ref,
     sourceId: venue.sourceId, sourceLogId: null, effectiveFromBlock: venue.effectiveFromBlock, official: venue.official,
   }).onConflictDoNothing();
+  changes.push({ kind: 'launch.changed', chainId, tokenAddress: venue.tokenAddress });
   return 'applied';
 }
 
 // ---- v4-swap ----
-async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<ApplyOutcome> {
+async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const poolId = str(raw.poolId).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'v4_pool', poolId);
   if (!venue) return 'skipped'; // most V4 swap activity on this chain is not a Pons-graduated pool
@@ -315,6 +327,7 @@ async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
     traderAddress: trade.traderAddress,
   }).onConflictDoNothing();
+  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 
@@ -352,11 +365,12 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
   });
 
   const newQuoteAssets: QuoteAssetToEnqueue[] = [];
+  const changes: ChangeNotification[] = [];
   let applied = 0;
   let unresolved = 0;
   await appDb.transaction(async (tx) => {
     for (const raw of page.rows) {
-      const outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets);
+      const outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets, changes);
       if (outcome === 'applied') applied += 1;
       else if (outcome === 'unresolved') {
         unresolved += 1;
@@ -367,6 +381,8 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
       }
     }
     await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, input.fence);
+    // Inside the same transaction so delivery to a LISTEN-ing session only happens after commit.
+    await notifyChanged(tx, changes);
   });
   for (const asset of newQuoteAssets) {
     await enqueueFeedResolutionJob(appDb.$client, asset.chainId, asset.quoteAssetAddress)
@@ -377,17 +393,18 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
 }
 
 async function applyRow(
-  tx: DbOrTx, chainId: number, stream: Stream, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[],
+  tx: DbOrTx, chainId: number, stream: Stream, raw: Record<string, unknown>,
+  newQuoteAssets: QuoteAssetToEnqueue[], changes: ChangeNotification[],
 ): Promise<ApplyOutcome> {
   switch (stream) {
-    case 'v1-launch': return applyV1Launch(tx, chainId, raw, newQuoteAssets);
-    case 'v1-swap': return applyV1Swap(tx, chainId, raw);
-    case 'v2-launch': return applyV2Launch(tx, chainId, raw, newQuoteAssets);
-    case 'v2-curve': return applyV2Curve(tx, chainId, raw);
-    case 'v2-buyback': return applyV2Buyback(tx, chainId, raw);
-    case 'v2-lifecycle': return applyV2Lifecycle(tx, chainId, raw);
-    case 'v4-initialize': return applyV4Initialize(tx, chainId, raw);
-    case 'v4-swap': return applyV4Swap(tx, chainId, raw);
+    case 'v1-launch': return applyV1Launch(tx, chainId, raw, newQuoteAssets, changes);
+    case 'v1-swap': return applyV1Swap(tx, chainId, raw, changes);
+    case 'v2-launch': return applyV2Launch(tx, chainId, raw, newQuoteAssets, changes);
+    case 'v2-curve': return applyV2Curve(tx, chainId, raw, changes);
+    case 'v2-buyback': return applyV2Buyback(tx, chainId, raw, changes);
+    case 'v2-lifecycle': return applyV2Lifecycle(tx, chainId, raw, changes);
+    case 'v4-initialize': return applyV4Initialize(tx, chainId, raw, changes);
+    case 'v4-swap': return applyV4Swap(tx, chainId, raw, changes);
   }
 }
 
@@ -419,10 +436,12 @@ export async function retryUnresolvedEvents(envioPool: Pool, appDb: Database, in
       continue;
     }
     const newQuoteAssets: QuoteAssetToEnqueue[] = [];
+    const changes: ChangeNotification[] = [];
     let outcome: ApplyOutcome = 'unresolved';
     await appDb.transaction(async (tx) => {
-      outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets);
+      outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets, changes);
       await settleUnresolvedEvent(tx, claim, outcome !== 'unresolved', now, claim.retryCount);
+      await notifyChanged(tx, changes);
     });
     for (const asset of newQuoteAssets) {
       await enqueueFeedResolutionJob(appDb.$client, asset.chainId, asset.quoteAssetAddress).catch(() => { /* best-effort */ });

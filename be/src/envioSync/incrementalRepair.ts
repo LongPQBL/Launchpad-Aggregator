@@ -6,6 +6,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readRawWindowKeys, type CanonicalEventKey } from './incrementalPage.js';
 import { advanceSyncCursor, claimSyncCursor, LANES, type Stream } from './incrementalCursor.js';
 import { DEFAULT_STREAM_TABLES, STREAM_ORDER } from './incrementalSync.js';
+import { notifyChanged } from './notifyChanges.js';
 
 const v1SourceIds = getPonsFactorySources().filter((factory) => factory.version === 'v1').map((factory) => factory.id);
 const v2Factory = getPonsFactorySources()[2]!;
@@ -197,6 +198,8 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
       for (const tokenAddress of staleTokens) changed.set(`${input.chainId}:${tokenAddress}`, { chainId: input.chainId, tokenAddress });
       await rewindStreamCursors(tx, input.chainId, stream, windowStart, input.fence, staleTokens.length > 0);
     }
+    // Inside the same transaction so delivery only happens after the repair actually commits.
+    await notifyChanged(tx, [...changed.values()].map((key) => ({ kind: 'launch.changed' as const, ...key })));
   });
 
   return { changedLaunchKeys: [...changed.values()] };

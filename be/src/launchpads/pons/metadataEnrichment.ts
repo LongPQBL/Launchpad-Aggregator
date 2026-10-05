@@ -4,6 +4,7 @@ import { readV1CoreMetadataOutcomes, readV2CoreMetadataOutcomes } from './coreMe
 import { readExtendedTokenMetadataOutcomes, readLaunchTimestamp,
   type BlockReadClient, type ExtendedMetadataReadClient, type ReadOutcome } from './extendedMetadata.js';
 import { claimDueMetadataLaunches, finishCoreMetadataLaunch, finishMetadataLaunch } from './metadataEnrichmentStore.js';
+import { notifyChanged } from '../../envioSync/notifyChanges.js';
 import type { V1ReadClient } from './v1/state.js';
 import type { V2QuoteClient } from './v2/adapter.js';
 
@@ -43,6 +44,10 @@ export async function enrichMetadataOnce(
         if (outcome.state === 'pending' && outcome.errorKind === 'unknown') unknownFailures++;
       }
       const coreSaved = await finishCoreMetadataLaunch(db, claim, core, now);
+      // Not wrapped in a transaction (finishCoreMetadataLaunch is its own atomic UPDATE) — notify
+      // right after a successful save, same as "verified metadata arrives" in the spec's near-
+      // realtime design, even if some individual fields (e.g. decimals alone) are still pending.
+      if (coreSaved) await notifyChanged(db, [{ kind: 'launch.changed', chainId: claim.chainId, tokenAddress: claim.tokenAddress }]);
       corePending = !coreSaved || [core.name, core.symbol, core.decimals, core.graduated, core.quoteAssetSymbol, core.quoteAssetDecimals]
         .some((outcome) => outcome.state === 'pending');
     }
