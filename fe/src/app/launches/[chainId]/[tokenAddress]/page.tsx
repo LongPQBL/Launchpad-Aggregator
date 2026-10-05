@@ -21,8 +21,10 @@ function isTokenAddress(value: string): boolean {
 
 export default async function LaunchDetailPage({ params, searchParams }: LaunchDetailPageProps) {
   const { chainId: chainIdParam, tokenAddress } = await params;
-  const currencyParam = (await searchParams).currency;
-  const chartCurrency: 'quote' | 'usd' = currencyParam === 'usd' ? 'usd' : 'quote';
+  const search = await searchParams;
+  const chartCurrency: 'quote' | 'usd' = search.currency === 'usd' ? 'usd' : 'quote';
+  const intervalParam = Number(search.interval);
+  const chartInterval = [60, 300, 900, 3600, 86400].includes(intervalParam) ? intervalParam : 3600;
   const chainId = parseChainId(chainIdParam);
   if (chainId === null || !isTokenAddress(tokenAddress)) notFound();
 
@@ -43,7 +45,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
 
   const [trades, candles, pools] = await Promise.all([
     getLaunchTrades(chainId, tokenAddress).catch(() => null),
-    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency }).catch(() => null),
+    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, intervalSeconds: chartInterval }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
   ]);
   const hasPendingTrade = trades?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
@@ -54,7 +56,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
-      <LaunchDetail detail={detail} trades={trades} candles={candles} pools={pools} chartCurrency={chartCurrency} />
+      <LaunchDetail detail={detail} trades={trades} candles={candles} pools={pools} chartCurrency={chartCurrency} chartInterval={chartInterval} />
     </AppShell>
   );
 }

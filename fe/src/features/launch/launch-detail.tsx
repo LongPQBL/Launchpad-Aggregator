@@ -6,7 +6,7 @@ import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
 import { TokenLogo } from '@/features/launches/token-logo';
 import { AboutSection } from './about-section';
 import { CoverageBadge } from './coverage-badge';
-import { OfficialChart } from './official-chart';
+import { DEFAULT_CHART_INTERVAL, OfficialChart } from './official-chart';
 import { TradeList } from './trade-list';
 import { PoolList } from '@/features/pools/pool-list';
 
@@ -16,9 +16,10 @@ export interface LaunchDetailProps {
   candles: CandlePage | null;
   pools?: PoolPage | null;
   chartCurrency?: 'quote' | 'usd';
+  chartInterval?: number;
 }
 
-export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = 'quote' }: LaunchDetailProps) {
+export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -130,6 +131,7 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
               quoteSymbol={detail.quoteAsset.symbol}
               coverageStatus={chartCoverageStatus}
               currency={chartCurrency}
+              intervalSeconds={chartInterval}
             />
           </CardContent>
         </Card>

@@ -15,15 +15,25 @@ import { CoverageBadge } from './coverage-badge';
 
 export interface OfficialChartCandle { bucketStart: number; open: string; high: string; low: string; close: string }
 
+export const CHART_INTERVALS = [
+  { seconds: 60, label: '1m' },
+  { seconds: 300, label: '5m' },
+  { seconds: 900, label: '15m' },
+  { seconds: 3600, label: '1h' },
+  { seconds: 86400, label: '1D' },
+] as const;
+export const DEFAULT_CHART_INTERVAL = 3600;
+
 export interface OfficialChartProps {
   candles: readonly OfficialChartCandle[];
   graduationTime: number | null;
   quoteSymbol: string | null;
   coverageStatus: string;
   currency?: 'quote' | 'usd';
+  intervalSeconds?: number;
 }
 
-export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote' }: OfficialChartProps) {
+export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', intervalSeconds = DEFAULT_CHART_INTERVAL }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
@@ -98,8 +108,14 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       <div className="mb-2 flex items-center gap-2">
         <CoverageBadge status={coverageStatus} />
         <nav aria-label="Chart currency" className="flex gap-1 text-xs">
-          <a href="?currency=quote" aria-current={currency === 'quote' ? 'page' : undefined}>{displaySymbol(quoteSymbol)}</a>
-          <a href="?currency=usd" aria-current={currency === 'usd' ? 'page' : undefined}>USD</a>
+          <a href={`?currency=quote&interval=${intervalSeconds}`} aria-current={currency === 'quote' ? 'page' : undefined}>{displaySymbol(quoteSymbol)}</a>
+          <a href={`?currency=usd&interval=${intervalSeconds}`} aria-current={currency === 'usd' ? 'page' : undefined}>USD</a>
+        </nav>
+        <nav aria-label="Chart interval" className="flex gap-1 text-xs">
+          {CHART_INTERVALS.map((interval) => (
+            <a key={interval.seconds} href={`?currency=${currency}&interval=${interval.seconds}`}
+              aria-current={interval.seconds === intervalSeconds ? 'page' : undefined}>{interval.label}</a>
+          ))}
         </nav>
         <p className="text-xs text-muted-foreground">
           {currency === 'usd' ? 'Chart prices (USD) are approximate for plotting; see the trade table for exact figures.' : `Chart prices (${displaySymbol(quoteSymbol)}) are approximate for plotting; see the trade table for exact figures.`}
