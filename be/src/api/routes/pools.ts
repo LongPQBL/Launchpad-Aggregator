@@ -53,8 +53,8 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
       const query = listQuery(request.query, address);
       if (!query) return reply.code(400).send({ error: 'Invalid pool query' });
       if (!deps.pools) return unavailable(reply);
-      const excludeOfficial = request.query.excludeOfficial === 'true';
-      try { return await deps.pools.listPools({ ...query, chainId, tokenAddress: address, excludeOfficial }); }
+      const excludeOfficial = request.query.excludeOfficial === 'true' ? { excludeOfficial: true } : {};
+      try { return await deps.pools.listPools({ ...query, chainId, tokenAddress: address, ...excludeOfficial }); }
       catch (error) { if (error instanceof Error && ['Invalid pool cursor', 'Unsupported pool protocol'].includes(error.message))
         return reply.code(400).send({ error: error.message }); throw error; }
     });
