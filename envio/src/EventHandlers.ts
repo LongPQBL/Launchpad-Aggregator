@@ -66,23 +66,10 @@ indexer.onEvent(
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
       poolAddress: event.srcAddress.toLowerCase(),
-      // sender/recipient/liquidity/tick: kept in the schema (removing them requires a full
-      // reindex — confirmed against the real indexer, Envio's incompatible-schema check compares
-      // its own stored entity fingerprint, not the live table) but not worth storing real values —
-      // be/src/envioSync's hydrateV1SwapFromDecoded never reads them (price comes from
-      // sqrtPriceX96; trader comes from txFrom, not the event's sender/recipient params), and
-      // liquidity/tick are Uniswap V3 concentrated-liquidity-math internals, not token amounts
-      // (confirmed in the Pons TVL correction work: naively using them was off by ~20 orders of
-      // magnitude). Writing cheap constants here instead of the real decoded values stops this
-      // 12M+ row table from growing on these columns going forward.
-      sender: "",
-      recipient: "",
       txFrom: event.transaction.from.toLowerCase(),
       amount0: event.params.amount0,
       amount1: event.params.amount1,
       sqrtPriceX96: event.params.sqrtPriceX96,
-      liquidity: 0n,
-      tick: 0,
       blockNumber: BigInt(event.block.number),
       blockHash: event.block.hash,
       txHash: event.transaction.hash,

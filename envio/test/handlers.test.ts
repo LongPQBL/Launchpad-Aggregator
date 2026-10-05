@@ -43,7 +43,7 @@ describe("PonsV1LegacyFactory TokenLaunched", () => {
 });
 
 describe("PonsV3Pool Swap", () => {
-  it("stores a lowercase RawSwap entity with the transaction's from address, not the event's sender param, and writes placeholder values for the unused sender/recipient/liquidity/tick columns", async () => {
+  it("stores a lowercase RawSwap entity with the transaction's from address, not the event's sender param, and no sender/recipient/liquidity/tick columns", async () => {
     const indexer = createTestIndexer();
     // Register the pool first — PonsV3Pool has no static address in config.yaml (dynamic-only), so a
     // Swap from it only routes to a handler once contractRegister has added it, exactly like on chain.
@@ -80,13 +80,6 @@ describe("PonsV3Pool Swap", () => {
     expect(swaps[0].poolAddress).toBe(pool.toLowerCase());
     expect(swaps[0].txFrom).toBe(txFrom.toLowerCase());
     expect(swaps[0].txFrom).not.toBe(sender.toLowerCase());
-    // sender/recipient/liquidity/tick are unused downstream (be/src/envioSync's
-    // hydrateV1SwapFromDecoded never reads them) — kept in the schema (dropping a field requires a
-    // full reindex) but written as cheap placeholders instead of the real decoded event values, to
-    // stop this 12M+ row table from growing on these columns.
-    expect(swaps[0].sender).toBe("");
-    expect(swaps[0].recipient).toBe("");
-    expect(swaps[0].liquidity).toBe(0n);
-    expect(swaps[0].tick).toBe(0);
+    expect(Object.keys(swaps[0])).not.toEqual(expect.arrayContaining(["sender", "recipient", "liquidity", "tick"]));
   });
 });
