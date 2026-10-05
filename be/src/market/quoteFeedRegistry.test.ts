@@ -50,4 +50,13 @@ describe('quote feed discovery', () => {
     expect(await registry.resolve(tsla)).toBeNull();
     expect(fetchJson).toHaveBeenCalledTimes(4);
   });
+
+  it('resolves a crypto quote feed named without the "Robinhood" prefix (e.g. "ETH / USD")', async () => {
+    const eth = '0x0000000000000000000000000000000000000000';
+    const fetchJson = vi.fn(async (url: string) => url.includes('/rhj/assets')
+      ? { assets: [{ tokenSymbol: 'ETH', status: 'ASSET_STATUS_ACTIVE', deployments: [{ chainId: 4663, contractAddress: eth }] }] }
+      : [{ name: 'ETH / USD', proxyAddress: '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9' }]);
+    const registry = createQuoteFeedRegistry(fetchJson, () => 1000);
+    expect(await registry.resolve(eth)).toBe('0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9');
+  });
 });

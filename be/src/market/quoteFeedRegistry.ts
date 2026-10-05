@@ -10,7 +10,9 @@ interface Asset { tokenSymbol?: unknown; status?: unknown; deployments?: { chain
 interface Feed { name?: unknown; proxyAddress?: unknown }
 
 function feedSymbol(name: string): string | null {
-  const match = /^Robinhood ([A-Z0-9]+)(?: \/ USD|-USD)$/i.exec(name);
+  // Tokenized-stock feeds are named "Robinhood SYMBOL / USD" or "Robinhood SYMBOL-USD"; crypto
+  // quote feeds (ETH, USDG, ...) use the same "SYMBOL / USD" suffix without that prefix.
+  const match = /^(?:Robinhood )?([A-Z0-9]+)(?: \/ USD|-USD)$/i.exec(name);
   return match?.[1]?.toUpperCase() ?? null;
 }
 
