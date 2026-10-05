@@ -45,12 +45,19 @@ async function deleteLaunches(tx: DbOrTx, chainId: number, tokenAddresses: reado
   await tx.delete(launches).where(and(eq(launches.chainId, chainId), inArray(launches.tokenAddress, tokenAddresses)));
 }
 
-// ---- v1-swap / v2-curve / v2-buyback / v4-swap: trades, individually keyed by (chainId, txHash, logIndex). ----
-async function appTradeWindow(tx: DbOrTx, chainId: number, venueKinds: readonly string[], windowStart: bigint): Promise<AppKeyedRow[]> {
+// ---- v1-swap / v2-curve / v2-buyback / v4-swap: trades, individually keyed by (chainId, txHash, logIndex).
+// `sourceEvents` scopes the diff to the rows this one raw stream actually owns — curve and buyback
+// trades share the same 'curve'-kind venue, so without it, each stream's diff would see the other's
+// rows as absent from its own raw table and delete them as "stale", wiping both every repair pass
+// (final review, Important 6). ----
+async function appTradeWindow(
+  tx: DbOrTx, chainId: number, venueKinds: readonly string[], sourceEvents: readonly string[], windowStart: bigint,
+): Promise<AppKeyedRow[]> {
   const venueIds = tx.select({ id: venues.id }).from(venues).where(inArray(venues.kind, venueKinds));
   const rows = await tx.select({ txHash: trades.txHash, logIndex: trades.logIndex, blockHash: trades.blockHash, tokenAddress: trades.tokenAddress })
     .from(trades).where(and(
-      eq(trades.chainId, chainId), inArray(trades.venueId, venueIds), isNull(trades.sourceLogId), gte(trades.blockNumber, windowStart),
+      eq(trades.chainId, chainId), inArray(trades.venueId, venueIds), inArray(trades.sourceEvent, sourceEvents),
+      isNull(trades.sourceLogId), gte(trades.blockNumber, windowStart),
     ));
   return rows.map((row) => ({ txHash: row.txHash.toLowerCase(), logIndex: row.logIndex, blockHash: row.blockHash.toLowerCase(), tokenAddress: row.tokenAddress }));
 }
@@ -135,6 +142,12 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
   const windowStart = input.fence > input.depth ? input.fence - input.depth : 0n;
   const changed = new Map<string, { chainId: number; tokenAddress: string }>();
 
+  // A launch/venue deletion here cascades (via FK) to rows another stream's OWN diff owns — that
+  // stream then sees those rows as simply gone, not "mismatched", and never flags them stale on its
+  // own. Without forcing its rewind too, its cursor stays put and the cascaded-away data is never
+  // re-read or re-applied — a permanent loss, not a delay (final review, Important 7).
+  const cascadeRewind = new Set<Stream>();
+
   await appDb.transaction(async (tx) => {
     let removedLifecycleTokens: string[] = [];
     for (const stream of STREAM_ORDER) {
@@ -146,11 +159,12 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
           const stale = staleAppRows(envioKeys, appRows);
           await deleteLaunches(tx, input.chainId, stale.map((row) => row.tokenAddress));
           staleTokens = stale.map((row) => row.tokenAddress);
+          if (staleTokens.length > 0) cascadeRewind.add('v1-swap');
           break;
         }
         case 'v1-swap': {
           const envioKeys = await readRawWindowKeys(envioPool, tables['v1-swap'], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['v3_pool'], windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['v3_pool'], ['Swap'], windowStart);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);
@@ -162,12 +176,16 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
           const stale = staleAppRows(envioKeys, appRows);
           await deleteLaunches(tx, input.chainId, stale.map((row) => row.tokenAddress));
           staleTokens = stale.map((row) => row.tokenAddress);
+          if (staleTokens.length > 0) {
+            for (const downstream of ['v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap'] as const) cascadeRewind.add(downstream);
+          }
           break;
         }
         case 'v2-curve':
         case 'v2-buyback': {
+          const sourceEvents = stream === 'v2-curve' ? ['CurveBuy', 'CurveSell'] : ['BuybackLocked'];
           const envioKeys = await readRawWindowKeys(envioPool, tables[stream], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['curve'], windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['curve'], sourceEvents, windowStart);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);
@@ -184,11 +202,12 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
         }
         case 'v4-initialize': {
           staleTokens = await repairV4InitializeCascade(tx, input.chainId, removedLifecycleTokens);
+          if (staleTokens.length > 0) cascadeRewind.add('v4-swap');
           break;
         }
         case 'v4-swap': {
           const envioKeys = await readRawWindowKeys(envioPool, tables['v4-swap'], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['v4_pool'], windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['v4_pool'], ['Swap'], windowStart);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);
@@ -196,7 +215,7 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
         }
       }
       for (const tokenAddress of staleTokens) changed.set(`${input.chainId}:${tokenAddress}`, { chainId: input.chainId, tokenAddress });
-      await rewindStreamCursors(tx, input.chainId, stream, windowStart, input.fence, staleTokens.length > 0);
+      await rewindStreamCursors(tx, input.chainId, stream, windowStart, input.fence, staleTokens.length > 0 || cascadeRewind.has(stream));
     }
     // Inside the same transaction so delivery only happens after the repair actually commits.
     await notifyChanged(tx, [...changed.values()].map((key) => ({ kind: 'launch.changed' as const, ...key })));

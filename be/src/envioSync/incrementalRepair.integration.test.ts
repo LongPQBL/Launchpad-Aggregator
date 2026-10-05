@@ -4,7 +4,7 @@ import { eq, and } from 'drizzle-orm';
 import { createDatabase } from '../db/client.js';
 import { envioSyncCursors, launches, venues, trades, sources, rawLogs } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
-import { STREAMS } from './incrementalCursor.js';
+import { STREAMS, claimSyncCursor, advanceSyncCursor } from './incrementalCursor.js';
 import { applyEnvioPage } from './incrementalSync.js';
 import { repairEnvioWindow } from './incrementalRepair.js';
 
@@ -152,6 +152,93 @@ describe('repairEnvioWindow: legacy source_log_id rows', () => {
     const rows = await db.select().from(launches).where(eq(launches.tokenAddress, token));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.name).toBe('Legacy Launch');
+  });
+});
+
+describe('repairEnvioWindow: curve and buyback trades are not cross-deleted (final review, Important 6)', () => {
+  it('leaves a matching curve trade and a matching buyback trade both in place — each diffed against its own raw table, not the shared venue kind', async () => {
+    const { token, poolAddress: curveAddress } = freshToken();
+    // sourceLogId non-null (an "old indexer" row, by this file's own convention) so repair's
+    // launch-window diff for v1-launch/v2-launch never touches it — this test is isolating the
+    // curve/buyback trade-diffing step, not launch repair.
+    await db.insert(launches).values({
+      chainId, tokenAddress: token, sourceId: 'pons-v1-legacy', sourceLogId: legacyRawLogId,
+      name: null, symbol: null, tokenDecimals: null, platform: 'pons', protocolVersion: 'v2',
+      factoryAddress: curveAddress, deployerAddress: token, launchBlock: 500n, launchBlockHash: `0x${'aa'.repeat(32)}`,
+      launchTxHash: `0x${'aa'.repeat(32)}`, launchLogIndex: 1, quoteAssetAddress: weth, quoteAssetSymbol: 'WETH',
+      quoteAssetDecimals: 18, lifecycleStatus: 'trading', coreMetadataReadState: 'done',
+    });
+    await db.insert(venues).values({
+      id: `curve-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: curveAddress,
+      sourceId: 'pons-v2-curve', sourceLogId: null, effectiveFromBlock: 500n, official: true,
+    });
+    const curveBlockHash = `0x${'c6'.repeat(32)}`;
+    const curveTxHash = `0x${'c7'.repeat(32)}`;
+    await db.insert(trades).values({
+      chainId, tokenAddress: token, venueId: `curve-${token}`, blockNumber: 600n, blockHash: curveBlockHash,
+      txHash: curveTxHash, logIndex: 1, timestamp: 1_700_000_000, side: 'buy',
+      tokenAmountRaw: '1000000000000000000', quoteAmountRaw: '2000000000000000000',
+      quoteAssetAddress: weth, sourceEvent: 'CurveBuy', activityKind: 'user_trade',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: token,
+    });
+    await envioPool.query(`INSERT INTO ${tables['v2-curve']} VALUES ($1,$2,$3,$4,$5,$6)`,
+      ['curve-raw-1', chainId, 600, curveBlockHash, curveTxHash, 1]);
+
+    const buybackBlockHash = `0x${'b8'.repeat(32)}`;
+    const buybackTxHash = `0x${'b9'.repeat(32)}`;
+    await db.insert(trades).values({
+      chainId, tokenAddress: token, venueId: `curve-${token}`, blockNumber: 610n, blockHash: buybackBlockHash,
+      txHash: buybackTxHash, logIndex: 1, timestamp: 1_700_000_100, side: 'buy',
+      tokenAmountRaw: '500000000000000000', quoteAmountRaw: '700000000000000000',
+      quoteAssetAddress: weth, sourceEvent: 'BuybackLocked', activityKind: 'protocol_buyback',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: token,
+    });
+    await envioPool.query(`INSERT INTO ${tables['v2-buyback']} VALUES ($1,$2,$3,$4,$5,$6)`,
+      ['buyback-raw-1', chainId, 610, buybackBlockHash, buybackTxHash, 1]);
+
+    await repairEnvioWindow(envioPool, db, { chainId, fence, depth, tables });
+
+    const remaining = await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+    expect(remaining.map((row) => row.sourceEvent).sort()).toEqual(['BuybackLocked', 'CurveBuy']);
+  });
+});
+
+describe('repairEnvioWindow: a launch deletion forces its dependent streams\' cursors to rewind too (final review, Important 7)', () => {
+  it('rewinds the swap stream even when the swap row itself was already gone via the launch\'s cascade delete, so it is re-applied rather than lost', async () => {
+    await resetCursor('v1-launch', 'history');
+    const v1SwapKey = { chainId, stream: 'v1-swap' as const, lane: 'history' as const };
+    await db.delete(envioSyncCursors).where(and(eq(envioSyncCursors.chainId, chainId), eq(envioSyncCursors.stream, v1SwapKey.stream), eq(envioSyncCursors.lane, v1SwapKey.lane)));
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`launch-${token}`, token, poolAddress, txHash, 600, `0x${'a1'.repeat(32)}`);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence, limit: 10, tables });
+    const [launchRow] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+    await db.insert(venues).values({
+      id: `v3-${token}`, chainId, tokenAddress: token, kind: 'v3_pool', ref: poolAddress,
+      sourceId: `${launchRow!.sourceId}-trades`, sourceLogId: null, effectiveFromBlock: 600n, official: true,
+    });
+    await db.insert(trades).values({
+      chainId, tokenAddress: token, venueId: `v3-${token}`, blockNumber: 610n, blockHash: `0x${'a2'.repeat(32)}`,
+      txHash: `0x${'a3'.repeat(32)}`, logIndex: 1, timestamp: 1_700_000_000, side: 'buy',
+      tokenAmountRaw: '1000000000000000000', quoteAmountRaw: '2000000000000000000',
+      quoteAssetAddress: weth, sourceEvent: 'Swap', activityKind: 'user_trade',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: token,
+    });
+    // v1-swap's own cursor already read well past this window with nothing stale of its own —
+    // simulates a prior pass that read this trade before the launch itself became stale.
+    await claimSyncCursor(db, v1SwapKey);
+    await advanceSyncCursor(db, v1SwapKey, { blockNumber: 900n, logIndex: 0, rawId: 'x' }, 900n);
+
+    // The launch itself now goes stale (Envio no longer reports it) — its delete cascades to the
+    // venue and trade above, so the v1-swap step's own diff finds nothing of its own to flag.
+    await envioPool.query(`DELETE FROM ${rawLaunchTable} WHERE id = $1`, [`launch-${token}`]);
+    await repairEnvioWindow(envioPool, db, { chainId, fence, depth, tables });
+
+    const afterSwapCursor = (await db.select().from(envioSyncCursors).where(and(
+      eq(envioSyncCursors.chainId, chainId), eq(envioSyncCursors.stream, 'v1-swap'), eq(envioSyncCursors.lane, 'history'),
+    )))[0]!;
+    // Must be rewound to windowStart (500) like the launch's own stream — a future swap for a
+    // relaunched/corrected token in this window must be re-read, not silently skipped forever.
+    expect(afterSwapCursor.blockNumber).toBeLessThanOrEqual(500n);
   });
 });
 
