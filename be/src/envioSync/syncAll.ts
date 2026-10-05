@@ -4,9 +4,9 @@ import { syncV1LegacyOnce, syncV1LegacyToReal, DEFAULT_ENVIO_TABLES, type EnvioT
 import { syncV2Once, syncV2ToReal, DEFAULT_ENVIO_V2_TABLES, type EnvioV2TableNames } from './runSyncV2.js';
 import { syncV4Once, syncV4ToReal, DEFAULT_ENVIO_V4_TABLES, type EnvioV4TableNames } from './runSyncV4.js';
 import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
-import { runTailPass, runHistoryPass, type SyncReport } from './incrementalSync.js';
+import { runTailPass, runHistoryPass, retryUnresolvedEvents, syncSourceCoverage, type SyncReport } from './incrementalSync.js';
 import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './incrementalRepair.js';
-import type { Stream } from './incrementalCursor.js';
+import { STREAMS, type Stream } from './incrementalCursor.js';
 
 export interface AllSyncTables {
   v1: EnvioTableNames;
@@ -75,6 +75,17 @@ export async function runIncrementalCycle(
   const passInput = { chainId, envioPool, appDb, fence: processedBlock, limit, tables: deps.tables };
   const tail = await runTailPass(passInput);
   const history = await runHistoryPass(passInput);
+  // Without this, a row queued because its dependency hadn't arrived yet is never revisited in
+  // production — only the integration test ever called retryUnresolvedEvents directly (final
+  // review, Critical 1). Run it for every stream each cycle; a stream with nothing due is a cheap
+  // no-op claim.
+  for (const stream of STREAMS) {
+    await retryUnresolvedEvents(envioPool, appDb, { chainId, stream, limit, tables: deps.tables });
+  }
+  // Without this, the API's per-launch coverage/backfilling status and officialVolume24h stay
+  // frozen at whatever a source's row was last set to (or its insert-time default) forever once the
+  // incremental path is the only writer — nothing else ever advances it (final review, Critical 3).
+  await syncSourceCoverage(appDb, chainId, headBlock);
   await recordEnvioChainProgress(appDb, chainId, headBlock);
   return { tail, history };
 }

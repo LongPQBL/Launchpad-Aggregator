@@ -61,7 +61,11 @@ export async function claimSyncCursor(appDb: DbOrTx, key: CursorKey): Promise<Sy
 export async function advanceSyncCursor(
   tx: DbOrTx, key: CursorKey, position: CursorPosition, processedBlock: bigint,
 ): Promise<void> {
-  if (position.blockNumber > processedBlock) {
+  // A caller cut short by its own page limit legitimately reports a position one block ahead of
+  // what it can confirm complete (it stopped mid-block, not knowing whether more rows at that same
+  // block remain unread) — allow exactly that one-block gap, reject anything wider (final review,
+  // Critical 3/Important 4).
+  if (position.blockNumber > processedBlock + 1n) {
     throw new Error(`Cursor position block ${position.blockNumber} exceeds processed fence ${processedBlock} `
       + `for chain ${key.chainId} stream ${key.stream} lane ${key.lane}`);
   }

@@ -3,12 +3,12 @@ import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import { eq, and } from 'drizzle-orm';
 import { createDatabase } from '../db/client.js';
-import { envioSyncCursors, launches, venues, trades, unresolvedEvents } from '../db/schema.js';
+import { envioSyncCursors, launches, venues, trades, unresolvedEvents, sources } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
 import type { Launch } from '../domain/types.js';
-import type { Lane, Stream } from './incrementalCursor.js';
-import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents } from './incrementalSync.js';
+import { claimSyncCursor, advanceSyncCursor, type Lane, type Stream } from './incrementalCursor.js';
+import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage } from './incrementalSync.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -181,6 +181,39 @@ describe('applyEnvioPage: minimal launch records and deferred metadata', () => {
   });
 });
 
+describe('applyEnvioPage: v2-lifecycle status reflects the latest transition by block order (final review, Important 9)', () => {
+  it('does not regress lifecycle_status to an older transition that is merely applied later via a different lane', async () => {
+    await resetCursor('v2-launch', 'history');
+    await resetCursor('v2-lifecycle', 'tail');
+    await resetCursor('v2-lifecycle', 'history');
+    const { token, poolAddress: curveAddress, txHash: launchTxHash } = freshToken();
+
+    await envioPool.query(`INSERT INTO ${rawLaunchV2Table} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`v2launch-${token}`, chainId, token, curveAddress, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0', zeroAddress,
+        700, `0x${'a7'.repeat(32)}`, launchTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 1000n, limit: 10, tables });
+
+    // The tail lane (seeded near head) picks up the chronologically LATER transition (graduated,
+    // block 720) first — the history lane (still crawling from genesis) has not reached either
+    // transition for this token yet. Independent per-lane cursors make this ordering realistic.
+    const gradTxHash = `0x${createHash('sha256').update(`order-grad-${token}`).digest('hex')}`;
+    await envioPool.query(`INSERT INTO ${rawLifecycleTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [`order-grad-${token}`, chainId, token, 2, 'graduated', 720, `0x${'b7'.repeat(32)}`, gradTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'tail', fence: 1000n, limit: 10, tables });
+    let [launchRow] = await db.select().from(launches).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, token)));
+    expect(launchRow!.lifecycleStatus).toBe('graduated');
+
+    // The history lane now reaches the chronologically EARLIER transition (swept, block 710) for
+    // the same token and applies it second.
+    const sweptTxHash = `0x${createHash('sha256').update(`order-swept-${token}`).digest('hex')}`;
+    await envioPool.query(`INSERT INTO ${rawLifecycleTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [`order-swept-${token}`, chainId, token, 1, 'swept', 710, `0x${'c7'.repeat(32)}`, sweptTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'history', fence: 1000n, limit: 10, tables });
+    [launchRow] = await db.select().from(launches).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, token)));
+    expect(launchRow!.lifecycleStatus).toBe('graduated'); // must not regress to the older 'swept'
+  });
+});
+
 describe('applyEnvioPage: transactional page application', () => {
   it('rolls back the whole page and does not advance the cursor when a later row fails to hydrate', async () => {
     await resetCursor('v1-launch', 'history');
@@ -321,6 +354,85 @@ describe('applyEnvioPage: V2 graduation opens the matching V4 venue', () => {
     expect(v4Venues).toHaveLength(1);
     expect(v4Venues[0]!.ref).toBe(poolId.toLowerCase());
   });
+
+  it('queues a V4 Initialize as unresolved (not silently skipped) when its matching graduation has not been applied by v2-lifecycle yet (final review, Important 5)', async () => {
+    await resetCursor('v2-launch', 'history');
+    await resetCursor('v2-lifecycle', 'tail');
+    await resetCursor('v2-lifecycle', 'history');
+    await resetCursor('v4-initialize', 'history');
+    const fresh = freshToken();
+    const curveAddress = fresh.poolAddress;
+    const launchTxHash = fresh.txHash;
+    const token = `0x${fresh.token.slice(2).padStart(40, '0').slice(-40)}`;
+    testTokens.push(token);
+
+    await envioPool.query(`INSERT INTO ${rawLaunchV2Table} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`v2launch-${token}`, chainId, token, curveAddress, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0', zeroAddress,
+        700, `0x${'a7'.repeat(32)}`, launchTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 1000n, limit: 10, tables });
+
+    // The graduation's lifecycle transition is never inserted/applied in this test — the two
+    // streams page independently, so the V4 Initialize for a real, imminent Pons graduation can
+    // legitimately be read before v2-lifecycle has caught up to the same block.
+    const gradTxHash = `0x${createHash('sha256').update(`late-grad-${token}`).digest('hex')}`;
+    const gradBlockHash = `0x${createHash('sha256').update(`late-gradhash-${token}`).digest('hex')}`;
+    const launchForPoolId: Launch = {
+      chainId, tokenAddress: token as `0x${string}`, name: null, symbol: null, tokenDecimals: null,
+      platform: 'pons', protocolVersion: 'v2', sourceId: v2Factory.id, sourceLogId: '',
+      factoryAddress: v2Factory.factory, deployerAddress: token as `0x${string}`,
+      launchBlock: 700n, launchTxHash: launchTxHash as `0x${string}`,
+      quoteAsset: { address: zeroAddress as `0x${string}`, symbol: 'ETH', decimals: 18 }, lifecycleStatus: 'graduated',
+    };
+    const poolId = derivePonsV4PoolId(launchForPoolId, { fee: 0, tickSpacing: 60 }, PONS_HOOK);
+    const [currency0, currency1] = token.toLowerCase() < zeroAddress ? [token, zeroAddress] : [zeroAddress, token];
+    await envioPool.query(`INSERT INTO ${rawV4InitializeTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [`v4init-late-${token}`, chainId, poolId, currency0, currency1, 0, 60, PONS_HOOK,
+        '2005366647941715384651103712059394', 0, 710, gradBlockHash, gradTxHash, 1]);
+
+    const initResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v4-initialize', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(initResult.applied).toBe(0);
+    expect(initResult.unresolved).toBe(1);
+    let v4Venues = await db.select().from(venues).where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, token), eq(venues.kind, 'v4_pool')));
+    expect(v4Venues).toHaveLength(0);
+
+    // v2-lifecycle now catches up with the matching graduation — a retry must open the venue, not
+    // leave it silently lost.
+    await envioPool.query(`INSERT INTO ${rawLifecycleTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [`v2grad-late-${token}`, chainId, token, 2, 'graduated', 710, gradBlockHash, gradTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'history', fence: 1000n, limit: 10, tables });
+    const resolvedCount = await retryUnresolvedEvents(envioPool, db, {
+      chainId, stream: 'v4-initialize', limit: 10, tables, now: new Date(Date.now() + 61_000),
+    });
+    expect(resolvedCount).toBe(1);
+    v4Venues = await db.select().from(venues).where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, token), eq(venues.kind, 'v4_pool')));
+    expect(v4Venues).toHaveLength(1);
+    expect(v4Venues[0]!.ref).toBe(poolId.toLowerCase());
+  });
+
+  it('settles a V4 Initialize as permanently skipped (not stuck retrying forever) once v2-lifecycle has confirmed past its block with no matching graduation (final review, Important 5)', async () => {
+    await resetCursor('v2-lifecycle', 'tail');
+    await resetCursor('v2-lifecycle', 'history');
+    await resetCursor('v4-initialize', 'tail');
+    await resetCursor('v4-initialize', 'history');
+    const { token } = freshToken();
+    const nonPonsTxHash = `0x${createHash('sha256').update(`not-pons-${token}`).digest('hex')}`;
+    await envioPool.query(`INSERT INTO ${rawV4InitializeTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [`v4init-noise-${token}`, chainId, `0x${'ee'.repeat(32)}`, token, zeroAddress, 500, 10, zeroAddress,
+        '2005366647941715384651103712059394', 0, 500, `0x${'ff'.repeat(32)}`, nonPonsTxHash, 1]);
+
+    const initResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v4-initialize', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(initResult.unresolved).toBe(1); // v2-lifecycle has never been synced yet — still ambiguous
+
+    // v2-lifecycle (with nothing graduated at this address) now confirms past block 500 — this row
+    // is now provably not a Pons pool, not merely "not yet applied".
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'history', fence: 600n, limit: 10, tables });
+    const resolvedCount = await retryUnresolvedEvents(envioPool, db, {
+      chainId, stream: 'v4-initialize', limit: 10, tables, now: new Date(Date.now() + 61_000),
+    });
+    expect(resolvedCount).toBe(1); // settled (skipped), not left to retry forever
+    const remaining = await retryUnresolvedEvents(envioPool, db, { chainId, stream: 'v4-initialize', limit: 10, tables });
+    expect(remaining).toBe(0);
+  });
 });
 
 describe('confirmedSourceBlock', () => {
@@ -358,5 +470,94 @@ describe('confirmedSourceBlock', () => {
     const neverSyncedChain = 999777;
     const confirmed = await confirmedSourceBlock(db, neverSyncedChain, ['v1-launch', 'v1-swap'], 'history');
     expect(confirmed).toBeNull();
+  });
+
+  it('never claims past the last row actually read when a page is cut short by its own limit (final review, Critical 3/Important 4)', async () => {
+    await resetCursor('v1-launch', 'history');
+    const a = freshToken();
+    const b = freshToken();
+    // Two rows exist well below the fence, but limit:1 forces the page to stop after the first —
+    // confirmedSourceBlock must not claim the fence (950) when only block 100 was actually read.
+    await insertLaunchRow(`trunc-a-${a.token}`, a.token, a.poolAddress, a.txHash, 100, 1);
+    await insertLaunchRow(`trunc-b-${b.token}`, b.token, b.poolAddress, b.txHash, 200, 1);
+    const result = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 950n, limit: 1, tables });
+    expect(result.applied).toBe(1);
+    expect(result.cursor.position.blockNumber).toBe(100n);
+    const confirmed = await confirmedSourceBlock(db, chainId, ['v1-launch'], 'history');
+    expect(confirmed).toBe(99n);
+  });
+});
+
+describe('syncSourceCoverage (final review, Critical 3)', () => {
+  const v1FactoryIds = getPonsFactorySources().filter((f) => f.version === 'v1').flatMap((f) => [f.id, `${f.id}-trades`]);
+  async function seedSource(id: string): Promise<void> {
+    await db.insert(sources).values({
+      id, chainId, version: 'v1', factoryAddress: zeroAddress, startBlock: 0n, scannedToBlock: 0n, confirmedToBlock: 0n, status: 'backfilling',
+    }).onConflictDoUpdate({ target: sources.id, set: { confirmedToBlock: 0n, scannedToBlock: 0n, status: 'backfilling' } });
+  }
+  afterAll(async () => {
+    // These ids are shared, chain-global fixture rows other test files also seed/read (e.g.
+    // runSyncV2.integration.test.ts) — reset rather than delete, both because launches created in
+    // this block still reference them via a foreign key until the file-level afterAll runs, and to
+    // avoid leaving a stale confirmed_to_block for another file's test to read.
+    for (const id of [...v1FactoryIds, v2Factory.id, 'pons-v2-curve', 'pons-v2-lifecycle']) {
+      await db.update(sources).set({ confirmedToBlock: 0n, scannedToBlock: 0n, status: 'backfilling' }).where(eq(sources.id, id));
+    }
+  });
+
+  it('advances confirmed_to_block and flips status to caught_up for v1, v2 launch, and v2 trade/lifecycle sources once their streams reach head — never left frozen at insert time (final review, Critical 3)', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    await resetCursor('v2-launch', 'history');
+    await resetCursor('v2-lifecycle', 'history');
+    for (const id of [...v1FactoryIds, v2Factory.id, 'pons-v2-curve', 'pons-v2-lifecycle']) await seedSource(id);
+
+    const v1 = freshToken();
+    await insertLaunchRow(`cov-v1-${v1.token}`, v1.token, v1.poolAddress, v1.txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+
+    const v2 = freshToken();
+    await envioPool.query(`INSERT INTO ${rawLaunchV2Table} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`cov-v2-${v2.token}`, chainId, v2.token, v2.poolAddress, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0', zeroAddress,
+        100, `0x${'a7'.repeat(32)}`, v2.txHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'history', fence: 500n, limit: 10, tables });
+    // v2-curve/v2-buyback have no fixture raw table in this file — a real cycle (runIncrementalCycle)
+    // always claims and advances every stream's cursor together, so stand that in for directly
+    // rather than widening this file's fixture setup just for these two empty streams.
+    for (const stream of ['v2-curve', 'v2-buyback'] as const) {
+      await resetCursor(stream, 'history');
+      const cursor = await claimSyncCursor(db, { chainId, stream, lane: 'history' });
+      await advanceSyncCursor(db, { chainId, stream, lane: 'history' }, cursor.position, 500n);
+    }
+
+    await syncSourceCoverage(db, chainId, 500n);
+
+    for (const id of v1FactoryIds) {
+      const [row] = await db.select().from(sources).where(eq(sources.id, id));
+      expect(row!.confirmedToBlock).toBe(500n);
+      expect(row!.status).toBe('caught_up');
+    }
+    for (const id of [v2Factory.id, 'pons-v2-curve', 'pons-v2-lifecycle']) {
+      const [row] = await db.select().from(sources).where(eq(sources.id, id));
+      expect(row!.confirmedToBlock).toBe(500n);
+      expect(row!.status).toBe('caught_up');
+    }
+  });
+
+  it('never regresses confirmed_to_block below a value already recorded (final review, Critical 3)', async () => {
+    await resetCursor('v2-launch', 'history');
+    await seedSource(v2Factory.id);
+    await db.update(sources).set({ confirmedToBlock: 900n, scannedToBlock: 900n, status: 'caught_up' }).where(eq(sources.id, v2Factory.id));
+
+    // This cycle's own history-lane watermark is far behind 900 (a fresh resetCursor + tiny fence) —
+    // syncSourceCoverage must not drag a previously-advanced source backward.
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 50n, limit: 10, tables });
+    await syncSourceCoverage(db, chainId, 900n);
+
+    const [row] = await db.select().from(sources).where(eq(sources.id, v2Factory.id));
+    expect(row!.confirmedToBlock).toBe(900n);
+    expect(row!.status).toBe('caught_up');
   });
 });

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { STREAMS } from './incrementalCursor.js';
 
 vi.mock('./runSync.js', () => ({
   syncV1LegacyOnce: vi.fn(async () => ({ launchesWritten: 0, tradesWritten: 0 })),
@@ -22,12 +23,19 @@ vi.mock('./envioDb.js', () => ({
   readEnvioProgress: vi.fn(async () => ({ processedBlock: 100n, headBlock: 200n })),
   recordEnvioChainProgress: vi.fn(async () => undefined),
 }));
+vi.mock('./incrementalSync.js', () => ({
+  runTailPass: vi.fn(async () => ({ lane: 'tail', fence: 100n, results: {} })),
+  runHistoryPass: vi.fn(async () => ({ lane: 'history', fence: 100n, results: {} })),
+  retryUnresolvedEvents: vi.fn(async () => 0),
+  syncSourceCoverage: vi.fn(async () => undefined),
+}));
 
-const { runAllSyncsOnce } = await import('./syncAll.js');
+const { runAllSyncsOnce, runIncrementalCycle } = await import('./syncAll.js');
 const { syncV1LegacyOnce, syncV1LegacyToReal } = await import('./runSync.js');
 const { syncV2Once, syncV2ToReal } = await import('./runSyncV2.js');
 const { syncV4Once, syncV4ToReal } = await import('./runSyncV4.js');
 const { recordEnvioChainProgress } = await import('./envioDb.js');
+const { retryUnresolvedEvents, syncSourceCoverage } = await import('./incrementalSync.js');
 
 const tables = {
   v1: { rawLaunchTable: 'x', rawSwapTable: 'x' },
@@ -55,5 +63,24 @@ describe('runAllSyncsOnce target dispatch', () => {
     expect(result.v1Result).toEqual({ launchesWritten: 1, tradesWritten: 1 });
     expect(result.v2Result).toEqual({ launchesWritten: 1, tradesWritten: 1, transitionsWritten: 1 });
     expect(result.v4Result).toEqual({ venuesOpened: 1, tradesWritten: 1 });
+  });
+});
+
+describe('runIncrementalCycle unresolved-event retry (final review, Critical 1)', () => {
+  it('retries unresolved events for every stream every cycle, not only via the integration test\'s direct call', async () => {
+    vi.mocked(retryUnresolvedEvents).mockClear();
+    await runIncrementalCycle({} as never, {} as never, 4663);
+    expect(retryUnresolvedEvents).toHaveBeenCalledTimes(STREAMS.length);
+    for (const stream of STREAMS) {
+      expect(retryUnresolvedEvents).toHaveBeenCalledWith({}, {}, expect.objectContaining({ chainId: 4663, stream }));
+    }
+  });
+});
+
+describe('runIncrementalCycle source coverage advancement (final review, Critical 3)', () => {
+  it('advances per-source coverage watermarks every cycle using the reported Envio head block', async () => {
+    vi.mocked(syncSourceCoverage).mockClear();
+    await runIncrementalCycle({} as never, {} as never, 4663);
+    expect(syncSourceCoverage).toHaveBeenCalledWith({}, 4663, 200n);
   });
 });

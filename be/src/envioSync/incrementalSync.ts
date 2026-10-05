@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
 import type { Database, DbOrTx } from '../db/client.js';
 import type { Launch, LifecycleStatus, Venue, VenueKind } from '../domain/types.js';
@@ -248,7 +248,6 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
 }
 
 // ---- v2-lifecycle ----
-const LIFECYCLE_STATUS_BY_PHASE: Record<1 | 2 | 3, LifecycleStatus> = { 1: 'swept', 2: 'graduated', 3: 'rescued' };
 async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const row: EnvioRawLifecycleRow = {
     chainId, tokenAddress: str(raw.tokenAddress), phase: int(raw.phase) as 1 | 2 | 3, kind: str(raw.kind) as EnvioRawLifecycleRow['kind'],
@@ -263,8 +262,16 @@ async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string,
     txHash: transition.txHash, logIndex: transition.logIndex,
   }).onConflictDoNothing().returning({ txHash: lifecycleTransitions.txHash });
   if (inserted.length === 0) return 'applied';
-  await tx.update(launches).set({ lifecycleStatus: LIFECYCLE_STATUS_BY_PHASE[transition.phase] })
-    .where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, transition.tokenAddress)));
+  // Derived from the latest transition by block/log order, not whichever transition this call just
+  // inserted — tail and history lanes apply independently, so an older transition (e.g. 'swept') can
+  // be applied after a newer one (e.g. 'graduated') for the same token and must never regress its
+  // status (final review, Important 9; mirrors the rebuild query in incrementalRepair.ts and the old
+  // full-table runSyncV2.ts).
+  await tx.execute(sql`UPDATE launches SET lifecycle_status = COALESCE((
+    SELECT CASE t.phase WHEN 1 THEN 'swept' WHEN 2 THEN 'graduated' WHEN 3 THEN 'rescued' END
+    FROM lifecycle_transitions AS t WHERE t.chain_id = ${chainId} AND t.token_address = ${transition.tokenAddress}
+    ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1
+  ), 'trading') WHERE chain_id = ${chainId} AND token_address = ${transition.tokenAddress}`);
   if (transition.phase === 1) {
     await tx.update(venues).set({ effectiveToBlock: transition.blockNumber, effectiveToLogIndex: transition.logIndex })
       .where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, transition.tokenAddress), eq(venues.kind, 'curve')));
@@ -273,12 +280,31 @@ async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string,
   return 'applied';
 }
 
+// A V4 Initialize or V4 Swap with no matching Pons record is ambiguous on its own: it may be chain
+// noise from an unrelated pool (the shared UniswapV4PoolManager singleton emits overwhelmingly
+// non-Pons activity), or it may be a genuine Pons event whose upstream dependency (v2-lifecycle for
+// Initialize, v4-initialize for Swap) simply hasn't reached this block yet, since each stream pages
+// independently. Settling it as permanently irrelevant is only safe once the upstream stream has
+// itself confirmed past this row's block in at least one lane — tail and history read disjoint
+// ranges of the same chain-global dependency, so either one catching up resolves the ambiguity
+// (final review, Important 5; corrects Task 2's Ruling 4, which understated this as a
+// same-pass "by a hair" case rather than a gap that can span many cycles during history backfill).
+async function upstreamConfirmedPast(tx: DbOrTx, chainId: number, upstream: Stream, blockNumber: bigint): Promise<boolean> {
+  const tail = await confirmedSourceBlock(tx, chainId, [upstream], 'tail');
+  const history = await confirmedSourceBlock(tx, chainId, [upstream], 'history');
+  const confirmed = tail === null ? history : history === null ? tail : (tail > history ? tail : history);
+  return confirmed !== null && confirmed >= blockNumber;
+}
+
 // ---- v4-initialize ----
 async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const txHash = str(raw.txHash).toLowerCase();
   const [graduation] = await tx.select().from(lifecycleTransitions)
     .where(and(eq(lifecycleTransitions.chainId, chainId), eq(lifecycleTransitions.kind, 'graduated'), eq(lifecycleTransitions.txHash, txHash)));
-  if (!graduation) return 'skipped'; // not a Pons graduation pool — most V4 Initialize activity on this chain
+  if (!graduation) {
+    const settled = await upstreamConfirmedPast(tx, chainId, 'v2-lifecycle', num(raw.blockNumber));
+    return settled ? 'skipped' : 'unresolved'; // not a Pons graduation pool, or v2-lifecycle just hasn't caught up yet
+  }
   const launch = await lookupLaunch(tx, chainId, graduation.tokenAddress);
   const curveVenue = await lookupVenueByToken(tx, chainId, graduation.tokenAddress, 'curve');
   if (!launch || !curveVenue) return 'unresolved';
@@ -309,7 +335,10 @@ async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string
 async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const poolId = str(raw.poolId).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'v4_pool', poolId);
-  if (!venue) return 'skipped'; // most V4 swap activity on this chain is not a Pons-graduated pool
+  if (!venue) {
+    const settled = await upstreamConfirmedPast(tx, chainId, 'v4-initialize', num(raw.blockNumber));
+    return settled ? 'skipped' : 'unresolved'; // not a Pons-graduated pool, or its v4-initialize just hasn't caught up yet
+  }
   const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawV4SwapRow = {
@@ -385,7 +414,15 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
         });
       }
     }
-    await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, input.fence);
+    // A page cut short by its own limit has not actually drained everything up to the fence — only
+    // up to (but not including) the last row's block, since more rows may share that exact block
+    // number beyond what this page read. Claiming the fence here would let coverage lie about
+    // history it never actually applied (final review, Critical 3/Important 4).
+    const pageFull = page.rows.length >= input.limit;
+    const confirmedBlock = pageFull && page.lastPosition
+      ? (page.lastPosition.blockNumber > 0n ? page.lastPosition.blockNumber - 1n : 0n)
+      : input.fence;
+    await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, confirmedBlock);
     // Inside the same transaction so delivery to a LISTEN-ing session only happens after commit.
     await notifyChanged(tx, changes);
   });
@@ -508,6 +545,42 @@ export async function readConfirmedSourceBlock(pool: Pool, chainId: number, stre
     if (min === null || confirmed < min) min = confirmed;
   }
   return min;
+}
+
+// Advances `sources.confirmed_to_block` from the history lane's own confirmed watermark (the only
+// lane that proves genesis-to-head completeness — the tail lane only ever covers a recent window).
+// Without this, the API's existing per-launch coverage/backfilling status (launchCoverageSql in
+// store.ts) and officialVolume24h stay frozen forever once the incremental path is live, since
+// nothing else ever touches these rows for it (final review, Critical 3 — the V4-pool source row
+// applyV4Initialize inserts is written once at open time and never advanced again). GREATEST
+// guards against ever moving a source backward across cycles.
+async function advanceSourceCoverage(db: DbOrTx, idOrPrefix: { id: string } | { prefix: string }, confirmed: bigint, headBlock: bigint): Promise<void> {
+  const target = 'id' in idOrPrefix ? sql`id = ${idOrPrefix.id}` : sql`id LIKE ${idOrPrefix.prefix}`;
+  await db.execute(sql`UPDATE sources SET
+    confirmed_to_block = GREATEST(confirmed_to_block, ${confirmed.toString()}::bigint),
+    scanned_to_block = GREATEST(scanned_to_block, ${confirmed.toString()}::bigint),
+    status = CASE WHEN GREATEST(confirmed_to_block, ${confirmed.toString()}::bigint) >= ${headBlock.toString()}::bigint
+      THEN 'caught_up' ELSE 'backfilling' END
+    WHERE ${target}`);
+}
+
+export async function syncSourceCoverage(appDb: Database, chainId: number, headBlock: bigint): Promise<void> {
+  const v1Confirmed = await confirmedSourceBlock(appDb, chainId, ['v1-launch', 'v1-swap'], 'history');
+  if (v1Confirmed !== null) {
+    for (const factory of v1Factories) {
+      for (const id of [factory.id, `${factory.id}-trades`]) {
+        await advanceSourceCoverage(appDb, { id }, v1Confirmed, headBlock);
+      }
+    }
+  }
+  const v2LaunchConfirmed = await confirmedSourceBlock(appDb, chainId, ['v2-launch'], 'history');
+  if (v2LaunchConfirmed !== null) await advanceSourceCoverage(appDb, { id: v2Factory.id }, v2LaunchConfirmed, headBlock);
+  const v2TradeConfirmed = await confirmedSourceBlock(appDb, chainId, ['v2-launch', 'v2-curve', 'v2-buyback'], 'history');
+  if (v2TradeConfirmed !== null) await advanceSourceCoverage(appDb, { id: 'pons-v2-curve' }, v2TradeConfirmed, headBlock);
+  const v2LifecycleConfirmed = await confirmedSourceBlock(appDb, chainId, ['v2-launch', 'v2-lifecycle'], 'history');
+  if (v2LifecycleConfirmed !== null) await advanceSourceCoverage(appDb, { id: 'pons-v2-lifecycle' }, v2LifecycleConfirmed, headBlock);
+  const v4Confirmed = await confirmedSourceBlock(appDb, chainId, ['v2-launch', 'v2-lifecycle', 'v4-initialize', 'v4-swap'], 'history');
+  if (v4Confirmed !== null) await advanceSourceCoverage(appDb, { prefix: 'pons-v2-v4:%' }, v4Confirmed, headBlock);
 }
 
 export interface SyncReport {
