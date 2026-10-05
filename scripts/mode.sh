@@ -52,7 +52,7 @@ docker exec envio-postgres psql -U postgres -d envio-dev -c "$views" > /dev/null
 
 cd "$root/be"
 (DATABASE_URL="$app_url" nohup npm run dev:api < /dev/null > "$log_dir/api-$mode.log" 2>&1 &)
-(DATABASE_URL="$app_url" nohup npm run sync:envio-staging:loop < /dev/null > "$log_dir/sync-$mode.log" 2>&1 &)
+(STAGING_UPDATE_COVERAGE=$([ "$mode" = test ] && echo 1 || echo 0) DATABASE_URL="$app_url" nohup npm run sync:envio-staging:loop < /dev/null > "$log_dir/sync-$mode.log" 2>&1 &)
 (DATABASE_URL="$app_url" nohup npm run launch-volume:worker < /dev/null > "$log_dir/worker-$mode.log" 2>&1 &)
 (DATABASE_URL="$app_url" nohup npm run usd-candles:worker < /dev/null > "$log_dir/usd-candles-$mode.log" 2>&1 &)
 (DATABASE_URL="$app_url" nohup npm run launch-stats:worker < /dev/null > "$log_dir/launch-stats-$mode.log" 2>&1 &)

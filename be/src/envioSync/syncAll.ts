@@ -46,7 +46,8 @@ export function resolveSyncTablesFromEnv(): AllSyncTables {
   };
 }
 
-export async function runAllSyncsOnce(envioPool: Pool, appDb: Database, tables: AllSyncTables, target: SyncTarget = 'staging') {
+export async function runAllSyncsOnce(envioPool: Pool, appDb: Database, tables: AllSyncTables, target: SyncTarget = 'staging',
+  options: { updateCoverage?: boolean } = {}) {
   const v1Result = target === 'real' ? await syncV1LegacyToReal(envioPool, appDb, tables.v1) : await syncV1LegacyOnce(envioPool, appDb, tables.v1);
   const v2Result = target === 'real' ? await syncV2ToReal(envioPool, appDb, tables.v2) : await syncV2Once(envioPool, appDb, tables.v2);
   const v4Result = target === 'real' ? await syncV4ToReal(envioPool, appDb, tables.v4) : await syncV4Once(envioPool, appDb, tables.v4);
@@ -61,6 +62,10 @@ export async function runAllSyncsOnce(envioPool: Pool, appDb: Database, tables: 
     const allLaunches = await appDb.select({ chainId: launches.chainId, tokenAddress: launches.tokenAddress })
       .from(launches).where(eq(launches.chainId, 4663));
     await invalidateLaunchVolume(appDb, allLaunches, new Date());
+  } else if (options.updateCoverage) {
+    const { headBlock } = await readEnvioProgress(envioPool, tables.v1.progressTable);
+    await recordEnvioChainProgress(appDb, 4663, headBlock);
+    await syncSourceCoverage(appDb, 4663, headBlock);
   }
   return { v1Result, v2Result, v4Result };
 }

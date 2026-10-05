@@ -260,7 +260,11 @@ async function applyV2Lifecycle(tx: DbOrTx, chainId: number, raw: Record<string,
     blockNumber: num(raw.blockNumber), blockHash: str(raw.blockHash), txHash: str(raw.txHash), logIndex: int(raw.logIndex),
   };
   const launch = await lookupLaunch(tx, chainId, row.tokenAddress);
-  if (!launch) return 'unresolved';
+  if (!launch) {
+    // A launch that was never indexed (created before the indexed window) will not arrive later.
+    const settled = await upstreamConfirmedPast(tx, chainId, 'v2-launch', row.blockNumber);
+    return settled ? 'skipped' : 'unresolved';
+  }
   const transition = envioRawLifecycleToTransition(row, 'pons-v2-lifecycle');
   const inserted = await tx.insert(lifecycleTransitions).values({
     sourceLogId: null, chainId: transition.chainId, tokenAddress: transition.tokenAddress, sourceId: 'pons-v2-lifecycle',
@@ -313,7 +317,12 @@ async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string
   }
   const launch = await lookupLaunch(tx, chainId, graduation.tokenAddress);
   const curveVenue = await lookupVenueByToken(tx, chainId, graduation.tokenAddress, 'curve');
-  if (!launch || !curveVenue) return 'unresolved';
+  if (!launch || !curveVenue) {
+    // A graduated launch that was never indexed (e.g. created before the indexed window) will not
+    // arrive later; once v2-launch has confirmed past this block it is settled, not pending.
+    const settled = await upstreamConfirmedPast(tx, chainId, 'v2-launch', num(raw.blockNumber));
+    return settled ? 'skipped' : 'unresolved';
+  }
   const existingV4 = await lookupVenue(tx, chainId, 'v4_pool', str(raw.poolId));
   if (existingV4) return 'applied';
   const row: EnvioRawV4InitializeRow = {

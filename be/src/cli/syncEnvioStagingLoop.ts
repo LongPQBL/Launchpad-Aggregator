@@ -68,7 +68,8 @@ if (syncTarget === 'staging') {
   while (!stopping) {
     const startedAt = new Date().toISOString();
     try {
-      const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables, syncTarget);
+      const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables, syncTarget,
+        { updateCoverage: process.env.STAGING_UPDATE_COVERAGE === '1' });
       console.log(`[${startedAt}] Synced V1-legacy from Envio into staging:`, v1Result);
       console.log(`[${startedAt}] Synced V2 from Envio into staging:`, v2Result);
       console.log(`[${startedAt}] Synced V4 from Envio into staging:`, v4Result);
