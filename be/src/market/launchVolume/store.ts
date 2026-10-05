@@ -1,8 +1,9 @@
 import type { Pool } from 'pg';
-import { sql } from 'drizzle-orm';
-import type { DbOrTx } from '../../db/client.js';
+import { sql, type SQL } from 'drizzle-orm';
 
 export const VOLUME_LEASE_SECONDS = 120;
+
+export interface SqlExecutor { execute(query: SQL): PromiseLike<unknown> }
 
 export interface LaunchKey { chainId: number; tokenAddress: string }
 export interface VolumeClaim { key: LaunchKey; revision: number; leaseId: string }
@@ -23,7 +24,7 @@ export interface VolumeScore {
 
 const RANK_ORDER: Record<RankCategory, number> = { positive: 0, zero: 1, null: 2 };
 
-export async function invalidateLaunchVolume(tx: DbOrTx, keys: readonly LaunchKey[], dueAt: Date): Promise<void> {
+export async function invalidateLaunchVolume(tx: SqlExecutor, keys: readonly LaunchKey[], dueAt: Date): Promise<void> {
   const distinct = [...new Map(keys.map((key) => [`${key.chainId}:${key.tokenAddress}`, key])).values()];
   if (distinct.length === 0) return;
   const values = sql.join(distinct.map((key) => sql`(${key.chainId}::integer, ${key.tokenAddress}::text)`), sql`, `);

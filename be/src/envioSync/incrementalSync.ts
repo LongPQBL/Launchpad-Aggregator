@@ -19,6 +19,7 @@ import { verifyV4PoolFromEnvio, openV4Venue, hydrateV4SwapFromDecoded,
 import { enqueueFeedResolutionJob } from '../market/quotePricing/priceJobStore.js';
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import { launchKeysFromChanges } from '../market/launchVolume/invalidate.js';
+import { invalidateForCoverageChange } from '../market/launchVolume/oracleInvalidation.js';
 
 export const DEFAULT_STREAM_TABLES: Record<Stream, string> = {
   'v1-launch': 'envio."RawLaunch"',
@@ -561,14 +562,29 @@ export async function readConfirmedSourceBlock(pool: Pool, chainId: number, stre
 // nothing else ever touches these rows for it (final review, Critical 3 — the V4-pool source row
 // applyV4Initialize inserts is written once at open time and never advanced again). GREATEST
 // guards against ever moving a source backward across cycles.
-async function advanceSourceCoverage(db: DbOrTx, idOrPrefix: { id: string } | { prefix: string }, confirmed: bigint, headBlock: bigint): Promise<void> {
+// Only a source whose completeness flips (confirmed crosses the head in either direction) changes any
+// launch's cached volume; routine progress without a flip does not enqueue recomputation.
+export async function advanceSourceCoverage(db: DbOrTx, idOrPrefix: { id: string } | { prefix: string }, confirmed: bigint, headBlock: bigint): Promise<void> {
   const target = 'id' in idOrPrefix ? sql`id = ${idOrPrefix.id}` : sql`id LIKE ${idOrPrefix.prefix}`;
-  await db.execute(sql`UPDATE sources SET
-    confirmed_to_block = GREATEST(confirmed_to_block, ${confirmed.toString()}::bigint),
-    scanned_to_block = GREATEST(scanned_to_block, ${confirmed.toString()}::bigint),
-    status = CASE WHEN GREATEST(confirmed_to_block, ${confirmed.toString()}::bigint) >= ${headBlock.toString()}::bigint
-      THEN 'caught_up' ELSE 'backfilling' END
-    WHERE ${target}`);
+  const head = headBlock.toString();
+  const confirmedText = confirmed.toString();
+  await db.transaction(async (tx) => {
+    const result = await tx.execute(sql`
+      WITH before AS (SELECT id, confirmed_to_block FROM sources WHERE ${target}),
+      updated AS (
+        UPDATE sources s SET
+          confirmed_to_block = GREATEST(s.confirmed_to_block, ${confirmedText}::bigint),
+          scanned_to_block = GREATEST(s.scanned_to_block, ${confirmedText}::bigint),
+          status = CASE WHEN GREATEST(s.confirmed_to_block, ${confirmedText}::bigint) >= ${head}::bigint
+            THEN 'caught_up' ELSE 'backfilling' END
+        FROM before WHERE s.id = before.id
+        RETURNING s.id, s.confirmed_to_block
+      )
+      SELECT updated.id FROM updated JOIN before ON before.id = updated.id
+      WHERE (before.confirmed_to_block >= ${head}::bigint) <> (updated.confirmed_to_block >= ${head}::bigint)`);
+    const flipped = (result as unknown as { rows: { id: string }[] }).rows.map((row) => row.id);
+    await invalidateForCoverageChange(tx, flipped);
+  });
 }
 
 export async function syncSourceCoverage(appDb: Database, chainId: number, headBlock: bigint): Promise<void> {
