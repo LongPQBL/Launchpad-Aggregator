@@ -7,6 +7,8 @@ import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
 import { runTailPass, runHistoryPass, retryUnresolvedEvents, syncSourceCoverage, type SyncReport } from './incrementalSync.js';
 import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './incrementalRepair.js';
 import { STREAMS, detectEnvioRollback, type Stream } from './incrementalCursor.js';
+import { repairPoolWindow, syncV4PoolPage, type PoolRepairReport, type PoolSyncPageResult,
+  type PoolStream } from '../pools/syncV4Pools.js';
 
 export interface AllSyncTables {
   v1: EnvioTableNames;
@@ -102,6 +104,29 @@ export interface RepairCycleDeps {
   tables?: Partial<Record<Stream, string>>;
   depth?: bigint;
   progressTable?: string;
+}
+
+// All-V4 discovery keeps its own cursor and trade tables so it never changes the official Pons feed.
+export async function runPoolCatalogCycle(envioPool: Pool, appDb: Database, chainId: number,
+  deps: { limit?: number; progressTable?: string; tables?: Partial<Record<PoolStream, string>> } = {},
+): Promise<PoolSyncPageResult[]> {
+  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+  const results: PoolSyncPageResult[] = [];
+  for (const lane of ['tail', 'history'] as const) {
+    for (const stream of ['initialize', 'swap'] as const) {
+      results.push(await syncV4PoolPage(envioPool, appDb, { chainId, lane, stream,
+        fence: processedBlock, limit: deps.limit ?? 500, tables: deps.tables }));
+    }
+  }
+  return results;
+}
+
+export async function runPoolCatalogRepairCycle(envioPool: Pool, appDb: Database, chainId: number,
+  deps: { depth?: bigint; progressTable?: string; tables?: Partial<Record<PoolStream, string>> } = {},
+): Promise<PoolRepairReport> {
+  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+  return repairPoolWindow(envioPool, appDb, { chainId, fence: processedBlock,
+    depth: deps.depth ?? 500n, tables: deps.tables });
 }
 
 /**

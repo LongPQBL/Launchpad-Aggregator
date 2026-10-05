@@ -282,6 +282,53 @@ export const poolMembers = pgTable('pool_members', {
   index('pool_members_token_idx').on(table.chainId, table.tokenAddress),
 ]);
 
+export const poolTrades = pgTable('pool_trades', {
+  chainId: integer('chain_id').notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  blockHash: text('block_hash').notNull(),
+  timestamp: integer('timestamp').notNull(),
+  amount0Raw: numeric('amount0_raw', { precision: 78, scale: 0 }).notNull(),
+  amount1Raw: numeric('amount1_raw', { precision: 78, scale: 0 }).notNull(),
+  sqrtPriceX96: numeric('sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  traderAddress: text('trader_address').notNull(),
+  senderAddress: text('sender_address').notNull(),
+  fee: integer('fee').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
+  foreignKey({ columns: [table.chainId, table.protocol, table.poolId],
+    foreignColumns: [poolCatalog.chainId, poolCatalog.protocol, poolCatalog.poolId] }).onDelete('cascade'),
+  index('pool_trades_pool_time_idx').on(table.chainId, table.protocol, table.poolId, table.timestamp),
+  index('pool_trades_pool_block_idx').on(table.chainId, table.protocol, table.poolId, table.blockNumber),
+]);
+
+export const poolSyncCursors = pgTable('pool_sync_cursors', {
+  chainId: integer('chain_id').notNull(),
+  stream: text('stream').notNull(),
+  lane: text('lane').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull().default(sql`0`),
+  logIndex: integer('log_index').notNull().default(-1),
+  rawId: text('raw_id').notNull().default(''),
+  processedWatermark: bigint('processed_watermark', { mode: 'bigint' }),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.stream, table.lane] }),
+  check('pool_sync_cursors_stream', sql`${table.stream} IN ('initialize', 'swap')`),
+  check('pool_sync_cursors_lane', sql`${table.lane} IN ('tail', 'history')`),
+]);
+
+export const poolPendingSwaps = pgTable('pool_pending_swaps', {
+  chainId: integer('chain_id').notNull(),
+  rawId: text('raw_id').notNull(),
+  poolId: text('pool_id').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.rawId] }),
+  index('pool_pending_swaps_pool_idx').on(table.chainId, table.poolId),
+]);
+
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {
   sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   chainId: integer('chain_id').notNull(),

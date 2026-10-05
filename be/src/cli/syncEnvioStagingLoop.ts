@@ -1,7 +1,8 @@
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
-import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepairCycle } from '../envioSync/syncAll.js';
+import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepairCycle,
+  runPoolCatalogCycle, runPoolCatalogRepairCycle } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
@@ -97,13 +98,19 @@ if (syncTarget === 'staging') {
     const startedAt = new Date().toISOString();
     try {
       const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable });
+      const poolTables = { initialize: tables.v4.rawV4InitializeTable, swap: tables.v4.rawV4SwapTable };
+      const poolPages = await runPoolCatalogCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable, tables: poolTables });
       failureStreak = 0;
       console.log(`[${startedAt}] Envio tail pass:`, tail.results);
       console.log(`[${startedAt}] Envio history pass:`, history.results);
+      console.log(`[${startedAt}] V4 pool catalog pages:`, poolPages);
       tick += 1;
       if (tick % repairEveryTicks === 0) {
         const repairReport = await runRepairCycle(envioPool, db, 4663, { progressTable: tables.v1.progressTable });
+        const poolRepair = await runPoolCatalogRepairCycle(envioPool, db, 4663,
+          { progressTable: tables.v1.progressTable, tables: poolTables });
         console.log(`[${startedAt}] Envio reorg repair: ${repairReport.changedLaunchKeys.length} launch(es) affected`);
+        console.log(`[${startedAt}] V4 pool catalog repair:`, poolRepair);
       }
     } catch (error) {
       failureStreak += 1;
