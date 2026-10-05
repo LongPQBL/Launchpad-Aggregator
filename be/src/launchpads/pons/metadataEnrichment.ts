@@ -1,3 +1,4 @@
+import type { Pool } from 'pg';
 import type { Address } from 'viem';
 import type { Database } from '../../db/client.js';
 import { readV1CoreMetadataOutcomes, readV2CoreMetadataOutcomes } from './coreMetadata.js';
@@ -5,6 +6,7 @@ import { readExtendedTokenMetadataOutcomes, readLaunchTimestamp,
   type BlockReadClient, type ExtendedMetadataReadClient, type ReadOutcome } from './extendedMetadata.js';
 import { claimDueMetadataLaunches, finishCoreMetadataLaunch, finishMetadataLaunch } from './metadataEnrichmentStore.js';
 import { notifyChanged } from '../../envioSync/notifyChanges.js';
+import { lookupLaunch, repriceNullPricedTrades } from '../../envioSync/incrementalSync.js';
 import type { V1ReadClient } from './v1/state.js';
 import type { V2QuoteClient } from './v2/adapter.js';
 
@@ -23,7 +25,8 @@ interface MetadataEnrichmentReport {
 }
 
 export async function enrichMetadataOnce(
-  db: Database, client: ExtendedMetadataReadClient & BlockReadClient & V1ReadClient & V2QuoteClient, now: Date, limit = 10,
+  db: Database, envioPool: Pool, client: ExtendedMetadataReadClient & BlockReadClient & V1ReadClient & V2QuoteClient,
+  now: Date, limit = 10,
 ): Promise<MetadataEnrichmentReport> {
   const claims = await claimDueMetadataLaunches(db, now, limit, 600_000);
   let completed = 0;
@@ -47,7 +50,15 @@ export async function enrichMetadataOnce(
       // Not wrapped in a transaction (finishCoreMetadataLaunch is its own atomic UPDATE) — notify
       // right after a successful save, same as "verified metadata arrives" in the spec's near-
       // realtime design, even if some individual fields (e.g. decimals alone) are still pending.
-      if (coreSaved) await notifyChanged(db, [{ kind: 'launch.changed', chainId: claim.chainId, tokenAddress: claim.tokenAddress }]);
+      if (coreSaved) {
+        await notifyChanged(db, [{ kind: 'launch.changed', chainId: claim.chainId, tokenAddress: claim.tokenAddress }]);
+        // Decimals may have just gone from unknown to known — any trade recorded for this launch
+        // while they were unknown has a permanently-null price unless repriced now (trades are
+        // insert-only; nothing else ever revisits them). A no-op when decimals are still pending or
+        // there's nothing to reprice (final review, Critical 2).
+        const launch = await lookupLaunch(db, claim.chainId, claim.tokenAddress);
+        if (launch) await repriceNullPricedTrades(envioPool, db, launch);
+      }
       corePending = !coreSaved || [core.name, core.symbol, core.decimals, core.graduated, core.quoteAssetSymbol, core.quoteAssetDecimals]
         .some((outcome) => outcome.state === 'pending');
     }
@@ -77,13 +88,13 @@ export async function enrichMetadataOnce(
 }
 
 export async function enrichMetadataSafely(
-  db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date,
+  db: Database, envioPool: Pool, client: ExtendedMetadataReadClient & BlockReadClient, now: Date,
   log: (event: { kind: string; claimed?: number; completed?: number; pending?: number;
     transportFailures?: number; unknownFailures?: number }) => void,
   limit = 10,
 ): Promise<void> {
   try {
-    const result = await enrichMetadataOnce(db, client, now, limit);
+    const result = await enrichMetadataOnce(db, envioPool, client, now, limit);
     log({ kind: 'enrichment_complete', ...result });
   } catch {
     // Errors can include provider URLs. Report only a fixed category here.

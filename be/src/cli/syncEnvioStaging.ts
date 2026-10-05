@@ -22,7 +22,7 @@ try {
   console.log(`Synced V4 from Envio into ${syncTarget}:`, v4Result);
   if (syncTarget === 'real') {
     const metadataClient = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com');
-    await enrichMetadataSafely(db, metadataClient, new Date(),
+    await enrichMetadataSafely(db, envioPool, metadataClient, new Date(),
       (event) => console.log('Envio metadata enrichment:', event),
       resolveMetadataBatchLimit(process.env.ENVIO_METADATA_BATCH_LIMIT));
   }

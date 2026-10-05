@@ -8,7 +8,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
 import type { Launch } from '../domain/types.js';
 import { claimSyncCursor, advanceSyncCursor, type Lane, type Stream } from './incrementalCursor.js';
-import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage } from './incrementalSync.js';
+import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage, repriceNullPricedTrades, lookupLaunch } from './incrementalSync.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -559,5 +559,64 @@ describe('syncSourceCoverage (final review, Critical 3)', () => {
     const [row] = await db.select().from(sources).where(eq(sources.id, v2Factory.id));
     expect(row!.confirmedToBlock).toBe(900n);
     expect(row!.status).toBe('caught_up');
+  });
+});
+
+describe('repriceNullPricedTrades (final review, Critical 2)', () => {
+  it('fills in a previously null-priced V1 trade once the launch\'s token decimals are resolved later — never left null forever', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`reprice-${token}`, token, poolAddress, txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    await insertSwapRow(`reprice-swap-${token}`, poolAddress, 110, 1, '100000000000000000', '-200000000000000000000');
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+
+    let [tradeRow] = await db.select().from(trades).where(eq(trades.tokenAddress, token));
+    expect(tradeRow!.priceNumeratorRaw).toBeNull();
+    expect(tradeRow!.priceDenominatorRaw).toBeNull();
+
+    // Core metadata enrichment resolves the token's decimals later — on-chain truth was always
+    // available, this trade's price must not stay null forever just because it arrived first.
+    await db.update(launches).set({ tokenDecimals: 18 }).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, token)));
+    const launch = await lookupLaunch(db, chainId, token);
+    const repricedCount = await repriceNullPricedTrades(envioPool, db, launch!, tables);
+    expect(repricedCount).toBe(1);
+
+    [tradeRow] = await db.select().from(trades).where(eq(trades.tokenAddress, token));
+    expect(tradeRow!.priceNumeratorRaw).not.toBeNull();
+    expect(tradeRow!.priceDenominatorRaw).not.toBeNull();
+    expect(BigInt(tradeRow!.priceNumeratorRaw!)).toBeGreaterThan(0n);
+    expect(BigInt(tradeRow!.priceDenominatorRaw!)).toBeGreaterThan(0n);
+
+    // Idempotent: re-running after the trade is already priced reprices nothing.
+    const secondPass = await repriceNullPricedTrades(envioPool, db, launch!, tables);
+    expect(secondPass).toBe(0);
+  });
+
+  it('never touches a curve/buyback trade, which is null by design regardless of decimals', async () => {
+    await resetCursor('v2-launch', 'history');
+    const { token, poolAddress: curveAddress, txHash: launchTxHash } = freshToken();
+    await envioPool.query(`INSERT INTO ${rawLaunchV2Table} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`reprice-v2-${token}`, chainId, token, curveAddress, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0', zeroAddress,
+        100, `0x${'a7'.repeat(32)}`, launchTxHash, 1]);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    const launch = await lookupLaunch(db, chainId, token);
+    await db.insert(venues).values({
+      id: `curve-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: curveAddress,
+      sourceId: 'pons-v2-curve', sourceLogId: null, effectiveFromBlock: 100n, official: true,
+    });
+    await db.insert(trades).values({
+      chainId, tokenAddress: token, venueId: `curve-${token}`, blockNumber: 105n, blockHash: `0x${'e1'.repeat(32)}`,
+      txHash: `0x${'e2'.repeat(32)}`, logIndex: 1, timestamp: 1_700_000_100, side: 'buy',
+      tokenAmountRaw: '1000000000000000000', quoteAmountRaw: '2000000000000000000',
+      quoteAssetAddress: zeroAddress, sourceEvent: 'CurveBuy', activityKind: 'user_trade',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: zeroAddress,
+    });
+
+    const repricedCount = await repriceNullPricedTrades(envioPool, db, launch!, tables);
+    expect(repricedCount).toBe(0);
+    const [tradeRow] = await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+    expect(tradeRow!.priceNumeratorRaw).toBeNull();
   });
 });

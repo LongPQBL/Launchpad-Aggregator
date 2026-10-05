@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import type { Pool } from 'pg';
 import type { Database } from '../../db/client.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from './metadataEnrichment.js';
 
@@ -7,7 +8,7 @@ afterEach(() => vi.useRealTimers());
 it('contains a worker failure and logs no RPC URL or credential', async () => {
   const events: unknown[] = [];
   const brokenDb = { $client: { connect: async () => { throw new Error('https://rpc.example/secret-key'); } } } as unknown as Database;
-  await expect(enrichMetadataSafely(brokenDb, {
+  await expect(enrichMetadataSafely(brokenDb, {} as Pool, {
     readContract: async () => '', getBlock: async () => ({ timestamp: 1n }),
   }, new Date('2026-10-04T00:00:00Z'), (event) => events.push(event))).resolves.toBeUndefined();
   expect(events).toEqual([{ kind: 'enrichment_error' }]);

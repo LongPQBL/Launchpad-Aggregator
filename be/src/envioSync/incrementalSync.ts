@@ -1,11 +1,11 @@
 import type { Pool } from 'pg';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
 import type { Database, DbOrTx } from '../db/client.js';
 import type { Launch, LifecycleStatus, Venue, VenueKind } from '../domain/types.js';
 import { launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { claimSyncCursor, advanceSyncCursor, STREAMS, type Stream, type Lane, type CursorPosition, type SyncCursor } from './incrementalCursor.js';
-import { readRawPage, readRawRowById } from './incrementalPage.js';
+import { readRawPage, readRawRowById, readRawRowByTxLog } from './incrementalPage.js';
 import { claimDueUnresolvedEvents, earliestUnresolvedBlock, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
 import { notifyChanged, type ChangeNotification } from './notifyChanges.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
@@ -69,7 +69,7 @@ function toVenueFromRow(row: typeof venues.$inferSelect): Venue {
     effectiveToBlock: row.effectiveToBlock, effectiveToLogIndex: row.effectiveToLogIndex, official: row.official,
   };
 }
-async function lookupLaunch(db: DbOrTx, chainId: number, tokenAddress: string): Promise<Launch | null> {
+export async function lookupLaunch(db: DbOrTx, chainId: number, tokenAddress: string): Promise<Launch | null> {
   const [row] = await db.select().from(launches).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, tokenAddress.toLowerCase())));
   return row ? toLaunchFromRow(row) : null;
 }
@@ -581,6 +581,46 @@ export async function syncSourceCoverage(appDb: Database, chainId: number, headB
   if (v2LifecycleConfirmed !== null) await advanceSourceCoverage(appDb, { id: 'pons-v2-lifecycle' }, v2LifecycleConfirmed, headBlock);
   const v4Confirmed = await confirmedSourceBlock(appDb, chainId, ['v2-launch', 'v2-lifecycle', 'v4-initialize', 'v4-swap'], 'history');
   if (v4Confirmed !== null) await advanceSourceCoverage(appDb, { prefix: 'pons-v2-v4:%' }, v4Confirmed, headBlock);
+}
+
+// V1/V4 swap prices (sourceEvent 'Swap') are left null only because the launch's decimals were
+// unknown at insert time (minimal-launch-first design) — the underlying on-chain price was always
+// real, just withheld. Curve/buyback trades are null by design regardless of decimals (unrelated;
+// excluded by the sourceEvent filter) and must never be touched here. `trades` doesn't keep Envio's
+// raw sqrtPriceX96, so this goes back to Envio's own raw row (by chainId/txHash/logIndex) to recompute
+// the exact same pool-price formula hydrateV1SwapFromDecoded/hydrateV4SwapFromDecoded use — never an
+// approximation from tokenAmountRaw/quoteAmountRaw, which is the trade's execution ratio, not the
+// pool's price (final review, Critical 2).
+export async function repriceNullPricedTrades(
+  envioPool: Pool, db: DbOrTx, launch: Launch, tablesOverride: Partial<Record<Stream, string>> = {},
+): Promise<number> {
+  if (launch.tokenDecimals === null || launch.quoteAsset.decimals === null) return 0;
+  const tableByStream = { ...DEFAULT_STREAM_TABLES, ...tablesOverride };
+  const rows = await db.select({ trade: trades, venueKind: venues.kind }).from(trades)
+    .innerJoin(venues, eq(trades.venueId, venues.id))
+    .where(and(eq(trades.chainId, launch.chainId), eq(trades.tokenAddress, launch.tokenAddress.toLowerCase()),
+      eq(trades.sourceEvent, 'Swap'), isNull(trades.priceNumeratorRaw)));
+  const tokenIsBase = launch.tokenAddress.toLowerCase() < launch.quoteAsset.address.toLowerCase();
+  const q192 = 2n ** 192n;
+  const decimalScale = 10n ** BigInt(launch.tokenDecimals);
+  const quoteScale = 10n ** BigInt(launch.quoteAsset.decimals);
+  let repriced = 0;
+  for (const { trade, venueKind } of rows) {
+    const table = venueKind === 'v3_pool' ? tableByStream['v1-swap'] : tableByStream['v4-swap'];
+    const raw = await readRawRowByTxLog(envioPool, table, launch.chainId, trade.txHash, trade.logIndex);
+    if (!raw) continue; // a reorg replaced/removed the raw row since this trade was recorded
+    const sqrtPriceX96 = BigInt(String(raw.sqrtPriceX96));
+    if (sqrtPriceX96 === 0n) continue;
+    const sqrtSquared = sqrtPriceX96 * sqrtPriceX96;
+    const priceNumeratorRaw = tokenIsBase ? sqrtSquared * decimalScale : q192 * decimalScale;
+    const priceDenominatorRaw = tokenIsBase ? q192 * quoteScale : sqrtSquared * quoteScale;
+    const updated = await db.update(trades).set({
+      priceNumeratorRaw: priceNumeratorRaw.toString(), priceDenominatorRaw: priceDenominatorRaw.toString(),
+    }).where(and(eq(trades.chainId, launch.chainId), eq(trades.txHash, trade.txHash), eq(trades.logIndex, trade.logIndex)))
+      .returning({ txHash: trades.txHash });
+    if (updated.length) repriced += 1;
+  }
+  return repriced;
 }
 
 export interface SyncReport {

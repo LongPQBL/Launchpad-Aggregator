@@ -1,9 +1,16 @@
-import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import type { Pool } from 'pg';
 import { TimeoutError } from 'viem';
 import { createDatabase } from '../../db/client.js';
 import { launches, metadataEnrichmentBudget, sources } from '../../db/schema.js';
 import { enrichMetadataOnce } from './metadataEnrichment.js';
+
+vi.mock('../../envioSync/incrementalSync.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../envioSync/incrementalSync.js')>();
+  return { ...actual, repriceNullPricedTrades: vi.fn(async () => 0) };
+});
+const { repriceNullPricedTrades } = await import('../../envioSync/incrementalSync.js');
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -11,12 +18,16 @@ const { db, pool } = createDatabase(databaseUrl);
 const address = `0x${'d'.repeat(40)}`;
 const secondAddress = `0x${'c'.repeat(40)}`;
 const now = new Date('2026-10-04T12:00:00.000Z');
+// repriceNullPricedTrades is mocked above — enrichMetadataOnce never does real Envio I/O in this
+// file, so a stub pool is enough to thread through the new parameter.
+const envioPoolStub = {} as Pool;
 
 beforeAll(async () => {
   await db.insert(sources).values({ id: 'pons-v2', chainId: 4663, version: 'v2', factoryAddress: address,
     startBlock: 1n, scannedToBlock: 1n, confirmedToBlock: 1n, status: 'backfilling' }).onConflictDoNothing();
 });
 beforeEach(async () => {
+  vi.mocked(repriceNullPricedTrades).mockClear();
   await db.update(metadataEnrichmentBudget).set({ lastStartedAt: null }).where(eq(metadataEnrichmentBudget.id, 1));
   await db.insert(launches).values({
     chainId: 4663, tokenAddress: address, sourceId: 'pons-v2', sourceLogId: null,
@@ -48,10 +59,10 @@ it('keeps only one RPC enrichment worker active across overlapping Envio process
     },
     getBlock: async () => ({ timestamp: 1_700_000_000n }),
   };
-  const firstPass = enrichMetadataOnce(db, firstClient, now, 1);
+  const firstPass = enrichMetadataOnce(db, envioPoolStub, firstClient, now, 1);
   await enteredRead;
   let secondCalls = 0;
-  const secondPass = await enrichMetadataOnce(db, {
+  const secondPass = await enrichMetadataOnce(db, envioPoolStub, {
     readContract: async () => { secondCalls++; return 'unexpected'; },
     getBlock: async () => ({ timestamp: 1_700_000_000n }),
   }, new Date(now.getTime() + 60_001), 1);
@@ -91,7 +102,7 @@ it('resolves a near-realtime-synced V1 launch\'s core metadata, retrying only th
     getBlock: async () => { throw new Error('timestamp already done'); },
   };
   try {
-    const first = await enrichMetadataOnce(db, rpcClient, now, 1);
+    const first = await enrichMetadataOnce(db, envioPoolStub, rpcClient, now, 1);
     expect(first.pending).toBe(1);
     expect(first.transportFailures).toBe(1);
     let [row] = await db.select().from(launches).where(eq(launches.tokenAddress, v1Address));
@@ -106,13 +117,19 @@ it('resolves a near-realtime-synced V1 launch\'s core metadata, retrying only th
 
     graduationFails = false;
     calls.length = 0;
-    const second = await enrichMetadataOnce(db, rpcClient, new Date(now.getTime() + 60_001), 1);
+    const second = await enrichMetadataOnce(db, envioPoolStub, rpcClient, new Date(now.getTime() + 60_001), 1);
     expect(second.completed).toBe(1);
     expect(calls).toEqual(expect.arrayContaining(['graduationStatus']));
     [row] = await db.select().from(launches).where(eq(launches.tokenAddress, v1Address));
     expect(row.lifecycleStatus).toBe('graduated');
     expect(row.coreMetadataReadState).toBe('done');
     expect(row.coreMetadataRetryAt).toBeNull();
+    // Decimals just resolved (name/symbol/decimals group) — repriceNullPricedTrades must run for
+    // this launch so any trade recorded while decimals were unknown gets its real price filled in,
+    // not left null forever (final review, Critical 2).
+    expect(repriceNullPricedTrades).toHaveBeenCalledWith(
+      envioPoolStub, db, expect.objectContaining({ tokenAddress: v1Address, tokenDecimals: 9 }),
+    );
   } finally {
     await db.delete(launches).where(eq(launches.tokenAddress, v1Address));
   }
@@ -131,7 +148,7 @@ it('repairs a launch far outside the reorg window, then retries only the field t
     },
     getBlock: async () => { throw new Error('timestamp was already done'); },
   };
-  const first = await enrichMetadataOnce(db, rpcClient, now, 1);
+  const first = await enrichMetadataOnce(db, envioPoolStub, rpcClient, now, 1);
   expect(first).toEqual({ claimed: 1, completed: 0, pending: 1, transportFailures: 1, unknownFailures: 0 });
   expect(calls).toEqual(['logo', 'description']);
   let [row] = await db.select().from(launches).where(eq(launches.tokenAddress, address));
@@ -142,7 +159,7 @@ it('repairs a launch far outside the reorg window, then retries only the field t
 
   descriptionFails = false;
   calls.length = 0;
-  const second = await enrichMetadataOnce(db, rpcClient, new Date(now.getTime() + 60_001), 1);
+  const second = await enrichMetadataOnce(db, envioPoolStub, rpcClient, new Date(now.getTime() + 60_001), 1);
   expect(second).toEqual({ claimed: 1, completed: 1, pending: 0, transportFailures: 0, unknownFailures: 0 });
   expect(calls).toEqual(['description']);
   [row] = await db.select().from(launches).where(eq(launches.tokenAddress, address));

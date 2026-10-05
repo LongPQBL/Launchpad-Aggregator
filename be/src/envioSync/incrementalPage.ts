@@ -36,6 +36,20 @@ export async function readRawRowById(envioPool: Pool, table: string, id: string)
   return (result.rows[0] as Record<string, unknown> | undefined) ?? null;
 }
 
+/**
+ * Point lookup by (chainId, txHash, logIndex) — `trades` keeps that triple as its own primary key
+ * but not Envio's raw sqrtPriceX96, so repricing a trade once decimals resolve (final review,
+ * Critical 2) has to go back to Envio's raw row to recompute price, not just re-read `trades` itself.
+ */
+export async function readRawRowByTxLog(envioPool: Pool, table: string, chainId: number, txHash: string, logIndex: number): Promise<Record<string, unknown> | null> {
+  assertSafeTable(table);
+  const result = await envioPool.query(
+    `SELECT * FROM ${table} WHERE "chainId" = $1 AND "txHash" = $2 AND "logIndex" = $3 LIMIT 1`,
+    [chainId, txHash, logIndex],
+  );
+  return (result.rows[0] as Record<string, unknown> | undefined) ?? null;
+}
+
 export interface CanonicalEventKey { txHash: string; logIndex: number; blockHash: string }
 
 /**

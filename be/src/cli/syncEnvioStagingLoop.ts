@@ -23,7 +23,7 @@ const metadataBatchLimit = metadataClient ? resolveMetadataBatchLimit(process.en
 
 let stopping = false;
 const metadataLoop = metadataClient
-  ? startMetadataEnrichmentLoop(() => enrichMetadataSafely(db, metadataClient, new Date(), (event) => {
+  ? startMetadataEnrichmentLoop(() => enrichMetadataSafely(db, envioPool, metadataClient, new Date(), (event) => {
     if (event.kind === 'enrichment_error' || (event.claimed ?? 0) > 0) console.log('Envio metadata enrichment:', event);
   }, metadataBatchLimit)) : null;
 const priceLoop = metadataClient
