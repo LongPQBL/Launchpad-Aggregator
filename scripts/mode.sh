@@ -25,7 +25,7 @@ else
 fi
 previous="$(cat "$state_file" 2>/dev/null || echo none)"
 
-pkill -f "syncEnvioStagingLoop|runLaunchVolumeWorker|runUsdCandleWorker|cli/api.ts" 2>/dev/null || true
+pkill -9 -f "syncEnvioStagingLoop|runLaunchVolumeWorker|runUsdCandleWorker|cli/api.ts" 2>/dev/null || true
 sleep 2
 
 restart_envio=""
