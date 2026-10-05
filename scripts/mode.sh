@@ -36,8 +36,8 @@ sleep 2
 
 # The app's Envio reader expects tables under schema "envio"; envio dev writes them to "public".
 # Wait for the indexer storage, then (re)create read-only views. --restart drops this schema, so do it every switch.
-for _ in $(seq 1 120); do
-  if docker exec envio-postgres psql -U postgres -d envio-dev -tAc "select 1 from information_schema.tables where table_name = 'chain_metadata'" 2>/dev/null | grep -q 1; then break; fi
+for _ in $(seq 1 240); do
+  if grep -q "Starting indexing" "$log_dir/envio-$mode.log" 2>/dev/null; then break; fi
   sleep 5
 done
 views="CREATE SCHEMA IF NOT EXISTS envio;"
