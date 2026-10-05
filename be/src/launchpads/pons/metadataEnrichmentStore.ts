@@ -3,6 +3,11 @@ import type { Database } from '../../db/client.js';
 import type { CoreMetadataReadResults } from './coreMetadata.js';
 import { mapMetadataReadResults, type MetadataReadResults } from './extendedMetadata.js';
 
+// Minimum spacing between enrichment passes. Production keeps the default; a test environment can shorten it.
+function metadataPassIntervalMs(): number {
+  return Number(process.env.METADATA_ENRICHMENT_PASS_INTERVAL_MS ?? 60_000);
+}
+
 export interface ClaimedMetadataLaunch {
   chainId: number;
   tokenAddress: string;
@@ -52,7 +57,7 @@ export async function claimDueMetadataLaunches(db: Database, now: Date, limit: n
       'SELECT last_started_at FROM metadata_enrichment_budget WHERE id = 1 FOR UPDATE',
     );
     if (budget.rowCount !== 1) throw new Error('Metadata enrichment budget is missing');
-    if (budget.rows[0].last_started_at && now.getTime() - budget.rows[0].last_started_at.getTime() < 60_000) {
+    if (budget.rows[0].last_started_at && now.getTime() - budget.rows[0].last_started_at.getTime() < metadataPassIntervalMs()) {
       await client.query('COMMIT');
       return [];
     }
