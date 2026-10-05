@@ -240,6 +240,32 @@ describe('repairEnvioWindow: a launch deletion forces its dependent streams\' cu
     // relaunched/corrected token in this window must be re-read, not silently skipped forever.
     expect(afterSwapCursor.blockNumber).toBeLessThanOrEqual(500n);
   });
+
+  it('enqueues the launch volume job when a reorg deletes a trade that Envio no longer has', async () => {
+    await resetCursor('v1-launch', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`reorg-trade-launch-${token}`, token, poolAddress, txHash, 600, `0x${'b1'.repeat(32)}`);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence, limit: 10, tables });
+    await db.insert(venues).values({
+      id: `v3-reorg-${token}`, chainId, tokenAddress: token, kind: 'v3_pool', ref: poolAddress,
+      sourceId: `${(await db.select().from(launches).where(eq(launches.tokenAddress, token)))[0]!.sourceId}-trades`,
+      sourceLogId: null, effectiveFromBlock: 600n, official: true,
+    });
+    await db.insert(trades).values({
+      chainId, tokenAddress: token, venueId: `v3-reorg-${token}`, blockNumber: 610n, blockHash: `0x${'b2'.repeat(32)}`,
+      txHash: `0x${'b3'.repeat(32)}`, logIndex: 1, timestamp: 1_700_000_000, side: 'buy',
+      tokenAmountRaw: '1000000000000000000', quoteAmountRaw: '2000000000000000000',
+      quoteAssetAddress: weth, sourceEvent: 'Swap', activityKind: 'user_trade',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: token,
+    });
+    await pool.query('DELETE FROM launch_volume24h_jobs WHERE token_address = $1', [token]);
+
+    await repairEnvioWindow(envioPool, db, { chainId, fence, depth, tables });
+
+    expect(await db.select().from(trades).where(eq(trades.tokenAddress, token))).toHaveLength(0);
+    const job = await pool.query('SELECT revision FROM launch_volume24h_jobs WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+    expect(job.rows[0]?.revision).toBe(1);
+  });
 });
 
 describe('repairEnvioWindow: Envio processed-block rollback behind the cursor', () => {

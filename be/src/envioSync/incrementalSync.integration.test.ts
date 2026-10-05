@@ -652,3 +652,41 @@ describe('applyEnvioPage: no notification for a no-op replay (final review, Mino
     expect(secondChanges).toEqual([]);
   });
 });
+
+describe('applyEnvioPage: volume ranking invalidation', () => {
+  async function volumeJobRevision(token: string): Promise<number | undefined> {
+    return (await pool.query('SELECT revision FROM launch_volume24h_jobs WHERE chain_id = $1 AND token_address = $2', [chainId, token])).rows[0]?.revision;
+  }
+
+  it('enqueues one volume job per launch whose trades changed, coalescing several swaps from one page into one revision bump', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`vol-launch-${token}`, token, poolAddress, txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    expect(await volumeJobRevision(token)).toBe(1);
+
+    await insertSwapRow(`vol-swap-a-${token}`, poolAddress, 110, 1, '100000000000000000', '-200000000000000000000');
+    await insertSwapRow(`vol-swap-b-${token}`, poolAddress, 111, 1, '100000000000000000', '-200000000000000000000');
+    const result = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+    expect(result.applied).toBe(2);
+    expect(await volumeJobRevision(token)).toBe(2);
+    const jobs = await pool.query('SELECT count(*)::int AS n FROM launch_volume24h_jobs WHERE token_address = $1', [token]);
+    expect(jobs.rows[0].n).toBe(1);
+  });
+
+  it('enqueues nothing when a replayed page finds every trade already applied', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`vol-replay-launch-${token}`, token, poolAddress, txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    await insertSwapRow(`vol-replay-swap-${token}`, poolAddress, 110, 1, '100000000000000000', '-200000000000000000000');
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+    await pool.query('DELETE FROM launch_volume24h_jobs WHERE token_address = $1', [token]);
+
+    await resetCursor('v1-swap', 'history');
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+    expect(await volumeJobRevision(token)).toBeUndefined();
+  });
+});

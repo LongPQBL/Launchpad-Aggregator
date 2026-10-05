@@ -17,6 +17,8 @@ import { envioRawLifecycleToTransition, type EnvioRawLifecycleRow } from './tran
 import { verifyV4PoolFromEnvio, openV4Venue, hydrateV4SwapFromDecoded,
   type EnvioRawV4InitializeRow, type EnvioRawV4SwapRow } from './transformV4.js';
 import { enqueueFeedResolutionJob } from '../market/quotePricing/priceJobStore.js';
+import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
+import { launchKeysFromChanges } from '../market/launchVolume/invalidate.js';
 
 export const DEFAULT_STREAM_TABLES: Record<Stream, string> = {
   'v1-launch': 'envio."RawLaunch"',
@@ -426,6 +428,7 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
       ? (page.lastPosition.blockNumber > 0n ? page.lastPosition.blockNumber - 1n : 0n)
       : input.fence;
     await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, confirmedBlock);
+    await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), new Date());
     // Inside the same transaction so delivery to a LISTEN-ing session only happens after commit.
     await notifyChanged(tx, changes);
   });
@@ -486,6 +489,7 @@ export async function retryUnresolvedEvents(envioPool: Pool, appDb: Database, in
     await appDb.transaction(async (tx) => {
       outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets, changes);
       await settleUnresolvedEvent(tx, claim, outcome !== 'unresolved', now, claim.retryCount);
+      await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), now);
       await notifyChanged(tx, changes);
     });
     for (const asset of newQuoteAssets) {

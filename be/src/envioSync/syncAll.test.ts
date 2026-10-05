@@ -28,6 +28,9 @@ vi.mock('./runSyncV4.js', () => ({
   syncV4ToReal: vi.fn(async () => ({ venuesOpened: 1, tradesWritten: 1 })),
   DEFAULT_ENVIO_V4_TABLES: { rawV4InitializeTable: 'envio."RawV4Initialize"', rawV4SwapTable: 'envio."RawV4Swap"' },
 }));
+vi.mock('../market/launchVolume/store.js', () => ({
+  invalidateLaunchVolume: vi.fn(async () => undefined),
+}));
 vi.mock('./envioDb.js', () => ({
   readEnvioProgress: vi.fn(async () => ({ processedBlock: 100n, headBlock: 200n })),
   recordEnvioChainProgress: vi.fn(async () => undefined),
@@ -47,6 +50,7 @@ const { recordEnvioChainProgress } = await import('./envioDb.js');
 const { retryUnresolvedEvents, syncSourceCoverage } = await import('./incrementalSync.js');
 const { detectEnvioRollback } = await import('./incrementalCursor.js');
 const { repairEnvioWindow } = await import('./incrementalRepair.js');
+const { invalidateLaunchVolume } = await import('../market/launchVolume/store.js');
 
 const tables = {
   v1: { rawLaunchTable: 'x', rawSwapTable: 'x' },
@@ -66,11 +70,14 @@ describe('runAllSyncsOnce target dispatch', () => {
   });
 
   it('calls the *ToReal variants and mirrors chain progress when target is "real"', async () => {
-    const result = await runAllSyncsOnce({} as never, {} as never, tables, 'real');
+    const launchRows = [{ chainId: 4663, tokenAddress: '0xaa' }];
+    const appDb = { select: () => ({ from: () => ({ where: async () => launchRows }) }) };
+    const result = await runAllSyncsOnce({} as never, appDb as never, tables, 'real');
     expect(syncV1LegacyToReal).toHaveBeenCalled();
     expect(syncV2ToReal).toHaveBeenCalled();
     expect(syncV4ToReal).toHaveBeenCalled();
-    expect(recordEnvioChainProgress).toHaveBeenCalledWith({}, 4663, 200n);
+    expect(recordEnvioChainProgress).toHaveBeenCalledWith(appDb, 4663, 200n);
+    expect(invalidateLaunchVolume).toHaveBeenCalledWith(appDb, launchRows, expect.any(Date));
     expect(result.v1Result).toEqual({ launchesWritten: 1, tradesWritten: 1 });
     expect(result.v2Result).toEqual({ launchesWritten: 1, tradesWritten: 1, transitionsWritten: 1 });
     expect(result.v4Result).toEqual({ venuesOpened: 1, tradesWritten: 1 });

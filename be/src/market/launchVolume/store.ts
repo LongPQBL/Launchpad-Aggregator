@@ -1,4 +1,6 @@
-import type { Pool, PoolClient } from 'pg';
+import type { Pool } from 'pg';
+import { sql } from 'drizzle-orm';
+import type { DbOrTx } from '../../db/client.js';
 
 export const VOLUME_LEASE_SECONDS = 120;
 
@@ -19,28 +21,27 @@ export interface VolumeScore {
   launchLogIndex: number;
 }
 
-type Queryable = Pool | PoolClient;
-
 const RANK_ORDER: Record<RankCategory, number> = { positive: 0, zero: 1, null: 2 };
 
-export async function invalidateLaunchVolume(tx: Queryable, keys: readonly LaunchKey[], dueAt: Date): Promise<void> {
+export async function invalidateLaunchVolume(tx: DbOrTx, keys: readonly LaunchKey[], dueAt: Date): Promise<void> {
   const distinct = [...new Map(keys.map((key) => [`${key.chainId}:${key.tokenAddress}`, key])).values()];
   if (distinct.length === 0) return;
-  const chainIds = distinct.map((key) => key.chainId);
-  const tokenAddresses = distinct.map((key) => key.tokenAddress);
-  await tx.query(`
+  const values = sql.join(distinct.map((key) => sql`(${key.chainId}::integer, ${key.tokenAddress}::text)`), sql`, `);
+  // A launch deleted by reorg repair has no ranking left to recompute; its score row cascades with it.
+  await tx.execute(sql`
     INSERT INTO launch_volume24h_jobs (chain_id, token_address, revision, due_at)
-    SELECT k.chain_id, k.token_address, 1, $3::timestamptz
-    FROM unnest($1::integer[], $2::text[]) AS k(chain_id, token_address)
+    SELECT k.chain_id, k.token_address, 1, ${dueAt}::timestamptz
+    FROM (VALUES ${values}) AS k(chain_id, token_address)
+    JOIN launches l ON l.chain_id = k.chain_id AND l.token_address = k.token_address
     ON CONFLICT (chain_id, token_address) DO UPDATE SET
       revision = launch_volume24h_jobs.revision + 1,
       due_at = LEAST(launch_volume24h_jobs.due_at, EXCLUDED.due_at),
-      updated_at = now()`, [chainIds, tokenAddresses, dueAt]);
-  await tx.query(`
+      updated_at = now()`);
+  await tx.execute(sql`
     UPDATE launch_volume24h_usd AS s SET
       volume_usd = NULL, rank_category = 'null', rank_order = 2, completeness_reason = 'updating'
-    FROM unnest($1::integer[], $2::text[]) AS k(chain_id, token_address)
-    WHERE s.chain_id = k.chain_id AND s.token_address = k.token_address`, [chainIds, tokenAddresses]);
+    FROM (VALUES ${values}) AS k(chain_id, token_address)
+    WHERE s.chain_id = k.chain_id AND s.token_address = k.token_address`);
 }
 
 export async function claimVolumeJobs(pool: Pool, now: Date, limit: number): Promise<VolumeClaim[]> {

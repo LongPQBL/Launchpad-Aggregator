@@ -1,4 +1,7 @@
 import type { Pool } from 'pg';
+import { eq } from 'drizzle-orm';
+import { launches } from '../db/schema.js';
+import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import type { Database } from '../db/client.js';
 import { syncV1LegacyOnce, syncV1LegacyToReal, DEFAULT_ENVIO_TABLES, type EnvioTableNames } from './runSync.js';
 import { syncV2Once, syncV2ToReal, DEFAULT_ENVIO_V2_TABLES, type EnvioV2TableNames } from './runSyncV2.js';
@@ -54,6 +57,10 @@ export async function runAllSyncsOnce(envioPool: Pool, appDb: Database, tables: 
   if (target === 'real') {
     const { headBlock } = await readEnvioProgress(envioPool, tables.v1.progressTable);
     await recordEnvioChainProgress(appDb, 4663, headBlock);
+    // Full-table reconciliation can rewrite trades for any launch, so every launch's cached volume is stale.
+    const allLaunches = await appDb.select({ chainId: launches.chainId, tokenAddress: launches.tokenAddress })
+      .from(launches).where(eq(launches.chainId, 4663));
+    await invalidateLaunchVolume(appDb, allLaunches, new Date());
   }
   return { v1Result, v2Result, v4Result };
 }
