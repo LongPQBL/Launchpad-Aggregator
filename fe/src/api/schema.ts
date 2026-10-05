@@ -370,6 +370,300 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                chainId?: number;
+                                protocol?: string;
+                                poolId?: string;
+                                currency0?: string;
+                                currency1?: string;
+                                displayedToken?: string;
+                                fee?: number;
+                                tickSpacing?: number;
+                                hooks?: string;
+                                createdBlock?: string;
+                                createdTimestamp?: number | null;
+                                ponsDesignated?: boolean;
+                                launchTokenAddress?: string | null;
+                                volume24hUsd?: string | null;
+                                priceInQuote?: string | null;
+                                priceUsd?: string | null;
+                                fdvUsd?: string | null;
+                                tvlUsd?: string | null;
+                                change1h?: string | null;
+                                change1d?: string | null;
+                                coverageStatus?: string;
+                                lastTradeTimestamp?: number | null;
+                            }[];
+                            nextCursor?: string | null;
+                            supportedProtocols?: string[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/launches/{chainId}/{tokenAddress}/pools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    tokenAddress: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                chainId?: number;
+                                protocol?: string;
+                                poolId?: string;
+                                currency0?: string;
+                                currency1?: string;
+                                displayedToken?: string;
+                                fee?: number;
+                                tickSpacing?: number;
+                                hooks?: string;
+                                createdBlock?: string;
+                                createdTimestamp?: number | null;
+                                ponsDesignated?: boolean;
+                                launchTokenAddress?: string | null;
+                                volume24hUsd?: string | null;
+                                priceInQuote?: string | null;
+                                priceUsd?: string | null;
+                                fdvUsd?: string | null;
+                                tvlUsd?: string | null;
+                                change1h?: string | null;
+                                change1d?: string | null;
+                                coverageStatus?: string;
+                                lastTradeTimestamp?: number | null;
+                            }[];
+                            nextCursor?: string | null;
+                            supportedProtocols?: string[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{chainId}/{protocol}/{poolId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    protocol: string;
+                    poolId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            chainId?: number;
+                            protocol?: string;
+                            poolId?: string;
+                            currency0?: string;
+                            currency1?: string;
+                            displayedToken?: string;
+                            fee?: number;
+                            tickSpacing?: number;
+                            hooks?: string;
+                            createdBlock?: string;
+                            createdTimestamp?: number | null;
+                            ponsDesignated?: boolean;
+                            launchTokenAddress?: string | null;
+                            volume24hUsd?: string | null;
+                            priceInQuote?: string | null;
+                            priceUsd?: string | null;
+                            fdvUsd?: string | null;
+                            tvlUsd?: string | null;
+                            change1h?: string | null;
+                            change1d?: string | null;
+                            coverageStatus?: string;
+                            lastTradeTimestamp?: number | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{chainId}/{protocol}/{poolId}/trades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    protocol: string;
+                    poolId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                txHash?: string;
+                                logIndex?: number;
+                                blockNumber?: string;
+                                timestamp?: number;
+                                traderAddress?: string;
+                                side?: string;
+                                amount0Raw?: string;
+                                amount1Raw?: string;
+                                priceInQuote?: string | null;
+                                usdValue?: string | null;
+                                /** @enum {string} */
+                                usdValueStatus?: "priced" | "pending" | "unavailable";
+                            }[];
+                            nextCursor?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/pools/{chainId}/{protocol}/{poolId}/candles": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    protocol: string;
+                    poolId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                intervalSeconds?: number;
+                                bucketStart?: number;
+                                open?: string;
+                                high?: string;
+                                low?: string;
+                                close?: string;
+                                tradeCount?: number;
+                            }[];
+                            complete?: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;

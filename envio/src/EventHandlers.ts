@@ -282,3 +282,63 @@ indexer.onEvent(
     });
   },
 );
+
+// All-pool V3/V2 sources are registered only from the canonical Uniswap factories.
+indexer.onEvent({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {
+  context.RawV3PoolCreated.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId, factoryAddress: event.srcAddress.toLowerCase(),
+    poolAddress: event.params.pool.toLowerCase(), token0: event.params.token0.toLowerCase(),
+    token1: event.params.token1.toLowerCase(), fee: Number(event.params.fee),
+    tickSpacing: Number(event.params.tickSpacing), blockNumber: BigInt(event.block.number),
+    blockHash: event.block.hash, txHash: event.transaction.hash, logIndex: event.logIndex,
+  });
+});
+indexer.contractRegister({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {
+  context.chain.UniswapV3Pool.add(event.params.pool);
+});
+indexer.onEvent({ contract: "UniswapV3Pool", event: "V3Swap" }, async ({ event, context }) => {
+  if (!event.transaction.from) throw new Error(`Missing transaction.from for V3 swap ${event.transaction.hash}`);
+  context.RawV3Swap.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId, poolAddress: event.srcAddress.toLowerCase(),
+    txFrom: event.transaction.from.toLowerCase(), sender: event.params.sender.toLowerCase(),
+    amount0: event.params.amount0, amount1: event.params.amount1,
+    sqrtPriceX96: event.params.sqrtPriceX96, fee: 0,
+    blockNumber: BigInt(event.block.number), blockHash: event.block.hash,
+    txHash: event.transaction.hash, logIndex: event.logIndex, timestamp: event.block.timestamp,
+  });
+});
+indexer.onEvent({ contract: "UniswapV2Factory", event: "PairCreated" }, async ({ event, context }) => {
+  context.RawV2PairCreated.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId, factoryAddress: event.srcAddress.toLowerCase(),
+    pairAddress: event.params.pair.toLowerCase(), token0: event.params.token0.toLowerCase(),
+    token1: event.params.token1.toLowerCase(), blockNumber: BigInt(event.block.number),
+    blockHash: event.block.hash, txHash: event.transaction.hash, logIndex: event.logIndex,
+  });
+});
+indexer.contractRegister({ contract: "UniswapV2Factory", event: "PairCreated" }, async ({ event, context }) => {
+  context.chain.UniswapV2Pair.add(event.params.pair);
+});
+indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Swap" }, async ({ event, context }) => {
+  if (!event.transaction.from) throw new Error(`Missing transaction.from for V2 swap ${event.transaction.hash}`);
+  context.RawV2Swap.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId, pairAddress: event.srcAddress.toLowerCase(),
+    txFrom: event.transaction.from.toLowerCase(), sender: event.params.sender.toLowerCase(),
+    amount0In: event.params.amount0In, amount1In: event.params.amount1In,
+    amount0Out: event.params.amount0Out, amount1Out: event.params.amount1Out,
+    blockNumber: BigInt(event.block.number), blockHash: event.block.hash,
+    txHash: event.transaction.hash, logIndex: event.logIndex, timestamp: event.block.timestamp,
+  });
+});
+indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Sync" }, async ({ event, context }) => {
+  context.RawV2Sync.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId, pairAddress: event.srcAddress.toLowerCase(),
+    reserve0: event.params.reserve0, reserve1: event.params.reserve1,
+    blockNumber: BigInt(event.block.number), blockHash: event.block.hash,
+    txHash: event.transaction.hash, logIndex: event.logIndex,
+  });
+});

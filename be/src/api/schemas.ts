@@ -84,3 +84,31 @@ export const candle = { type: 'object', properties: {
 export function pageSchema(item: object) {
   return { type: 'object', properties: { items: { type: 'array', items: item }, nextCursor: { type: 'string', nullable: true } } } as const;
 }
+
+const nullableMetric = { type: 'string', nullable: true } as const;
+export const poolSummary = { type: 'object', properties: {
+  chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' },
+  currency0: { type: 'string' }, currency1: { type: 'string' }, displayedToken: { type: 'string' },
+  fee: { type: 'integer' }, tickSpacing: { type: 'integer' }, hooks: { type: 'string' },
+  createdBlock: { type: 'string' }, createdTimestamp: { type: 'integer', nullable: true },
+  ponsDesignated: { type: 'boolean' },
+  launchTokenAddress: nullableMetric, volume24hUsd: nullableMetric, priceInQuote: nullableMetric,
+  priceUsd: nullableMetric, fdvUsd: nullableMetric, tvlUsd: nullableMetric, change1h: nullableMetric,
+  change1d: nullableMetric, coverageStatus: { type: 'string' },
+  lastTradeTimestamp: { type: 'integer', nullable: true },
+} } as const;
+export const poolPage = { type: 'object', properties: {
+  items: { type: 'array', items: poolSummary }, nextCursor: nullableMetric,
+  supportedProtocols: { type: 'array', items: { type: 'string' } },
+} } as const;
+export const poolTrade = { type: 'object', properties: {
+  txHash: { type: 'string' }, logIndex: { type: 'integer' }, blockNumber: { type: 'string' },
+  timestamp: { type: 'integer' }, traderAddress: { type: 'string' }, side: { type: 'string' },
+  amount0Raw: { type: 'string' }, amount1Raw: { type: 'string' }, priceInQuote: nullableMetric,
+  usdValue: nullableMetric, usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
+} } as const;
+export const poolCandle = { type: 'object', properties: {
+  intervalSeconds: { type: 'integer' }, bucketStart: { type: 'integer' },
+  open: { type: 'string' }, high: { type: 'string' }, low: { type: 'string' }, close: { type: 'string' },
+  tradeCount: { type: 'integer' },
+} } as const;

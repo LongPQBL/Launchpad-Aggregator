@@ -9,6 +9,8 @@ import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './inc
 import { STREAMS, detectEnvioRollback, type Stream } from './incrementalCursor.js';
 import { repairPoolWindow, syncV4PoolPage, updatePoolCoverage, type PoolRepairReport, type PoolSyncPageResult,
   type PoolStream } from '../pools/syncV4Pools.js';
+import { ensureAdditionalPoolSourceAudit, repairV3V2PoolWindow, syncV3V2PoolPage,
+  updateAdditionalPoolCoverage, DEFAULT_ADDITIONAL_POOL_TABLES, type AdditionalPoolStream } from '../pools/syncV3V2Pools.js';
 
 export interface AllSyncTables {
   v1: EnvioTableNames;
@@ -128,6 +130,36 @@ export async function runPoolCatalogRepairCycle(envioPool: Pool, appDb: Database
   const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
   return repairPoolWindow(envioPool, appDb, { chainId, fence: processedBlock,
     depth: deps.depth ?? 500n, tables: deps.tables });
+}
+
+/** V3/V2 raw streams use independent cursors. API visibility stays behind the source parity audit. */
+export async function runAdditionalPoolCatalogCycle(envioPool: Pool, appDb: Database, chainId: number,
+  deps: { limit?: number; progressTable?: string } = {}) {
+  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+  await ensureAdditionalPoolSourceAudit(appDb, chainId);
+  const results = [];
+  for (const lane of ['tail', 'history'] as const) {
+    for (const stream of ['v3_created', 'v2_created', 'v3_swap', 'v2_swap'] as AdditionalPoolStream[]) {
+      results.push(await syncV3V2PoolPage(envioPool, appDb, { chainId, stream, lane,
+        fence: processedBlock, limit: deps.limit ?? 500 }));
+    }
+  }
+  await updateAdditionalPoolCoverage(appDb, chainId, processedBlock);
+  return results;
+}
+
+export async function runAdditionalPoolCatalogRepairCycle(envioPool: Pool, appDb: Database, chainId: number,
+  deps: { depth?: bigint; progressTable?: string } = {}) {
+  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+  return Promise.all((['uniswap_v3', 'uniswap_v2'] as const).map((source) => repairV3V2PoolWindow(
+    envioPool, appDb, { chainId, source, fence: processedBlock, depth: deps.depth ?? 500n })));
+}
+
+export async function additionalPoolRawTablesReady(envioPool: Pool): Promise<boolean> {
+  const names = Object.values(DEFAULT_ADDITIONAL_POOL_TABLES);
+  const result = await envioPool.query('SELECT count(*)::integer AS present FROM unnest($1::text[]) AS raw(name) WHERE to_regclass(raw.name) IS NOT NULL',
+    [names]);
+  return Number(result.rows[0]?.present) === names.length;
 }
 
 /**

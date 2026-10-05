@@ -37,11 +37,31 @@ contracts:
       - event: "Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)"
       - event: "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
         name: V4Swap
+  - name: UniswapV3Factory
+    handler: src/EventHandlers.ts
+    events:
+      - event: "PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)"
+  - name: UniswapV3Pool
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
+        name: V3Swap
+  - name: UniswapV2Factory
+    handler: src/EventHandlers.ts
+    events:
+      - event: "PairCreated(address indexed token0, address indexed token1, address pair, uint256)"
+  - name: UniswapV2Pair
+    handler: src/EventHandlers.ts
+    events:
+      - event: "Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)"
+        name: V2Swap
+      - event: "Sync(uint112 reserve0, uint112 reserve1)"
+        name: V2Sync
 chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    start_block: 8600612
+    start_block: 8928
     contracts:
       - name: PonsV1LegacyFactory
         address:
@@ -58,3 +78,11 @@ chains:
       - name: UniswapV4PoolManager
         address:
           - "0x8366a39cC670b4001a1121b8f6A443A643E40951"
+      - name: UniswapV3Factory
+        address:
+          - "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
+      - name: UniswapV3Pool
+      - name: UniswapV2Factory
+        address:
+          - "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f"
+      - name: UniswapV2Pair

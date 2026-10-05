@@ -1,6 +1,6 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
 import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
-import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
+import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
 import { TokenLogo } from '@/features/launches/token-logo';
@@ -8,14 +8,16 @@ import { AboutSection } from './about-section';
 import { CoverageBadge } from './coverage-badge';
 import { OfficialChart } from './official-chart';
 import { TradeList } from './trade-list';
+import { PoolList } from '@/features/pools/pool-list';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
   trades: TradePage | null;
   candles: CandlePage | null;
+  pools?: PoolPage | null;
 }
 
-export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
+export function LaunchDetail({ detail, trades, candles, pools }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -114,6 +116,9 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
           </CardContent>
         </Card>
       </section>
+
+      {pools && <section aria-label="Pools for this token"><h2 className="mb-3 text-lg font-semibold">Pools for this token</h2>
+        <PoolList page={pools} tokenAddress={detail.tokenAddress} /></section>}
 
       {candles && (
         <Card>

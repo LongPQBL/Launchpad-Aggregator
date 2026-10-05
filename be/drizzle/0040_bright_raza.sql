@@ -1,0 +1,1 @@
+ALTER TABLE "pool_pending_swaps" ADD COLUMN "protocol" text DEFAULT 'uniswap_v4' NOT NULL;

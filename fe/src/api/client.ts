@@ -139,3 +139,43 @@ export async function getLaunchCandles(chainId: number, tokenAddress: string, qu
     before: query.before,
   });
 }
+
+// Pool metrics are scoped to a verified pool and never reuse official launch values.
+type PoolsBody = paths['/v1/pools']['get']['responses'][200]['content']['application/json'];
+type RawPool = NonNullable<PoolsBody['items']>[number];
+export type PoolSummary = Required<RawPool>;
+export interface PoolPage { items: readonly PoolSummary[]; nextCursor: string | null; supportedProtocols: readonly string[] }
+export interface PoolQuery { chainId?: number; tokenAddress?: string; cursor?: string; limit?: number; protocol?: string }
+export function poolHref(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, displayedToken?: string): string {
+  const path = `/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}`;
+  return displayedToken ? `${path}?displayedToken=${encodeURIComponent(displayedToken)}` : path;
+}
+export async function getPools(query: PoolQuery = {}): Promise<PoolPage> {
+  return request<PoolPage>('/v1/pools', { chainId: query.chainId, tokenAddress: query.tokenAddress,
+    cursor: query.cursor, limit: query.limit, protocol: query.protocol });
+}
+export async function getLaunchPools(chainId: number, tokenAddress: string, query: Omit<PoolQuery, 'chainId' | 'tokenAddress'> = {}): Promise<PoolPage> {
+  return request<PoolPage>(`/v1/launches/${chainId}/${encodeURIComponent(tokenAddress)}/pools`,
+    { cursor: query.cursor, limit: query.limit, protocol: query.protocol });
+}
+export async function getPoolDetail(chainId: number, protocol: string, poolId: string, displayedToken?: string): Promise<PoolSummary | null> {
+  const path = `/v1/pools/${chainId}/${encodeURIComponent(protocol)}/${encodeURIComponent(poolId)}`;
+  const response = await rawFetch(path, { displayedToken });
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError(`${path} returned error ${response.status}`);
+  return (await response.json()) as PoolSummary;
+}
+type PoolTradesBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/trades']['get']['responses'][200]['content']['application/json'];
+export type PoolTrade = Required<NonNullable<PoolTradesBody['items']>[number]>;
+export interface PoolTradePage { items: readonly PoolTrade[]; nextCursor: string | null }
+type PoolCandlesBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/candles']['get']['responses'][200]['content']['application/json'];
+export type PoolCandle = Required<NonNullable<PoolCandlesBody['items']>[number]>;
+export interface PoolCandlePage { items: readonly PoolCandle[]; complete: boolean }
+export async function getPoolTrades(pool: PoolSummary, cursor?: string): Promise<PoolTradePage> {
+  return request<PoolTradePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/trades`,
+    { displayedToken: pool.displayedToken, cursor });
+}
+export async function getPoolCandles(pool: PoolSummary, intervalSeconds = 3600): Promise<PoolCandlePage> {
+  return request<PoolCandlePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/candles`,
+    { displayedToken: pool.displayedToken, intervalSeconds });
+}

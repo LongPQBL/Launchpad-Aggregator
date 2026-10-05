@@ -23,7 +23,8 @@
     "backfill:feed-resolution-jobs": "tsx --env-file-if-exists=.env src/cli/backfillFeedResolutionJobs.ts",
     "candles:backfill": "tsx --env-file-if-exists=.env src/cli/backfillCandles.ts",
     "candles:worker": "tsx --env-file-if-exists=.env src/cli/runCandleWorker.ts",
-    "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts"
+    "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts",
+    "pools:parity": "tsx --env-file-if-exists=.env src/cli/probePoolSources.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

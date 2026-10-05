@@ -264,10 +264,24 @@ export const poolCatalog = pgTable('pool_catalog', {
   coverageStatus: text('coverage_status').notNull().default('backfilling'),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.protocol, table.poolId] }),
-  check('pool_catalog_v4_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+  check('pool_catalog_protocol', sql`${table.protocol} IN ('uniswap_v4', 'uniswap_v3', 'uniswap_v2')`),
   check('pool_catalog_verified', sql`${table.verified} = true`),
   check('pool_catalog_currency_order', sql`${table.currency0} < ${table.currency1}`),
   check('pool_catalog_coverage_status', sql`${table.coverageStatus} IN ('backfilling', 'caught_up', 'incomplete')`),
+  index('pool_catalog_recent_idx').on(table.blockNumber, table.logIndex, table.chainId, table.protocol, table.poolId),
+]);
+
+export const poolSourceAudits = pgTable('pool_source_audits', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  factoryAddress: text('factory_address').notNull(),
+  deploymentBlock: bigint('deployment_block', { mode: 'bigint' }).notNull(),
+  auditedToBlock: bigint('audited_to_block', { mode: 'bigint' }),
+  status: text('status').notNull().default('pending'),
+  checkedAt: timestamp('checked_at', { withTimezone: true }),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol] }),
+  check('pool_source_audits_status', sql`${table.status} IN ('pending', 'mismatch', 'complete')`),
 ]);
 
 export const poolMembers = pgTable('pool_members', {
@@ -315,13 +329,14 @@ export const poolSyncCursors = pgTable('pool_sync_cursors', {
   processedWatermark: bigint('processed_watermark', { mode: 'bigint' }),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.stream, table.lane] }),
-  check('pool_sync_cursors_stream', sql`${table.stream} IN ('initialize', 'swap')`),
+  check('pool_sync_cursors_stream', sql`${table.stream} IN ('initialize', 'swap', 'v3_created', 'v3_swap', 'v2_created', 'v2_swap')`),
   check('pool_sync_cursors_lane', sql`${table.lane} IN ('tail', 'history')`),
 ]);
 
 export const poolPendingSwaps = pgTable('pool_pending_swaps', {
   chainId: integer('chain_id').notNull(),
   rawId: text('raw_id').notNull(),
+  protocol: text('protocol').notNull().default('uniswap_v4'),
   poolId: text('pool_id').notNull(),
   blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
 }, (table) => [

@@ -138,3 +138,76 @@ type RawV4Swap @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "
   logIndex: Int!
   timestamp: Int!
 }
+
+# Global V3/V2 factory registrations. These rows are raw evidence only; the app DB
+# promotes them after independent identity checks and source parity.
+type RawV3PoolCreated @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
+  id: ID!
+  chainId: Int!
+  factoryAddress: String!
+  poolAddress: String!
+  token0: String!
+  token1: String!
+  fee: Int!
+  tickSpacing: Int!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}
+type RawV3Swap @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
+  id: ID!
+  chainId: Int!
+  poolAddress: String!
+  txFrom: String!
+  sender: String!
+  amount0: BigInt!
+  amount1: BigInt!
+  sqrtPriceX96: BigInt!
+  fee: Int!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Int!
+}
+type RawV2PairCreated @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
+  id: ID!
+  chainId: Int!
+  factoryAddress: String!
+  pairAddress: String!
+  token0: String!
+  token1: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}
+type RawV2Swap @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
+  id: ID!
+  chainId: Int!
+  pairAddress: String!
+  txFrom: String!
+  sender: String!
+  amount0In: BigInt!
+  amount1In: BigInt!
+  amount0Out: BigInt!
+  amount1Out: BigInt!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+  timestamp: Int!
+}
+type RawV2Sync @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]])
+  @index(fields: ["chainId", "pairAddress", "txHash", ["logIndex", "DESC"]]) {
+  id: ID!
+  chainId: Int!
+  pairAddress: String!
+  reserve0: BigInt!
+  reserve1: BigInt!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}

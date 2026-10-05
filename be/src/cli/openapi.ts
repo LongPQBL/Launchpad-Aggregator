@@ -4,6 +4,8 @@ import { createApiServer } from '../api/server.js';
 const unavailable = async (): Promise<never> => { throw new Error('OpenAPI generation must not query data'); };
 const app = await createApiServer({
   feOrigin: 'http://localhost:3000',
+  pools: { listPools: unavailable, getPool: unavailable, resolvePoolSide: unavailable,
+    listPoolTrades: unavailable, listPoolCandles: unavailable },
   data: { listSources: unavailable, getCoverage: unavailable, listLaunches: unavailable,
     getLaunch: unavailable, listTrades: unavailable, listCandles: unavailable },
 });

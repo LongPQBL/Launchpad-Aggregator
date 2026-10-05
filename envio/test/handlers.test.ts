@@ -12,6 +12,7 @@ const pool: Address = "0x10cc6BD38112caC182Db90B6a71D8bB5939526bA";
 const launchedSimulate = {
   contract: "PonsV1LegacyFactory" as const,
   event: "TokenLaunched" as const,
+  block: { number: 8600612 },
   params: {
     token, deployer, dexFactory, pairToken, pool,
     dexId: 0n, launchConfigId: 0n, positionId: 0n,
@@ -59,6 +60,7 @@ describe("PonsV3Pool Swap", () => {
             contract: "PonsV3Pool",
             event: "Swap",
             srcAddress: pool,
+            block: { number: 8600613 },
             transaction: { from: txFrom },
             params: {
               sender, recipient,

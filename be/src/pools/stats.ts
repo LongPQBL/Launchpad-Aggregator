@@ -19,7 +19,7 @@ const lensAbi = parseAbi([
 ]);
 const MAX_RECENT_TRADES = 10_000;
 
-export interface PoolKey { chainId: number; protocol: 'uniswap_v4'; poolId: string }
+export interface PoolKey { chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string }
 export interface PoolStats {
   volume24hUsd: string | null;
   priceInQuote: string | null;
@@ -173,8 +173,8 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     ? await readTotalSupply(options.rpcClient, displayed as Address) : null;
   const fdvUsd = supply !== null && displayedDecimals !== null
     ? computeFdvUsd(supply, displayedDecimals, priceInQuote, currentQuoteUsd?.priceUsd ?? null) : null;
-  const tvlUsd = await poolTvlUsd(options.rpcClient, catalog, displayedIsCurrency0, displayedDecimals,
-    quoteDecimals, currentQuoteUsd?.priceUsd ?? null);
+  const tvlUsd = key.protocol === 'uniswap_v4' ? await poolTvlUsd(options.rpcClient, catalog,
+    displayedIsCurrency0, displayedDecimals, quoteDecimals, currentQuoteUsd?.priceUsd ?? null) : null;
 
   let volume24hUsd: string | null = complete ? '0' : null;
   if (complete && rows.length > 0) {

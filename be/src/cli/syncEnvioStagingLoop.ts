@@ -2,7 +2,8 @@ import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepairCycle,
-  runPoolCatalogCycle, runPoolCatalogRepairCycle } from '../envioSync/syncAll.js';
+  runPoolCatalogCycle, runPoolCatalogRepairCycle, runAdditionalPoolCatalogCycle,
+  runAdditionalPoolCatalogRepairCycle, additionalPoolRawTablesReady } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
@@ -13,6 +14,7 @@ const envioDatabaseUrl = process.env.ENVIO_DATABASE_URL;
 if (!envioDatabaseUrl) throw new Error('ENVIO_DATABASE_URL is required (points at the self-hosted Envio Postgres from envio/docker-compose.yaml)');
 const intervalMs = Number(process.env.ENVIO_SYNC_LOOP_INTERVAL_MS ?? 900_000);
 const syncTarget = (process.env.ENVIO_SYNC_TARGET ?? 'staging') as 'staging' | 'real';
+const additionalPoolSourcesAllowed = process.env.ENABLE_ADDITIONAL_POOL_SOURCES !== 'false';
 if (syncTarget !== 'staging' && syncTarget !== 'real') throw new Error('ENVIO_SYNC_TARGET must be "staging" or "real"');
 
 const { db, pool } = createDatabase(databaseUrl);
@@ -94,23 +96,34 @@ if (syncTarget === 'staging') {
     + `repair every ${repairEveryTicks} ticks). Ctrl+C or SIGTERM stops it after the current cycle.`);
   let failureStreak = 0;
   let tick = 0;
+  let additionalPoolSourcesReady = false;
   while (!stopping) {
     const startedAt = new Date().toISOString();
     try {
       const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable });
+      if (additionalPoolSourcesAllowed && tick % 30 === 0) {
+        additionalPoolSourcesReady = await additionalPoolRawTablesReady(envioPool);
+      }
       const poolTables = { initialize: tables.v4.rawV4InitializeTable, swap: tables.v4.rawV4SwapTable };
       const poolPages = await runPoolCatalogCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable, tables: poolTables });
+      const additionalPoolPages = additionalPoolSourcesReady
+        ? await runAdditionalPoolCatalogCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable }) : null;
       failureStreak = 0;
       console.log(`[${startedAt}] Envio tail pass:`, tail.results);
       console.log(`[${startedAt}] Envio history pass:`, history.results);
       console.log(`[${startedAt}] V4 pool catalog pages:`, poolPages);
+      if (additionalPoolPages) console.log(`[${startedAt}] V3/V2 pool catalog pages (parity-gated):`, additionalPoolPages);
       tick += 1;
       if (tick % repairEveryTicks === 0) {
         const repairReport = await runRepairCycle(envioPool, db, 4663, { progressTable: tables.v1.progressTable });
         const poolRepair = await runPoolCatalogRepairCycle(envioPool, db, 4663,
           { progressTable: tables.v1.progressTable, tables: poolTables });
+        const additionalPoolRepair = additionalPoolSourcesReady
+          ? await runAdditionalPoolCatalogRepairCycle(envioPool, db, 4663,
+            { progressTable: tables.v1.progressTable }) : null;
         console.log(`[${startedAt}] Envio reorg repair: ${repairReport.changedLaunchKeys.length} launch(es) affected`);
         console.log(`[${startedAt}] V4 pool catalog repair:`, poolRepair);
+        if (additionalPoolRepair) console.log(`[${startedAt}] V3/V2 pool catalog repair:`, additionalPoolRepair);
       }
     } catch (error) {
       failureStreak += 1;

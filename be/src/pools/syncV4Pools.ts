@@ -31,13 +31,16 @@ export async function updatePoolCoverage(appDb: Database, chainId: number, fence
   const complete = (['initialize', 'swap'] as const).every((stream) =>
     cursors.some((row) => row.stream === stream && (row.processedWatermark ?? -1n) >= safeFence));
   const pending = await appDb.select({ rawId: poolPendingSwaps.rawId }).from(poolPendingSwaps)
-    .where(and(eq(poolPendingSwaps.chainId, chainId), lte(poolPendingSwaps.blockNumber, safeFence))).limit(1);
+    .where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.protocol, 'uniswap_v4'),
+      lte(poolPendingSwaps.blockNumber, safeFence))).limit(1);
   if (complete && pending.length === 0) {
     await appDb.update(poolCatalog).set({ coverageStatus: 'caught_up' }).where(and(
-      eq(poolCatalog.chainId, chainId), lte(poolCatalog.blockNumber, safeFence), eq(poolCatalog.coverageStatus, 'backfilling')));
+      eq(poolCatalog.chainId, chainId), eq(poolCatalog.protocol, 'uniswap_v4'),
+      lte(poolCatalog.blockNumber, safeFence), eq(poolCatalog.coverageStatus, 'backfilling')));
   } else {
     await appDb.update(poolCatalog).set({ coverageStatus: 'backfilling' }).where(and(
-      eq(poolCatalog.chainId, chainId), eq(poolCatalog.coverageStatus, 'caught_up')));
+      eq(poolCatalog.chainId, chainId), eq(poolCatalog.protocol, 'uniswap_v4'),
+      eq(poolCatalog.coverageStatus, 'caught_up')));
   }
 }
 
@@ -71,7 +74,7 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
   const [pool] = await tx.select().from(poolCatalog).where(and(eq(poolCatalog.chainId, chainId),
     eq(poolCatalog.protocol, 'uniswap_v4'), eq(poolCatalog.poolId, poolId)));
   if (!pool) {
-    await tx.insert(poolPendingSwaps).values({ chainId, rawId: String(raw.id), poolId,
+    await tx.insert(poolPendingSwaps).values({ chainId, rawId: String(raw.id), protocol: 'uniswap_v4', poolId,
       blockNumber: BigInt(String(raw.blockNumber)) }).onConflictDoNothing();
     return false;
   }
@@ -94,7 +97,8 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
 }
 
 async function retryPending(envioPool: Pool, tx: DbOrTx, chainId: number, swapTable: string, limit: number): Promise<number> {
-  const pending = await tx.select().from(poolPendingSwaps).where(eq(poolPendingSwaps.chainId, chainId)).limit(limit);
+  const pending = await tx.select().from(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId),
+    eq(poolPendingSwaps.protocol, 'uniswap_v4'))).limit(limit);
   let resolved = 0;
   for (const row of pending) {
     const [pool] = await tx.select({ poolId: poolCatalog.poolId }).from(poolCatalog).where(and(
@@ -152,6 +156,7 @@ export async function repairPoolWindow(envioPool: Pool, appDb: Database, input: 
   let removedSwaps = 0;
   await appDb.transaction(async (tx) => {
     const existingSwaps = await tx.select().from(poolTrades).where(and(eq(poolTrades.chainId, input.chainId),
+      eq(poolTrades.protocol, 'uniswap_v4'),
       gte(poolTrades.blockNumber, start)));
     for (const row of existingSwaps) {
       if (swapMap.get(`${row.txHash}:${row.logIndex}`) === row.blockHash) continue;
@@ -160,6 +165,7 @@ export async function repairPoolWindow(envioPool: Pool, appDb: Database, input: 
       removedSwaps += 1;
     }
     const existingPools = await tx.select().from(poolCatalog).where(and(eq(poolCatalog.chainId, input.chainId),
+      eq(poolCatalog.protocol, 'uniswap_v4'),
       gte(poolCatalog.blockNumber, start)));
     for (const row of existingPools) {
       if (initMap.get(`${row.txHash}:${row.logIndex}`) === row.blockHash) continue;

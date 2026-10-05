@@ -675,6 +675,540 @@
         }
       }
     },
+    "/v1/pools": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "poolId": {
+                            "type": "string"
+                          },
+                          "currency0": {
+                            "type": "string"
+                          },
+                          "currency1": {
+                            "type": "string"
+                          },
+                          "displayedToken": {
+                            "type": "string"
+                          },
+                          "fee": {
+                            "type": "integer"
+                          },
+                          "tickSpacing": {
+                            "type": "integer"
+                          },
+                          "hooks": {
+                            "type": "string"
+                          },
+                          "createdBlock": {
+                            "type": "string"
+                          },
+                          "createdTimestamp": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "ponsDesignated": {
+                            "type": "boolean"
+                          },
+                          "launchTokenAddress": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "volume24hUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "priceInQuote": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "priceUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "fdvUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1h": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1d": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "coverageStatus": {
+                            "type": "string"
+                          },
+                          "lastTradeTimestamp": {
+                            "type": "integer",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "supportedProtocols": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/launches/{chainId}/{tokenAddress}/pools": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "tokenAddress",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "poolId": {
+                            "type": "string"
+                          },
+                          "currency0": {
+                            "type": "string"
+                          },
+                          "currency1": {
+                            "type": "string"
+                          },
+                          "displayedToken": {
+                            "type": "string"
+                          },
+                          "fee": {
+                            "type": "integer"
+                          },
+                          "tickSpacing": {
+                            "type": "integer"
+                          },
+                          "hooks": {
+                            "type": "string"
+                          },
+                          "createdBlock": {
+                            "type": "string"
+                          },
+                          "createdTimestamp": {
+                            "type": "integer",
+                            "nullable": true
+                          },
+                          "ponsDesignated": {
+                            "type": "boolean"
+                          },
+                          "launchTokenAddress": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "volume24hUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "priceInQuote": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "priceUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "fdvUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1h": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1d": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "coverageStatus": {
+                            "type": "string"
+                          },
+                          "lastTradeTimestamp": {
+                            "type": "integer",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "supportedProtocols": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools/{chainId}/{protocol}/{poolId}": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "protocol",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "poolId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "integer"
+                    },
+                    "protocol": {
+                      "type": "string"
+                    },
+                    "poolId": {
+                      "type": "string"
+                    },
+                    "currency0": {
+                      "type": "string"
+                    },
+                    "currency1": {
+                      "type": "string"
+                    },
+                    "displayedToken": {
+                      "type": "string"
+                    },
+                    "fee": {
+                      "type": "integer"
+                    },
+                    "tickSpacing": {
+                      "type": "integer"
+                    },
+                    "hooks": {
+                      "type": "string"
+                    },
+                    "createdBlock": {
+                      "type": "string"
+                    },
+                    "createdTimestamp": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "ponsDesignated": {
+                      "type": "boolean"
+                    },
+                    "launchTokenAddress": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "volume24hUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "priceInQuote": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "priceUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "fdvUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "change1h": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "change1d": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "coverageStatus": {
+                      "type": "string"
+                    },
+                    "lastTradeTimestamp": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools/{chainId}/{protocol}/{poolId}/trades": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "protocol",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "poolId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "txHash": {
+                            "type": "string"
+                          },
+                          "logIndex": {
+                            "type": "integer"
+                          },
+                          "blockNumber": {
+                            "type": "string"
+                          },
+                          "timestamp": {
+                            "type": "integer"
+                          },
+                          "traderAddress": {
+                            "type": "string"
+                          },
+                          "side": {
+                            "type": "string"
+                          },
+                          "amount0Raw": {
+                            "type": "string"
+                          },
+                          "amount1Raw": {
+                            "type": "string"
+                          },
+                          "priceInQuote": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "usdValue": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "usdValueStatus": {
+                            "type": "string",
+                            "enum": [
+                              "priced",
+                              "pending",
+                              "unavailable"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pools/{chainId}/{protocol}/{poolId}/candles": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "protocol",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "poolId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "intervalSeconds": {
+                            "type": "integer"
+                          },
+                          "bucketStart": {
+                            "type": "integer"
+                          },
+                          "open": {
+                            "type": "string"
+                          },
+                          "high": {
+                            "type": "string"
+                          },
+                          "low": {
+                            "type": "string"
+                          },
+                          "close": {
+                            "type": "string"
+                          },
+                          "tradeCount": {
+                            "type": "integer"
+                          }
+                        }
+                      }
+                    },
+                    "complete": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/events": {
       "get": {
         "responses": {

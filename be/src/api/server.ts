@@ -5,6 +5,8 @@ import { registerSourcesRoutes } from './routes/sources.js';
 import { registerCoverageRoutes } from './routes/coverage.js';
 import { registerLaunchRoutes } from './routes/launches.js';
 import { registerEventsRoute } from './routes/events.js';
+import { registerPoolRoutes } from './routes/pools.js';
+import type { PoolApiStore } from './poolStore.js';
 import { ApiEventBus } from './events.js';
 import type { LaunchParityCoverage } from '../coverage/repairRanges.js';
 
@@ -63,6 +65,7 @@ export interface IncrementalSyncCoverage {
 export interface ApiDeps {
   feOrigin: string;
   events?: ApiEventBus;
+  pools?: PoolApiStore;
   data: {
     listSources(): Promise<readonly { id: string; chainId: number; platform: string; protocolVersion: string }[]>;
     getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[];
@@ -83,6 +86,7 @@ export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
   registerSourcesRoutes(app, deps);
   registerCoverageRoutes(app, deps);
   registerLaunchRoutes(app, deps);
+  registerPoolRoutes(app, deps);
   registerEventsRoute(app, deps.events ?? new ApiEventBus());
   app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
   await app.ready();
