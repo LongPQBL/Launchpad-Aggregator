@@ -263,6 +263,22 @@ export const launchStats = pgTable('launch_stats', {
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
 ]);
 
+// Checkpoint for replaying Pons V2 bonding-curve reserves from each curve trade's own amounts
+// (be/src/launchpads/pons/v2/curve.ts) — see be/src/market/curvePricing.ts. Deleting a launch's row
+// is always safe: the next worker tick re-derives it from totalSupply() and a full current replay.
+export const launchCurveReserves = pgTable('launch_curve_reserves', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  quoteReserveRaw: numeric('quote_reserve_raw', { precision: 78, scale: 0 }).notNull(),
+  tokenReserveRaw: numeric('token_reserve_raw', { precision: 78, scale: 0 }).notNull(),
+  lastBlockNumber: bigint('last_block_number', { mode: 'bigint' }).notNull(),
+  lastLogIndex: integer('last_log_index').notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+]);
+
 export const usdCandles = pgTable('usd_candles', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),

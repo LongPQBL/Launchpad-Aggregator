@@ -8,6 +8,7 @@ import { advanceSyncCursor, claimSyncCursor, LANES, type Stream } from './increm
 import { DEFAULT_STREAM_TABLES, STREAM_ORDER } from './incrementalSync.js';
 import { notifyChanged } from './notifyChanges.js';
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
+import { invalidateCurveReserve } from '../market/curvePricing.js';
 
 const v1SourceIds = getPonsFactorySources().filter((factory) => factory.version === 'v1').map((factory) => factory.id);
 const v2Factory = getPonsFactorySources()[2]!;
@@ -220,6 +221,7 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
     }
     // Inside the same transaction so delivery only happens after the repair actually commits.
     await invalidateLaunchVolume(tx, [...changed.values()], new Date());
+    await invalidateCurveReserve(tx, [...changed.values()]);
     await notifyChanged(tx, [...changed.values()].map((key) => ({ kind: 'launch.changed' as const, ...key })));
   });
 

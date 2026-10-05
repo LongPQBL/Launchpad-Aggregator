@@ -28,6 +28,7 @@
     "launch-volume:reconcile": "tsx --env-file-if-exists=.env src/cli/reconcileLaunchVolumes.ts",
     "usd-candles:worker": "tsx --env-file-if-exists=.env src/cli/runUsdCandleWorker.ts",
     "launch-stats:worker": "tsx --env-file-if-exists=.env src/cli/runLaunchStatsWorker.ts",
+    "curve-pricing:worker": "tsx --env-file-if-exists=.env src/cli/runCurvePricingWorker.ts",
     "mode:test": "bash ../scripts/mode.sh test",
     "mode:prod": "bash ../scripts/mode.sh prod",
     "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts",
