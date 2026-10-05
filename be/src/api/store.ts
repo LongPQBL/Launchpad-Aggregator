@@ -15,6 +15,7 @@ import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
+import { ttlMemo } from './ttlMemo.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
@@ -56,6 +57,32 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
 interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
 const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
 
+// The launch page recomputes these per request; the RPC answers change on the scale of minutes, and
+// the page is re-fetched on every visit, so a short per-(pool, client) cache keeps repeat loads fast.
+const CHAIN_READ_TTL_MS = 60_000;
+const usdPriceMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, Awaited<ReturnType<typeof readUsdPrice>>>>>>();
+const totalSupplyMemos = new WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, bigint | null>>>();
+function cachedUsdPrice(pool: Pool, client: UsdPriceClient, quoteAssetAddress: string) {
+  let byClient = usdPriceMemos.get(pool);
+  if (!byClient) { byClient = new WeakMap(); usdPriceMemos.set(pool, byClient); }
+  let memo = byClient.get(client);
+  if (!memo) { memo = ttlMemo((quote: string) => readUsdPrice(pool, client, quote), CHAIN_READ_TTL_MS); byClient.set(client, memo); }
+  return memo(quoteAssetAddress);
+}
+const tvlMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, TvlFields, Row>>>>();
+function cachedTvl(pool: Pool, client: UsdPriceClient, row: Row): Promise<TvlFields> {
+  let byClient = tvlMemos.get(pool);
+  if (!byClient) { byClient = new WeakMap(); tvlMemos.set(pool, byClient); }
+  let memo = byClient.get(client);
+  if (!memo) { memo = ttlMemo((_key: string, launchRow: Row) => computeTvl(pool, client, launchRow), CHAIN_READ_TTL_MS); byClient.set(client, memo); }
+  return memo(`${number(row.chain_id)}:${string(row.token_address)}`, row);
+}
+function cachedTotalSupply(client: UsdPriceClient, tokenAddress: string) {
+  let memo = totalSupplyMemos.get(client);
+  if (!memo) { memo = ttlMemo((token: string) => readTotalSupply(client, token as Address), CHAIN_READ_TTL_MS); totalSupplyMemos.set(client, memo); }
+  return memo(tokenAddress);
+}
+
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
   if (row.token_decimals === null || row.quote_asset_decimals === null) {
     // A near-realtime-synced launch awaiting core-metadata enrichment — no fabricated decimals.
@@ -83,14 +110,15 @@ async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Prom
 // retain their existing coverage gate. An RPC error in either path cannot erase the other.
 async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, row: Row,
   complete: boolean): Promise<StatsFields> {
-  const tvl = rpcClient ? await computeTvl(pool, rpcClient, row) : NULL_TVL;
+  // Started now so the TVL reads run alongside the price and supply reads below, not after them.
+  const tvlPromise = rpcClient ? cachedTvl(pool, rpcClient, row) : Promise.resolve(NULL_TVL);
   // The latest indexed trade and the 52-week range cannot be presented as current/complete
   // while an official source is behind the safe head. Match priceQuote's coverage rule.
-  if (!rpcClient || !complete) return { ...NULL_STATS, ...tvl };
+  if (!rpcClient || !complete) return { ...NULL_STATS, ...(await tvlPromise) };
   try {
     const [usdPrice, totalSupply, priceResult] = await Promise.all([
-      readUsdPrice(pool, rpcClient, string(row.quote_asset_address)),
-      readTotalSupply(rpcClient, string(row.token_address) as Address),
+      cachedUsdPrice(pool, rpcClient, string(row.quote_asset_address)),
+      cachedTotalSupply(rpcClient, string(row.token_address)),
       pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
           AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
@@ -153,9 +181,9 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
     const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
     const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
-    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, change1h, change1d, ...tvl };
+    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, change1h, change1d, ...(await tvlPromise) };
   } catch {
-    return { ...NULL_STATS, ...tvl };
+    return { ...NULL_STATS, ...(await tvlPromise) };
   }
 }
 
