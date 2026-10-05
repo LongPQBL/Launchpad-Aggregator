@@ -61,13 +61,16 @@ chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    start_block: 80600000
+    rpc:
+      - url: ${ENVIO_RH_HTTP_RPC_URL}
+        for: fallback
+    start_block: 81062234
     contracts:
       - name: PonsV1LegacyFactory
         address:
           - "0x0c37a24F5D23A486FA692d1500881d698B1F77a4"
       - name: PonsV1ActiveFactory
-        start_block: 80600000
+        start_block: 81062234
         address:
           - "0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB"
       - name: PonsV3Pool
