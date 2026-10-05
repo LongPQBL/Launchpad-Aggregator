@@ -110,7 +110,7 @@ export function startMetadataEnrichmentLoop(run: () => Promise<void>): { stop():
     active = Promise.resolve().then(run).catch(() => { /* caller uses enrichMetadataSafely */ })
       .finally(() => { active = null; });
   };
-  const interval = setInterval(tick, 60_000);
+  const interval = setInterval(tick, Number(process.env.METADATA_ENRICHMENT_TICK_MS ?? 60_000));
   tick();
   return {
     async stop() {
