@@ -25,7 +25,7 @@ else
 fi
 previous="$(cat "$state_file" 2>/dev/null || echo none)"
 
-pkill -f "syncEnvioStagingLoop|runLaunchVolumeWorker|cli/api.ts" 2>/dev/null || true
+pkill -f "syncEnvioStagingLoop|runLaunchVolumeWorker|runUsdCandleWorker|cli/api.ts" 2>/dev/null || true
 sleep 2
 
 restart_envio=""
@@ -50,6 +50,7 @@ cd "$root/be"
 (DATABASE_URL="$app_url" nohup npm run dev:api < /dev/null > "$log_dir/api-$mode.log" 2>&1 &)
 (DATABASE_URL="$app_url" nohup npm run sync:envio-staging:loop < /dev/null > "$log_dir/sync-$mode.log" 2>&1 &)
 (DATABASE_URL="$app_url" nohup npm run launch-volume:worker < /dev/null > "$log_dir/worker-$mode.log" 2>&1 &)
+(DATABASE_URL="$app_url" nohup npm run usd-candles:worker < /dev/null > "$log_dir/usd-candles-$mode.log" 2>&1 &)
 
 echo "$mode" > "$state_file"
 echo "mode=$mode envio_config=$envio_config envio_restart=${restart_envio:-no} app_db=${app_url##*/}"
