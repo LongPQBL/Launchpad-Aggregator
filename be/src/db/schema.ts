@@ -253,6 +253,12 @@ export const launchVolume24hUsd = pgTable('launch_volume24h_usd', {
   check('launch_volume24h_usd_reason_valid', sql`${table.completenessReason} IN ('complete', 'incomplete_coverage', 'unpriced_trade', 'updating')`),
 ]);
 
+export const launchVolume24hState = pgTable('launch_volume24h_state', {
+  id: integer('id').primaryKey(),
+  backfillCompleteAt: timestamp('backfill_complete_at', { withTimezone: true }),
+  workerHeartbeatAt: timestamp('worker_heartbeat_at', { withTimezone: true }),
+}, (table) => [check('launch_volume24h_state_singleton', sql`${table.id} = 1`)]);
+
 export const launchVolume24hJobs = pgTable('launch_volume24h_jobs', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),

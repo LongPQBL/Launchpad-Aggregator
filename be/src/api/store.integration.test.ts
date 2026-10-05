@@ -2,6 +2,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
 import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
+import { refreshDueLaunchVolumes } from '../market/launchVolume/worker.js';
+import { markVolumeBackfillComplete, recordVolumeWorkerHeartbeat } from '../market/launchVolume/state.js';
 import { createApiStore } from './store.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -642,6 +644,14 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
       side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
       VALUES (4663,$1,$2,500,$3,$4,0,$5,'buy','1','50000000000000000000',$6,'V3Swap','user_trade',$1)`,
     [launchD, `4663:v3_pool:${launchD}`, rankBlockHash, '0x' + 'ed'.repeat(32), rankNow - 100, rankQuote]);
+    // The volume sort reads the published cache, so score the four launches exactly as the worker would.
+    const dueAt = new Date(Date.now() - 1_000);
+    await pool.query(`INSERT INTO launch_volume24h_jobs (chain_id, token_address, revision, due_at)
+      SELECT 4663, token, 1, $2::timestamptz FROM unnest($1::text[]) AS token ON CONFLICT DO NOTHING`,
+    [[launchA, launchB, launchC, launchD], dueAt]);
+    await refreshDueLaunchVolumes(pool, new Date(), 50, async () => 2000n);
+    await markVolumeBackfillComplete(pool, new Date());
+    await recordVolumeWorkerHeartbeat(pool, new Date());
   });
 
   afterAll(async () => {
@@ -654,6 +664,9 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     await pool.query('DELETE FROM quote_usd_feeds WHERE quote_asset_address = $1', [rankQuote]);
     await pool.query('DELETE FROM quote_usd_price_rounds WHERE feed_address = $1', [rankFeed]);
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
+    await pool.query('DELETE FROM launch_volume24h_usd WHERE token_address = ANY($1)', [[launchA, launchB, launchC, launchD]]);
+    await pool.query('DELETE FROM launch_volume24h_jobs WHERE token_address = ANY($1)', [[launchA, launchB, launchC, launchD]]);
+    await pool.query('DELETE FROM launch_volume24h_state WHERE id = 1');
   });
 
   it('ranks launches by real USD volume descending, not by raw quote-unit amounts across different quote assets', async () => {

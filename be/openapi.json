@@ -304,6 +304,11 @@
                           },
                           "officialVolume24hUsdApprox": {
                             "type": "boolean"
+                          },
+                          "officialVolume24hUsdAsOf": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
                           }
                         }
                       }
@@ -464,6 +469,11 @@
                     },
                     "officialVolume24hUsdApprox": {
                       "type": "boolean"
+                    },
+                    "officialVolume24hUsdAsOf": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
                     },
                     "description": {
                       "type": "string",

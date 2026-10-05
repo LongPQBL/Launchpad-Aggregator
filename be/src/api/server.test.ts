@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createApiServer } from './server.js';
 import { ApiEventBus } from './events.js';
 import { InvalidVolumeCursorError } from './volumeCursor.js';
+import { VolumeRankingUnavailableError } from '../market/launchVolume/state.js';
 
 const address = '0x1111111111111111111111111111111111111111';
 const launchSummary = {
@@ -13,7 +14,7 @@ const launchSummary = {
   week52High: null, week52Low: null,
   logoUri: null, websiteUrl: null, twitterUrl: null, launchTimestamp: null,
   change1h: null, change1d: null,
-  officialVolume24hUsd: null, officialVolume24hUsdApprox: false,
+  officialVolume24hUsd: null, officialVolume24hUsdApprox: false, officialVolume24hUsdAsOf: null,
 };
 const launch = { ...launchSummary, description: null };
 
@@ -60,6 +61,17 @@ describe('read-only API', () => {
     expect(invalid.statusCode).toBe(404);
     const badCursor = await app.inject({ method: 'GET', url: '/v1/launches?cursor=bad' });
     expect(badCursor.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('answers 503 with Retry-After while the volume ranking is unavailable, not a frozen or empty ranking', async () => {
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async () => { throw new VolumeRankingUnavailableError('backfill not complete'); },
+    } });
+    const response = await app.inject({ method: 'GET', url: '/v1/launches?sort=volume24hUsd' });
+    expect(response.statusCode).toBe(503);
+    expect(response.headers['retry-after']).toBe('30');
     await app.close();
   });
 

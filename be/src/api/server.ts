@@ -25,7 +25,7 @@ export interface LaunchSummary {
   week52High: string | null; week52Low: string | null;
   logoUri: string | null; websiteUrl: string | null; twitterUrl: string | null;
   launchTimestamp: string | null; change1h: string | null; change1d: string | null;
-  officialVolume24hUsd: string | null; officialVolume24hUsdApprox: boolean;
+  officialVolume24hUsd: string | null; officialVolume24hUsdApprox: boolean; officialVolume24hUsdAsOf: string | null;
 }
 export interface LaunchDetail extends LaunchSummary {
   description: string | null;

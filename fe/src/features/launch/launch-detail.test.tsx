@@ -72,6 +72,7 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     change1d: null,
     officialVolume24hUsd: null,
     officialVolume24hUsdApprox: false,
+    officialVolume24hUsdAsOf: null,
     ...overrides,
   };
 }

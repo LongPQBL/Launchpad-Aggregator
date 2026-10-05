@@ -168,6 +168,8 @@ export interface paths {
                                 change1d?: string | null;
                                 officialVolume24hUsd?: string | null;
                                 officialVolume24hUsdApprox?: boolean;
+                                /** Format: date-time */
+                                officialVolume24hUsdAsOf?: string | null;
                             }[];
                             nextCursor?: string | null;
                         };
@@ -241,6 +243,8 @@ export interface paths {
                             change1d?: string | null;
                             officialVolume24hUsd?: string | null;
                             officialVolume24hUsdApprox?: boolean;
+                            /** Format: date-time */
+                            officialVolume24hUsdAsOf?: string | null;
                             description?: string | null;
                             officialVenues?: {
                                 id?: string;

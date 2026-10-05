@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { refreshDueLaunchVolumes, sweepLaunchVolumes } from '../market/launchVolume/worker.js';
+import { recordVolumeWorkerHeartbeat } from '../market/launchVolume/state.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -15,6 +16,7 @@ try {
   while (!stopping) {
     const now = new Date();
     try {
+      await recordVolumeWorkerHeartbeat(pool, now);
       if (now.getTime() - lastSweepAt >= sweepEveryMs) {
         await sweepLaunchVolumes(pool, now);
         lastSweepAt = now.getTime();

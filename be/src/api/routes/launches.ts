@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
+import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
 import { candle, launchDetail, launchSummary, pageSchema, trade } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
@@ -66,6 +67,9 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       // either throws InvalidVolumeCursorError, which is the client's fault, never a 500
       // (final review, Important 2).
       if (error instanceof InvalidVolumeCursorError) return reply.code(400).send({ error: 'Invalid cursor' });
+      if (error instanceof VolumeRankingUnavailableError) {
+        return reply.code(503).header('Retry-After', '30').send({ error: 'Launch volume ranking is temporarily unavailable' });
+      }
       throw error;
     }
   });

@@ -47,6 +47,7 @@ export const launchSummary = { type: 'object', properties: {
   launchTimestamp: { type: 'string', nullable: true },
   change1h: { type: 'string', nullable: true }, change1d: { type: 'string', nullable: true },
   officialVolume24hUsd: { type: 'string', nullable: true }, officialVolume24hUsdApprox: { type: 'boolean' },
+  officialVolume24hUsdAsOf: { type: 'string', format: 'date-time', nullable: true },
 } } as const;
 
 export const launchDetail = { type: 'object', properties: {

@@ -33,6 +33,7 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     change1d: null,
     officialVolume24hUsd: null,
     officialVolume24hUsdApprox: false,
+    officialVolume24hUsdAsOf: null,
     ...overrides,
   };
 }
@@ -353,6 +354,21 @@ describe('LaunchList', () => {
     );
     const table = screen.getByRole('table', { name: /launch list/i });
     expect(within(table).getByText(/~\$1234\.56/)).toBeInTheDocument();
+  });
+
+  it('explains that the volume ranking is updating on 503, and points to the recent tab instead of a generic error', () => {
+    render(<LaunchList page={null} sources={oneChainOneSource} error rankingUnavailable />);
+    expect(screen.getByRole('status')).toHaveTextContent('Official volume ranking is updating');
+    expect(screen.getByRole('link', { name: 'Browse recent launches' })).toHaveAttribute('href', '/?tab=recent');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows when the official volume was last computed, from the newest row', () => {
+    render(<LaunchList page={{ items: [
+      launch({ officialVolume24hUsdAsOf: '2026-10-05T11:00:00.000Z' }),
+      launch({ tokenAddress: '0x2222222222222222222222222222222222222222', officialVolume24hUsdAsOf: '2026-10-05T11:30:00.000Z' }),
+    ], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    expect(screen.getByText('Official 24h volume as of 2026-10-05 11:30 UTC')).toBeInTheDocument();
   });
 
   it('shows the honest unavailable state (not a fabricated zero) when officialVolume24hUsd is null', () => {

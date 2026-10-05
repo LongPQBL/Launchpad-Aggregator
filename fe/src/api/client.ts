@@ -35,7 +35,7 @@ export interface SourceList {
 }
 
 export class ApiError extends Error {
-  constructor(message: string, override readonly cause?: unknown) {
+  constructor(message: string, override readonly cause?: unknown, readonly status?: number) {
     super(message);
     this.name = 'ApiError';
   }
@@ -60,7 +60,7 @@ async function rawFetch(path: string, searchParams?: Record<string, string | num
 async function request<T>(path: string, searchParams?: Record<string, string | number | undefined>): Promise<T> {
   const response = await rawFetch(path, searchParams);
   if (!response.ok) {
-    throw new ApiError(`${path} returned error ${response.status}`);
+    throw new ApiError(`${path} returned error ${response.status}`, undefined, response.status);
   }
   return (await response.json()) as T;
 }

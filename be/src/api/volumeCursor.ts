@@ -1,14 +1,13 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export interface VolumeCursorValue {
-  version: 1; sort: 'volume24hUsd'; asOf: number; rankCategory: 'positive' | 'zero' | 'null';
-  rankValue: string | null; tiebreakBlockNumber: string; tiebreakTxHash: string; tiebreakLogIndex: number;
+  version: 2; sort: 'volume24hUsd'; issuedAt: number;
+  rankOrder: 0 | 1 | 2; volumeUsd: string | null;
+  launchBlock: string; launchTxHash: string; launchLogIndex: number;
 }
 
 // Distinguishable from a generic Error so the route can map it to 400 (client's cursor is bad or
-// stale) rather than letting it fall through to a 500 (final review, Important 2) — thrown both
-// for a malformed/tampered/expired/wrong-sort cursor here, and for a cursor whose pinned row no
-// longer exists in the current ranking (store.ts's listLaunchesByVolume).
+// stale) rather than letting it fall through to a 500.
 export class InvalidVolumeCursorError extends Error {}
 
 const MAX_CURSOR_AGE_SECONDS = 24 * 3600;
@@ -33,11 +32,12 @@ export function decodeVolumeCursor(value: string, secret: string, now: number): 
     const parsed: unknown = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
     if (typeof parsed !== 'object' || parsed === null) throw new InvalidVolumeCursorError('Invalid cursor');
     const candidate = parsed as Record<string, unknown>;
-    if (candidate.version !== 1 || candidate.sort !== 'volume24hUsd') throw new InvalidVolumeCursorError('Invalid cursor');
-    if (typeof candidate.asOf !== 'number' || !Number.isSafeInteger(candidate.asOf)) throw new InvalidVolumeCursorError('Invalid cursor');
-    if (now - candidate.asOf > MAX_CURSOR_AGE_SECONDS) throw new InvalidVolumeCursorError('Invalid cursor');
-    if (candidate.rankCategory !== 'positive' && candidate.rankCategory !== 'zero' && candidate.rankCategory !== 'null') throw new InvalidVolumeCursorError('Invalid cursor');
-    if (typeof candidate.tiebreakBlockNumber !== 'string' || typeof candidate.tiebreakTxHash !== 'string' || typeof candidate.tiebreakLogIndex !== 'number') {
+    if (candidate.version !== 2 || candidate.sort !== 'volume24hUsd') throw new InvalidVolumeCursorError('Invalid cursor');
+    if (typeof candidate.issuedAt !== 'number' || !Number.isSafeInteger(candidate.issuedAt)) throw new InvalidVolumeCursorError('Invalid cursor');
+    if (now - candidate.issuedAt > MAX_CURSOR_AGE_SECONDS) throw new InvalidVolumeCursorError('Invalid cursor');
+    if (candidate.rankOrder !== 0 && candidate.rankOrder !== 1 && candidate.rankOrder !== 2) throw new InvalidVolumeCursorError('Invalid cursor');
+    if (candidate.volumeUsd !== null && typeof candidate.volumeUsd !== 'string') throw new InvalidVolumeCursorError('Invalid cursor');
+    if (typeof candidate.launchBlock !== 'string' || typeof candidate.launchTxHash !== 'string' || typeof candidate.launchLogIndex !== 'number') {
       throw new InvalidVolumeCursorError('Invalid cursor');
     }
     return candidate as unknown as VolumeCursorValue;

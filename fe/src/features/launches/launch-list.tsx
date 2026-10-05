@@ -11,6 +11,7 @@ export interface LaunchListProps {
   page: LaunchPage | null;
   sources: readonly Source[];
   error: boolean;
+  rankingUnavailable?: boolean;
   chainId?: number;
   search?: string;
   status?: string;
@@ -74,8 +75,18 @@ function formatAge(launchTimestamp: string | null): string {
   return `${days}d`;
 }
 
-export function LaunchList({ page, sources, error, chainId, search, status, platform, tab }: LaunchListProps) {
+export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab }: LaunchListProps) {
   if (error || !page) {
+    if (rankingUnavailable) {
+      return (
+        <div role="status">
+          <p>Official volume ranking is updating and will be back shortly. Recently listed launches are still available.</p>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- see the error branch below */}
+          <a href="/?tab=recent">Browse recent launches</a>{' '}
+          <a href="/">Retry</a>
+        </div>
+      );
+    }
     return (
       <div role="alert">
         <p>Could not load the launch list from the server. Please try again.</p>
@@ -94,9 +105,13 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
   // server-side via `sort`) must resolve to the All tab, not silently show no active tab.
   const activeTab = TABS.some((t) => t.value === tab) ? tab! : 'all';
   const items = page.items;
+  const freshestAsOf = items.map((item) => item.officialVolume24hUsdAsOf).filter((value): value is string => value !== null).sort().at(-1) ?? null;
 
   return (
     <div className="flex flex-col gap-4">
+      {activeTab === 'all' && freshestAsOf !== null && (
+        <p className="text-xs text-muted-foreground">Official 24h volume as of {freshestAsOf.replace('T', ' ').slice(0, 16)} UTC</p>
+      )}
       <nav aria-label="Filter by tab" className="flex gap-2">
         {TABS.map(({ value, label }) => (
           <a

@@ -1,7 +1,7 @@
 import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchList } from '@/features/launches/launch-list';
-import { getLaunches, getSources, type LaunchPage, type Source } from '@/api/client';
+import { ApiError, getLaunches, getSources, type LaunchPage, type Source } from '@/api/client';
 import { chainResourceKey } from '@/hooks/resource-keys';
 
 interface HomePageProps {
@@ -31,6 +31,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   let page: LaunchPage | null = null;
   let sources: readonly Source[] = [];
   let error = false;
+  let rankingUnavailable = false;
 
   const sort = tab === 'recent' ? 'recent' : 'volume24hUsd';
 
@@ -38,8 +39,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     const [launchesResult, sourcesResult] = await Promise.all([getLaunches({ cursor, chainId, search, status, platform, sort }), getSources()]);
     page = launchesResult;
     sources = sourcesResult.items;
-  } catch {
+  } catch (caught) {
     error = true;
+    rankingUnavailable = caught instanceof ApiError && caught.status === 503;
   }
 
   const resourceKeys = [...new Set(sources.map((source) => source.chainId))].map(chainResourceKey);
@@ -47,7 +49,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   return (
     <AppShell>
       {!error && <LiveRefreshIndicator resourceKeys={resourceKeys} />}
-      <LaunchList page={page} sources={sources} error={error} chainId={chainId} search={search} status={status} platform={platform} tab={tab} />
+      <LaunchList page={page} sources={sources} error={error} rankingUnavailable={rankingUnavailable} chainId={chainId} search={search} status={status} platform={platform} tab={tab} />
     </AppShell>
   );
 }
