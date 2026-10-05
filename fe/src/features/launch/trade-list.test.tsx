@@ -34,7 +34,7 @@ describe('TradeList', () => {
 
   it('shows the honest unavailable state for usdValueStatus unavailable, distinct from pending', () => {
     render(<TradeList trades={[trade({ usdValue: null, usdValueApprox: false, usdValueStatus: 'unavailable' })]} venues={noVenues} quoteSymbol="ROBIN" explorerBase={undefined} />);
-    expect(screen.getByText(/no data yet|unavailable/i)).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.queryByText(/calculating|loading/i)).not.toBeInTheDocument();
   });
 

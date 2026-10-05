@@ -1,10 +1,10 @@
 export function formatQuote(value: string | null, symbol: string | null): string {
-  if (value === null) return 'No data yet';
+  if (value === null) return '—';
   return `${value} ${symbol ?? '—'}`;
 }
 
 export function formatUsd(value: string | null): string {
-  if (value === null) return 'No data yet';
+  if (value === null) return '—';
   return `$${value}`;
 }
 

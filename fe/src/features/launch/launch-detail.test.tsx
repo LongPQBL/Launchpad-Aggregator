@@ -200,15 +200,15 @@ describe('LaunchDetail', () => {
 
     view.rerender(<LaunchDetail detail={detail({ tvlUsd: null, tvlUnavailableReason: 'quote_price_unavailable' })}
       trades={{ items: [], nextCursor: null }} candles={null} />);
-    expect(screen.getByText(/TVL/)).toHaveTextContent('No data yet');
+    expect(screen.getByText(/TVL/)).toHaveTextContent('—');
     expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('USD price'));
   });
 
-  it('shows "No data yet" for FDV instead of a fabricated number when fdvUsd is null', () => {
+  it('shows "—" for FDV instead of a fabricated number when fdvUsd is null', () => {
     render(
       <LaunchDetail detail={detail({ fdvUsd: null })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
-    expect(screen.getByText(/FDV/)).toHaveTextContent('No data yet');
+    expect(screen.getByText(/FDV/)).toHaveTextContent('—');
   });
 
   it('shows the swept phase label', () => {
@@ -417,7 +417,7 @@ describe('LaunchDetail', () => {
     expect(screen.getByTitle(/historical.*not the current price/i)).toBeInTheDocument();
   });
 
-  it('shows "No data yet" for a trade USD value instead of a fabricated number when usdValue is null', () => {
+  it('shows "—" for a trade USD value instead of a fabricated number when usdValue is null', () => {
     render(
       <LaunchDetail
         detail={detail()}
@@ -425,7 +425,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.getAllByText('No data yet').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('shows the current official price', () => {
@@ -452,7 +452,7 @@ describe('LaunchDetail', () => {
     expect(screen.getByText(/stale price/i)).toBeInTheDocument();
   });
 
-  it('shows "No data yet" for price instead of a fabricated value when the price is not yet available', () => {
+  it('shows "—" for price instead of a fabricated value when the price is not yet available', () => {
     render(
       <LaunchDetail
         detail={detail({ priceQuote: null })}
@@ -461,7 +461,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText(/Current price/)).toHaveTextContent('No data yet');
+    expect(screen.getByText(/Current price/)).toHaveTextContent('—');
   });
 
   it('keeps the exact decimal string for a 6-decimal token trade amount, without rounding it', () => {

@@ -11,8 +11,8 @@ import {
 } from './format';
 
 describe('formatUsd', () => {
-  it('shows "No data yet" instead of a fabricated value when null', () => {
-    expect(formatUsd(null)).toBe('No data yet');
+  it('shows "—" instead of a fabricated value when null', () => {
+    expect(formatUsd(null)).toBe('—');
   });
 
   it('prefixes the value with $', () => {
@@ -25,8 +25,8 @@ describe('formatQuote', () => {
     expect(formatQuote('12.5', 'ROBIN')).toBe('12.5 ROBIN');
   });
 
-  it('shows "No data yet" instead of a fabricated zero when the value is null', () => {
-    expect(formatQuote(null, 'ROBIN')).toBe('No data yet');
+  it('shows "—" instead of a fabricated zero when the value is null', () => {
+    expect(formatQuote(null, 'ROBIN')).toBe('—');
   });
 
   it('keeps the exact decimal string for a 6-decimal ERC-20 amount, without rounding', () => {

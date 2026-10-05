@@ -137,7 +137,7 @@ describe('LaunchList', () => {
     expect(names[1]).toContain('Older');
   });
 
-  it('shows "No data yet" when officialVolume24h is null instead of a fabricated zero', () => {
+  it('shows "—" when officialVolume24h is null instead of a fabricated zero', () => {
     render(
       <LaunchList
         page={{ items: [launch({ officialVolume24h: null })], nextCursor: null }}
@@ -146,7 +146,7 @@ describe('LaunchList', () => {
       />,
     );
 
-    expect(screen.getAllByText('No data yet').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.queryByText(/\b0(\.0+)?\s*ROBIN\b/)).not.toBeInTheDocument();
   });
 
@@ -373,7 +373,7 @@ describe('LaunchList', () => {
 
   it('shows the honest unavailable state (not a fabricated zero) when officialVolume24hUsd is null', () => {
     render(<LaunchList page={{ items: [launch({ officialVolume24hUsd: null })], nextCursor: null }} sources={oneChainOneSource} error={false} />);
-    expect(screen.getAllByText('No data yet').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('defaults to the All tab when no tab is given', () => {
