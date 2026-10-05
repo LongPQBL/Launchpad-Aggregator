@@ -10,18 +10,20 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
-import type { Candle } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CoverageBadge } from './coverage-badge';
 
+export interface OfficialChartCandle { bucketStart: number; open: string; high: string; low: string; close: string }
+
 export interface OfficialChartProps {
-  candles: readonly Candle[];
+  candles: readonly OfficialChartCandle[];
   graduationTime: number | null;
   quoteSymbol: string | null;
   coverageStatus: string;
+  currency?: 'quote' | 'usd';
 }
 
-export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus }: OfficialChartProps) {
+export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote' }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
@@ -95,8 +97,12 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     <div>
       <div className="mb-2 flex items-center gap-2">
         <CoverageBadge status={coverageStatus} />
+        <nav aria-label="Chart currency" className="flex gap-1 text-xs">
+          <a href="?currency=quote" aria-current={currency === 'quote' ? 'page' : undefined}>{displaySymbol(quoteSymbol)}</a>
+          <a href="?currency=usd" aria-current={currency === 'usd' ? 'page' : undefined}>USD</a>
+        </nav>
         <p className="text-xs text-muted-foreground">
-          Chart prices ({displaySymbol(quoteSymbol)}) are approximate for plotting; see the trade table for exact figures.
+          {currency === 'usd' ? 'Chart prices (USD) are approximate for plotting; see the trade table for exact figures.' : `Chart prices (${displaySymbol(quoteSymbol)}) are approximate for plotting; see the trade table for exact figures.`}
         </p>
       </div>
       <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />

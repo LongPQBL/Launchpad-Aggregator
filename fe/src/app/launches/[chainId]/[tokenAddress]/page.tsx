@@ -7,6 +7,7 @@ import { launchResourceKey } from '@/hooks/resource-keys';
 
 interface LaunchDetailPageProps {
   params: Promise<{ chainId: string; tokenAddress: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }
 
 function parseChainId(value: string): number | null {
@@ -18,8 +19,10 @@ function isTokenAddress(value: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(value);
 }
 
-export default async function LaunchDetailPage({ params }: LaunchDetailPageProps) {
+export default async function LaunchDetailPage({ params, searchParams }: LaunchDetailPageProps) {
   const { chainId: chainIdParam, tokenAddress } = await params;
+  const currencyParam = (await searchParams).currency;
+  const chartCurrency: 'quote' | 'usd' = currencyParam === 'usd' ? 'usd' : 'quote';
   const chainId = parseChainId(chainIdParam);
   if (chainId === null || !isTokenAddress(tokenAddress)) notFound();
 
@@ -40,7 +43,7 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
 
   const [trades, candles, pools] = await Promise.all([
     getLaunchTrades(chainId, tokenAddress).catch(() => null),
-    getLaunchCandles(chainId, tokenAddress).catch(() => null),
+    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
   ]);
   const hasPendingTrade = trades?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
@@ -51,7 +54,7 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
-      <LaunchDetail detail={detail} trades={trades} candles={candles} pools={pools} />
+      <LaunchDetail detail={detail} trades={trades} candles={candles} pools={pools} chartCurrency={chartCurrency} />
     </AppShell>
   );
 }

@@ -15,9 +15,10 @@ export interface LaunchDetailProps {
   trades: TradePage | null;
   candles: CandlePage | null;
   pools?: PoolPage | null;
+  chartCurrency?: 'quote' | 'usd';
 }
 
-export function LaunchDetail({ detail, trades, candles, pools }: LaunchDetailProps) {
+export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = 'quote' }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -128,6 +129,7 @@ export function LaunchDetail({ detail, trades, candles, pools }: LaunchDetailPro
               graduationTime={graduationTime}
               quoteSymbol={detail.quoteAsset.symbol}
               coverageStatus={chartCoverageStatus}
+              currency={chartCurrency}
             />
           </CardContent>
         </Card>

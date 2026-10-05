@@ -109,7 +109,7 @@ export interface TradeQuery {
 
 type CandlesBody = paths['/v1/launches/{chainId}/{tokenAddress}/candles']['get']['responses'][200]['content']['application/json'];
 
-export type Candle = Required<NonNullable<CandlesBody['items']>[number]>;
+export type Candle = Required<Pick<NonNullable<CandlesBody['items']>[number], 'intervalSeconds' | 'bucketStart' | 'open' | 'high' | 'low' | 'close' | 'quoteVolume'>>;
 
 export interface CandlePage {
   items: readonly Candle[];
@@ -119,6 +119,7 @@ export interface CandlePage {
 export interface CandleQuery {
   intervalSeconds?: number;
   before?: number;
+  currency?: 'quote' | 'usd';
 }
 
 export async function getLaunchDetail(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
@@ -137,6 +138,7 @@ export async function getLaunchCandles(chainId: number, tokenAddress: string, qu
   return request<CandlePage>(`/v1/launches/${chainId}/${tokenAddress}/candles`, {
     intervalSeconds: query.intervalSeconds,
     before: query.before,
+    currency: query.currency,
   });
 }
 

@@ -359,6 +359,10 @@ export interface paths {
                                 low?: string;
                                 close?: string;
                                 quoteVolume?: string;
+                                volumeUsd?: string;
+                                tradeCount?: number;
+                                /** Format: date-time */
+                                computedAt?: string;
                             }[];
                             complete?: boolean;
                         };
