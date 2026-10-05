@@ -110,6 +110,22 @@ function candle(overrides: Partial<Candle> = {}): Candle {
 }
 
 describe('LaunchDetail', () => {
+  it('lists other pools under the Other pools heading and omits the section when pools are unavailable', () => {
+    const otherPool = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'b'.repeat(64)}`,
+      currency0: '0x1111111111111111111111111111111111111111', currency1: '0x2222222222222222222222222222222222222222',
+      displayedToken: '0x1111111111111111111111111111111111111111', fee: 3000, tickSpacing: 60,
+      hooks: '0x0000000000000000000000000000000000000000', createdBlock: '123', createdTimestamp: null,
+      ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, priceInQuote: null,
+      priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
+      coverageStatus: 'backfilling', lastTradeTimestamp: null };
+    const view = render(<LaunchDetail detail={detail()} trades={null} candles={null}
+      pools={{ items: [otherPool], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
+    expect(screen.getByRole('heading', { name: 'Other pools' })).toBeInTheDocument();
+    expect(view.container.querySelector(`a[href^="/pools/4663/uniswap_v4/0x${'b'.repeat(64)}"]`)).not.toBeNull();
+    view.rerender(<LaunchDetail detail={detail()} trades={null} candles={null} pools={null} />);
+    expect(screen.queryByRole('heading', { name: 'Other pools' })).not.toBeInTheDocument();
+  });
+
   it('shows token, Robinhood Chain, and Pons brand images in the header', () => {
     render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} trades={null} candles={null} />);
 
