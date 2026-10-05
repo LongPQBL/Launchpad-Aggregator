@@ -82,6 +82,11 @@ describe('readPoolStats', () => {
     expect(second.nextCursor).toBeNull();
   });
 
+  it('uses the last trade before the 24h window as the 1d change baseline', async () => {
+    const stats = await readPoolStats(pool, key, a, 1000 + 86_400 + 500, { rpcClient });
+    expect(stats.change1d).not.toBeNull();
+  });
+
   it('returns null USD volume when one positive trade has no historical price', async () => {
     await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id=$1 AND feed_address=$2', [chainId, feed]);
     const stats = await readPoolStats(pool, key, a, 4000, { rpcClient });

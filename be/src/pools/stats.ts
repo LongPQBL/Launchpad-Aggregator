@@ -168,7 +168,8 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const currentQuoteUsd = options.rpcClient && quoteFeed
     ? await readUsdPrice(pool, options.rpcClient, quoteAddress, () => asOf * 1000).catch(() => null) : null;
   const priceUsd = priceInQuote !== null && currentQuoteUsd
-    ? (Number(priceInQuote) * currentQuoteUsd.priceUsd).toString() : null;
+    ? (Number(priceInQuote) * currentQuoteUsd.priceUsd).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 20 })
+    : null;
   const supply = options.rpcClient && displayed !== ZERO_ADDRESS
     ? await readTotalSupply(options.rpcClient, displayed as Address) : null;
   const fdvUsd = supply !== null && displayedDecimals !== null
@@ -201,8 +202,12 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     }
   }
 
+  const priorTrade = complete ? await pool.query(`SELECT sqrt_price_x96, timestamp FROM pool_trades
+    WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND timestamp < $4
+    ORDER BY timestamp DESC, block_number DESC, log_index DESC LIMIT 1`,
+  [key.chainId, key.protocol, key.poolId.toLowerCase(), asOf - 86_400]) : null;
   const pricePoints = complete && displayedDecimals !== null && quoteDecimals !== null
-    ? rows.map((row) => ({ timestamp: Number(row.timestamp), price: poolPriceInQuote(
+    ? [...(priorTrade?.rows as TradeRow[] ?? []), ...rows].map((row) => ({ timestamp: Number(row.timestamp), price: poolPriceInQuote(
       BigInt(row.sqrt_price_x96), displayedDecimals, quoteDecimals, displayedIsCurrency0),
     })).filter((row): row is { timestamp: number; price: string } => row.price !== null) : [];
   return {
