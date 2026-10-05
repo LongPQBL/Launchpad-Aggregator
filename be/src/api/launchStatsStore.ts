@@ -4,7 +4,9 @@ import type { StatsFields } from './store.js';
 export interface LaunchKeyRef { chainId: number; tokenAddress: string }
 
 export async function writeLaunchStats(pool: Pool, chainId: number, tokenAddress: string, stats: StatsFields, computedAt: Date): Promise<void> {
-  await pool.query(`INSERT INTO launch_stats (chain_id, token_address, stats, computed_at) VALUES ($1, $2, $3, $4)
+  // Skips a launch that was removed (for example by reorg repair) after it was read for recomputation.
+  await pool.query(`INSERT INTO launch_stats (chain_id, token_address, stats, computed_at)
+    SELECT chain_id, token_address, $3, $4 FROM launches WHERE chain_id = $1 AND token_address = $2
     ON CONFLICT (chain_id, token_address) DO UPDATE SET stats = EXCLUDED.stats, computed_at = EXCLUDED.computed_at`,
   [chainId, tokenAddress.toLowerCase(), JSON.stringify(stats), computedAt]);
 }

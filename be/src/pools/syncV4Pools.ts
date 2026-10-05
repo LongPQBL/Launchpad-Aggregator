@@ -81,6 +81,12 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
   const amount0 = BigInt(String(raw.amount0));
   const amount1 = BigInt(String(raw.amount1));
   const sqrtPriceX96 = BigInt(String(raw.sqrtPriceX96));
+  // A swap that moved no tokens on either side is a real on-chain event but not a trade: nothing to
+  // record, and it must not stall the sync cycle the way a malformed row does.
+  if (amount0 === 0n && amount1 === 0n) {
+    await tx.delete(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.rawId, String(raw.id))));
+    return true;
+  }
   if (amount0 === 0n || amount1 === 0n || amount0 * amount1 >= 0n || sqrtPriceX96 <= 0n) {
     throw new Error(`Invalid V4 Swap amounts at raw row ${String(raw.id)}`);
   }
