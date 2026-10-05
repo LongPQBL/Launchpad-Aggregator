@@ -126,7 +126,7 @@ export const launches = pgTable('launches', {
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
-  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'set null' }),
   // Nullable: a near-realtime-synced launch (be/src/envioSync/incrementalSync.ts) persists its
   // minimal chain-derived record before a bounded enrichment job resolves these — never a placeholder
   // empty string. Existing rows written by the old synchronous-RPC sync path are unaffected.
@@ -284,7 +284,7 @@ export const venues = pgTable('venues', {
   kind: text('kind').notNull(),
   ref: text('ref').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
-  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'set null' }),
   effectiveFromBlock: bigint('effective_from_block', { mode: 'bigint' }).notNull(),
   effectiveFromLogIndex: integer('effective_from_log_index').notNull().default(0),
   effectiveToBlock: bigint('effective_to_block', { mode: 'bigint' }),
@@ -423,7 +423,7 @@ export const poolCandles = pgTable('pool_candles', {
 ]);
 
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {
-  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'set null' }),
   chainId: integer('chain_id').notNull(),
   tokenAddress: text('token_address').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
@@ -466,7 +466,7 @@ export const trades = pgTable('trades', {
   quoteAssetAddress: text('quote_asset_address').notNull(),
   sourceEvent: text('source_event').notNull(),
   activityKind: text('activity_kind').notNull().default('user_trade'),
-  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
+  sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'set null' }),
   priceNumeratorRaw: text('price_numerator_raw'),
   priceDenominatorRaw: text('price_denominator_raw'),
   // Nullable only because rows saved before this field existed haven't been backfilled yet
