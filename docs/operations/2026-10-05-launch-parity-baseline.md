@@ -18,3 +18,19 @@ When Envio is available, pin an observed head, audit adjacent finalized ranges f
 source start through `head - 500`, and retain the JSON reports. Each range requires exact
 chain/Envio/app key and block-hash parity plus contiguous Envio/app processed watermarks.
 Resolve layer-specific mismatches and rerun their ranges before calling any source complete.
+
+## Bounded live smoke test
+
+A disposable Envio stack was started with the same event handlers and a temporary config
+restricted to blocks `27027321`–`27027323` on chain `4663`. HyperSync returned the events,
+Envio processed through block `27027323`, and `envio."RawLaunchV2"` contained one launch
+at block `27027321`. The read-only parity CLI compared this range against an independent
+chain RPC and the migrated app **test** database: chain `1`, Envio `1`, app `0`. It reported
+`missingEnvio=[]`, one `missingApp` key, and status `mismatch`, as expected for the test
+database. This confirms the three-way audit runs with live chain/Envio data on a bounded
+range; it does not establish historical completeness.
+
+The local app **main** database has not applied migration `0029` and lacks
+`launches.launch_block_hash`, so the same CLI currently fails there with PostgreSQL error
+`42703`. Apply pending migrations before auditing that database. The disposable Envio stack
+was removed after the smoke test; the historical Envio database remains unavailable.
