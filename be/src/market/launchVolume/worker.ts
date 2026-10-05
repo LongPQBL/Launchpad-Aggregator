@@ -11,11 +11,12 @@ export async function refreshDueLaunchVolumes(
   pool: Pool, now: Date, limit: number, readHead: () => Promise<bigint | null> = () => readSafeHead(pool),
 ): Promise<WorkerReport> {
   const report: WorkerReport = { claimed: 0, published: 0, superseded: 0, failed: 0 };
+  // Read the head before claiming so a failing head read never leaves leases behind.
+  const headBlock = await readHead();
   const claims = await claimVolumeJobs(pool, now, limit);
   report.claimed = claims.length;
   if (claims.length === 0) return report;
 
-  const headBlock = await readHead();
   const windowEnd = Math.floor(now.getTime() / 1000);
   for (const claim of claims) {
     try {
