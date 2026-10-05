@@ -329,6 +329,33 @@ export const poolPendingSwaps = pgTable('pool_pending_swaps', {
   index('pool_pending_swaps_pool_idx').on(table.chainId, table.poolId),
 ]);
 
+export const poolCandleDirtyBuckets = pgTable('pool_candle_dirty_buckets', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  bucketStart: integer('bucket_start').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.bucketStart] }),
+  index('pool_candle_dirty_oldest_idx').on(table.bucketStart),
+]);
+
+export const poolCandles = pgTable('pool_candles', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: integer('bucket_start').notNull(),
+  openSqrtPriceX96: numeric('open_sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  highSqrtPriceX96: numeric('high_sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  lowSqrtPriceX96: numeric('low_sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  closeSqrtPriceX96: numeric('close_sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  tradeCount: integer('trade_count').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.intervalSeconds, table.bucketStart] }),
+  foreignKey({ columns: [table.chainId, table.protocol, table.poolId],
+    foreignColumns: [poolCatalog.chainId, poolCatalog.protocol, poolCatalog.poolId] }).onDelete('cascade'),
+]);
+
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {
   sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   chainId: integer('chain_id').notNull(),

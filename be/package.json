@@ -22,7 +22,8 @@
     "seed:known-quote-feeds": "tsx --env-file-if-exists=.env src/cli/seedKnownQuoteFeeds.ts",
     "backfill:feed-resolution-jobs": "tsx --env-file-if-exists=.env src/cli/backfillFeedResolutionJobs.ts",
     "candles:backfill": "tsx --env-file-if-exists=.env src/cli/backfillCandles.ts",
-    "candles:worker": "tsx --env-file-if-exists=.env src/cli/runCandleWorker.ts"
+    "candles:worker": "tsx --env-file-if-exists=.env src/cli/runCandleWorker.ts",
+    "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",

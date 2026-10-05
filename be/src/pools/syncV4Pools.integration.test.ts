@@ -4,7 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { createDatabase } from '../db/client.js';
 import { poolCatalog, poolMembers, poolTrades, poolSyncCursors, poolPendingSwaps } from '../db/schema.js';
-import { repairPoolWindow, syncV4PoolPage } from './syncV4Pools.js';
+import { repairPoolWindow, syncV4PoolPage, updatePoolCoverage } from './syncV4Pools.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -74,6 +74,24 @@ describe('V4 pool catalog sync', () => {
     const swaps = await db.select().from(poolTrades).where(eq(poolTrades.chainId, chainId));
     expect(swaps).toHaveLength(1);
     expect(swaps[0]).toMatchObject({ poolId: id, amount0Raw: '-100', amount1Raw: '200' });
+  });
+
+  it('claims finalized coverage only after historical Initialize and Swap scans drain', async () => {
+    await addInitialize(); await addSwap();
+    await syncV4PoolPage(envio, db, { ...input('initialize'), fence: 700n });
+    await updatePoolCoverage(db, chainId, 700n);
+    expect((await db.select().from(poolCatalog).where(eq(poolCatalog.chainId, chainId)))[0]?.coverageStatus).toBe('backfilling');
+    await syncV4PoolPage(envio, db, { ...input('swap'), fence: 700n });
+    await updatePoolCoverage(db, chainId, 700n);
+    expect((await db.select().from(poolCatalog).where(eq(poolCatalog.chainId, chainId)))[0]?.coverageStatus).toBe('caught_up');
+  });
+
+  it('keeps a pool created inside the provisional 500-block window backfilling', async () => {
+    await addInitialize(600n);
+    await syncV4PoolPage(envio, db, { ...input('initialize'), fence: 700n });
+    await syncV4PoolPage(envio, db, { ...input('swap'), fence: 700n });
+    await updatePoolCoverage(db, chainId, 700n);
+    expect((await db.select().from(poolCatalog).where(eq(poolCatalog.chainId, chainId)))[0]?.coverageStatus).toBe('backfilling');
   });
 
   it('keeps a swap that arrived before its Initialize and applies it after the pool appears', async () => {

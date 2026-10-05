@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 import type { Database, DbOrTx } from '../db/client.js';
 import { poolCatalog, poolPendingSwaps, poolSyncCursors, poolTrades } from '../db/schema.js';
 import { readRawPage, readRawRowById, readRawWindowKeys } from '../envioSync/incrementalPage.js';
@@ -22,6 +22,24 @@ export interface PoolSyncInput {
 export interface PoolSyncPageResult { applied: number; pending: number; cursor: CursorPosition; processedWatermark: bigint }
 export interface PoolRepairInput { chainId: number; fence: bigint; depth: bigint; tables?: Partial<Record<PoolStream, string>> }
 export interface PoolRepairReport { removedPools: number; removedSwaps: number }
+
+/** Only a fully drained historical scan can certify finalized pool rows. */
+export async function updatePoolCoverage(appDb: Database, chainId: number, fence: bigint): Promise<void> {
+  const safeFence = fence > 500n ? fence - 500n : 0n;
+  const cursors = await appDb.select().from(poolSyncCursors).where(and(eq(poolSyncCursors.chainId, chainId),
+    eq(poolSyncCursors.lane, 'history')));
+  const complete = (['initialize', 'swap'] as const).every((stream) =>
+    cursors.some((row) => row.stream === stream && (row.processedWatermark ?? -1n) >= safeFence));
+  const pending = await appDb.select({ rawId: poolPendingSwaps.rawId }).from(poolPendingSwaps)
+    .where(and(eq(poolPendingSwaps.chainId, chainId), lte(poolPendingSwaps.blockNumber, safeFence))).limit(1);
+  if (complete && pending.length === 0) {
+    await appDb.update(poolCatalog).set({ coverageStatus: 'caught_up' }).where(and(
+      eq(poolCatalog.chainId, chainId), lte(poolCatalog.blockNumber, safeFence), eq(poolCatalog.coverageStatus, 'backfilling')));
+  } else {
+    await appDb.update(poolCatalog).set({ coverageStatus: 'backfilling' }).where(and(
+      eq(poolCatalog.chainId, chainId), eq(poolCatalog.coverageStatus, 'caught_up')));
+  }
+}
 
 function position(row: typeof poolSyncCursors.$inferSelect): CursorPosition {
   return { blockNumber: row.blockNumber, logIndex: row.logIndex, rawId: row.rawId };

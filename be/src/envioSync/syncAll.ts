@@ -7,7 +7,7 @@ import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
 import { runTailPass, runHistoryPass, retryUnresolvedEvents, syncSourceCoverage, type SyncReport } from './incrementalSync.js';
 import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './incrementalRepair.js';
 import { STREAMS, detectEnvioRollback, type Stream } from './incrementalCursor.js';
-import { repairPoolWindow, syncV4PoolPage, type PoolRepairReport, type PoolSyncPageResult,
+import { repairPoolWindow, syncV4PoolPage, updatePoolCoverage, type PoolRepairReport, type PoolSyncPageResult,
   type PoolStream } from '../pools/syncV4Pools.js';
 
 export interface AllSyncTables {
@@ -118,6 +118,7 @@ export async function runPoolCatalogCycle(envioPool: Pool, appDb: Database, chai
         fence: processedBlock, limit: deps.limit ?? 500, tables: deps.tables }));
     }
   }
+  await updatePoolCoverage(appDb, chainId, processedBlock);
   return results;
 }
 
