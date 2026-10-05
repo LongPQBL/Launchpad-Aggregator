@@ -3,6 +3,7 @@ import { formatUnits, type Address, type Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readLaunchParityCoverage } from '../coverage/repairRanges.js';
+import { launchCoverageSql, SAFE_HEAD_SQL } from '../coverage/launchCoverageSql.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
 import { read52WeekHighLowFromCandles } from '../market/candleStats.js';
@@ -27,29 +28,6 @@ function string(value: unknown): string { return String(value); }
 function number(value: unknown): number { return Number(value); }
 function nullableString(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
 function nullableNumber(value: unknown): number | null { return value === null || value === undefined ? null : Number(value); }
-
-// Per-launch coverage, not the global `coverage()` below: a launch's 24h volume/price/candles are
-// complete only if ITS OWN factory, lifecycle (v2) and official venue trade sources are each
-// certified to safe head — not every source ever discovered for the whole chain (docs/superpowers/
-// specs/2026-09-30-parallel-indexer-design.md §5). The trade-source-id-from-venue-kind mapping
-// mirrors getTradeSourceDefinitions()/getV4PoolSources(); update both together if either changes.
-function launchCoverageSql(headParamIndex: number): string {
-  return `(
-    SELECT $${headParamIndex}::bigint IS NOT NULL AND count(*) = count(src.id)
-      AND coalesce(bool_and(src.confirmed_to_block >= $${headParamIndex}::bigint), false)
-    FROM (
-      SELECT l.source_id AS id
-      UNION ALL SELECT 'pons-v2-lifecycle' WHERE l.protocol_version = 'v2'
-      UNION ALL SELECT CASE v.kind
-          WHEN 'v4_pool' THEN 'pons-v2-v4:' || v.ref
-          WHEN 'curve' THEN 'pons-v2-curve'
-          WHEN 'v3_pool' THEN l.source_id || '-trades'
-        END AS id
-      FROM venues v WHERE v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true
-    ) req
-    LEFT JOIN sources src ON src.id = req.id
-  )`;
-}
 
 function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary {
   const coverageStatus = complete ? 'caught_up' : 'backfilling';
@@ -194,18 +172,14 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
   // Envio's own chain head (be/src/envioSync/syncAll.ts's runAllSyncsOnce, 'real' target only) — once
   // the RPC-scan indexer stops at cutover, observed_blocks freezes, and without this, every source's
   // coverage would be judged against that stale value forever (final review, Important 3).
-  const safeHeadSql = `SELECT GREATEST(
-    (SELECT max(number) FROM observed_blocks WHERE chain_id = 4663),
-    (SELECT head_block FROM envio_chain_progress WHERE chain_id = 4663)
-  ) AS safe_head`;
   async function safeHead(): Promise<bigint | null> {
-    const result = await pool.query(safeHeadSql);
+    const result = await pool.query(SAFE_HEAD_SQL);
     return result.rows[0]?.safe_head === null ? null : BigInt(string(result.rows[0].safe_head));
   }
   async function coverage() {
     const [sourceResult, headResult, gapResult, poolResult, phaseResult] = await Promise.all([
       pool.query('SELECT id, status, confirmed_to_block, start_block FROM sources'),
-      pool.query(safeHeadSql),
+      pool.query(SAFE_HEAD_SQL),
       pool.query('SELECT source_id, from_block, to_block, reason FROM source_gaps ORDER BY source_id, from_block'),
       pool.query("SELECT DISTINCT 'pons-v2-v4:' || lower(ref) AS id FROM venues WHERE chain_id = 4663 AND kind = 'v4_pool' AND official = true"),
       pool.query(`SELECT count(*)::int AS count FROM launches l LEFT JOIN phase_observations p

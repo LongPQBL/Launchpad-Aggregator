@@ -102,3 +102,22 @@ export async function publishVolumeScore(pool: Pool, claim: VolumeClaim, score: 
     client.release();
   }
 }
+
+// Unlike invalidateLaunchVolume, scheduling leaves the published score in place: an expiry is a
+// reminder that the rolling total may have changed, not a claim that the cached value is stale.
+export async function scheduleLaunchVolumeExpiry(pool: Pool, key: LaunchKey, dueAt: Date): Promise<void> {
+  await pool.query(`
+    INSERT INTO launch_volume24h_jobs (chain_id, token_address, revision, due_at)
+    SELECT l.chain_id, l.token_address, 1, $3::timestamptz FROM launches l
+    WHERE l.chain_id = $1 AND l.token_address = $2
+    ON CONFLICT (chain_id, token_address) DO UPDATE SET
+      due_at = LEAST(launch_volume24h_jobs.due_at, EXCLUDED.due_at),
+      updated_at = now()`, [key.chainId, key.tokenAddress, dueAt]);
+}
+
+export async function releaseVolumeClaim(pool: Pool, claim: VolumeClaim, retryAt: Date, errorMessage: string): Promise<void> {
+  await pool.query(`
+    UPDATE launch_volume24h_jobs SET lease_id = NULL, lease_until = NULL, last_error = $4, due_at = $3
+    WHERE chain_id = $1 AND token_address = $2 AND lease_id = $5`,
+  [claim.key.chainId, claim.key.tokenAddress, retryAt, errorMessage, claim.leaseId]);
+}
