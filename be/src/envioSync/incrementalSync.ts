@@ -146,15 +146,18 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     throw new Error(`Failed to apply V1 swap at tx ${row.txHash} log ${row.logIndex}: ${(error as Error).message}`, { cause: error });
   }
   if (!trade) return 'applied';
-  await tx.insert(trades).values({
+  // Only notify when the insert actually added a new row — the history lane keeps re-reading
+  // ranges the tail lane (or an earlier cycle) already applied, so an unconditional push here would
+  // fire a duplicate notification on every no-op replay (final review, Minor 11).
+  const inserted = await tx.insert(trades).values({
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(),
     activityKind: trade.activityKind, quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent,
     sourceLogId: null, priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
     priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing();
-  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 
@@ -214,14 +217,14 @@ async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unk
     timestamp: int(raw.timestamp),
   };
   const trade = hydrateCurveTradeFromDecoded(row, venue, launch);
-  await tx.insert(trades).values({
+  const inserted = await tx.insert(trades).values({
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing();
-  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
@@ -236,14 +239,14 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
     logIndex: int(raw.logIndex), timestamp: int(raw.timestamp),
   };
   const trade = hydrateCurveBuybackFromDecoded(row, venue, launch);
-  await tx.insert(trades).values({
+  const inserted = await tx.insert(trades).values({
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing();
-  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 
@@ -353,15 +356,15 @@ async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     throw new Error(`Failed to apply V4 swap at tx ${row.txHash} log ${row.logIndex}: ${(error as Error).message}`, { cause: error });
   }
   if (!trade) return 'applied';
-  await tx.insert(trades).values({
+  const inserted = await tx.insert(trades).values({
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
     traderAddress: trade.traderAddress,
-  }).onConflictDoNothing();
-  changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
   return 'applied';
 }
 

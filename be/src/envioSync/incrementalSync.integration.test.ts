@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import { eq, and } from 'drizzle-orm';
@@ -8,7 +8,13 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
 import type { Launch } from '../domain/types.js';
 import { claimSyncCursor, advanceSyncCursor, type Lane, type Stream } from './incrementalCursor.js';
-import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage, repriceNullPricedTrades, lookupLaunch } from './incrementalSync.js';
+
+vi.mock('./notifyChanges.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./notifyChanges.js')>();
+  return { ...actual, notifyChanged: vi.fn((...args: Parameters<typeof actual.notifyChanged>) => actual.notifyChanged(...args)) };
+});
+const { notifyChanged } = await import('./notifyChanges.js');
+const { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage, repriceNullPricedTrades, lookupLaunch } = await import('./incrementalSync.js');
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -618,5 +624,31 @@ describe('repriceNullPricedTrades (final review, Critical 2)', () => {
     expect(repricedCount).toBe(0);
     const [tradeRow] = await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
     expect(tradeRow!.priceNumeratorRaw).toBeNull();
+  });
+});
+
+describe('applyEnvioPage: no notification for a no-op replay (final review, Minor 11)', () => {
+  it('does not notify trade.created when a trade insert hits an already-applied row (history/tail window overlap)', async () => {
+    vi.mocked(notifyChanged).mockClear();
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`noop-launch-${token}`, token, poolAddress, txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    await insertSwapRow(`noop-swap-${token}`, poolAddress, 110, 1, '100000000000000000', '-200000000000000000000');
+
+    const first = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+    expect(first.applied).toBe(1);
+    const firstChanges = vi.mocked(notifyChanged).mock.calls.at(-1)![1];
+    expect(firstChanges).toContainEqual(expect.objectContaining({ kind: 'trade.created', tokenAddress: token }));
+
+    // Simulate the history lane re-reading a window the tail lane (or an earlier cycle) already
+    // applied — the raw row is read again, but the trade insert hits the existing row.
+    await resetCursor('v1-swap', 'history');
+    vi.mocked(notifyChanged).mockClear();
+    const second = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
+    expect(second.applied).toBe(1); // applyRow still reports 'applied' (correct outcome) — only the notification must not fire again
+    const secondChanges = vi.mocked(notifyChanged).mock.calls.at(-1)![1];
+    expect(secondChanges).toEqual([]);
   });
 });
