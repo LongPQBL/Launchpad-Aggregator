@@ -145,11 +145,11 @@ export async function finishCoreMetadataLaunch(
   const retryAt = allDone ? null : nextMetadataRetryAt(now, claim.coreMetadataRetryCount);
   const graduatedToTrue = claim.protocolVersion === 'v1' && graduatedDone && result.graduated.value === true;
   const updated = await db.$client.query(`UPDATE launches SET
-    name = CASE WHEN $1 THEN $2 ELSE name END,
-    symbol = CASE WHEN $3 THEN $4 ELSE symbol END,
-    token_decimals = CASE WHEN $5 THEN $6 ELSE token_decimals END,
-    quote_asset_symbol = CASE WHEN $7 THEN $8 ELSE quote_asset_symbol END,
-    quote_asset_decimals = CASE WHEN $9 THEN $10 ELSE quote_asset_decimals END,
+    name = CASE WHEN $1 AND $2::text IS NOT NULL THEN $2 ELSE name END,
+    symbol = CASE WHEN $3 AND $4::text IS NOT NULL THEN $4 ELSE symbol END,
+    token_decimals = CASE WHEN $5 AND $6::integer IS NOT NULL THEN $6 ELSE token_decimals END,
+    quote_asset_symbol = CASE WHEN $7 AND $8::text IS NOT NULL THEN $8 ELSE quote_asset_symbol END,
+    quote_asset_decimals = CASE WHEN $9 AND $10::integer IS NOT NULL THEN $10 ELSE quote_asset_decimals END,
     lifecycle_status = CASE WHEN $11 THEN 'graduated' ELSE lifecycle_status END,
     core_metadata_read_state = CASE WHEN $12 THEN 'done' ELSE core_metadata_read_state END,
     core_metadata_retry_at = $13, core_metadata_retry_count = $14
