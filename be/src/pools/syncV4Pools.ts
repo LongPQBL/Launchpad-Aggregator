@@ -81,9 +81,10 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
   const amount0 = BigInt(String(raw.amount0));
   const amount1 = BigInt(String(raw.amount1));
   const sqrtPriceX96 = BigInt(String(raw.sqrtPriceX96));
-  // A swap that moved no tokens on either side is a real on-chain event but not a trade: nothing to
-  // record, and it must not stall the sync cycle the way a malformed row does.
-  if (amount0 === 0n && amount1 === 0n) {
+  // A swap with a zero side is a real on-chain event but not a trade: a one-sided zero (for example
+  // 0 in, 7330 out of the other token) has no per-token price and no two-sided volume. It must not
+  // stall the sync cycle the way a malformed row does.
+  if (amount0 === 0n || amount1 === 0n) {
     await tx.delete(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.rawId, String(raw.id))));
     return true;
   }

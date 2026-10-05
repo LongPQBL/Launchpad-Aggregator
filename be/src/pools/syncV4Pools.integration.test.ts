@@ -28,10 +28,10 @@ async function addInitialize(block = 100n, blockHash = hash('a')) {
     "blockNumber", "blockHash", "txHash", "logIndex") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
   [`init-${blockHash}`, chainId, id, a, b, 3000, 60, hook, block.toString(), blockHash, hash('c'), 0]);
 }
-async function addSwap(block = 101n, blockHash = hash('a')) {
+async function addSwap(block = 101n, blockHash = hash('a'), amount0 = '-100', amount1 = '200') {
   await envio.query(`INSERT INTO ${swapTable} (id, "chainId", "poolId", amount0, amount1, "sqrtPriceX96", "txFrom", sender,
     "blockNumber", "blockHash", "txHash", "logIndex", "timestamp", fee) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-  [`swap-${blockHash}`, chainId, id, '-100', '200', '79228162514264337593543950336', a, b,
+  [`swap-${blockHash}`, chainId, id, amount0, amount1, '79228162514264337593543950336', a, b,
     block.toString(), blockHash, hash('d'), 1, 1_700_000_000, 3000]);
 }
 const input = (stream: 'initialize' | 'swap', lane: 'tail' | 'history' = 'history') =>
@@ -92,6 +92,15 @@ describe('V4 pool catalog sync', () => {
     await syncV4PoolPage(envio, db, { ...input('swap'), fence: 700n });
     await updatePoolCoverage(db, chainId, 700n);
     expect((await db.select().from(poolCatalog).where(eq(poolCatalog.chainId, chainId)))[0]?.coverageStatus).toBe('backfilling');
+  });
+
+  it('skips a swap with one side at zero without recording a trade or stalling the sync', async () => {
+    await addInitialize();
+    await syncV4PoolPage(envio, db, input('initialize'));
+    await addSwap(101n, hash('a'), '0', '-7330');
+    await expect(syncV4PoolPage(envio, db, input('swap'))).resolves.toBeDefined();
+    expect(await db.select().from(poolTrades).where(eq(poolTrades.chainId, chainId))).toHaveLength(0);
+    expect(await db.select().from(poolPendingSwaps).where(eq(poolPendingSwaps.chainId, chainId))).toHaveLength(0);
   });
 
   it('keeps a swap that arrived before its Initialize and applies it after the pool appears', async () => {
