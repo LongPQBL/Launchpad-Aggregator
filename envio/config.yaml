@@ -61,7 +61,7 @@ chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    start_block: 8928
+    start_block: 8600612
     contracts:
       - name: PonsV1LegacyFactory
         address:
