@@ -247,6 +247,41 @@ export const venues = pgTable('venues', {
   index('venues_kind_ref_idx').on(table.chainId, table.kind, table.ref),
 ]);
 
+export const poolCatalog = pgTable('pool_catalog', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  currency0: text('currency0').notNull(),
+  currency1: text('currency1').notNull(),
+  fee: integer('fee').notNull(),
+  tickSpacing: integer('tick_spacing').notNull(),
+  hooks: text('hooks').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  blockHash: text('block_hash').notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+  verified: boolean('verified').notNull(),
+  coverageStatus: text('coverage_status').notNull().default('backfilling'),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId] }),
+  check('pool_catalog_v4_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+  check('pool_catalog_verified', sql`${table.verified} = true`),
+  check('pool_catalog_currency_order', sql`${table.currency0} < ${table.currency1}`),
+  check('pool_catalog_coverage_status', sql`${table.coverageStatus} IN ('backfilling', 'caught_up', 'incomplete')`),
+]);
+
+export const poolMembers = pgTable('pool_members', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.protocol, table.poolId],
+    foreignColumns: [poolCatalog.chainId, poolCatalog.protocol, poolCatalog.poolId] }).onDelete('cascade'),
+  index('pool_members_token_idx').on(table.chainId, table.tokenAddress),
+]);
+
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {
   sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
   chainId: integer('chain_id').notNull(),
