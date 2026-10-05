@@ -6,7 +6,7 @@ import type { Launch, LifecycleStatus, Venue, VenueKind } from '../domain/types.
 import { launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { claimSyncCursor, advanceSyncCursor, STREAMS, type Stream, type Lane, type CursorPosition, type SyncCursor } from './incrementalCursor.js';
 import { readRawPage, readRawRowById } from './incrementalPage.js';
-import { claimDueUnresolvedEvents, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
+import { claimDueUnresolvedEvents, earliestUnresolvedBlock, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
 import { hydrateV1Launch } from '../launchpads/pons/v1/adapter.js';
 import { envioRawLaunchToEvent, hydrateV1SwapFromDecoded, type EnvioRawLaunchRow, type EnvioRawSwapRow } from './transformV1Legacy.js';
@@ -362,6 +362,7 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
         unresolved += 1;
         await enqueueUnresolvedEvent(tx, {
           chainId: input.chainId, stream: input.stream, rawId: String(raw.id), reason: 'dependency_missing',
+          blockNumber: BigInt(String(raw.blockNumber)),
         });
       }
     }
@@ -429,6 +430,60 @@ export async function retryUnresolvedEvents(envioPool: Pool, appDb: Database, in
     if (outcome !== 'unresolved') resolved += 1;
   }
   return resolved;
+}
+
+/**
+ * The minimum contiguous block actually applied across `streams` for one `lane` — never just the
+ * raw-read cursor's position, since a stream's cursor advances past an unresolved row without
+ * applying it (Task 3). A stream with an unresolved event at block B can never confirm past B - 1,
+ * even if its cursor has since read far beyond it. Returns null if any required stream has never
+ * been synced at all — coverage must stay incomplete, not silently report block 0.
+ */
+export async function confirmedSourceBlock(appDb: DbOrTx, chainId: number, streams: readonly Stream[], lane: Lane): Promise<bigint | null> {
+  let min: bigint | null = null;
+  for (const stream of streams) {
+    const cursor = await claimSyncCursor(appDb, { chainId, stream, lane });
+    if (cursor.processedWatermark === null) return null;
+    let confirmed = cursor.processedWatermark;
+    const earliestGap = await earliestUnresolvedBlock(appDb, chainId, stream);
+    if (earliestGap !== null && earliestGap - 1n < confirmed) confirmed = earliestGap - 1n;
+    if (confirmed < 0n) confirmed = 0n;
+    if (min === null || confirmed < min) min = confirmed;
+  }
+  return min;
+}
+
+/**
+ * Same semantics as confirmedSourceBlock, but a pure read against a raw `Pool` with no claim/insert
+ * side effect — for the coverage API's GET path, which must never create a cursor row as a side
+ * effect of being polled. A stream with no cursor row yet is "never synced", same as a null watermark.
+ */
+export async function readConfirmedSourceBlock(pool: Pool, chainId: number, streams: readonly Stream[], lane: Lane): Promise<bigint | null> {
+  if (streams.length === 0) return null;
+  const [cursorResult, gapResult] = await Promise.all([
+    pool.query(
+      `SELECT stream, block_number, processed_watermark FROM envio_sync_cursors WHERE chain_id = $1 AND lane = $2 AND stream = ANY($3::text[])`,
+      [chainId, lane, streams],
+    ),
+    pool.query(
+      `SELECT stream, min(block_number) AS earliest FROM unresolved_events WHERE chain_id = $1 AND stream = ANY($2::text[]) GROUP BY stream`,
+      [chainId, streams],
+    ),
+  ]);
+  const cursorByStream = new Map((cursorResult.rows as { stream: string; block_number: string; processed_watermark: string | null }[])
+    .map((row) => [row.stream, row]));
+  const gapByStream = new Map((gapResult.rows as { stream: string; earliest: string }[]).map((row) => [row.stream, BigInt(row.earliest)]));
+  let min: bigint | null = null;
+  for (const stream of streams) {
+    const cursor = cursorByStream.get(stream);
+    if (!cursor || cursor.processed_watermark === null) return null;
+    let confirmed = BigInt(cursor.processed_watermark);
+    const earliestGap = gapByStream.get(stream);
+    if (earliestGap !== undefined && earliestGap - 1n < confirmed) confirmed = earliestGap - 1n;
+    if (confirmed < 0n) confirmed = 0n;
+    if (min === null || confirmed < min) min = confirmed;
+  }
+  return min;
 }
 
 export interface SyncReport {

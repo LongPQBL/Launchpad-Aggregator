@@ -246,6 +246,13 @@
       "when": 1791160319564,
       "tag": "0034_unresolved_events",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1791170878052,
+      "tag": "0035_coverage_observability",
+      "breakpoints": true
     }
   ]
 }

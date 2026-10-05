@@ -70,7 +70,7 @@ describe('listLaunches without raw log provenance', () => {
 });
 
 describe('a near-realtime-synced launch with unresolved core metadata', () => {
-  const pendingToken = '0x1717171717171717171717171717171717171717';
+  const pendingToken = '0x1818181818181818181818181818181818181818';
   const pendingSource = 'envio-store-pending-metadata-test';
 
   beforeAll(async () => {
@@ -142,6 +142,48 @@ describe('safe head considers envio_chain_progress (final review, Important 3)',
 
     const afterHead = await store.getLaunch(4663, headToken);
     expect(afterHead?.coverageStatus).toBe('caught_up');
+  });
+});
+
+describe('getCoverage: incremental sync observability', () => {
+  afterAll(async () => {
+    await pool.query('DELETE FROM envio_sync_cursors WHERE chain_id = 4663');
+    await pool.query('DELETE FROM unresolved_events WHERE chain_id = 4663');
+    await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
+  });
+
+  it('stays incomplete (null confirmed block) while any required stream has never been synced, even with an observed Envio head', async () => {
+    await pool.query('DELETE FROM envio_sync_cursors WHERE chain_id = 4663');
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (4663, 1000)
+      ON CONFLICT (chain_id) DO UPDATE SET head_block = 1000`);
+
+    const coverage = await store.getCoverage();
+    expect(coverage.incrementalSync?.observedEnvioHead).toBe('1000');
+    expect(coverage.incrementalSync?.tailConfirmedBlock).toBeNull();
+    expect(coverage.incrementalSync?.tailLagBlocks).toBeNull();
+  });
+
+  it('reports tail lag, history backlog, and unresolved/repair counters once every stream has a cursor', async () => {
+    await pool.query('DELETE FROM envio_sync_cursors WHERE chain_id = 4663');
+    await pool.query('DELETE FROM unresolved_events WHERE chain_id = 4663');
+    const streams = ['v1-launch', 'v1-swap', 'v2-launch', 'v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap'];
+    for (const stream of streams) {
+      await pool.query(`INSERT INTO envio_sync_cursors (chain_id, stream, lane, block_number, log_index, raw_id, processed_watermark)
+        VALUES (4663, $1, 'tail', 900, -1, '', 900), (4663, $1, 'history', 300, -1, '', 300)`, [stream]);
+    }
+    await pool.query(`INSERT INTO unresolved_events (chain_id, stream, raw_id, reason, block_number) VALUES (4663, 'v1-swap', 'cov-test-1', 'dependency_missing', 850)`);
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (4663, 1000)
+      ON CONFLICT (chain_id) DO UPDATE SET head_block = 1000`);
+
+    const coverage = await store.getCoverage();
+    expect(coverage.incrementalSync?.observedEnvioHead).toBe('1000');
+    // v1-swap's unresolved event at 850 caps its own tail confirmation at 849, which becomes the
+    // cross-stream minimum even though every other stream reached 900.
+    expect(coverage.incrementalSync?.tailConfirmedBlock).toBe('849');
+    expect(coverage.incrementalSync?.tailLagBlocks).toBe('151');
+    expect(coverage.incrementalSync?.historyConfirmedBlock).toBe('300');
+    expect(coverage.incrementalSync?.historyBacklogBlocks).toBe('700');
+    expect(coverage.incrementalSync?.unresolvedEventCount).toBe(1);
   });
 });
 

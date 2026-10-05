@@ -45,6 +45,21 @@ export interface CandleResponse {
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
 export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string; sort?: 'volume24hUsd' | 'recent' }
 
+// Observability for the near-realtime incremental sync path (be/src/envioSync/incrementalSync.ts),
+// separate from the sources-table-based coverage above (which only the old full-table sync writes).
+// A stream's "confirmed" block is the minimum contiguous block actually applied, not merely read —
+// see confirmedSourceBlock's own doc comment for why those differ while an event sits unresolved.
+export interface IncrementalSyncCoverage {
+  observedEnvioHead: string | null;
+  tailConfirmedBlock: string | null;
+  historyConfirmedBlock: string | null;
+  tailLagBlocks: string | null;
+  historyBacklogBlocks: string | null;
+  unresolvedEventCount: number;
+  pendingCoreMetadataCount: number;
+  repair: { lastRunAt: string | null; lastSuccessAt: string | null; lastFailureAt: string | null; lastFailureReason: string | null; failureCount: number };
+}
+
 export interface ApiDeps {
   feOrigin: string;
   events?: ApiEventBus;
@@ -52,7 +67,8 @@ export interface ApiDeps {
     listSources(): Promise<readonly { id: string; chainId: number; platform: string; protocolVersion: string }[]>;
     getCoverage(): Promise<{ complete: boolean; pendingSourceIds: string[]; missingRanges: readonly { sourceId: string; fromBlock: string; toBlock: string; reason: string }[];
       latestFinalizedFence?: string | null; launchParity?: readonly LaunchParityCoverage[];
-      parityAlerts?: { mismatchedSources: number; stalledSources: number; pendingRepairs: number } }>;
+      parityAlerts?: { mismatchedSources: number; stalledSources: number; pendingRepairs: number };
+      incrementalSync?: IncrementalSyncCoverage }>;
     listLaunches(query: LaunchListQuery): Promise<Page<LaunchSummary>>;
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;

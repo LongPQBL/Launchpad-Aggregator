@@ -5,7 +5,7 @@ import { syncV2Once, syncV2ToReal, DEFAULT_ENVIO_V2_TABLES, type EnvioV2TableNam
 import { syncV4Once, syncV4ToReal, DEFAULT_ENVIO_V4_TABLES, type EnvioV4TableNames } from './runSyncV4.js';
 import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
 import { runTailPass, runHistoryPass, type SyncReport } from './incrementalSync.js';
-import { repairEnvioWindow, type RepairReport } from './incrementalRepair.js';
+import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './incrementalRepair.js';
 import type { Stream } from './incrementalCursor.js';
 
 export interface AllSyncTables {
@@ -85,8 +85,19 @@ export interface RepairCycleDeps {
   progressTable?: string;
 }
 
-/** Bounded reorg repair over the last `depth` blocks (default 500 — the standard reorg safety margin). */
+/**
+ * Bounded reorg repair over the last `depth` blocks (default 500 — the standard reorg safety margin).
+ * Records its own success/failure into envio_repair_state so a silently-failing repair worker stays
+ * observable through the coverage API, then rethrows — the caller's own retry/backoff is unchanged.
+ */
 export async function runRepairCycle(envioPool: Pool, appDb: Database, chainId: number, deps: RepairCycleDeps = {}): Promise<RepairReport> {
-  const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
-  return repairEnvioWindow(envioPool, appDb, { chainId, fence: processedBlock, depth: deps.depth ?? 500n, tables: deps.tables });
+  try {
+    const { processedBlock } = await readEnvioProgress(envioPool, deps.progressTable);
+    const report = await repairEnvioWindow(envioPool, appDb, { chainId, fence: processedBlock, depth: deps.depth ?? 500n, tables: deps.tables });
+    await recordRepairOutcome(appDb, chainId, new Date(), null);
+    return report;
+  } catch (error) {
+    await recordRepairOutcome(appDb, chainId, new Date(), error).catch(() => { /* best-effort; the original error still propagates */ });
+    throw error;
+  }
 }

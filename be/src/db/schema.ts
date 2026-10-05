@@ -370,16 +370,32 @@ export const unresolvedEvents = pgTable('unresolved_events', {
   stream: text('stream').notNull(),
   rawId: text('raw_id').notNull(),
   reason: text('reason').notNull(),
+  // The row's own block — be/src/envioSync/incrementalSync.ts's confirmedSourceBlock caps a stream's
+  // confirmed-contiguous watermark just before the earliest still-unresolved block, so coverage can
+  // never claim complete past a gap this stream's cursor merely read past without actually applying.
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
   retryCount: integer('retry_count').notNull().default(0),
   nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.stream, table.rawId] }),
   index('unresolved_events_due_idx').on(table.nextRetryAt),
+  index('unresolved_events_block_idx').on(table.chainId, table.stream, table.blockNumber),
   check('unresolved_events_valid_stream', sql`${table.stream} IN
     ('v1-launch', 'v1-swap', 'v2-launch', 'v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap')`),
   check('unresolved_events_retry_count_valid', sql`${table.retryCount} >= 0`),
 ]);
+
+// Tracks whether be/src/envioSync/incrementalRepair.ts's bounded repair pass is actually succeeding —
+// a repair failure must be observable from the coverage API, not only from CLI logs.
+export const envioRepairState = pgTable('envio_repair_state', {
+  chainId: integer('chain_id').primaryKey(),
+  lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+  lastFailureAt: timestamp('last_failure_at', { withTimezone: true }),
+  lastFailureReason: text('last_failure_reason'),
+  failureCount: integer('failure_count').notNull().default(0),
+});
 
 export const candleDirtyBuckets = pgTable('candle_dirty_buckets', {
   chainId: integer('chain_id').notNull(),

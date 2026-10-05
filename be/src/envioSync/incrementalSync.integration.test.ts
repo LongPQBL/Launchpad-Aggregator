@@ -6,7 +6,7 @@ import { createDatabase } from '../db/client.js';
 import { envioSyncCursors, launches, venues, trades, unresolvedEvents } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import type { Lane, Stream } from './incrementalCursor.js';
-import { applyEnvioPage, retryUnresolvedEvents } from './incrementalSync.js';
+import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents } from './incrementalSync.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -54,6 +54,7 @@ afterAll(async () => {
   }
   await db.delete(envioSyncCursors).where(eq(envioSyncCursors.chainId, chainId));
   await db.delete(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId));
+  await db.delete(envioSyncCursors).where(eq(envioSyncCursors.chainId, 999777));
   await pool.end();
   await envioPool.end();
 });
@@ -251,5 +252,43 @@ describe('applyEnvioPage: overlap between history and tail lanes', () => {
     const lanesSeen = new Set(cursorRows.map((row) => row.lane));
     expect(lanesSeen.has('tail')).toBe(true);
     expect(lanesSeen.has('history')).toBe(true);
+  });
+});
+
+describe('confirmedSourceBlock', () => {
+  it('reports the advanced watermark for a stream whose pass applied zero rows (an empty range)', async () => {
+    await resetCursor('v1-launch', 'history');
+    // No raw rows inserted at all — applyEnvioPage still advances the watermark on an empty page.
+    const result = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 800n, limit: 10, tables });
+    expect(result.applied).toBe(0);
+    const confirmed = await confirmedSourceBlock(db, chainId, ['v1-launch'], 'history');
+    expect(confirmed).toBe(800n);
+  });
+
+  it('caps a stream at the block before its earliest unresolved event — a swap whose launch has not arrived yet', async () => {
+    await resetCursor('v1-swap', 'history');
+    const { poolAddress } = freshToken();
+    await insertSwapRow(`gap-${poolAddress}`, poolAddress, 500, 1, '100000000000000000', '-200000000000000000000');
+    const result = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 900n, limit: 10, tables });
+    expect(result.unresolved).toBe(1);
+    // The cursor itself read all the way to 900, but the stream cannot confirm past the unresolved
+    // gap at block 500 — coverage must never claim a block it only read past, not actually applied.
+    const confirmed = await confirmedSourceBlock(db, chainId, ['v1-swap'], 'history');
+    expect(confirmed).toBe(499n);
+  });
+
+  it('tracks tail and history independently for the same stream', async () => {
+    await resetCursor('v1-launch', 'tail');
+    await resetCursor('v1-launch', 'history');
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'tail', fence: 900n, limit: 10, tables });
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 300n, limit: 10, tables });
+    expect(await confirmedSourceBlock(db, chainId, ['v1-launch'], 'tail')).not.toBe(await confirmedSourceBlock(db, chainId, ['v1-launch'], 'history'));
+    expect(await confirmedSourceBlock(db, chainId, ['v1-launch'], 'history')).toBe(300n);
+  });
+
+  it('stays null (provisional, never a fabricated number) while any required stream has never been synced', async () => {
+    const neverSyncedChain = 999777;
+    const confirmed = await confirmedSourceBlock(db, neverSyncedChain, ['v1-launch', 'v1-swap'], 'history');
+    expect(confirmed).toBeNull();
   });
 });

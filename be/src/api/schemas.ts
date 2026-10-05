@@ -17,6 +17,17 @@ export const coverageSchema = { type: 'object', properties: {
   parityAlerts: { type: 'object', properties: {
     mismatchedSources: { type: 'integer' }, stalledSources: { type: 'integer' }, pendingRepairs: { type: 'integer' },
   } },
+  incrementalSync: { type: 'object', properties: {
+    observedEnvioHead: { type: 'string', nullable: true },
+    tailConfirmedBlock: { type: 'string', nullable: true }, historyConfirmedBlock: { type: 'string', nullable: true },
+    tailLagBlocks: { type: 'string', nullable: true }, historyBacklogBlocks: { type: 'string', nullable: true },
+    unresolvedEventCount: { type: 'integer' }, pendingCoreMetadataCount: { type: 'integer' },
+    repair: { type: 'object', properties: {
+      lastRunAt: { type: 'string', nullable: true }, lastSuccessAt: { type: 'string', nullable: true },
+      lastFailureAt: { type: 'string', nullable: true }, lastFailureReason: { type: 'string', nullable: true },
+      failureCount: { type: 'integer' },
+    } },
+  } },
 } } as const;
 
 export const launchSummary = { type: 'object', properties: {

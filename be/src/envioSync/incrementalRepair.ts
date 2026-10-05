@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { and, eq, inArray, isNull, gte, sql } from 'drizzle-orm';
 import type { Database, DbOrTx } from '../db/client.js';
-import { launches, venues, trades, lifecycleTransitions } from '../db/schema.js';
+import { launches, venues, trades, lifecycleTransitions, envioRepairState } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readRawWindowKeys, type CanonicalEventKey } from './incrementalPage.js';
 import { advanceSyncCursor, claimSyncCursor, LANES, type Stream } from './incrementalCursor.js';
@@ -200,4 +200,38 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
   });
 
   return { changedLaunchKeys: [...changed.values()] };
+}
+
+/** Records a repair attempt's outcome — see schema.ts's envioRepairState: the coverage API reads this so a silently-failing repair worker is observable, not only visible in CLI logs. */
+export async function recordRepairOutcome(appDb: Database, chainId: number, now: Date, error: unknown): Promise<void> {
+  if (error === null) {
+    await appDb.insert(envioRepairState).values({ chainId, lastRunAt: now, lastSuccessAt: now })
+      .onConflictDoUpdate({ target: envioRepairState.chainId, set: { lastRunAt: now, lastSuccessAt: now } });
+    return;
+  }
+  const reason = error instanceof Error ? error.message : String(error);
+  await appDb.insert(envioRepairState).values({ chainId, lastRunAt: now, lastFailureAt: now, lastFailureReason: reason, failureCount: 1 })
+    .onConflictDoUpdate({
+      target: envioRepairState.chainId,
+      set: { lastRunAt: now, lastFailureAt: now, lastFailureReason: reason, failureCount: sql`${envioRepairState.failureCount} + 1` },
+    });
+}
+
+export interface RepairState {
+  lastRunAt: Date | null; lastSuccessAt: Date | null; lastFailureAt: Date | null; lastFailureReason: string | null; failureCount: number;
+}
+const EMPTY_REPAIR_STATE: RepairState = { lastRunAt: null, lastSuccessAt: null, lastFailureAt: null, lastFailureReason: null, failureCount: 0 };
+
+export async function readRepairState(pool: Pool, chainId: number): Promise<RepairState> {
+  const result = await pool.query(
+    'SELECT last_run_at, last_success_at, last_failure_at, last_failure_reason, failure_count FROM envio_repair_state WHERE chain_id = $1',
+    [chainId],
+  );
+  const row = result.rows[0] as { last_run_at: Date | null; last_success_at: Date | null; last_failure_at: Date | null;
+    last_failure_reason: string | null; failure_count: number } | undefined;
+  if (!row) return EMPTY_REPAIR_STATE;
+  return {
+    lastRunAt: row.last_run_at, lastSuccessAt: row.last_success_at, lastFailureAt: row.last_failure_at,
+    lastFailureReason: row.last_failure_reason, failureCount: row.failure_count,
+  };
 }

@@ -6,15 +6,25 @@ import type { Stream } from './incrementalCursor.js';
 export interface UnresolvedEventKey { chainId: number; stream: Stream; rawId: string }
 
 /** Durably records a row `applyEnvioPage` could not apply, so it survives past the moving cursor. */
-export async function enqueueUnresolvedEvent(tx: DbOrTx, input: UnresolvedEventKey & { reason: string }): Promise<void> {
+export async function enqueueUnresolvedEvent(
+  tx: DbOrTx, input: UnresolvedEventKey & { reason: string; blockNumber: bigint },
+): Promise<void> {
   await tx.insert(unresolvedEvents).values({
-    chainId: input.chainId, stream: input.stream, rawId: input.rawId, reason: input.reason,
+    chainId: input.chainId, stream: input.stream, rawId: input.rawId, reason: input.reason, blockNumber: input.blockNumber,
   }).onConflictDoNothing();
 }
 
 export interface ClaimedUnresolvedEvent extends UnresolvedEventKey {
   reason: string;
   retryCount: number;
+}
+
+/** The lowest block among a stream's still-unresolved events, or null if none — see schema.ts's comment on unresolvedEvents.blockNumber. */
+export async function earliestUnresolvedBlock(db: DbOrTx, chainId: number, stream: Stream): Promise<bigint | null> {
+  const [row] = await db.select({ blockNumber: unresolvedEvents.blockNumber }).from(unresolvedEvents)
+    .where(and(eq(unresolvedEvents.chainId, chainId), eq(unresolvedEvents.stream, stream)))
+    .orderBy(unresolvedEvents.blockNumber).limit(1);
+  return row?.blockNumber ?? null;
 }
 
 /** Due rows for one stream, oldest first. A single retry worker is assumed — no row locking. */

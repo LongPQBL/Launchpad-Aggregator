@@ -83,6 +83,22 @@ export interface paths {
                                 stalledSources?: number;
                                 pendingRepairs?: number;
                             };
+                            incrementalSync?: {
+                                observedEnvioHead?: string | null;
+                                tailConfirmedBlock?: string | null;
+                                historyConfirmedBlock?: string | null;
+                                tailLagBlocks?: string | null;
+                                historyBacklogBlocks?: string | null;
+                                unresolvedEventCount?: number;
+                                pendingCoreMetadataCount?: number;
+                                repair?: {
+                                    lastRunAt?: string | null;
+                                    lastSuccessAt?: string | null;
+                                    lastFailureAt?: string | null;
+                                    lastFailureReason?: string | null;
+                                    failureCount?: number;
+                                };
+                            };
                         };
                     };
                 };

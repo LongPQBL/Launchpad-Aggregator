@@ -15,7 +15,9 @@ import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
-import type { ApiDeps, CandleResponse, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
+import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
+import { readRepairState } from '../envioSync/incrementalRepair.js';
+import type { ApiDeps, CandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -234,7 +236,37 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         && BigInt(item.envioWatermark) < finalizedTarget).length,
       pendingRepairs: number(pendingRepairs.rows[0]?.count) };
     return { complete: pendingSourceIds.length === 0 && missingRanges.length === 0, pendingSourceIds, missingRanges,
-      latestFinalizedFence: finalizedTarget?.toString() ?? null, launchParity, parityAlerts };
+      latestFinalizedFence: finalizedTarget?.toString() ?? null, launchParity, parityAlerts,
+      incrementalSync: await incrementalSyncCoverage() };
+  }
+
+  // Observability for the near-realtime incremental sync path — separate from the sources-table
+  // coverage above, which only the old full-table sync (still available offline) ever writes.
+  async function incrementalSyncCoverage(): Promise<IncrementalSyncCoverage> {
+    const [headResult, tailConfirmed, historyConfirmed, unresolvedResult, coreMetadataResult, repairState] = await Promise.all([
+      pool.query('SELECT head_block FROM envio_chain_progress WHERE chain_id = 4663'),
+      readConfirmedSourceBlock(pool, 4663, STREAM_ORDER, 'tail'),
+      readConfirmedSourceBlock(pool, 4663, STREAM_ORDER, 'history'),
+      pool.query('SELECT count(*)::int AS count FROM unresolved_events WHERE chain_id = 4663'),
+      pool.query("SELECT count(*)::int AS count FROM launches WHERE chain_id = 4663 AND core_metadata_read_state = 'pending'"),
+      readRepairState(pool, 4663),
+    ]);
+    const observedHead = headResult.rows[0]?.head_block === undefined || headResult.rows[0]?.head_block === null
+      ? null : BigInt(string(headResult.rows[0].head_block));
+    return {
+      observedEnvioHead: observedHead?.toString() ?? null,
+      tailConfirmedBlock: tailConfirmed?.toString() ?? null,
+      historyConfirmedBlock: historyConfirmed?.toString() ?? null,
+      tailLagBlocks: observedHead !== null && tailConfirmed !== null ? (observedHead - tailConfirmed).toString() : null,
+      historyBacklogBlocks: observedHead !== null && historyConfirmed !== null ? (observedHead - historyConfirmed).toString() : null,
+      unresolvedEventCount: number(unresolvedResult.rows[0]?.count),
+      pendingCoreMetadataCount: number(coreMetadataResult.rows[0]?.count),
+      repair: {
+        lastRunAt: repairState.lastRunAt?.toISOString() ?? null, lastSuccessAt: repairState.lastSuccessAt?.toISOString() ?? null,
+        lastFailureAt: repairState.lastFailureAt?.toISOString() ?? null, lastFailureReason: repairState.lastFailureReason,
+        failureCount: repairState.failureCount,
+      },
+    };
   }
 
   async function listLaunchesByVolume(query: LaunchListQuery): Promise<Page<LaunchSummary>> {
