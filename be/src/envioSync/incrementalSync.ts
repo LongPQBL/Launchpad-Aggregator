@@ -77,6 +77,11 @@ async function lookupVenue(db: DbOrTx, chainId: number, kind: VenueKind, ref: st
   const [row] = await db.select().from(venues).where(and(eq(venues.chainId, chainId), eq(venues.kind, kind), eq(venues.ref, ref.toLowerCase())));
   return row ? toVenueFromRow(row) : null;
 }
+async function lookupVenueByToken(db: DbOrTx, chainId: number, tokenAddress: string, kind: VenueKind): Promise<Venue | null> {
+  const [row] = await db.select().from(venues)
+    .where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, tokenAddress.toLowerCase()), eq(venues.kind, kind)));
+  return row ? toVenueFromRow(row) : null;
+}
 function num(value: unknown): bigint { return BigInt(String(value)); }
 function str(value: unknown): string { return String(value); }
 function int(value: unknown): number { return Number(value); }
@@ -275,7 +280,7 @@ async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string
     .where(and(eq(lifecycleTransitions.chainId, chainId), eq(lifecycleTransitions.kind, 'graduated'), eq(lifecycleTransitions.txHash, txHash)));
   if (!graduation) return 'skipped'; // not a Pons graduation pool — most V4 Initialize activity on this chain
   const launch = await lookupLaunch(tx, chainId, graduation.tokenAddress);
-  const curveVenue = await lookupVenue(tx, chainId, 'curve', graduation.tokenAddress);
+  const curveVenue = await lookupVenueByToken(tx, chainId, graduation.tokenAddress, 'curve');
   if (!launch || !curveVenue) return 'unresolved';
   const existingV4 = await lookupVenue(tx, chainId, 'v4_pool', str(raw.poolId));
   if (existingV4) return 'applied';

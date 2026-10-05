@@ -5,6 +5,8 @@ import { eq, and } from 'drizzle-orm';
 import { createDatabase } from '../db/client.js';
 import { envioSyncCursors, launches, venues, trades, unresolvedEvents } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
+import { derivePonsV4PoolId } from '../launchpads/pons/v2/poolKey.js';
+import type { Launch } from '../domain/types.js';
 import type { Lane, Stream } from './incrementalCursor.js';
 import { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents } from './incrementalSync.js';
 
@@ -15,10 +17,19 @@ const { db, pool } = createDatabase(databaseUrl);
 const envioPool = new Pool({ connectionString: databaseUrl });
 const rawLaunchTable = 'envio_fixture_incremental."RawLaunch"';
 const rawSwapTable = 'envio_fixture_incremental."RawSwap"';
+const rawLaunchV2Table = 'envio_fixture_incremental."RawLaunchV2"';
+const rawLifecycleTable = 'envio_fixture_incremental."RawLifecycleTransition"';
+const rawV4InitializeTable = 'envio_fixture_incremental."RawV4Initialize"';
 const chainId = 4663; // hydrateV1Launch binds launch.chainId from the factory source, always 4663 — not test-swappable.
 const legacyFactory = getPonsFactorySources().find((factory) => factory.id === 'pons-v1-legacy')!.factory;
+const v2Factory = getPonsFactorySources()[2]!;
 const weth = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
-const tables = { 'v1-launch': rawLaunchTable, 'v1-swap': rawSwapTable };
+const PONS_HOOK = '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044';
+const zeroAddress = '0x0000000000000000000000000000000000000000';
+const tables = {
+  'v1-launch': rawLaunchTable, 'v1-swap': rawSwapTable, 'v2-launch': rawLaunchV2Table,
+  'v2-lifecycle': rawLifecycleTable, 'v4-initialize': rawV4InitializeTable,
+};
 
 const testTokens: string[] = [];
 
@@ -32,7 +43,16 @@ beforeAll(async () => {
     id text primary key, "chainId" int, "poolAddress" text, "txFrom" text,
     amount0 numeric, amount1 numeric, "sqrtPriceX96" numeric, "blockNumber" numeric, "blockHash" text,
     "txHash" text, "logIndex" int, "timestamp" int)`);
-  await envioPool.query(`TRUNCATE ${rawLaunchTable}, ${rawSwapTable}`);
+  await envioPool.query(`CREATE TABLE IF NOT EXISTS ${rawLaunchV2Table} (
+    id text primary key, "chainId" int, "tokenAddress" text, "curveAddress" text, "deployerAddress" text,
+    "pairTokenAddress" text, "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int)`);
+  await envioPool.query(`CREATE TABLE IF NOT EXISTS ${rawLifecycleTable} (
+    id text primary key, "chainId" int, "tokenAddress" text, phase int, kind text,
+    "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int)`);
+  await envioPool.query(`CREATE TABLE IF NOT EXISTS ${rawV4InitializeTable} (
+    id text primary key, "chainId" int, "poolId" text, currency0 text, currency1 text, fee int, "tickSpacing" int,
+    hooks text, "sqrtPriceX96" numeric, tick int, "blockNumber" numeric, "blockHash" text, "txHash" text, "logIndex" int)`);
+  await envioPool.query(`TRUNCATE ${rawLaunchTable}, ${rawSwapTable}, ${rawLaunchV2Table}, ${rawLifecycleTable}, ${rawV4InitializeTable}`);
 });
 
 // Every test reads its own stream from genesis (via resetCursor), so a row left over from an earlier
@@ -41,7 +61,7 @@ beforeAll(async () => {
 // (chainId, stream) only, so a leftover row would otherwise be claimed (and "resolved" as
 // gone-from-raw, since the fixture truncate above removes its raw row too) by an unrelated test.
 beforeEach(async () => {
-  await envioPool.query(`TRUNCATE ${rawLaunchTable}, ${rawSwapTable}`);
+  await envioPool.query(`TRUNCATE ${rawLaunchTable}, ${rawSwapTable}, ${rawLaunchV2Table}, ${rawLifecycleTable}, ${rawV4InitializeTable}`);
   await db.delete(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId));
 });
 
@@ -252,6 +272,54 @@ describe('applyEnvioPage: overlap between history and tail lanes', () => {
     const lanesSeen = new Set(cursorRows.map((row) => row.lane));
     expect(lanesSeen.has('tail')).toBe(true);
     expect(lanesSeen.has('history')).toBe(true);
+  });
+});
+
+describe('applyEnvioPage: V2 graduation opens the matching V4 venue', () => {
+  it('applies v2-launch, then v2-lifecycle, then v4-initialize to open a v4_pool venue on the launch (not looked up by tokenAddress as a pool ref)', async () => {
+    await resetCursor('v2-launch', 'history');
+    await resetCursor('v2-lifecycle', 'history');
+    await resetCursor('v4-initialize', 'history');
+    const fresh = freshToken();
+    const curveAddress = fresh.poolAddress;
+    const launchTxHash = fresh.txHash;
+    // derivePonsV4PoolId strictly validates a real 20-byte address (freshToken()'s own 44-hex-char
+    // values are fine for plain string comparisons elsewhere, but not here) — reshape to exactly 40 hex chars.
+    const token = `0x${fresh.token.slice(2).padStart(40, '0').slice(-40)}`;
+    testTokens.push(token);
+
+    await envioPool.query(`INSERT INTO ${rawLaunchV2Table} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      [`v2launch-${token}`, chainId, token, curveAddress, '0xb9f5f4ea1af1f5d3678470eb98e8fbdcadeb24b0', zeroAddress,
+        700, `0x${'a7'.repeat(32)}`, launchTxHash, 1]);
+    const launchResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-launch', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(launchResult.applied).toBe(1);
+
+    const gradTxHash = `0x${createHash('sha256').update(`grad-${token}`).digest('hex')}`;
+    const gradBlockHash = `0x${createHash('sha256').update(`gradhash-${token}`).digest('hex')}`;
+    await envioPool.query(`INSERT INTO ${rawLifecycleTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [`v2grad-${token}`, chainId, token, 2, 'graduated', 710, gradBlockHash, gradTxHash, 1]);
+    const lifecycleResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v2-lifecycle', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(lifecycleResult.applied).toBe(1);
+
+    const launchForPoolId: Launch = {
+      chainId, tokenAddress: token as `0x${string}`, name: null, symbol: null, tokenDecimals: null,
+      platform: 'pons', protocolVersion: 'v2', sourceId: v2Factory.id, sourceLogId: '',
+      factoryAddress: v2Factory.factory, deployerAddress: token as `0x${string}`,
+      launchBlock: 700n, launchTxHash: launchTxHash as `0x${string}`,
+      quoteAsset: { address: zeroAddress as `0x${string}`, symbol: 'ETH', decimals: 18 }, lifecycleStatus: 'graduated',
+    };
+    const poolId = derivePonsV4PoolId(launchForPoolId, { fee: 0, tickSpacing: 60 }, PONS_HOOK);
+    const [currency0, currency1] = token.toLowerCase() < zeroAddress ? [token, zeroAddress] : [zeroAddress, token];
+    await envioPool.query(`INSERT INTO ${rawV4InitializeTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+      [`v4init-${token}`, chainId, poolId, currency0, currency1, 0, 60, PONS_HOOK,
+        '2005366647941715384651103712059394', 0, 710, gradBlockHash, gradTxHash, 1]);
+    const initResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v4-initialize', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(initResult.applied).toBe(1);
+    expect(initResult.unresolved).toBe(0);
+
+    const v4Venues = await db.select().from(venues).where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, token), eq(venues.kind, 'v4_pool')));
+    expect(v4Venues).toHaveLength(1);
+    expect(v4Venues[0]!.ref).toBe(poolId.toLowerCase());
   });
 });
 

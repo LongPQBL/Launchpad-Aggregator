@@ -123,6 +123,54 @@ cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill ho
 nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
 nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
+### Sync gần thời gian thực (incremental) và repair reorg — thay cho vòng lặp đọc lại toàn bảng
+
+Từ bản near-realtime-sync, chế độ `ENVIO_SYNC_TARGET=real` của `sync:envio-staging:loop` **không còn**
+đọc lại toàn bộ bảng raw mỗi `ENVIO_SYNC_LOOP_INTERVAL_MS`. Thay vào đó nó chạy một vòng lặp mới,
+đọc theo cursor bounded cho từng stream (launch/swap V1, launch/curve/buyback/lifecycle V2, initialize/
+swap V4), áp dụng trong transaction, rồi ngủ ngắn và lặp lại:
+
+```sh
+ENVIO_SYNC_TARGET=real npm run -w be sync:envio-staging:loop
+```
+
+Các biến điều khiển vòng lặp mới (đều optional, có default hợp lý cho dev):
+
+- `ENVIO_TAIL_PASS_INTERVAL_MS` (mặc định `1000`): khoảng nghỉ giữa hai lượt tail+history.
+- `ENVIO_INCREMENTAL_PAGE_LIMIT` (mặc định `500`): số dòng raw tối đa đọc mỗi stream mỗi lượt.
+- `ENVIO_REPAIR_EVERY_TICKS` (mặc định `30`): sau bao nhiêu lượt tail thì chạy một lượt repair reorg
+  (so khớp key canonical trong 500 block cuối, xoá dòng đã lỗi thời, lùi cursor để lượt sau áp lại
+  đúng dữ liệu) — repair nặng hơn một lượt tail bình thường nên không chạy mỗi tick.
+
+Launch mới hiện ngay với `name`/`symbol` là `null` (FE hiển thị địa chỉ token thay tên) cho tới khi
+job làm giàu metadata lõi (`be/src/launchpads/pons/coreMetadata.ts`, chạy chung cơ chế lease với job
+logo/description/socials cũ) điền đầy đủ. **`ENVIO_SYNC_TARGET=staging` và lệnh `sync:envio-staging`
+một lần vẫn dùng đường cũ (đọc lại toàn bảng) không đổi** — đây là cách rollback nếu đường incremental
+có vấn đề: dừng tiến trình `real`, chạy lại với `ENVIO_SYNC_TARGET=staging` hoặc gọi trực tiếp các hàm
+`syncV1LegacyToReal`/`syncV2ToReal`/`syncV4ToReal` qua `runAllSyncsOnce` (xem `be/src/envioSync/syncAll.ts`)
+để đối chiếu/khôi phục thủ công. Không hàm nào trong hai đường bị xoá — đường cũ luôn còn để đối chiếu.
+
+**Benchmark/probe trên DB disposable (không chạy trên app DB thật):**
+
+```sh
+DATABASE_URL=postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test \
+  npm run -w be tsx src/cli/benchmarkIncrementalSync.ts
+```
+
+Script tự chối chạy nếu tên DB trong `DATABASE_URL` không chứa `test`/`disposable`/`bench` — không có
+cách nào chạy nhầm lên app DB thật. Nó tự sinh dữ liệu synthetic (launch V1/V2, curve, buyback,
+graduation, pool V4), chạy đường cũ (full-table) trước để lấy tập key canonical "chuẩn", xoá sạch, rồi
+chạy đường incremental trên cùng dữ liệu và so khớp key — khớp tuyệt đối thì in `MATCH`. Nó cũng đo độ
+trễ từ lúc ghi dòng raw đến lúc transaction app commit, và một proxy "đến lúc SSE bắn thông báo" (không
+phải thời gian render UI thật — không có trình duyệt trong probe này, nhãn rõ là proxy). Ngưỡng pass:
+commit ≤ 3s, proxy SSE ≤ 5s (mục tiêu của spec, đo trên tải local "khoẻ mạnh", không phải cam kết độ
+trễ chain-to-UI thật). Script còn chạy thử "restart" (áp lại đúng dữ liệu, kỳ vọng 0 dòng mới) và một
+lượt repair trên dữ liệu đã đúng (kỳ vọng 0 thay đổi). **Không đo được** tình huống 429/throttling từ
+provider hay độ trễ chain-to-Envio thật — hai thứ này cần kết nối Envio/HyperSync thật, không có trong
+probe DB disposable; muốn đo thật thì chạy `sync:envio-staging:loop` với `RH_HTTP_RPC_URL` thật và theo
+dõi log. Biến môi trường `BENCH_V1_LAUNCHES`/`BENCH_V2_LAUNCHES`/`BENCH_GRADUATED` chỉnh quy mô dữ liệu
+synthetic (mặc định 10/10/3).
+
 ## Kiểm toán độ phủ launch Pons
 
 `GET /v1/coverage` báo riêng độ phủ từ source và `launchParity` cho ba factory Pons.
