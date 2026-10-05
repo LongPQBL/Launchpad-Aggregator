@@ -20,7 +20,7 @@ import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
-import type { ApiDeps, CandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
+import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -400,6 +400,27 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         usdValueApprox: valuations[i]!.status === 'priced',
         usdValueStatus: valuations[i]!.status,
       })) as Page<TradeResponse>;
+    },
+    async listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }> {
+      const head = await safeHead();
+      const launch = (await pool.query(`SELECT ${launchCoverageSql(3)} AS launch_coverage_complete
+        FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
+      [chainId, tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
+      if (!launch) return { items: [], complete: false };
+      const end = before ?? Math.floor(Date.now() / 1000) + 1;
+      const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
+      const rows = (await pool.query(`SELECT bucket_start, open, high, low, close, volume_usd, trade_count, computed_at
+        FROM usd_candles WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = $3
+          AND bucket_start >= $4 AND bucket_start < $5
+        ORDER BY bucket_start DESC LIMIT 500`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end])).rows as Row[];
+      return {
+        complete: Boolean(launch.launch_coverage_complete),
+        items: rows.map((row) => ({
+          intervalSeconds, bucketStart: number(row.bucket_start), open: string(row.open), high: string(row.high),
+          low: string(row.low), close: string(row.close), volumeUsd: string(row.volume_usd), tradeCount: number(row.trade_count),
+          computedAt: new Date(row.computed_at as string | Date).toISOString(),
+        })),
+      };
     },
     async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
       const head = await safeHead();

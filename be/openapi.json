@@ -670,6 +670,16 @@
                           },
                           "quoteVolume": {
                             "type": "string"
+                          },
+                          "volumeUsd": {
+                            "type": "string"
+                          },
+                          "tradeCount": {
+                            "type": "integer"
+                          },
+                          "computedAt": {
+                            "type": "string",
+                            "format": "date-time"
                           }
                         }
                       }

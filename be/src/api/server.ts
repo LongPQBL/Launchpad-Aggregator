@@ -44,6 +44,10 @@ export interface TradeResponse {
 export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
+export interface UsdCandleResponse {
+  intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string;
+  volumeUsd: string; tradeCount: number; computedAt: string;
+}
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
 export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string; sort?: 'volume24hUsd' | 'recent' }
 
@@ -76,6 +80,7 @@ export interface ApiDeps {
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
     listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
+    listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }>;
   };
 }
 

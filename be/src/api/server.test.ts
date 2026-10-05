@@ -26,6 +26,7 @@ function data() {
     getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false }),
     listTrades: async () => ({ items: [], nextCursor: null }),
     listCandles: async () => ({ items: [], complete: false }),
+    listUsdCandles: async () => ({ items: [], complete: false }),
   };
 }
 
@@ -128,6 +129,26 @@ describe('read-only API', () => {
     const invalid = await app.inject({ method: 'GET',
       url: `/v1/launches/4663/${address}/candles?before=not-a-time` });
     expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('serves USD candles only when currency=usd, and rejects an unknown currency', async () => {
+    const calls: string[] = [];
+    const source = data();
+    const usdItem = { intervalSeconds: 60, bucketStart: 1_700_000_000, open: '1.5', high: '2', low: '1', close: '1.8',
+      volumeUsd: '120.5', tradeCount: 3, computedAt: '2026-10-05T12:00:00.000Z' };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...source,
+      listCandles: async () => { calls.push('quote'); return { items: [], complete: false }; },
+      listUsdCandles: async () => { calls.push('usd'); return { items: [usdItem], complete: true }; },
+    } });
+    const usd = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?intervalSeconds=60&currency=usd` });
+    expect(usd.statusCode).toBe(200);
+    expect(usd.json().items).toEqual([usdItem]);
+    const quote = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?intervalSeconds=60` });
+    expect(quote.statusCode).toBe(200);
+    expect(calls).toEqual(['usd', 'quote']);
+    const bad = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?currency=eur` });
+    expect(bad.statusCode).toBe(400);
     await app.close();
   });
 

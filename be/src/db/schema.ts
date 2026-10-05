@@ -253,6 +253,24 @@ export const launchVolume24hUsd = pgTable('launch_volume24h_usd', {
   check('launch_volume24h_usd_reason_valid', sql`${table.completenessReason} IN ('complete', 'incomplete_coverage', 'unpriced_trade', 'updating')`),
 ]);
 
+export const usdCandles = pgTable('usd_candles', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
+  open: numeric('open', { precision: 40, scale: 20 }).notNull(),
+  high: numeric('high', { precision: 40, scale: 20 }).notNull(),
+  low: numeric('low', { precision: 40, scale: 20 }).notNull(),
+  close: numeric('close', { precision: 40, scale: 20 }).notNull(),
+  volumeUsd: numeric('volume_usd', { precision: 40, scale: 6 }).notNull(),
+  tradeCount: integer('trade_count').notNull(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+  check('usd_candles_interval_valid', sql`${table.intervalSeconds} IN (60, 300, 900, 3600, 86400)`),
+]);
+
 export const launchVolume24hState = pgTable('launch_volume24h_state', {
   id: integer('id').primaryKey(),
   backfillCompleteAt: timestamp('backfill_complete_at', { withTimezone: true }),

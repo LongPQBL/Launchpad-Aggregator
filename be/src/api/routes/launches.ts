@@ -102,6 +102,9 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       if (before !== undefined && (!/^\d+$/.test(request.query.before!) || !Number.isSafeInteger(before) || before < 1)) {
         return reply.code(400).send({ error: 'Invalid candle boundary' });
       }
+      const currency = request.query.currency ?? 'quote';
+      if (currency !== 'quote' && currency !== 'usd') return reply.code(400).send({ error: 'Invalid candle currency' });
+      if (currency === 'usd') return deps.data.listUsdCandles(identity.chainId, identity.tokenAddress, interval, before);
       return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before);
     },
   );
