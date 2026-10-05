@@ -225,6 +225,13 @@
       "when": 1791157981610,
       "tag": "0031_envio_sync_cursors",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1791158581812,
+      "tag": "0032_venues_kind_ref_idx",
+      "breakpoints": true
     }
   ]
 }

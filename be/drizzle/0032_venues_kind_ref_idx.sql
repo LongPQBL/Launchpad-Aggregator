@@ -1,0 +1,1 @@
+CREATE INDEX "venues_kind_ref_idx" ON "venues" USING btree ("chain_id","kind","ref");

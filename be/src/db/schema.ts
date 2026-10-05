@@ -226,6 +226,9 @@ export const venues = pgTable('venues', {
 }, (table) => [
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
   index('venues_token_idx').on(table.chainId, table.tokenAddress),
+  // be/src/envioSync/incrementalSync.ts's lookupVenue: a trade/swap page row resolves its venue by
+  // (chainId, kind, ref) — pool/curve address or V4 Pool ID — not by token, once per applied row.
+  index('venues_kind_ref_idx').on(table.chainId, table.kind, table.ref),
 ]);
 
 export const lifecycleTransitions = pgTable('lifecycle_transitions', {

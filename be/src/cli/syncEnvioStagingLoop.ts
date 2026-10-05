@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
-import { resolveSyncTablesFromEnv, runAllSyncsOnce } from '../envioSync/syncAll.js';
+import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
@@ -53,22 +53,61 @@ async function interruptibleSleep(ms: number): Promise<void> {
   }
 }
 
-console.log(`Starting Envio sync loop (target: ${syncTarget}, interval ${intervalMs}ms). Ctrl+C or SIGTERM stops it after the current cycle.`);
-while (!stopping) {
-  const startedAt = new Date().toISOString();
-  try {
-    const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables, syncTarget);
-    console.log(`[${startedAt}] Synced V1-legacy from Envio into ${syncTarget}:`, v1Result);
-    console.log(`[${startedAt}] Synced V2 from Envio into ${syncTarget}:`, v2Result);
-    console.log(`[${startedAt}] Synced V4 from Envio into ${syncTarget}:`, v4Result);
-  } catch (error) {
-    // A single bad cycle (e.g. a transient DB disconnect, or Envio not having reached a block yet)
-    // must not kill the loop — log it and retry at the next interval, matching the main indexer's
-    // own per-cycle try/catch resilience (be/src/cli/runFactoryIndexer.ts).
-    console.error(`[${startedAt}] Envio staging sync cycle failed, will retry next interval:`, error);
+// A jittered backoff after a failed cycle, instead of always retrying at the fixed tail interval —
+// a stuck DB or Envio outage must not turn into a tight failing retry loop.
+function backoffWithJitter(attempt: number): number {
+  const base = Math.min(30_000, 1000 * 2 ** Math.min(attempt, 5));
+  return base + Math.floor(Math.random() * base * 0.5);
+}
+
+if (syncTarget === 'staging') {
+  console.log(`Starting Envio sync loop (target: staging, interval ${intervalMs}ms). Ctrl+C or SIGTERM stops it after the current cycle.`);
+  while (!stopping) {
+    const startedAt = new Date().toISOString();
+    try {
+      const { v1Result, v2Result, v4Result } = await runAllSyncsOnce(envioPool, db, tables, syncTarget);
+      console.log(`[${startedAt}] Synced V1-legacy from Envio into staging:`, v1Result);
+      console.log(`[${startedAt}] Synced V2 from Envio into staging:`, v2Result);
+      console.log(`[${startedAt}] Synced V4 from Envio into staging:`, v4Result);
+    } catch (error) {
+      // A single bad cycle (e.g. a transient DB disconnect, or Envio not having reached a block yet)
+      // must not kill the loop — log it and retry at the next interval, matching the main indexer's
+      // own per-cycle try/catch resilience (be/src/cli/runFactoryIndexer.ts).
+      console.error(`[${startedAt}] Envio staging sync cycle failed, will retry next interval:`, error);
+    }
+    if (stopping) break;
+    await interruptibleSleep(intervalMs);
   }
-  if (stopping) break;
-  await interruptibleSleep(intervalMs);
+} else {
+  // The 'real' target replaces the old full-table reread loop with bounded incremental tail+history
+  // passes on a short interruptible cadence (spec target: 1s). `runAllSyncsOnce` above remains the
+  // offline full-table reconciliation command — it is not called from this live loop for 'real'.
+  if (!metadataClient) throw new Error('metadataClient is required for the real-target incremental loop');
+  const tailIntervalMs = Number(process.env.ENVIO_TAIL_PASS_INTERVAL_MS ?? 1000);
+  const limit = Number(process.env.ENVIO_INCREMENTAL_PAGE_LIMIT ?? 500);
+  console.log(`Starting Envio incremental sync loop (target: real, tail interval ${tailIntervalMs}ms, page limit ${limit}). `
+    + 'Ctrl+C or SIGTERM stops it after the current cycle.');
+  let failureStreak = 0;
+  while (!stopping) {
+    const startedAt = new Date().toISOString();
+    try {
+      const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, {
+        v1RpcClient: metadataClient, v2RpcClient: metadataClient,
+        limit, progressTable: tables.v1.progressTable,
+      });
+      failureStreak = 0;
+      console.log(`[${startedAt}] Envio tail pass:`, tail.results);
+      console.log(`[${startedAt}] Envio history pass:`, history.results);
+    } catch (error) {
+      failureStreak += 1;
+      console.error(`[${startedAt}] Envio incremental sync cycle failed (streak ${failureStreak}), backing off:`, error);
+      if (stopping) break;
+      await interruptibleSleep(backoffWithJitter(failureStreak));
+      continue;
+    }
+    if (stopping) break;
+    await interruptibleSleep(tailIntervalMs);
+  }
 }
 
 await (metadataStop ?? metadataLoop?.stop());
