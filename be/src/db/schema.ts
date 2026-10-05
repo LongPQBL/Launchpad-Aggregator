@@ -1,4 +1,4 @@
-import { bigint, boolean, check, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, foreignKey, index, integer, jsonb, numeric, pgTable, primaryKey, smallint, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
 export const sources = pgTable('sources', {
@@ -224,6 +224,51 @@ export const launchParityRepairs = pgTable('launch_parity_repairs', {
   check('launch_parity_repairs_layer_valid', sql`${table.failureLayer} IN ('envio', 'app')`),
   check('launch_parity_repairs_action_valid', sql`${table.action} IN ('envio_reindex', 'app_promotion')`),
   check('launch_parity_repairs_status_valid', sql`${table.status} IN ('pending', 'done')`),
+]);
+
+export const launchVolume24hUsd = pgTable('launch_volume24h_usd', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  volumeUsd: numeric('volume_usd', { precision: 78, scale: 30 }),
+  rankCategory: text('rank_category').notNull(),
+  rankOrder: smallint('rank_order').notNull(),
+  completenessReason: text('completeness_reason').notNull(),
+  computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
+  windowEnd: bigint('window_end', { mode: 'bigint' }).notNull(),
+  nextExpiryAt: timestamp('next_expiry_at', { withTimezone: true }),
+  revision: integer('revision').notNull(),
+  launchBlock: bigint('launch_block', { mode: 'bigint' }).notNull(),
+  launchTxHash: text('launch_tx_hash').notNull(),
+  launchLogIndex: integer('launch_log_index').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+  index('launch_volume24h_usd_rank_idx').on(table.rankOrder, table.volumeUsd.desc(), table.launchBlock.desc(),
+    table.launchTxHash.desc(), table.launchLogIndex.desc()),
+  check('launch_volume24h_usd_rank_valid', sql`
+    (${table.rankCategory} = 'positive' AND ${table.rankOrder} = 0 AND ${table.volumeUsd} > 0 AND ${table.completenessReason} = 'complete')
+    OR (${table.rankCategory} = 'zero' AND ${table.rankOrder} = 1 AND ${table.volumeUsd} = 0 AND ${table.completenessReason} = 'complete')
+    OR (${table.rankCategory} = 'null' AND ${table.rankOrder} = 2 AND ${table.volumeUsd} IS NULL)
+  `),
+  check('launch_volume24h_usd_reason_valid', sql`${table.completenessReason} IN ('complete', 'incomplete_coverage', 'unpriced_trade', 'updating')`),
+]);
+
+export const launchVolume24hJobs = pgTable('launch_volume24h_jobs', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  revision: integer('revision').notNull(),
+  dueAt: timestamp('due_at', { withTimezone: true }).notNull(),
+  leaseId: text('lease_id'),
+  leaseUntil: timestamp('lease_until', { withTimezone: true }),
+  attempts: integer('attempts').notNull().default(0),
+  lastError: text('last_error'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress] }),
+  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+  index('launch_volume24h_jobs_due_idx').on(table.dueAt, table.leaseUntil),
+  check('launch_volume24h_jobs_revision_positive', sql`${table.revision} >= 1`),
+  check('launch_volume24h_jobs_attempts_valid', sql`${table.attempts} >= 0`),
 ]);
 
 export const venues = pgTable('venues', {

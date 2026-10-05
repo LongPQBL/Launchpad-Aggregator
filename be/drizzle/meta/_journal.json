@@ -288,6 +288,13 @@
       "when": 1791188196897,
       "tag": "0040_bright_raza",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1791191359342,
+      "tag": "0041_chilly_tomorrow_man",
+      "breakpoints": true
     }
   ]
 }
