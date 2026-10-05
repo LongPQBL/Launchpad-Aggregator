@@ -10,8 +10,10 @@ import type { LaunchParityCoverage } from '../coverage/repairRanges.js';
 
 export interface Page<T> { items: readonly T[]; nextCursor: string | null }
 export interface LaunchSummary {
-  chainId: number; tokenAddress: string; name: string; symbol: string; platform: string; protocolVersion: string;
-  quoteAsset: { address: string; symbol: string; decimals: number }; lifecycleStatus: string;
+  // name/symbol are null until core-metadata enrichment resolves them — a near-realtime-synced
+  // launch is visible immediately with its address as the display fallback.
+  chainId: number; tokenAddress: string; name: string | null; symbol: string | null; platform: string; protocolVersion: string;
+  quoteAsset: { address: string; symbol: string | null; decimals: number | null }; lifecycleStatus: string;
   officialVolume24h: string | null; coverageStatus: string;
   // marketCapUsd always equals fdvUsd in this project (bonding-curve launches mint their full
   // supply at launch, no vesting) — see spec docs/superpowers/specs/2026-10-01-uniswap-parity-stats-design.md §4.
@@ -31,7 +33,10 @@ export interface LaunchDetail extends LaunchSummary {
 }
 export interface TradeResponse {
   venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;
-  activityKind: string; tokenAmount: string; quoteAmount: string; priceQuote: string | null; traderAddress: string;
+  // null when the launch's token/quote decimals are still unresolved (core-metadata enrichment
+  // pending) — the raw amount exists on-chain, but no human-scaled amount can be shown without
+  // fabricating a decimals count.
+  activityKind: string; tokenAmount: string | null; quoteAmount: string | null; priceQuote: string | null; traderAddress: string;
   usdValue: string | null; usdValueApprox: boolean; usdValueStatus: 'priced' | 'pending' | 'unavailable';
 }
 export interface CandleResponse {

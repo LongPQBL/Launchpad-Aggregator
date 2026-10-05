@@ -34,8 +34,8 @@ export function envioRawLaunchV2ToEvent(row: EnvioRawLaunchV2Row): V2LaunchEvent
 // remain unavailable here and are not used for the current sync path.
 export function hydrateV2LaunchFromEnvio(
   event: V2LaunchEvent, factory: FactorySource,
-  metadata: { name: string; symbol: string; decimals: number },
-  quoteAsset: { address: Address; symbol: string; decimals: number },
+  metadata: { name: string; symbol: string; decimals: number } | null,
+  quoteAsset: { address: Address; symbol: string | null; decimals: number | null },
   extended?: ExtendedLaunchMetadata,
 ): V2LaunchWithVenue {
   const record: V2LaunchRecord = {

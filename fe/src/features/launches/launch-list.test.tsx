@@ -65,6 +65,19 @@ describe('LaunchList', () => {
     expect(within(rows[1]).queryByRole('img', { name: 'Pons logo' })).not.toBeInTheDocument();
   });
 
+  it('shows the token address as the name and a dash for the symbol while core metadata is pending', () => {
+    render(
+      <LaunchList
+        page={{ items: [launch({ name: null, symbol: null, quoteAsset: { address: '0xquote', symbol: null, decimals: null } })], nextCursor: null }}
+        sources={oneChainOneSource}
+        error={false}
+      />,
+    );
+    const row = screen.getAllByRole('row')[1];
+    expect(within(row).getByText('0xaaa')).toBeInTheDocument();
+    expect(within(row).getByText('(—)')).toBeInTheDocument();
+  });
+
   it('shows a human-readable lifecycle label and chain name instead of raw enum/id values', () => {
     render(
       <LaunchList

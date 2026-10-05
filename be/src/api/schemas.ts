@@ -1,5 +1,5 @@
 const quoteAsset = { type: 'object', properties: {
-  address: { type: 'string' }, symbol: { type: 'string' }, decimals: { type: 'integer' },
+  address: { type: 'string' }, symbol: { type: 'string', nullable: true }, decimals: { type: 'integer', nullable: true },
 } } as const;
 
 export const coverageSchema = { type: 'object', properties: {
@@ -20,7 +20,10 @@ export const coverageSchema = { type: 'object', properties: {
 } } as const;
 
 export const launchSummary = { type: 'object', properties: {
-  chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string' }, symbol: { type: 'string' },
+  chainId: { type: 'integer' }, tokenAddress: { type: 'string' },
+  // null until core-metadata enrichment resolves it (be/src/launchpads/pons/coreMetadata.ts) — the
+  // UI falls back to displaying tokenAddress as the name in that window.
+  name: { type: 'string', nullable: true }, symbol: { type: 'string', nullable: true },
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,
   lifecycleStatus: { type: 'string' }, officialVolume24h: { type: 'string', nullable: true }, coverageStatus: { type: 'string' },
   fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true },
@@ -49,7 +52,7 @@ export const launchDetail = { type: 'object', properties: {
 export const trade = { type: 'object', properties: {
   venueId: { type: 'string' }, blockNumber: { type: 'string' }, txHash: { type: 'string' },
   logIndex: { type: 'integer' }, timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
-  tokenAmount: { type: 'string' }, quoteAmount: { type: 'string' }, priceQuote: { type: 'string', nullable: true },
+  tokenAmount: { type: 'string', nullable: true }, quoteAmount: { type: 'string', nullable: true }, priceQuote: { type: 'string', nullable: true },
   traderAddress: { type: 'string' },
   // usdValue is the trade's OWN historical quote-asset price at its exact (blockNumber, logIndex)
   // position, never the current/latest price — usdValueApprox is always true when usdValue is

@@ -1,11 +1,12 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import { eq, and } from 'drizzle-orm';
 import { createDatabase } from '../db/client.js';
-import { envioSyncCursors, launches, venues, trades } from '../db/schema.js';
+import { envioSyncCursors, launches, venues, trades, unresolvedEvents } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import type { Lane, Stream } from './incrementalCursor.js';
-import { applyEnvioPage } from './incrementalSync.js';
+import { applyEnvioPage, retryUnresolvedEvents } from './incrementalSync.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -18,17 +19,6 @@ const chainId = 4663; // hydrateV1Launch binds launch.chainId from the factory s
 const legacyFactory = getPonsFactorySources().find((factory) => factory.id === 'pons-v1-legacy')!.factory;
 const weth = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
 const tables = { 'v1-launch': rawLaunchTable, 'v1-swap': rawSwapTable };
-
-function rpcClientFor(poolAddress: string) {
-  return { readContract: async ({ functionName }: { functionName: string }) => {
-    if (functionName === 'name') return 'Test Token';
-    if (functionName === 'symbol') return 'TEST';
-    if (functionName === 'decimals') return 18;
-    if (functionName === 'liquidityPool') return poolAddress;
-    if (functionName === 'graduationStatus') return [0n, 0n, false];
-    throw new Error(`unexpected functionName ${functionName}`);
-  } };
-}
 
 const testTokens: string[] = [];
 
@@ -47,8 +37,12 @@ beforeAll(async () => {
 
 // Every test reads its own stream from genesis (via resetCursor), so a row left over from an earlier
 // test's insert would otherwise be re-read too — scope each test to only the rows it inserts itself.
+// Also clear any unresolved-event rows a prior test enqueued: retryUnresolvedEvents claims by
+// (chainId, stream) only, so a leftover row would otherwise be claimed (and "resolved" as
+// gone-from-raw, since the fixture truncate above removes its raw row too) by an unrelated test.
 beforeEach(async () => {
   await envioPool.query(`TRUNCATE ${rawLaunchTable}, ${rawSwapTable}`);
+  await db.delete(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId));
 });
 
 afterAll(async () => {
@@ -59,6 +53,7 @@ afterAll(async () => {
     await db.delete(launches).where(and(eq(launches.chainId, chainId), eq(launches.tokenAddress, token)));
   }
   await db.delete(envioSyncCursors).where(eq(envioSyncCursors.chainId, chainId));
+  await db.delete(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId));
   await pool.end();
   await envioPool.end();
 });
@@ -90,10 +85,13 @@ async function insertLaunchRow(id: string, token: string, poolAddress: string, t
 async function insertSwapRow(
   id: string, poolAddress: string, blockNumber: number, logIndex: number, amount0: string, amount1: string,
 ): Promise<void> {
+  // trades' primary key is (chainId, txHash, logIndex) — derive a per-row txHash from `id` so two
+  // different rows (in the same test or across tests) can never collide and silently no-op an insert.
+  const txHash = `0x${createHash('sha256').update(id).digest('hex')}`;
   await envioPool.query(`INSERT INTO ${rawSwapTable} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
     [id, chainId, poolAddress, '0x1234567890123456789012345678901234567890', amount0, amount1,
       '2005366647941715384651103712059394', blockNumber, `0x${'cd'.repeat(32)}`,
-      `0x${'ef'.repeat(32)}`, logIndex, 1_700_000_000]);
+      txHash, logIndex, 1_700_000_000]);
 }
 
 describe('applyEnvioPage: downstream dependency ordering', () => {
@@ -109,6 +107,57 @@ describe('applyEnvioPage: downstream dependency ordering', () => {
     const tradeRows = await db.select().from(trades).where(eq(trades.tokenAddress, token));
     expect(tradeRows).toHaveLength(0);
   });
+
+  it('retries an unresolved swap durably, independent of the moving cursor, once its launch arrives', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    // Swap-before-launch, same as the sibling test — but this time the launch does arrive afterwards.
+    await insertSwapRow(`retry-${token}`, poolAddress, 700, 1, '100000000000000000', '-200000000000000000000');
+    const firstPass = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(firstPass.unresolved).toBe(1);
+
+    const unresolvedBefore = await retryUnresolvedEvents(envioPool, db, { chainId, stream: 'v1-swap', limit: 10, tables });
+    expect(unresolvedBefore).toBe(0); // the launch still doesn't exist — retry correctly finds it still unresolved
+
+    await insertLaunchRow(`launch-${token}`, token, poolAddress, txHash, 690, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables });
+
+    const resolvedCount = await retryUnresolvedEvents(envioPool, db, {
+      chainId, stream: 'v1-swap', limit: 10, tables, now: new Date(Date.now() + 61_000),
+    });
+    expect(resolvedCount).toBe(1);
+    const tradeRows = await db.select().from(trades).where(eq(trades.tokenAddress, token));
+    expect(tradeRows).toHaveLength(1);
+  });
+});
+
+describe('applyEnvioPage: minimal launch records and deferred metadata', () => {
+  it('persists a V1 launch immediately with name/symbol/decimals null, pending core-metadata enrichment, and prices its trade as null while they stay unknown', async () => {
+    await resetCursor('v1-launch', 'history');
+    await resetCursor('v1-swap', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`launch-${token}`, token, poolAddress, txHash, 600, 1);
+
+    const launchResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(launchResult.applied).toBe(1); // visible before any RPC metadata call
+
+    const [launchRow] = await db.select().from(launches).where(eq(launches.tokenAddress, token));
+    expect(launchRow.name).toBeNull();
+    expect(launchRow.symbol).toBeNull();
+    expect(launchRow.tokenDecimals).toBeNull();
+    expect(launchRow.coreMetadataReadState).toBe('pending');
+    expect(launchRow.lifecycleStatus).toBe('trading'); // no graduation RPC call either; safe default
+
+    await insertSwapRow(`swap-${token}`, poolAddress, 610, 1, '100000000000000000', '-200000000000000000000');
+    const swapResult = await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 1000n, limit: 10, tables });
+    expect(swapResult.applied).toBe(1);
+    const [tradeRow] = await db.select().from(trades).where(eq(trades.tokenAddress, token));
+    expect(tradeRow.priceNumeratorRaw).toBeNull();
+    expect(tradeRow.priceDenominatorRaw).toBeNull();
+    // The raw amount is still recorded exactly — only the derived price is withheld.
+    expect(tradeRow.tokenAmountRaw).toBe('200000000000000000000');
+  });
 });
 
 describe('applyEnvioPage: transactional page application', () => {
@@ -118,7 +167,7 @@ describe('applyEnvioPage: transactional page application', () => {
     const { token, poolAddress, txHash } = freshToken();
     await insertLaunchRow(`launch-${token}`, token, poolAddress, txHash, 300, 1);
     const launchResult = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables,
     });
     expect(launchResult.applied).toBe(1);
 
@@ -144,13 +193,13 @@ describe('applyEnvioPage: replay after restart', () => {
     await insertLaunchRow(`launch-${token}`, token, poolAddress, txHash, 400, 1);
 
     const first = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables,
     });
     expect(first.applied).toBe(1);
 
     // Simulates a process restart: the durable cursor (not process memory) decides where this resumes.
     const restarted = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables,
     });
     expect(restarted.applied).toBe(0);
     expect(restarted.unresolved).toBe(0);
@@ -168,7 +217,7 @@ describe('applyEnvioPage: duplicate raw events', () => {
     await insertLaunchRow(`dup-b-${token}`, token, poolAddress, txHash, 500, 2);
 
     const result = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'history', fence: 1000n, limit: 10, tables,
     });
     expect(result.applied).toBe(2); // both rows processed...
     const launchRows = await db.select().from(launches).where(eq(launches.tokenAddress, token));
@@ -186,12 +235,12 @@ describe('applyEnvioPage: overlap between history and tail lanes', () => {
     const fence = 550n;
 
     const history = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'history', fence, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'history', fence, limit: 10, tables,
     });
     expect(history.applied).toBe(1);
 
     const tail = await applyEnvioPage(envioPool, db, {
-      chainId, stream: 'v1-launch', lane: 'tail', fence, limit: 10, tables, v1RpcClient: rpcClientFor(poolAddress),
+      chainId, stream: 'v1-launch', lane: 'tail', fence, limit: 10, tables,
     });
     expect(tail.applied).toBe(1); // tail independently reads and confirms the same row
 

@@ -122,14 +122,14 @@ export interface paths {
                             items?: {
                                 chainId?: number;
                                 tokenAddress?: string;
-                                name?: string;
-                                symbol?: string;
+                                name?: string | null;
+                                symbol?: string | null;
                                 platform?: string;
                                 protocolVersion?: string;
                                 quoteAsset?: {
                                     address?: string;
-                                    symbol?: string;
-                                    decimals?: number;
+                                    symbol?: string | null;
+                                    decimals?: number | null;
                                 };
                                 lifecycleStatus?: string;
                                 officialVolume24h?: string | null;
@@ -195,14 +195,14 @@ export interface paths {
                         "application/json": {
                             chainId?: number;
                             tokenAddress?: string;
-                            name?: string;
-                            symbol?: string;
+                            name?: string | null;
+                            symbol?: string | null;
                             platform?: string;
                             protocolVersion?: string;
                             quoteAsset?: {
                                 address?: string;
-                                symbol?: string;
-                                decimals?: number;
+                                symbol?: string | null;
+                                decimals?: number | null;
                             };
                             lifecycleStatus?: string;
                             officialVolume24h?: string | null;
@@ -282,8 +282,8 @@ export interface paths {
                                 timestamp?: number;
                                 side?: string;
                                 activityKind?: string;
-                                tokenAmount?: string;
-                                quoteAmount?: string;
+                                tokenAmount?: string | null;
+                                quoteAmount?: string | null;
                                 priceQuote?: string | null;
                                 traderAddress?: string;
                                 usdValue?: string | null;

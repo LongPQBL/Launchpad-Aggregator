@@ -93,6 +93,7 @@ export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, l
   if (tokenSigned * quoteSigned >= 0n || row.sqrtPriceX96 === 0n) throw new Error('Invalid V4 swap amounts or price');
   const q192 = 2n ** 192n;
   const sqrtSquared = row.sqrtPriceX96 * row.sqrtPriceX96;
+  const decimalsKnown = quoteAssetDecimals !== null && launch.tokenDecimals !== null;
   return {
     chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id,
     blockNumber: row.blockNumber, blockHash: row.blockHash.toLowerCase() as Hash,
@@ -102,8 +103,8 @@ export function hydrateV4SwapFromDecoded(row: EnvioRawV4SwapRow, venue: Venue, l
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
     activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
-    priceNumeratorRaw: quoteAssetDecimals === null ? null : (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
-    priceDenominatorRaw: quoteAssetDecimals === null ? null : (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(quoteAssetDecimals),
+    priceNumeratorRaw: !decimalsKnown ? null : (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals!),
+    priceDenominatorRaw: !decimalsKnown ? null : (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(quoteAssetDecimals!),
     traderAddress: row.txFrom.toLowerCase() as Address,
   };
 }

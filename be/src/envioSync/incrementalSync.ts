@@ -5,12 +5,11 @@ import type { Database, DbOrTx } from '../db/client.js';
 import type { Launch, LifecycleStatus, Venue, VenueKind } from '../domain/types.js';
 import { launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
 import { claimSyncCursor, advanceSyncCursor, STREAMS, type Stream, type Lane, type CursorPosition, type SyncCursor } from './incrementalCursor.js';
-import { readRawPage } from './incrementalPage.js';
+import { readRawPage, readRawRowById } from './incrementalPage.js';
+import { claimDueUnresolvedEvents, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
 import { getPonsFactorySources, type FactorySource } from '../launchpads/pons/sourceRegistry.js';
-import { hydrateV1Launch, type V1TokenMetadata } from '../launchpads/pons/v1/adapter.js';
-import { readV1TokenMetadata, readV1Graduation, type V1ReadClient } from '../launchpads/pons/v1/state.js';
+import { hydrateV1Launch } from '../launchpads/pons/v1/adapter.js';
 import { envioRawLaunchToEvent, hydrateV1SwapFromDecoded, type EnvioRawLaunchRow, type EnvioRawSwapRow } from './transformV1Legacy.js';
-import { readV2TokenMetadata, resolveV2QuoteAsset, type V2QuoteClient } from '../launchpads/pons/v2/adapter.js';
 import { envioRawLaunchV2ToEvent, hydrateV2LaunchFromEnvio, hydrateCurveTradeFromDecoded, hydrateCurveBuybackFromDecoded,
   resolveKnownQuoteAsset, type EnvioRawLaunchV2Row, type EnvioRawCurveTradeRow, type EnvioRawCurveBuybackRow } from './transformV2.js';
 import { envioRawLifecycleToTransition, type EnvioRawLifecycleRow } from './transformLifecycle.js';
@@ -82,29 +81,11 @@ function str(value: unknown): string { return String(value); }
 function int(value: unknown): number { return Number(value); }
 
 // ---- v1-launch ----
-interface V1LaunchContext { metadata: V1TokenMetadata; graduated: boolean }
-async function prepareV1Launch(
-  appDb: Database, chainId: number, rows: readonly Record<string, unknown>[], rpcClient: V1ReadClient,
-): Promise<Map<string, V1LaunchContext>> {
-  const prepared = new Map<string, V1LaunchContext>();
-  for (const raw of rows) {
-    const tokenAddress = str(raw.tokenAddress).toLowerCase();
-    if (prepared.has(tokenAddress)) continue;
-    const existing = await lookupLaunch(appDb, chainId, tokenAddress);
-    if (existing) continue;
-    const factory = resolveV1Factory(str(raw.factoryAddress));
-    const [metadata, graduated] = await Promise.all([
-      readV1TokenMetadata(rpcClient, tokenAddress as Address),
-      readV1Graduation(rpcClient, tokenAddress as Address, factory.factory),
-    ]);
-    prepared.set(tokenAddress, { metadata, graduated });
-  }
-  return prepared;
-}
-async function applyV1Launch(
-  tx: DbOrTx, chainId: number, raw: Record<string, unknown>, prepared: Map<string, V1LaunchContext>,
-  newQuoteAssets: QuoteAssetToEnqueue[],
-): Promise<ApplyOutcome> {
+// No RPC prefetch: name/symbol/decimals/graduation are deferred to the core-metadata enrichment job
+// (be/src/launchpads/pons/coreMetadata.ts) — see docs/superpowers/specs/
+// 2026-10-05-envio-near-realtime-sync-design.md's "Immediate launch records and enrichment". V1's
+// quote asset is always WETH (zero RPC calls, enforced inside hydrateV1Launch itself).
+async function applyV1Launch(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[]): Promise<ApplyOutcome> {
   const row: EnvioRawLaunchRow = {
     chainId, tokenAddress: str(raw.tokenAddress), deployerAddress: str(raw.deployerAddress),
     pairTokenAddress: str(raw.pairTokenAddress), poolAddress: str(raw.poolAddress), factoryAddress: str(raw.factoryAddress),
@@ -114,12 +95,10 @@ async function applyV1Launch(
   const tokenAddress = event.tokenAddress.toLowerCase();
   const existing = await lookupLaunch(tx, chainId, tokenAddress);
   if (existing) return 'applied';
-  const ctx = prepared.get(tokenAddress);
-  if (!ctx) throw new Error(`Missing prepared V1 metadata for ${tokenAddress} — prepare step bug`);
   const factory = resolveV1Factory(row.factoryAddress);
   let launch: Launch; let venue: Venue;
   try {
-    ({ launch, venue } = hydrateV1Launch(event, factory, ctx.metadata, ctx.graduated));
+    ({ launch, venue } = hydrateV1Launch(event, factory, null, null));
   } catch (error) {
     throw new Error(`Failed to apply V1 launch at tx ${row.txHash} log ${row.logIndex}: ${(error as Error).message}`, { cause: error });
   }
@@ -170,30 +149,11 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
 }
 
 // ---- v2-launch ----
-interface V2LaunchContext { metadata: { name: string; symbol: string; decimals: number }; quoteAsset: { address: Address; symbol: string; decimals: number } }
-async function prepareV2Launch(
-  appDb: Database, chainId: number, rows: readonly Record<string, unknown>[], rpcClient: V2QuoteClient,
-): Promise<Map<string, V2LaunchContext>> {
-  const prepared = new Map<string, V2LaunchContext>();
-  for (const raw of rows) {
-    const tokenAddress = str(raw.tokenAddress).toLowerCase();
-    if (prepared.has(tokenAddress)) continue;
-    const existing = await lookupLaunch(appDb, chainId, tokenAddress);
-    if (existing) continue;
-    const pairToken = str(raw.pairTokenAddress).toLowerCase() as Address;
-    const knownQuoteAsset = resolveKnownQuoteAsset(pairToken);
-    const [metadata, quoteAsset] = await Promise.all([
-      readV2TokenMetadata(rpcClient, tokenAddress as Address),
-      knownQuoteAsset ? Promise.resolve({ address: pairToken, ...knownQuoteAsset }) : resolveV2QuoteAsset(pairToken, rpcClient),
-    ]);
-    prepared.set(tokenAddress, { metadata, quoteAsset });
-  }
-  return prepared;
-}
-async function applyV2Launch(
-  tx: DbOrTx, chainId: number, raw: Record<string, unknown>, prepared: Map<string, V2LaunchContext>,
-  newQuoteAssets: QuoteAssetToEnqueue[],
-): Promise<ApplyOutcome> {
+// No RPC prefetch: name/symbol/decimals are deferred to the core-metadata enrichment job. The quote
+// asset's address is always known from the event itself; its symbol/decimals are known for free only
+// on the native-ETH fast path (resolveKnownQuoteAsset) — an unknown real ERC20 pair defers those two
+// fields to the same enrichment job.
+async function applyV2Launch(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[]): Promise<ApplyOutcome> {
   const row: EnvioRawLaunchV2Row = {
     chainId, tokenAddress: str(raw.tokenAddress), curveAddress: str(raw.curveAddress), deployerAddress: str(raw.deployerAddress),
     pairTokenAddress: str(raw.pairTokenAddress), blockNumber: num(raw.blockNumber), blockHash: str(raw.blockHash),
@@ -203,11 +163,11 @@ async function applyV2Launch(
   const tokenAddress = event.tokenAddress.toLowerCase();
   const existing = await lookupLaunch(tx, chainId, tokenAddress);
   if (existing) return 'applied';
-  const ctx = prepared.get(tokenAddress);
-  if (!ctx) throw new Error(`Missing prepared V2 metadata for ${tokenAddress} — prepare step bug`);
+  const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
+  const quoteAsset = { address: event.pairToken, symbol: knownQuoteAsset?.symbol ?? null, decimals: knownQuoteAsset?.decimals ?? null };
   let launch: Launch; let venue: Venue;
   try {
-    ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, ctx.metadata, ctx.quoteAsset));
+    ({ launch, venue } = hydrateV2LaunchFromEnvio(event, v2Factory, null, quoteAsset));
   } catch (error) {
     throw new Error(`Failed to apply V2 launch at tx ${row.txHash} log ${row.logIndex}: ${(error as Error).message}`, { cause: error });
   }
@@ -365,8 +325,6 @@ export interface ApplyPageInput {
   fence: bigint;
   limit: number;
   tables?: Partial<Record<Stream, string>>;
-  v1RpcClient?: V1ReadClient;
-  v2RpcClient?: V2QuoteClient;
 }
 export interface ApplyPageResult { applied: number; unresolved: number; cursor: SyncCursor }
 
@@ -374,10 +332,12 @@ const TAIL_SEED_DEPTH = 500n;
 
 /**
  * Reads and applies exactly one bounded page of one Envio raw stream, in one app-DB transaction with
- * its cursor advance. A fresh `tail` cursor seeds near `fence - 500` blocks instead of genesis (the
- * `history` lane owns full backfill from the stream's true start). Downstream rows whose launch/venue
- * dependency isn't in the app DB yet are counted `unresolved` and left unapplied — Task 3 adds the
- * durable retry queue; this task only guarantees the raw-read cursor keeps advancing past them.
+ * its cursor advance. No RPC calls: a new launch's name/symbol/decimals (and V1 graduation, and an
+ * unresolved V2 quote asset) are left null for the core-metadata enrichment job — see
+ * be/src/launchpads/pons/coreMetadata.ts. A fresh `tail` cursor seeds near `fence - 500` blocks
+ * instead of genesis (the `history` lane owns full backfill from the stream's true start). Downstream
+ * rows whose launch/venue dependency isn't in the app DB yet are counted `unresolved`, durably queued
+ * via unresolvedEvents.ts (retried independently of this stream's moving cursor), and left unapplied.
  */
 export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: ApplyPageInput): Promise<ApplyPageResult> {
   const tables = { ...DEFAULT_STREAM_TABLES, ...input.tables };
@@ -392,22 +352,18 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
   });
 
   const newQuoteAssets: QuoteAssetToEnqueue[] = [];
-  let v1Prepared: Map<string, V1LaunchContext> | undefined;
-  let v2Prepared: Map<string, V2LaunchContext> | undefined;
-  if (page.rows.length > 0 && input.stream === 'v1-launch') {
-    v1Prepared = await prepareV1Launch(appDb, input.chainId, page.rows, input.v1RpcClient ?? defaultV1RpcClient());
-  }
-  if (page.rows.length > 0 && input.stream === 'v2-launch') {
-    v2Prepared = await prepareV2Launch(appDb, input.chainId, page.rows, input.v2RpcClient ?? defaultV2RpcClient());
-  }
-
   let applied = 0;
   let unresolved = 0;
   await appDb.transaction(async (tx) => {
     for (const raw of page.rows) {
-      const outcome = await applyRow(tx, input.chainId, input.stream, raw, { v1Prepared, v2Prepared, newQuoteAssets });
+      const outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets);
       if (outcome === 'applied') applied += 1;
-      else if (outcome === 'unresolved') unresolved += 1;
+      else if (outcome === 'unresolved') {
+        unresolved += 1;
+        await enqueueUnresolvedEvent(tx, {
+          chainId: input.chainId, stream: input.stream, rawId: String(raw.id), reason: 'dependency_missing',
+        });
+      }
     }
     await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, input.fence);
   });
@@ -419,16 +375,13 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
   return { applied, unresolved, cursor: next };
 }
 
-interface ApplyRowDeps {
-  v1Prepared?: Map<string, V1LaunchContext>;
-  v2Prepared?: Map<string, V2LaunchContext>;
-  newQuoteAssets: QuoteAssetToEnqueue[];
-}
-async function applyRow(tx: DbOrTx, chainId: number, stream: Stream, raw: Record<string, unknown>, deps: ApplyRowDeps): Promise<ApplyOutcome> {
+async function applyRow(
+  tx: DbOrTx, chainId: number, stream: Stream, raw: Record<string, unknown>, newQuoteAssets: QuoteAssetToEnqueue[],
+): Promise<ApplyOutcome> {
   switch (stream) {
-    case 'v1-launch': return applyV1Launch(tx, chainId, raw, deps.v1Prepared!, deps.newQuoteAssets);
+    case 'v1-launch': return applyV1Launch(tx, chainId, raw, newQuoteAssets);
     case 'v1-swap': return applyV1Swap(tx, chainId, raw);
-    case 'v2-launch': return applyV2Launch(tx, chainId, raw, deps.v2Prepared!, deps.newQuoteAssets);
+    case 'v2-launch': return applyV2Launch(tx, chainId, raw, newQuoteAssets);
     case 'v2-curve': return applyV2Curve(tx, chainId, raw);
     case 'v2-buyback': return applyV2Buyback(tx, chainId, raw);
     case 'v2-lifecycle': return applyV2Lifecycle(tx, chainId, raw);
@@ -437,11 +390,45 @@ async function applyRow(tx: DbOrTx, chainId: number, stream: Stream, raw: Record
   }
 }
 
-function defaultV1RpcClient(): V1ReadClient {
-  throw new Error('v1RpcClient is required to apply a v1-launch page outside tests');
+export interface RetryUnresolvedInput {
+  chainId: number;
+  stream: Stream;
+  limit: number;
+  tables?: Partial<Record<Stream, string>>;
+  now?: Date;
 }
-function defaultV2RpcClient(): V2QuoteClient {
-  throw new Error('v2RpcClient is required to apply a v2-launch page outside tests');
+
+/**
+ * Re-attempts due unresolved events for one stream, independent of that stream's raw-read cursor
+ * (which already moved past them). Each row is re-fetched by its Envio `id` and re-applied in its own
+ * transaction, so one row's failure cannot block another's resolution. Returns the number resolved
+ * (applied or now irrelevant) — the rest are rescheduled with backoff by settleUnresolvedEvent.
+ */
+export async function retryUnresolvedEvents(envioPool: Pool, appDb: Database, input: RetryUnresolvedInput): Promise<number> {
+  const tables = { ...DEFAULT_STREAM_TABLES, ...input.tables };
+  const now = input.now ?? new Date();
+  const claims = await claimDueUnresolvedEvents(appDb, input.chainId, input.stream, now, input.limit);
+  let resolved = 0;
+  for (const claim of claims) {
+    const raw = await readRawRowById(envioPool, tables[input.stream], claim.rawId);
+    if (!raw) {
+      // The raw row itself is gone (an upstream reorg replaced it) — nothing left to retry.
+      await appDb.transaction((tx) => settleUnresolvedEvent(tx, claim, true, now, claim.retryCount));
+      resolved += 1;
+      continue;
+    }
+    const newQuoteAssets: QuoteAssetToEnqueue[] = [];
+    let outcome: ApplyOutcome = 'unresolved';
+    await appDb.transaction(async (tx) => {
+      outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets);
+      await settleUnresolvedEvent(tx, claim, outcome !== 'unresolved', now, claim.retryCount);
+    });
+    for (const asset of newQuoteAssets) {
+      await enqueueFeedResolutionJob(appDb.$client, asset.chainId, asset.quoteAssetAddress).catch(() => { /* best-effort */ });
+    }
+    if (outcome !== 'unresolved') resolved += 1;
+  }
+  return resolved;
 }
 
 export interface SyncReport {
@@ -456,8 +443,6 @@ export interface RunPassInput {
   fence: bigint;
   limit: number;
   tables?: Partial<Record<Stream, string>>;
-  v1RpcClient: V1ReadClient;
-  v2RpcClient: V2QuoteClient;
 }
 
 async function runPass(lane: Lane, input: RunPassInput): Promise<SyncReport> {
@@ -465,7 +450,6 @@ async function runPass(lane: Lane, input: RunPassInput): Promise<SyncReport> {
   for (const stream of STREAM_ORDER) {
     const result = await applyEnvioPage(input.envioPool, input.appDb, {
       chainId: input.chainId, stream, lane, fence: input.fence, limit: input.limit, tables: input.tables,
-      v1RpcClient: input.v1RpcClient, v2RpcClient: input.v2RpcClient,
     });
     results[stream] = { applied: result.applied, unresolved: result.unresolved };
   }

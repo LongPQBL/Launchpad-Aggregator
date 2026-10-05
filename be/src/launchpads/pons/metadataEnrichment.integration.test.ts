@@ -24,7 +24,7 @@ beforeEach(async () => {
     factoryAddress: address, deployerAddress: address, launchBlock: 1_000_000n,
     launchTxHash: `0x${'d'.repeat(64)}`, launchLogIndex: 1, quoteAssetAddress: address,
     quoteAssetSymbol: 'ETH', quoteAssetDecimals: 18, lifecycleStatus: 'trading',
-    socialsReadState: 'done', timestampReadState: 'done',
+    socialsReadState: 'done', timestampReadState: 'done', coreMetadataReadState: 'done',
   });
 });
 afterEach(async () => {
@@ -61,6 +61,62 @@ it('keeps only one RPC enrichment worker active across overlapping Envio process
   await firstPass;
 });
 afterAll(async () => { await pool.end(); });
+
+it('resolves a near-realtime-synced V1 launch\'s core metadata, retrying only the field that failed transiently', async () => {
+  const v1Address = `0x${'a'.repeat(40)}`;
+  const v1Factory = `0x${'b'.repeat(40)}`;
+  await db.insert(launches).values({
+    chainId: 4663, tokenAddress: v1Address, sourceId: 'pons-v1-legacy', sourceLogId: null,
+    name: null, symbol: null, tokenDecimals: null, platform: 'pons', protocolVersion: 'v1',
+    factoryAddress: v1Factory, deployerAddress: v1Address, launchBlock: 2_000_000n,
+    launchTxHash: `0x${'a'.repeat(64)}`, launchLogIndex: 1, quoteAssetAddress: `0x${'0'.repeat(40)}`,
+    quoteAssetSymbol: 'WETH', quoteAssetDecimals: 18, lifecycleStatus: 'trading',
+    logoReadState: 'done', descriptionReadState: 'done', socialsReadState: 'done', timestampReadState: 'done',
+  });
+  let graduationFails = true;
+  const calls: string[] = [];
+  const rpcClient = {
+    readContract: async ({ functionName }: { functionName: string }) => {
+      calls.push(functionName);
+      if (functionName === 'name') return 'V1 Token';
+      if (functionName === 'symbol') return 'V1T';
+      if (functionName === 'decimals') return 9;
+      if (functionName === 'liquidityPool') return v1Address;
+      if (functionName === 'graduationStatus') {
+        if (graduationFails) throw new TimeoutError({ body: {}, url: 'https://rpc.example/secret' });
+        return [0n, 0n, true];
+      }
+      throw new Error(`unexpected ${functionName}`);
+    },
+    getBlock: async () => { throw new Error('timestamp already done'); },
+  };
+  try {
+    const first = await enrichMetadataOnce(db, rpcClient, now, 1);
+    expect(first.pending).toBe(1);
+    expect(first.transportFailures).toBe(1);
+    let [row] = await db.select().from(launches).where(eq(launches.tokenAddress, v1Address));
+    // name/symbol/decimals (one independent RPC group) are saved even though graduation — a
+    // separate, independent call — failed transiently; the next claim's own launch is unaffected.
+    expect(row.name).toBe('V1 Token');
+    expect(row.symbol).toBe('V1T');
+    expect(row.tokenDecimals).toBe(9);
+    expect(row.lifecycleStatus).toBe('trading');
+    expect(row.coreMetadataReadState).toBe('pending');
+    expect(row.coreMetadataRetryAt).not.toBeNull();
+
+    graduationFails = false;
+    calls.length = 0;
+    const second = await enrichMetadataOnce(db, rpcClient, new Date(now.getTime() + 60_001), 1);
+    expect(second.completed).toBe(1);
+    expect(calls).toEqual(expect.arrayContaining(['graduationStatus']));
+    [row] = await db.select().from(launches).where(eq(launches.tokenAddress, v1Address));
+    expect(row.lifecycleStatus).toBe('graduated');
+    expect(row.coreMetadataReadState).toBe('done');
+    expect(row.coreMetadataRetryAt).toBeNull();
+  } finally {
+    await db.delete(launches).where(eq(launches.tokenAddress, v1Address));
+  }
+});
 
 it('repairs a launch far outside the reorg window, then retries only the field that timed out', async () => {
   const calls: string[] = [];

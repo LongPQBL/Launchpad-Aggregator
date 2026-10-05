@@ -29,7 +29,7 @@ describe('TradeList', () => {
   it('shows a loading state for a pending trade USD value, keeping the onchain amount visible', () => {
     render(<TradeList trades={[trade({ usdValue: null, usdValueApprox: false, usdValueStatus: 'pending' })]} venues={noVenues} quoteSymbol="ROBIN" explorerBase={undefined} />);
     expect(screen.getByText(/calculating|loading/i)).toBeInTheDocument();
-    expect(screen.getByText(trade().tokenAmount)).toBeInTheDocument(); // onchain amount still shown
+    expect(screen.getByText(trade().tokenAmount!)).toBeInTheDocument(); // onchain amount still shown
   });
 
   it('shows the honest unavailable state for usdValueStatus unavailable, distinct from pending', () => {

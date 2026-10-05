@@ -61,8 +61,11 @@ export function hydrateV1SwapFromDecoded(row: EnvioRawSwapRow, venue: Venue, lau
   const q192 = 2n ** 192n;
   const sqrtSquared = row.sqrtPriceX96 * row.sqrtPriceX96;
   if (sqrtSquared === 0n) throw new Error('Invalid V3 sqrt price');
-  const decimalScale = 10n ** BigInt(launch.tokenDecimals);
-  const quoteScale = 10n ** BigInt(launch.quoteAsset.decimals);
+  // Unknown token/quote decimals (launch awaiting core metadata enrichment) means price is genuinely
+  // unknown — never scale by a guessed decimals count.
+  const decimalsKnown = launch.tokenDecimals !== null && launch.quoteAsset.decimals !== null;
+  const decimalScale = decimalsKnown ? 10n ** BigInt(launch.tokenDecimals!) : 0n;
+  const quoteScale = decimalsKnown ? 10n ** BigInt(launch.quoteAsset.decimals!) : 0n;
   return {
     chainId: launch.chainId,
     tokenAddress: launch.tokenAddress,
@@ -78,8 +81,8 @@ export function hydrateV1SwapFromDecoded(row: EnvioRawSwapRow, venue: Venue, lau
     quoteAssetAddress: launch.quoteAsset.address,
     sourceEvent: 'Swap',
     activityKind: 'user_trade',
-    priceNumeratorRaw: tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
-    priceDenominatorRaw: tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
+    priceNumeratorRaw: !decimalsKnown ? null : tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
+    priceDenominatorRaw: !decimalsKnown ? null : tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
     traderAddress: traderAddress.toLowerCase() as Address,
   };
 }

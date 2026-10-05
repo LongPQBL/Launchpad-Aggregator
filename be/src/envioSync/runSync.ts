@@ -67,7 +67,11 @@ export async function syncV1LegacyToReal(
   for (const raw of rawLaunches) {
     const tokenAddress = raw.tokenAddress.toLowerCase();
     const existing = existingByToken.get(tokenAddress);
-    const willBeRebuilt = !existing || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
+    // A surviving row with null core metadata is one the near-realtime path inserted before its own
+    // enrichment job ran — this offline reconciliation pass can resolve it immediately rather than
+    // leaving it for that job's own schedule.
+    const willBeRebuilt = !existing || existing.name === null || existing.tokenDecimals === null
+      || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
     if (!willBeRebuilt || metadataByToken.has(tokenAddress)) continue;
     const factory = resolveV1Factory(raw.factoryAddress);
     const [metadata, graduated, extended] = await Promise.all([
@@ -104,7 +108,7 @@ export async function syncV1LegacyToReal(
       const tokenAddress = event.tokenAddress.toLowerCase();
       const factory = resolveV1Factory(raw.factoryAddress);
       const surviving = survivingByToken.get(tokenAddress);
-      const metadata = surviving
+      const metadata = surviving && surviving.name !== null && surviving.symbol !== null && surviving.tokenDecimals !== null
         ? { name: surviving.name, symbol: surviving.symbol, decimals: surviving.tokenDecimals, liquidityPool: event.poolAddress }
         : metadataByToken.get(tokenAddress);
       const graduated = surviving ? surviving.lifecycleStatus === 'graduated' : graduatedByToken.get(tokenAddress);
@@ -126,6 +130,8 @@ export async function syncV1LegacyToReal(
           launchTxHash: launch.launchTxHash,
           quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
           quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: launch.lifecycleStatus,
+          // This path always resolves name/symbol/decimals via RPC before insert — never deferred.
+          coreMetadataReadState: 'done',
           logoUri: launch.logoUri ?? null, description: launch.description ?? null,
           websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
           launchTimestamp: launch.launchTimestamp ?? null,
@@ -237,9 +243,11 @@ export async function syncV1LegacyOnce(
     }
     if (isNew) {
     const inserted = await appDb.transaction(async (tx) => {
+      // metadata above is always fully resolved here (freshly fetched or reused complete existing
+      // data), so launch.name/symbol/tokenDecimals are never actually null in this staging-only path.
       const launchRows = await tx.insert(launchesEnvioStaging).values({
-        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name, symbol: launch.symbol,
-        tokenDecimals: launch.tokenDecimals, platform: launch.platform, protocolVersion: launch.protocolVersion,
+        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name!, symbol: launch.symbol!,
+        tokenDecimals: launch.tokenDecimals!, platform: launch.platform, protocolVersion: launch.protocolVersion,
         factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock,
         launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
         quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: null,

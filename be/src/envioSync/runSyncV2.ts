@@ -59,7 +59,7 @@ export async function syncV2Once(
     const needsQuote = !existing || existing.quoteAssetSymbol === null || existing.quoteAssetDecimals === null;
     const metadata = needsMetadata
       ? await readV2TokenMetadata(rpcClient, event.tokenAddress)
-      : { name: existing.name!, symbol: existing.symbol!, decimals: existing.tokenDecimals };
+      : { name: existing.name!, symbol: existing.symbol!, decimals: existing.tokenDecimals! };
     const quoteAsset = knownQuoteAsset
       ? { address: event.pairToken, ...knownQuoteAsset }
       : needsQuote
@@ -80,12 +80,14 @@ export async function syncV2Once(
     }
     if (isNew) {
     const inserted = await appDb.transaction(async (tx) => {
+      // metadata/quoteAsset above are always fully resolved here, so these launch fields are never
+      // actually null in this staging-only path.
       const launchRows = await tx.insert(launchesEnvioStaging).values({
-        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name, symbol: launch.symbol,
-        tokenDecimals: launch.tokenDecimals, platform: launch.platform, protocolVersion: launch.protocolVersion,
+        chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name!, symbol: launch.symbol!,
+        tokenDecimals: launch.tokenDecimals!, platform: launch.platform, protocolVersion: launch.protocolVersion,
         factoryAddress: launch.factoryAddress, deployerAddress: launch.deployerAddress, launchBlock: launch.launchBlock,
         launchTxHash: launch.launchTxHash, quoteAssetAddress: launch.quoteAsset.address,
-        quoteAssetSymbol: launch.quoteAsset.symbol, quoteAssetDecimals: launch.quoteAsset.decimals,
+        quoteAssetSymbol: launch.quoteAsset.symbol!, quoteAssetDecimals: launch.quoteAsset.decimals!,
         lifecycleStatus: null,
       }).onConflictDoNothing().returning({ tokenAddress: launchesEnvioStaging.tokenAddress });
       if (launchRows.length === 0) return false;
@@ -172,7 +174,11 @@ export async function syncV2ToReal(
     const event = envioRawLaunchV2ToEvent(row);
     const tokenAddress = event.tokenAddress.toLowerCase();
     const existing = existingByToken.get(tokenAddress);
-    const willBeRebuilt = !existing || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
+    // A surviving row with null core metadata or quote asset is one the near-realtime path inserted
+    // before its own enrichment job ran — resolve it here immediately rather than waiting for that job.
+    const willBeRebuilt = !existing || existing.name === null || existing.tokenDecimals === null
+      || existing.quoteAssetSymbol === null || existing.quoteAssetDecimals === null
+      || (existing.sourceLogId === null && existing.launchBlock >= windowStart);
     if (!willBeRebuilt || metadataByToken.has(tokenAddress)) continue;
     const knownQuoteAsset = resolveKnownQuoteAsset(event.pairToken);
     // Independent RPC reads — none needs another's result — started together and awaited as one
@@ -214,10 +220,10 @@ export async function syncV2ToReal(
       const event = envioRawLaunchV2ToEvent(row);
       const tokenAddress = event.tokenAddress.toLowerCase();
       const surviving = survivingByToken.get(tokenAddress);
-      const metadata = surviving
+      const metadata = surviving && surviving.name !== null && surviving.symbol !== null && surviving.tokenDecimals !== null
         ? { name: surviving.name, symbol: surviving.symbol, decimals: surviving.tokenDecimals }
         : metadataByToken.get(tokenAddress);
-      const quoteAsset = surviving
+      const quoteAsset = surviving && surviving.quoteAssetSymbol !== null && surviving.quoteAssetDecimals !== null
         ? { address: event.pairToken, symbol: surviving.quoteAssetSymbol, decimals: surviving.quoteAssetDecimals }
         : quoteAssetByToken.get(tokenAddress);
       if (!metadata || !quoteAsset) throw new Error(`Missing pre-fetched metadata/quoteAsset for ${tokenAddress} — this is a bug in the pre-fetch scoping above`);
@@ -238,6 +244,8 @@ export async function syncV2ToReal(
           launchTxHash: launch.launchTxHash,
           quoteAssetAddress: launch.quoteAsset.address, quoteAssetSymbol: launch.quoteAsset.symbol,
           quoteAssetDecimals: launch.quoteAsset.decimals, lifecycleStatus: launch.lifecycleStatus,
+          // This path always resolves name/symbol/decimals/quote asset via RPC before insert — never deferred.
+          coreMetadataReadState: 'done',
           logoUri: launch.logoUri ?? null, description: launch.description ?? null,
           websiteUrl: launch.websiteUrl ?? null, twitterUrl: launch.twitterUrl ?? null,
           launchTimestamp: launch.launchTimestamp ?? null,

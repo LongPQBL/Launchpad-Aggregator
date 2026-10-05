@@ -127,9 +127,12 @@ export const launches = pgTable('launches', {
   tokenAddress: text('token_address').notNull(),
   sourceId: text('source_id').notNull().references(() => sources.id),
   sourceLogId: text('source_log_id').references(() => rawLogs.id, { onDelete: 'cascade' }),
-  name: text('name').notNull(),
-  symbol: text('symbol').notNull(),
-  tokenDecimals: integer('token_decimals').notNull(),
+  // Nullable: a near-realtime-synced launch (be/src/envioSync/incrementalSync.ts) persists its
+  // minimal chain-derived record before a bounded enrichment job resolves these — never a placeholder
+  // empty string. Existing rows written by the old synchronous-RPC sync path are unaffected.
+  name: text('name'),
+  symbol: text('symbol'),
+  tokenDecimals: integer('token_decimals'),
   platform: text('platform').notNull(),
   protocolVersion: text('protocol_version').notNull(),
   factoryAddress: text('factory_address').notNull(),
@@ -139,8 +142,10 @@ export const launches = pgTable('launches', {
   launchTxHash: text('launch_tx_hash').notNull(),
   launchLogIndex: integer('launch_log_index').notNull(),
   quoteAssetAddress: text('quote_asset_address').notNull(),
-  quoteAssetSymbol: text('quote_asset_symbol').notNull(),
-  quoteAssetDecimals: integer('quote_asset_decimals').notNull(),
+  // Nullable for an unresolved real ERC20 V2 pair token; never unknown for V1 (always WETH) or a V2
+  // native-ETH pair, both resolved without any RPC call.
+  quoteAssetSymbol: text('quote_asset_symbol'),
+  quoteAssetDecimals: integer('quote_asset_decimals'),
   lifecycleStatus: text('lifecycle_status').notNull(),
   v4PoolFee: integer('v4_pool_fee'),
   v4TickSpacing: integer('v4_tick_spacing'),
@@ -157,6 +162,13 @@ export const launches = pgTable('launches', {
   metadataRetryCount: integer('metadata_retry_count').notNull().default(0),
   metadataLeaseId: text('metadata_lease_id'),
   metadataLeaseUntil: timestamp('metadata_lease_until', { withTimezone: true }),
+  // Independently-paced core-identity retry (name/symbol/decimals; V1 graduation; V2 unknown quote
+  // asset symbol/decimals) — shares the extended fields' lease columns (one launch is worked on by at
+  // most one enrichment claim at a time) but its own read-state/retry-count/retry-at, since core
+  // fields are more urgent than logo/description/socials and must not wait behind that backlog.
+  coreMetadataReadState: text('core_metadata_read_state').notNull().default('pending'),
+  coreMetadataRetryAt: timestamp('core_metadata_retry_at', { withTimezone: true }),
+  coreMetadataRetryCount: integer('core_metadata_retry_count').notNull().default(0),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
@@ -164,11 +176,15 @@ export const launches = pgTable('launches', {
   index('launches_metadata_due_idx').on(table.metadataRetryAt, table.launchBlock).where(sql`${table.platform} = 'pons' AND
     (${table.logoReadState} = 'pending' OR ${table.descriptionReadState} = 'pending' OR
      ${table.socialsReadState} = 'pending' OR ${table.timestampReadState} = 'pending')`),
+  index('launches_core_metadata_due_idx').on(table.coreMetadataRetryAt, table.launchBlock)
+    .where(sql`${table.platform} = 'pons' AND ${table.coreMetadataReadState} = 'pending'`),
   check('launches_logo_read_state_valid', sql`${table.logoReadState} IN ('pending', 'done')`),
   check('launches_description_read_state_valid', sql`${table.descriptionReadState} IN ('pending', 'done')`),
   check('launches_socials_read_state_valid', sql`${table.socialsReadState} IN ('pending', 'done')`),
   check('launches_timestamp_read_state_valid', sql`${table.timestampReadState} IN ('pending', 'done')`),
   check('launches_metadata_retry_count_valid', sql`${table.metadataRetryCount} >= 0`),
+  check('launches_core_metadata_read_state_valid', sql`${table.coreMetadataReadState} IN ('pending', 'done')`),
+  check('launches_core_metadata_retry_count_valid', sql`${table.coreMetadataRetryCount} >= 0`),
 ]);
 
 export const launchParityReports = pgTable('launch_parity_reports', {
@@ -343,6 +359,26 @@ export const envioSyncCursors = pgTable('envio_sync_cursors', {
   check('envio_sync_cursors_valid_stream', sql`${table.stream} IN
     ('v1-launch', 'v1-swap', 'v2-launch', 'v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap')`),
   check('envio_sync_cursors_valid_lane', sql`${table.lane} IN ('tail', 'history')`),
+]);
+
+// A raw-event key an incremental sync pass (be/src/envioSync/incrementalSync.ts) saw but could not
+// apply because its launch/venue dependency wasn't in the app DB yet (e.g. a swap arriving before its
+// launch). The stream's own raw-read cursor keeps advancing past it — this table is the durable record
+// that lets be/src/envioSync/unresolvedEvents.ts retry it later, independent of cursor position.
+export const unresolvedEvents = pgTable('unresolved_events', {
+  chainId: integer('chain_id').notNull(),
+  stream: text('stream').notNull(),
+  rawId: text('raw_id').notNull(),
+  reason: text('reason').notNull(),
+  retryCount: integer('retry_count').notNull().default(0),
+  nextRetryAt: timestamp('next_retry_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.stream, table.rawId] }),
+  index('unresolved_events_due_idx').on(table.nextRetryAt),
+  check('unresolved_events_valid_stream', sql`${table.stream} IN
+    ('v1-launch', 'v1-swap', 'v2-launch', 'v2-curve', 'v2-buyback', 'v2-lifecycle', 'v4-initialize', 'v4-swap')`),
+  check('unresolved_events_retry_count_valid', sql`${table.retryCount} >= 0`),
 ]);
 
 export const candleDirtyBuckets = pgTable('candle_dirty_buckets', {

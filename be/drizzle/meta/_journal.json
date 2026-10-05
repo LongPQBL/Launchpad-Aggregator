@@ -232,6 +232,20 @@
       "when": 1791158581812,
       "tag": "0032_venues_kind_ref_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1791159262359,
+      "tag": "0033_launch_core_metadata_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791160319564,
+      "tag": "0034_unresolved_events",
+      "breakpoints": true
     }
   ]
 }

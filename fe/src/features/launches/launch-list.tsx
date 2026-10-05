@@ -1,5 +1,5 @@
 import { chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -190,10 +190,10 @@ export function LaunchList({ page, sources, error, chainId, search, status, plat
                 <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:align-middle">{index + 1}</div>
                 <div role="cell" className="md:table-cell md:p-4 md:align-middle">
                   <div className="flex items-center gap-3">
-                    <TokenLogo logoUri={launch.logoUri} symbol={launch.symbol} chainId={launch.chainId} />
+                    <TokenLogo logoUri={launch.logoUri} symbol={displaySymbol(launch.symbol)} chainId={launch.chainId} />
                     <div className="flex flex-col">
                       <a href={launchHref(launch.chainId, launch.tokenAddress)} className="font-medium text-foreground hover:text-primary hover:underline">
-                        {launch.name} <span className="text-muted-foreground">({launch.symbol})</span>
+                        {displayName(launch.name, launch.tokenAddress)} <span className="text-muted-foreground">({displaySymbol(launch.symbol)})</span>
                       </a>
                       <span className="text-xs text-muted-foreground">
                         <span>{chainName(launch.chainId)}</span> · <span>{formatLifecycleStatus(launch.lifecycleStatus)}</span>

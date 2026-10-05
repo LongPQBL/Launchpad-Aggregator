@@ -23,6 +23,8 @@ const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
 
 function string(value: unknown): string { return String(value); }
 function number(value: unknown): number { return Number(value); }
+function nullableString(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
+function nullableNumber(value: unknown): number | null { return value === null || value === undefined ? null : Number(value); }
 
 // Per-launch coverage, not the global `coverage()` below: a launch's 24h volume/price/candles are
 // complete only if ITS OWN factory, lifecycle (v2) and official venue trade sources are each
@@ -50,11 +52,11 @@ function launchCoverageSql(headParamIndex: number): string {
 function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary {
   const coverageStatus = complete ? 'caught_up' : 'backfilling';
   return {
-    chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: string(row.name), symbol: string(row.symbol),
+    chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: nullableString(row.name), symbol: nullableString(row.symbol),
     platform: string(row.platform), protocolVersion: string(row.protocol_version),
-    quoteAsset: { address: string(row.quote_asset_address), symbol: string(row.quote_asset_symbol), decimals: number(row.quote_asset_decimals) },
+    quoteAsset: { address: string(row.quote_asset_address), symbol: nullableString(row.quote_asset_symbol), decimals: nullableNumber(row.quote_asset_decimals) },
     lifecycleStatus: string(row.lifecycle_status),
-    officialVolume24h: complete && row.official_volume_raw !== undefined
+    officialVolume24h: complete && row.official_volume_raw !== undefined && row.quote_asset_decimals !== null
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
     coverageStatus,
     logoUri: row.logo_uri === null || row.logo_uri === undefined ? null : string(row.logo_uri),
@@ -73,6 +75,10 @@ interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: s
 const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
 
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
+  if (row.token_decimals === null || row.quote_asset_decimals === null) {
+    // A near-realtime-synced launch awaiting core-metadata enrichment — no fabricated decimals.
+    return { ...NULL_TVL, tvlUnavailableReason: 'decimals_unknown' };
+  }
   try {
     const venueResult = await pool.query(`SELECT kind, ref FROM venues WHERE chain_id = $1 AND token_address = $2
       AND official = true AND effective_to_block IS NULL
@@ -111,7 +117,8 @@ async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undefined, r
     const priceRow = priceResult.rows[0] as Row | undefined;
     const priceInQuoteAsset = priceRow
       ? formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18) : null;
-    const fdvUsd = totalSupply !== null ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
+    const fdvUsd = totalSupply !== null && row.token_decimals !== null
+      ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
@@ -295,7 +302,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const key = `${number(row.chain_id)}:${string(row.token_address)}`;
       const agg = byLaunch.get(key) ?? { usdTotalScaled: 0n, hasUnpriced: false, hasTrades: false };
       agg.hasTrades = true;
-      if (row.feed_address === null || row.answer_raw === null) {
+      if (row.feed_address === null || row.answer_raw === null || row.quote_asset_decimals === null) {
         agg.hasUnpriced = true;
       } else {
         const ageSeconds = number(row.timestamp) - number(row.price_updated_at);
@@ -458,7 +465,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       // resolve the feed once above this loop and thread it into a valueTradeUsd overload.
       const valuations = await Promise.all(rows.map((row) => valueTradeUsd(pool, chainId, string(row.launch_quote_asset_address), {
         timestamp: number(row.timestamp), quoteAmountRaw: BigInt(string(row.quote_amount_raw)),
-        quoteAssetDecimals: number(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
+        quoteAssetDecimals: nullableNumber(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
       })));
       // Demand-driven backfill: a `pending` row means a verified feed exists but this trade's exact
       // round isn't backfilled yet. Coalesce every pending row on this page into ONE bounded,
@@ -483,8 +490,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       return page(rows, query.limit, (row, i) => ({
         venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
         logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side),
-        activityKind: string(row.activity_kind), tokenAmount: formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
-        quoteAmount: formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)),
+        activityKind: string(row.activity_kind),
+        tokenAmount: row.token_decimals === null ? null : formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
+        quoteAmount: row.quote_asset_decimals === null ? null : formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)),
         priceQuote: row.price_numerator_raw === null || row.price_denominator_raw === null ? null
           : formatRational(BigInt(string(row.price_numerator_raw)), BigInt(string(row.price_denominator_raw)), 18),
         traderAddress: string(row.trader_address),

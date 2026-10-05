@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
@@ -38,9 +38,9 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
-            <TokenLogo logoUri={detail.logoUri} symbol={detail.symbol} chainId={detail.chainId} />
+            <TokenLogo logoUri={detail.logoUri} symbol={displaySymbol(detail.symbol)} chainId={detail.chainId} />
             <h1 className="text-xl font-semibold leading-none">
-              {detail.name} <span className="text-muted-foreground">({detail.symbol})</span>
+              {displayName(detail.name, detail.tokenAddress)} <span className="text-muted-foreground">({displaySymbol(detail.symbol)})</span>
             </h1>
           </div>
           <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
@@ -61,7 +61,7 @@ export function LaunchDetail({ detail, trades, candles }: LaunchDetailProps) {
           </p>
 
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
-            <p>Quote asset: {detail.quoteAsset.symbol}</p>
+            <p>Quote asset: {displaySymbol(detail.quoteAsset.symbol)}</p>
             <p className="flex items-center gap-2">
               Lifecycle: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
             </p>

@@ -11,13 +11,13 @@ import {
 } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 import type { Candle } from '@/api/client';
-import { computeChartPrecision, toChartValue } from '@/api/format';
+import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CoverageBadge } from './coverage-badge';
 
 export interface OfficialChartProps {
   candles: readonly Candle[];
   graduationTime: number | null;
-  quoteSymbol: string;
+  quoteSymbol: string | null;
   coverageStatus: string;
 }
 
@@ -96,7 +96,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       <div className="mb-2 flex items-center gap-2">
         <CoverageBadge status={coverageStatus} />
         <p className="text-xs text-muted-foreground">
-          Chart prices ({quoteSymbol}) are approximate for plotting; see the trade table for exact figures.
+          Chart prices ({displaySymbol(quoteSymbol)}) are approximate for plotting; see the trade table for exact figures.
         </p>
       </div>
       <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />

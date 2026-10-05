@@ -13,10 +13,14 @@ export const MAX_PRICE_AGE_SECONDS = 24 * 60 * 60;
 export type TradeUsdValuation = { status: 'priced'; usdValue: string } | { status: 'pending' } | { status: 'unavailable' };
 
 export interface TradeForValuation {
-  timestamp: number; quoteAmountRaw: bigint; quoteAssetDecimals: number; blockNumber: bigint; logIndex: number;
+  timestamp: number; quoteAmountRaw: bigint; quoteAssetDecimals: number | null; blockNumber: bigint; logIndex: number;
 }
 
 export async function valueTradeUsd(pool: Pool, chainId: number, quoteAssetAddress: string, trade: TradeForValuation): Promise<TradeUsdValuation> {
+  // A near-realtime-synced launch's quote asset decimals may still be unresolved (core-metadata
+  // enrichment pending) — no price_jobs backfill can ever produce this value, so it's unavailable
+  // now rather than pending forever.
+  if (trade.quoteAssetDecimals === null) return { status: 'unavailable' };
   const feed = await resolveVerifiedFeed(pool, chainId, quoteAssetAddress);
   if (!feed) return { status: 'unavailable' };
   const round = await findRoundAtOrBefore(pool, chainId, feed.feedAddress, trade.blockNumber, trade.logIndex);

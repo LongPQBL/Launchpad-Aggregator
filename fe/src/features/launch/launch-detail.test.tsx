@@ -126,6 +126,18 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('other')).toBeInTheDocument();
   });
 
+  it('shows the token address as the name and a dash for symbol/quote asset while core metadata is pending', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ name: null, symbol: null, quoteAsset: { address: '0xquote', symbol: null, decimals: null } })}
+        trades={null}
+        candles={null}
+      />,
+    );
+    expect(screen.getByRole('heading', { name: /0xabc/ })).toBeInTheDocument();
+    expect(screen.getByText('Quote asset: —')).toBeInTheDocument();
+  });
+
   it('hides the About section explorer pill for a chain with no registered explorer', () => {
     render(<LaunchDetail detail={detail({ chainId: 999999 })} trades={null} candles={null} />);
     expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();

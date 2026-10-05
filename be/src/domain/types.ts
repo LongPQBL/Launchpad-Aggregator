@@ -9,16 +9,23 @@ export type CoverageStatus = 'backfilling' | 'caught_up' | 'degraded';
 
 export interface QuoteAsset {
   address: Address;
-  symbol: string;
-  decimals: number;
+  // null until a bounded enrichment job resolves an unknown ERC20 quote asset's symbol/decimals —
+  // the known-native-ETH fast path (be/src/envioSync/transformV2.ts's resolveKnownQuoteAsset) never
+  // needs this, so this is only ever unknown for a real ERC20 pair token.
+  symbol: string | null;
+  decimals: number | null;
 }
 
 export interface Launch {
   chainId: number;
   tokenAddress: Address;
-  name: string;
-  symbol: string;
-  tokenDecimals: number;
+  // null until a bounded enrichment job resolves the token's on-chain name/symbol/decimals — see
+  // docs/superpowers/specs/2026-10-05-envio-near-realtime-sync-design.md's "Immediate launch records
+  // and enrichment". Never coerce a missing value to an empty string or zero; a UI/valuation consumer
+  // must treat null as unavailable, not a real value.
+  name: string | null;
+  symbol: string | null;
+  tokenDecimals: number | null;
   platform: 'pons';
   protocolVersion: ProtocolVersion;
   sourceId: string;

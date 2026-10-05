@@ -62,16 +62,20 @@ export function decodeV1Launch(log: RpcLog, factory: FactorySource): V1LaunchEve
   };
 }
 
-export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, metadata: V1TokenMetadata, graduated: boolean,
+// metadata/graduated are null when not yet known (a near-realtime-synced launch awaiting its bounded
+// core-metadata enrichment job — see be/src/launchpads/pons/coreMetadata.ts). A null graduated reads
+// as 'trading': V1 has no graduation event stream, so this is the correct state for virtually every
+// freshly observed launch, and the enrichment job corrects it once graduationStatus() is confirmed.
+export function hydrateV1Launch(event: V1LaunchEvent, factory: FactorySource, metadata: V1TokenMetadata | null, graduated: boolean | null,
   extended?: ExtendedLaunchMetadata): LaunchWithVenue {
-  if (metadata.liquidityPool.toLowerCase() !== event.poolAddress.toLowerCase()) throw new Error('Token pool does not match factory log');
+  if (metadata && metadata.liquidityPool.toLowerCase() !== event.poolAddress.toLowerCase()) throw new Error('Token pool does not match factory log');
   if (event.pairToken.toLowerCase() !== weth.toLowerCase()) throw new Error('Unsupported pons v1 quote asset');
   const launch: Launch = {
     chainId: factory.chainId,
     tokenAddress: event.tokenAddress,
-    name: metadata.name,
-    symbol: metadata.symbol,
-    tokenDecimals: metadata.decimals,
+    name: metadata?.name ?? null,
+    symbol: metadata?.symbol ?? null,
+    tokenDecimals: metadata?.decimals ?? null,
     platform: 'pons',
     protocolVersion: 'v1',
     sourceId: factory.id,
@@ -123,8 +127,11 @@ export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestam
   const q192 = 2n ** 192n;
   const sqrtSquared = decoded.args.sqrtPriceX96 * decoded.args.sqrtPriceX96;
   if (sqrtSquared === 0n) throw new Error('Invalid V3 sqrt price');
-  const decimalScale = 10n ** BigInt(launch.tokenDecimals);
-  const quoteScale = 10n ** BigInt(launch.quoteAsset.decimals);
+  // Unknown token/quote decimals (a near-realtime-synced launch awaiting core metadata enrichment)
+  // means price is genuinely unknown — never scale by a guessed decimals count.
+  const decimalsKnown = launch.tokenDecimals !== null && launch.quoteAsset.decimals !== null;
+  const decimalScale = decimalsKnown ? 10n ** BigInt(launch.tokenDecimals!) : 0n;
+  const quoteScale = decimalsKnown ? 10n ** BigInt(launch.quoteAsset.decimals!) : 0n;
   return {
     chainId: launch.chainId,
     tokenAddress: launch.tokenAddress,
@@ -140,8 +147,8 @@ export function decodeV1Swap(log: RpcLog, venue: Venue, launch: Launch, timestam
     quoteAssetAddress: launch.quoteAsset.address,
     sourceEvent: 'Swap',
     activityKind: 'user_trade',
-    priceNumeratorRaw: tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
-    priceDenominatorRaw: tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
+    priceNumeratorRaw: !decimalsKnown ? null : tokenIsToken0 ? sqrtSquared * decimalScale : q192 * decimalScale,
+    priceDenominatorRaw: !decimalsKnown ? null : tokenIsToken0 ? q192 * quoteScale : sqrtSquared * quoteScale,
     traderAddress: traderAddress.toLowerCase() as Address,
   };
 }

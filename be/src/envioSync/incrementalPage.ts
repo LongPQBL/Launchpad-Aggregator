@@ -29,6 +29,13 @@ function assertSafeTable(table: string): void {
   }
 }
 
+/** Point lookup by Envio's own `id`, for retrying one unresolved row — see unresolvedEvents.ts. */
+export async function readRawRowById(envioPool: Pool, table: string, id: string): Promise<Record<string, unknown> | null> {
+  assertSafeTable(table);
+  const result = await envioPool.query(`SELECT * FROM ${table} WHERE id = $1`, [id]);
+  return (result.rows[0] as Record<string, unknown> | undefined) ?? null;
+}
+
 /**
  * Reads the next bounded page of an Envio raw-event table in strict (blockNumber, logIndex, id)
  * order, never past `fence` — the pass's own observed Envio-processed block. Ties on

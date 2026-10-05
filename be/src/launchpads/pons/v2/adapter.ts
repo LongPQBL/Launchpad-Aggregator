@@ -42,8 +42,11 @@ export function phaseToLifecycle(phase: 0 | 1 | 2 | 3): LifecycleStatus {
   }
 }
 
+// metadata is null when not yet known (a near-realtime-synced launch awaiting its bounded
+// core-metadata enrichment job — see be/src/launchpads/pons/coreMetadata.ts); quoteAsset.symbol/
+// decimals are independently nullable for an unresolved real ERC20 pair token.
 export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, record: V2LaunchRecord,
-  metadata: { name: string; symbol: string; decimals: number }, quoteAsset: QuoteAsset,
+  metadata: { name: string; symbol: string; decimals: number } | null, quoteAsset: QuoteAsset,
   extended?: ExtendedLaunchMetadata): V2LaunchWithVenue {
   if (!record.exists || !same(record.token, event.tokenAddress) || !same(record.curve, event.curveAddress)
     || !same(record.deployer, event.deployerAddress) || !same(record.pairToken, event.pairToken)) {
@@ -51,8 +54,8 @@ export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, re
   }
   if (!same(quoteAsset.address, event.pairToken)) throw new Error('Quote asset does not match pons v2 factory event');
   const launch: Launch = {
-    chainId: factory.chainId, tokenAddress: event.tokenAddress, name: metadata.name, symbol: metadata.symbol,
-    tokenDecimals: metadata.decimals, platform: 'pons', protocolVersion: 'v2', sourceId: factory.id,
+    chainId: factory.chainId, tokenAddress: event.tokenAddress, name: metadata?.name ?? null, symbol: metadata?.symbol ?? null,
+    tokenDecimals: metadata?.decimals ?? null, platform: 'pons', protocolVersion: 'v2', sourceId: factory.id,
     sourceLogId: event.sourceLogId, factoryAddress: factory.factory, deployerAddress: event.deployerAddress,
     launchBlock: event.blockNumber, launchTxHash: event.transactionHash, quoteAsset,
     lifecycleStatus: 'trading',
@@ -71,7 +74,10 @@ export function hydrateV2Launch(event: V2LaunchEvent, factory: FactorySource, re
   return { launch, venue };
 }
 
-export async function resolveV2QuoteAsset(pairToken: Address, client: V2QuoteClient): Promise<QuoteAsset> {
+// Return type is deliberately a precise non-nullable shape, not the shared QuoteAsset domain type:
+// this function always either resolves real values or throws, independent of QuoteAsset's own
+// nullable-for-deferred-enrichment fields (a caller choosing to skip this call supplies null itself).
+export async function resolveV2QuoteAsset(pairToken: Address, client: V2QuoteClient): Promise<{ address: Address; symbol: string; decimals: number }> {
   if (same(pairToken, zeroAddress)) return { address: zeroAddress, symbol: 'ETH', decimals: 18 };
   const [symbol, decimals] = await Promise.all([
     client.readContract({ address: pairToken, abi: erc20MetadataAbi, functionName: 'symbol' }),
@@ -141,8 +147,10 @@ export function decodeCurveTrade(log: RpcLog, launch: Launch, venue: Venue, time
     blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp, side, tokenAmountRaw,
     quoteAmountRaw, quoteAssetAddress: launch.quoteAsset.address, sourceEvent,
     activityKind: 'user_trade',
-    priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
-    priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
+    priceNumeratorRaw: verifiedPostTradeReserves && launch.tokenDecimals !== null
+      ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
+    priceDenominatorRaw: verifiedPostTradeReserves && launch.quoteAsset.decimals !== null
+      ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
     traderAddress: traderAddress.toLowerCase() as Address,
   };
 }
@@ -163,8 +171,10 @@ export function decodeCurveBuyback(log: RpcLog, launch: Launch, venue: Venue, ti
     blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp, side: 'buy',
     tokenAmountRaw: decoded.args.tokensLocked, quoteAmountRaw: decoded.args.quoteSpent,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'BuybackLocked', activityKind: 'protocol_buyback',
-    priceNumeratorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
-    priceDenominatorRaw: verifiedPostTradeReserves ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
+    priceNumeratorRaw: verifiedPostTradeReserves && launch.tokenDecimals !== null
+      ? verifiedPostTradeReserves.quote * 10n ** BigInt(launch.tokenDecimals) : null,
+    priceDenominatorRaw: verifiedPostTradeReserves && launch.quoteAsset.decimals !== null
+      ? verifiedPostTradeReserves.token * 10n ** BigInt(launch.quoteAsset.decimals) : null,
     traderAddress: traderAddress.toLowerCase() as Address,
   };
 }

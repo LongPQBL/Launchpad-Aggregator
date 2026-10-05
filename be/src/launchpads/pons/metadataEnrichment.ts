@@ -1,8 +1,11 @@
 import type { Address } from 'viem';
 import type { Database } from '../../db/client.js';
+import { readV1CoreMetadataOutcomes, readV2CoreMetadataOutcomes } from './coreMetadata.js';
 import { readExtendedTokenMetadataOutcomes, readLaunchTimestamp,
   type BlockReadClient, type ExtendedMetadataReadClient, type ReadOutcome } from './extendedMetadata.js';
-import { claimDueMetadataLaunches, finishMetadataLaunch } from './metadataEnrichmentStore.js';
+import { claimDueMetadataLaunches, finishCoreMetadataLaunch, finishMetadataLaunch } from './metadataEnrichmentStore.js';
+import type { V1ReadClient } from './v1/state.js';
+import type { V2QuoteClient } from './v2/adapter.js';
 
 export function resolveMetadataBatchLimit(raw: string | undefined): number {
   const limit = raw === undefined ? 10 : Number(raw);
@@ -19,7 +22,7 @@ interface MetadataEnrichmentReport {
 }
 
 export async function enrichMetadataOnce(
-  db: Database, client: ExtendedMetadataReadClient & BlockReadClient, now: Date, limit = 10,
+  db: Database, client: ExtendedMetadataReadClient & BlockReadClient & V1ReadClient & V2QuoteClient, now: Date, limit = 10,
 ): Promise<MetadataEnrichmentReport> {
   const claims = await claimDueMetadataLaunches(db, now, limit, 600_000);
   let completed = 0;
@@ -27,6 +30,23 @@ export async function enrichMetadataOnce(
   let transportFailures = 0;
   let unknownFailures = 0;
   for (const claim of claims) {
+    // Core metadata (name/symbol/decimals; V1 graduation; V2 unknown quote asset) is read and saved
+    // FIRST, before extended fields — see finishCoreMetadataLaunch's own comment for why the order
+    // matters (it never clears the shared lease; finishMetadataLaunch below always does).
+    let corePending = false;
+    if (claim.coreMetadataReadState === 'pending') {
+      const core = claim.protocolVersion === 'v1'
+        ? await readV1CoreMetadataOutcomes(client, claim.tokenAddress as Address, claim.factoryAddress as Address)
+        : await readV2CoreMetadataOutcomes(client, claim.tokenAddress as Address, claim.quoteAssetAddress as Address, claim.quoteAssetSymbol === null);
+      for (const outcome of [core.name, core.symbol, core.decimals, core.graduated, core.quoteAssetSymbol, core.quoteAssetDecimals]) {
+        if (outcome.state === 'pending' && outcome.errorKind === 'transport') transportFailures++;
+        if (outcome.state === 'pending' && outcome.errorKind === 'unknown') unknownFailures++;
+      }
+      const coreSaved = await finishCoreMetadataLaunch(db, claim, core, now);
+      corePending = !coreSaved || [core.name, core.symbol, core.decimals, core.graduated, core.quoteAssetSymbol, core.quoteAssetDecimals]
+        .some((outcome) => outcome.state === 'pending');
+    }
+
     const functions: ('logo' | 'description' | 'socials')[] = [];
     if (claim.logoReadState === 'pending') functions.push('logo');
     if (claim.descriptionReadState === 'pending') functions.push('description');
@@ -40,7 +60,7 @@ export async function enrichMetadataOnce(
       if (outcome.state === 'pending' && outcome.errorKind === 'unknown') unknownFailures++;
     }
     const saved = await finishMetadataLaunch(db, claim, results, now);
-    const stillPending = !saved
+    const stillPending = corePending || !saved
       || (claim.logoReadState === 'pending' && results.logo.state === 'pending')
       || (claim.descriptionReadState === 'pending' && results.description.state === 'pending')
       || (claim.socialsReadState === 'pending' && results.socials.state === 'pending')

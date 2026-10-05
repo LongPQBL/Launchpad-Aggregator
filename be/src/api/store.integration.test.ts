@@ -69,6 +69,41 @@ describe('listLaunches without raw log provenance', () => {
   });
 });
 
+describe('a near-realtime-synced launch with unresolved core metadata', () => {
+  const pendingToken = '0x1717171717171717171717171717171717171717';
+  const pendingSource = 'envio-store-pending-metadata-test';
+
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v1',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [pendingSource, pendingToken]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status,core_metadata_read_state)
+      VALUES (4663,$1,$2,NULL,NULL,NULL,NULL,'pons','v1',$1,$1,1,$3,9,$1,NULL,NULL,'trading','pending') ON CONFLICT DO NOTHING`,
+    [pendingToken, pendingSource, `0x${'9'.repeat(64)}`]);
+  });
+  afterAll(async () => {
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [pendingToken]);
+    await pool.query('DELETE FROM sources WHERE id = $1', [pendingSource]);
+  });
+
+  it('serves name/symbol/quoteAsset as null and degrades FDV/TVL to null instead of crashing', async () => {
+    const detail = await store.getLaunch(4663, pendingToken);
+    expect(detail).not.toBeNull();
+    expect(detail!.name).toBeNull();
+    expect(detail!.symbol).toBeNull();
+    expect(detail!.quoteAsset.symbol).toBeNull();
+    expect(detail!.quoteAsset.decimals).toBeNull();
+    expect(detail!.fdvUsd).toBeNull();
+    expect(detail!.tvlUsd).toBeNull();
+
+    const list = await store.listLaunches({ limit: 50, chainId: 4663 });
+    const item = list.items.find((row) => row.tokenAddress === pendingToken);
+    expect(item?.name).toBeNull();
+    expect(item?.symbol).toBeNull();
+  });
+});
+
 describe('safe head considers envio_chain_progress (final review, Important 3)', () => {
   const headToken = '0x1616161616161616161616161616161616161616';
   const headSource = 'envio-store-head-test';

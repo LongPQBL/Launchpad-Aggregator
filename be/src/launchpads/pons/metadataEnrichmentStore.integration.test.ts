@@ -28,7 +28,7 @@ async function addLaunch(n: number, overrides: Partial<typeof launches.$inferIns
     factoryAddress: token(1000), deployerAddress: token(1001), launchBlock: BigInt(n),
     launchTxHash: `0x${n.toString(16).padStart(64, '0')}`, launchLogIndex: n,
     quoteAssetAddress: token(1002), quoteAssetSymbol: 'ETH', quoteAssetDecimals: 18,
-    lifecycleStatus: 'trading', ...overrides,
+    lifecycleStatus: 'trading', coreMetadataReadState: 'done', ...overrides,
   });
   return address;
 }

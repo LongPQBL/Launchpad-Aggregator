@@ -1,11 +1,21 @@
-export function formatQuote(value: string | null, symbol: string): string {
+export function formatQuote(value: string | null, symbol: string | null): string {
   if (value === null) return 'No data yet';
-  return `${value} ${symbol}`;
+  return `${value} ${symbol ?? '—'}`;
 }
 
 export function formatUsd(value: string | null): string {
   if (value === null) return 'No data yet';
   return `$${value}`;
+}
+
+// A near-realtime-synced launch is visible before its core metadata (name/symbol/decimals) resolves —
+// the UI shows the token address as the name fallback rather than hiding the row or inventing a label.
+export function displayName(name: string | null, tokenAddress: string): string {
+  return name ?? tokenAddress;
+}
+
+export function displaySymbol(symbol: string | null): string {
+  return symbol ?? '—';
 }
 
 export function tvlTooltip(value: {

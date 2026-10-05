@@ -140,10 +140,12 @@
                             "type": "string"
                           },
                           "name": {
-                            "type": "string"
+                            "type": "string",
+                            "nullable": true
                           },
                           "symbol": {
-                            "type": "string"
+                            "type": "string",
+                            "nullable": true
                           },
                           "platform": {
                             "type": "string"
@@ -158,10 +160,12 @@
                                 "type": "string"
                               },
                               "symbol": {
-                                "type": "string"
+                                "type": "string",
+                                "nullable": true
                               },
                               "decimals": {
-                                "type": "integer"
+                                "type": "integer",
+                                "nullable": true
                               }
                             }
                           },
@@ -296,10 +300,12 @@
                       "type": "string"
                     },
                     "name": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "symbol": {
-                      "type": "string"
+                      "type": "string",
+                      "nullable": true
                     },
                     "platform": {
                       "type": "string"
@@ -314,10 +320,12 @@
                           "type": "string"
                         },
                         "symbol": {
-                          "type": "string"
+                          "type": "string",
+                          "nullable": true
                         },
                         "decimals": {
-                          "type": "integer"
+                          "type": "integer",
+                          "nullable": true
                         }
                       }
                     },
@@ -500,10 +508,12 @@
                             "type": "string"
                           },
                           "tokenAmount": {
-                            "type": "string"
+                            "type": "string",
+                            "nullable": true
                           },
                           "quoteAmount": {
-                            "type": "string"
+                            "type": "string",
+                            "nullable": true
                           },
                           "priceQuote": {
                             "type": "string",

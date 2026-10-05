@@ -1,4 +1,4 @@
-import { formatActivityKind, formatQuote, formatSide, formatUsd, formatVenueKind } from '@/api/format';
+import { displaySymbol, formatActivityKind, formatQuote, formatSide, formatUsd, formatVenueKind } from '@/api/format';
 import type { OfficialVenue, Trade } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils';
 export interface TradeListProps {
   trades: readonly Trade[];
   venues: readonly OfficialVenue[];
-  quoteSymbol: string;
+  quoteSymbol: string | null;
   explorerBase?: string;
 }
 
@@ -21,7 +21,7 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
           <TableHead>Type</TableHead>
           <TableHead>Venue</TableHead>
           <TableHead className="text-right">Token amount</TableHead>
-          <TableHead className="text-right">{quoteSymbol} amount</TableHead>
+          <TableHead className="text-right">{displaySymbol(quoteSymbol)} amount</TableHead>
           <TableHead className="text-right">Price</TableHead>
           <TableHead className="text-right">USD</TableHead>
           <TableHead>Explorer</TableHead>
@@ -44,9 +44,9 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
                 {activityLabel ?? formatSide(trade.side)}
               </TableCell>
               <TableCell>{venue ? formatVenueKind(venue.kind) : trade.venueId}</TableCell>
-              <TableCell className="text-right font-mono">{trade.tokenAmount}</TableCell>
+              <TableCell className="text-right font-mono">{trade.tokenAmount ?? '—'}</TableCell>
               <TableCell className="text-right font-mono">
-                {trade.quoteAmount} {quoteSymbol}
+                {trade.quoteAmount ?? '—'} {displaySymbol(quoteSymbol)}
               </TableCell>
               <TableCell className="text-right font-mono">{formatQuote(trade.priceQuote, quoteSymbol)}</TableCell>
               <TableCell

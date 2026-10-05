@@ -29,6 +29,7 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
   }
   const q192 = 2n ** 192n;
   const sqrtSquared = decoded.args.sqrtPriceX96 * decoded.args.sqrtPriceX96;
+  const decimalsKnown = launch.tokenDecimals !== null && launch.quoteAsset.decimals !== null;
   return {
     chainId: launch.chainId, tokenAddress: launch.tokenAddress, venueId: venue.id, blockNumber: log.blockNumber,
     blockHash: log.blockHash, txHash: log.transactionHash, logIndex: log.logIndex, timestamp,
@@ -37,8 +38,8 @@ export function decodePonsV4Swap(log: RpcLog, poolId: Hash, launch: Launch, venu
     quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned,
     quoteAssetAddress: launch.quoteAsset.address, sourceEvent: 'Swap',
     activityKind: protocolSwap ? (quoteSigned < 0n ? 'protocol_buyback' : 'protocol_fee_conversion') : 'user_trade',
-    priceNumeratorRaw: (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals),
-    priceDenominatorRaw: (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals),
+    priceNumeratorRaw: !decimalsKnown ? null : (tokenIsCurrency0 ? sqrtSquared : q192) * 10n ** BigInt(launch.tokenDecimals!),
+    priceDenominatorRaw: !decimalsKnown ? null : (tokenIsCurrency0 ? q192 : sqrtSquared) * 10n ** BigInt(launch.quoteAsset.decimals!),
     traderAddress: traderAddress.toLowerCase() as Address,
   };
 }

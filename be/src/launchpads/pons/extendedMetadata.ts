@@ -45,7 +45,7 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function classifyReadError(error: unknown): ReadOutcome<never> {
+export function classifyReadError(error: unknown): ReadOutcome<never> {
   let cause: unknown = error;
   let contractFailure = false;
   const seen = new Set<unknown>();
@@ -62,7 +62,7 @@ function classifyReadError(error: unknown): ReadOutcome<never> {
   return contractFailure ? { state: 'done', value: null } : { state: 'pending', value: null, errorKind: 'unknown' };
 }
 
-async function readOne<T>(read: () => Promise<T>): Promise<ReadOutcome<T>> {
+export async function readOne<T>(read: () => Promise<T>): Promise<ReadOutcome<T>> {
   try { return { state: 'done', value: await read() }; }
   catch (error) { return classifyReadError(error); }
 }
