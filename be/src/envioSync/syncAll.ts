@@ -6,7 +6,7 @@ import { syncV4Once, syncV4ToReal, DEFAULT_ENVIO_V4_TABLES, type EnvioV4TableNam
 import { readEnvioProgress, recordEnvioChainProgress } from './envioDb.js';
 import { runTailPass, runHistoryPass, retryUnresolvedEvents, syncSourceCoverage, type SyncReport } from './incrementalSync.js';
 import { repairEnvioWindow, recordRepairOutcome, type RepairReport } from './incrementalRepair.js';
-import { STREAMS, type Stream } from './incrementalCursor.js';
+import { STREAMS, detectEnvioRollback, type Stream } from './incrementalCursor.js';
 
 export interface AllSyncTables {
   v1: EnvioTableNames;
@@ -72,6 +72,14 @@ export async function runIncrementalCycle(
 ): Promise<{ tail: SyncReport; history: SyncReport }> {
   const { processedBlock, headBlock } = await readEnvioProgress(envioPool, deps.progressTable);
   const limit = deps.limit ?? 500;
+  // If Envio's own processed block has rolled back behind a cursor, the normal read range below
+  // becomes empty while the cursor's position is still past the new fence — advanceSyncCursor's
+  // guard would throw on every cycle until Envio happens to pass the old position again, and the
+  // periodic repair schedule wouldn't get a chance to run while every tick keeps failing. Repair
+  // immediately instead of waiting for it (final review, Important 8).
+  if (await detectEnvioRollback(appDb, chainId, processedBlock)) {
+    await repairEnvioWindow(envioPool, appDb, { chainId, fence: processedBlock, depth: 500n, tables: deps.tables });
+  }
   const passInput = { chainId, envioPool, appDb, fence: processedBlock, limit, tables: deps.tables };
   const tail = await runTailPass(passInput);
   const history = await runHistoryPass(passInput);

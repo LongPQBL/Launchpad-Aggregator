@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, gt, or } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
 import { envioSyncCursors } from '../db/schema.js';
 
@@ -76,4 +76,20 @@ export async function advanceSyncCursor(
   if (result.rowCount !== 1) {
     throw new Error(`Cannot advance an unclaimed sync cursor for chain ${key.chainId} stream ${key.stream} lane ${key.lane}`);
   }
+}
+
+/**
+ * True when any stream/lane's recorded position or confirmed watermark is now ahead of `fence` —
+ * Envio's own processed block has rolled back behind what a cursor already read. Left undetected,
+ * the next regular pass's read range becomes empty (nothing is `<= fence` and `> position`) while
+ * its position stays at the old, now-invalid value, so advanceSyncCursor's own guard throws on every
+ * cycle until Envio happens to pass the old position again — repair never gets a chance to run while
+ * the loop is stuck failing (final review, Important 8). Callers should run a repair pass immediately
+ * on a true result, before resuming normal append ingestion.
+ */
+export async function detectEnvioRollback(appDb: DbOrTx, chainId: number, fence: bigint): Promise<boolean> {
+  const [row] = await appDb.select({ blockNumber: envioSyncCursors.blockNumber }).from(envioSyncCursors)
+    .where(and(eq(envioSyncCursors.chainId, chainId), or(gt(envioSyncCursors.blockNumber, fence), gt(envioSyncCursors.processedWatermark, fence))))
+    .limit(1);
+  return row !== undefined;
 }

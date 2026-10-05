@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import { STREAMS } from './incrementalCursor.js';
 
+vi.mock('./incrementalCursor.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./incrementalCursor.js')>();
+  return { ...actual, detectEnvioRollback: vi.fn(async () => false) };
+});
+vi.mock('./incrementalRepair.js', () => ({
+  repairEnvioWindow: vi.fn(async () => ({ changedLaunchKeys: [] })),
+  recordRepairOutcome: vi.fn(async () => undefined),
+}));
+
 vi.mock('./runSync.js', () => ({
   syncV1LegacyOnce: vi.fn(async () => ({ launchesWritten: 0, tradesWritten: 0 })),
   syncV1LegacyToReal: vi.fn(async () => ({ launchesWritten: 1, tradesWritten: 1 })),
@@ -36,6 +45,8 @@ const { syncV2Once, syncV2ToReal } = await import('./runSyncV2.js');
 const { syncV4Once, syncV4ToReal } = await import('./runSyncV4.js');
 const { recordEnvioChainProgress } = await import('./envioDb.js');
 const { retryUnresolvedEvents, syncSourceCoverage } = await import('./incrementalSync.js');
+const { detectEnvioRollback } = await import('./incrementalCursor.js');
+const { repairEnvioWindow } = await import('./incrementalRepair.js');
 
 const tables = {
   v1: { rawLaunchTable: 'x', rawSwapTable: 'x' },
@@ -82,5 +93,27 @@ describe('runIncrementalCycle source coverage advancement (final review, Critica
     vi.mocked(syncSourceCoverage).mockClear();
     await runIncrementalCycle({} as never, {} as never, 4663);
     expect(syncSourceCoverage).toHaveBeenCalledWith({}, 4663, 200n);
+  });
+});
+
+describe('runIncrementalCycle proactive repair on a detected Envio rollback (final review, Important 8)', () => {
+  it('does not repair when no rollback is detected', async () => {
+    vi.mocked(detectEnvioRollback).mockResolvedValueOnce(false);
+    vi.mocked(repairEnvioWindow).mockClear();
+    await runIncrementalCycle({} as never, {} as never, 4663);
+    expect(repairEnvioWindow).not.toHaveBeenCalled();
+  });
+
+  it('repairs the window immediately on a detected rollback, before resuming normal append ingestion', async () => {
+    vi.mocked(detectEnvioRollback).mockResolvedValueOnce(true);
+    vi.mocked(repairEnvioWindow).mockClear();
+    const { runTailPass } = await import('./incrementalSync.js');
+    vi.mocked(runTailPass).mockClear();
+    await runIncrementalCycle({} as never, {} as never, 4663);
+    expect(detectEnvioRollback).toHaveBeenCalledWith({}, 4663, 100n);
+    expect(repairEnvioWindow).toHaveBeenCalledWith({}, {}, expect.objectContaining({ chainId: 4663, fence: 100n }));
+    const repairOrder = vi.mocked(repairEnvioWindow).mock.invocationCallOrder[0]!;
+    const tailOrder = vi.mocked(runTailPass).mock.invocationCallOrder[0]!;
+    expect(repairOrder).toBeLessThan(tailOrder);
   });
 });
