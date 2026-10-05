@@ -58,7 +58,7 @@ describe('useLiveRefresh', () => {
       source.dispatch('trade.created', { chainId: 4663 });
     });
     act(() => {
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -71,7 +71,7 @@ describe('useLiveRefresh', () => {
 
     act(() => {
       source.dispatch('trade.created', { chainId: 1 });
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
 
     expect(refresh).not.toHaveBeenCalled();
@@ -84,7 +84,7 @@ describe('useLiveRefresh', () => {
 
     act(() => {
       source.dispatch('trade.created', { chainId: 4663, tokenAddress: '0xabc' });
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -99,6 +99,28 @@ describe('useLiveRefresh', () => {
     });
 
     expect(result.current).toBe('live');
+  });
+
+  it('still refreshes at a low rate while SSE stays connected, so a missed notification cannot leave a tab stale indefinitely (final review, Important 10)', () => {
+    // Spec: "Add a low-rate refresh while SSE is open so a missed notification cannot leave a tab
+    // stale indefinitely; it is a recovery mechanism, not the primary freshness path." The server's
+    // internal LISTEN connection can drop and reconnect without the browser's EventSource ever
+    // erroring, so a notification published during that gap has no other recovery path.
+    const refresh = vi.fn();
+    const { result } = renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));
+    const source = latestSource();
+
+    act(() => {
+      source.onopen?.();
+    });
+    expect(result.current).toBe('live');
+    refresh.mockClear();
+
+    act(() => {
+      vi.advanceTimersByTime(90_000);
+    });
+
+    expect(refresh.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   it('falls back to polling when the SSE connection errors, and keeps refreshing periodically', () => {
@@ -128,7 +150,7 @@ describe('useLiveRefresh', () => {
     });
     act(() => {
       source.onopen?.();
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
 
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -141,7 +163,7 @@ describe('useLiveRefresh', () => {
 
     act(() => {
       source.onopen?.();
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
 
     expect(refresh).not.toHaveBeenCalled();
@@ -157,13 +179,15 @@ describe('useLiveRefresh', () => {
     });
     act(() => {
       source.onopen?.();
-      vi.runAllTimers();
+      vi.advanceTimersByTime(300);
     });
     expect(result.current).toBe('live');
 
     refresh.mockClear();
+    // Below the low-rate live-refresh interval (60s, Important 10) — isolates the 15s outage-poll
+    // this test is actually checking for.
     act(() => {
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(20_000);
     });
 
     expect(refresh).not.toHaveBeenCalled();
@@ -179,19 +203,21 @@ describe('useLiveRefresh', () => {
     });
     expect(result.current).toBe('live');
 
+    // Past all 6 retries (5s * 6 = 30s) but below the 60s low-rate live-refresh interval
+    // (Important 10), so this stays isolated to the pending-row retry timer.
     act(() => {
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(31_000);
     });
 
     // Bounded — a fixed number of retries, not an unbounded poll that runs forever.
     expect(refresh.mock.calls.length).toBeGreaterThan(0);
-    const countAfterFirstMinute = refresh.mock.calls.length;
+    const countAfterRetries = refresh.mock.calls.length;
     refresh.mockClear();
     act(() => {
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(20_000);
     });
     expect(refresh).not.toHaveBeenCalled();
-    expect(countAfterFirstMinute).toBeGreaterThan(0);
+    expect(countAfterRetries).toBeGreaterThan(0);
   });
 
   it('does not retry on a pending-row timer when retryWhilePending is false', () => {
@@ -201,7 +227,8 @@ describe('useLiveRefresh', () => {
 
     act(() => {
       source.onopen?.();
-      vi.advanceTimersByTime(60_000);
+      // Below the 60s low-rate live-refresh interval (Important 10) — isolates the retry timer.
+      vi.advanceTimersByTime(31_000);
     });
 
     expect(refresh).not.toHaveBeenCalled();

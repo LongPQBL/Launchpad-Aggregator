@@ -11,6 +11,11 @@ export type LiveStatus = 'connecting' | 'live' | 'polling';
 const SSE_EVENT_TYPES = ['launch.changed', 'trade.created', 'coverage.changed'] as const;
 const COALESCE_WINDOW_MS = 300;
 const POLL_INTERVAL_MS = 15_000;
+// A recovery mechanism, not the primary freshness path (spec): the API's internal Postgres LISTEN
+// connection can drop and reconnect without the browser's EventSource ever erroring, so a
+// notification published in that gap has no other way to reach an already-open tab. Much slower
+// than the outage-poll interval, since SSE is expected to carry freshness when it's healthy.
+const LIVE_REFRESH_INTERVAL_MS = 60_000;
 // A `pending` trade USD value (verified feed, round not backfilled yet) resolves via a
 // background job with no SSE event of its own — no `trade.created`/`launch.changed` fires when
 // the round backfill completes. Retry a few times at a shorter interval, then give up; this is
@@ -103,9 +108,15 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
 
     for (const type of SSE_EVENT_TYPES) source.addEventListener(type, onSseEvent);
 
+    // Runs for the whole lifetime of this connection attempt, independent of 'live'/'polling'
+    // status — a missed notification must not leave a tab stale indefinitely even while SSE
+    // reports itself connected (final review, Important 10).
+    const liveRefreshTimer = setInterval(() => refreshRef.current(), LIVE_REFRESH_INTERVAL_MS);
+
     return () => {
       source.close();
       stopPolling();
+      clearInterval(liveRefreshTimer);
       if (coalesceTimer !== null) clearTimeout(coalesceTimer);
     };
   }, [key]);
