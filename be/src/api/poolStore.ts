@@ -11,7 +11,7 @@ export interface PoolSummary extends PoolStats {
   ponsDesignated: boolean; launchTokenAddress: string | null;
 }
 export interface PoolListQuery { limit: number; cursor?: string; chainId?: number; tokenAddress?: string;
-  protocol?: PoolKey['protocol'] }
+  protocol?: PoolKey['protocol']; excludeOfficial?: boolean }
 export interface PoolPage { items: PoolSummary[]; nextCursor: string | null; supportedProtocols: readonly string[] }
 export interface PoolApiStore {
   listPools(query: PoolListQuery): Promise<PoolPage>;
@@ -105,6 +105,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient): Pool
         AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id=p.chain_id
           AND m.protocol=p.protocol AND m.pool_id=p.pool_id AND m.token_address=$2))
         AND ($3::text IS NULL OR p.protocol=$3)
+        ${query.excludeOfficial ? `AND NOT EXISTS (SELECT 1 FROM venues v WHERE v.chain_id=p.chain_id
+          AND v.kind IN ('v4_pool','v3_pool') AND v.ref=p.pool_id AND v.official=true)` : ''}
         ${cursor ? 'AND (p.block_number,p.log_index,p.chain_id,p.protocol,p.pool_id) < ($4::bigint,$5::integer,$6::integer,$7::text,$8::text)' : ''}
         ORDER BY p.block_number DESC,p.log_index DESC,p.chain_id DESC,p.protocol DESC,p.pool_id DESC
         LIMIT $${args.length}`, args);

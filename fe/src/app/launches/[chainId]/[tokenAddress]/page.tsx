@@ -41,7 +41,7 @@ export default async function LaunchDetailPage({ params }: LaunchDetailPageProps
   const [trades, candles, pools] = await Promise.all([
     getLaunchTrades(chainId, tokenAddress).catch(() => null),
     getLaunchCandles(chainId, tokenAddress).catch(() => null),
-    getLaunchPools(chainId, tokenAddress).catch(() => null),
+    getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
   ]);
   const hasPendingTrade = trades?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 

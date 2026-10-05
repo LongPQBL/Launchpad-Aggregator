@@ -16,7 +16,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId }: {
   page: PoolPage | null; error?: boolean; tokenAddress?: string; chainId?: number;
 }) {
   if (error || !page) return <p role="alert">Could not load pools. Please try again.</p>;
-  return <section aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="space-y-4">
+  return <section aria-label={tokenAddress ? 'Other pools for this token' : 'Pools'} className="space-y-4">
     {!tokenAddress && <div><h1 className="text-2xl font-semibold">Pools</h1>
       <p className="text-sm text-muted-foreground">Verified indexed Uniswap pools on Robinhood Chain. Supported sources: {page.supportedProtocols.map((p) => p.replace('uniswap_', 'V')).join(', ')}. Coverage may still be backfilling.</p></div>}
     {page.items.length === 0 && <p>No verified indexed pools found.</p>}

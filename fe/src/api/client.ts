@@ -145,7 +145,7 @@ type PoolsBody = paths['/v1/pools']['get']['responses'][200]['content']['applica
 type RawPool = NonNullable<PoolsBody['items']>[number];
 export type PoolSummary = Required<RawPool>;
 export interface PoolPage { items: readonly PoolSummary[]; nextCursor: string | null; supportedProtocols: readonly string[] }
-export interface PoolQuery { chainId?: number; tokenAddress?: string; cursor?: string; limit?: number; protocol?: string }
+export interface PoolQuery { chainId?: number; tokenAddress?: string; cursor?: string; limit?: number; protocol?: string; excludeOfficial?: boolean }
 export function poolHref(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, displayedToken?: string): string {
   const path = `/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}`;
   return displayedToken ? `${path}?displayedToken=${encodeURIComponent(displayedToken)}` : path;
@@ -156,7 +156,7 @@ export async function getPools(query: PoolQuery = {}): Promise<PoolPage> {
 }
 export async function getLaunchPools(chainId: number, tokenAddress: string, query: Omit<PoolQuery, 'chainId' | 'tokenAddress'> = {}): Promise<PoolPage> {
   return request<PoolPage>(`/v1/launches/${chainId}/${encodeURIComponent(tokenAddress)}/pools`,
-    { cursor: query.cursor, limit: query.limit, protocol: query.protocol });
+    { cursor: query.cursor, limit: query.limit, protocol: query.protocol, excludeOfficial: query.excludeOfficial ? 'true' : undefined });
 }
 export async function getPoolDetail(chainId: number, protocol: string, poolId: string, displayedToken?: string): Promise<PoolSummary | null> {
   const path = `/v1/pools/${chainId}/${encodeURIComponent(protocol)}/${encodeURIComponent(poolId)}`;

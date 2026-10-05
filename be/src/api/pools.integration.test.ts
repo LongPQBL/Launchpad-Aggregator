@@ -28,6 +28,30 @@ beforeAll(async () => {
 });
 afterAll(async () => { await pool.query('DELETE FROM pool_catalog WHERE pool_id = ANY($1)', [ids]); await pool.end(); });
 describe('pool catalog API reader', () => {
+  it('excludes a pool that is the Pons official venue when excludeOfficial is set', async () => {
+    const source = 'pools-exclude-official-source';
+    const venueId = `4663:v4_pool:${ids[0]}`;
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v1',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [source, a]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'Official','OFF',18,'pons','v2',$1,$1,1,$3,9,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+    [a, source, `0x${'8'.repeat(64)}`]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v4_pool',$3,$4,NULL,1,true) ON CONFLICT (id) DO NOTHING`, [venueId, a, ids[0], source]);
+    try {
+      const all = await store.listPools({ chainId: 4663, limit: 10, tokenAddress: a });
+      expect(all.items.map((item) => item.poolId)).toContain(ids[0]);
+      const others = await store.listPools({ chainId: 4663, limit: 10, tokenAddress: a, excludeOfficial: true });
+      expect(others.items).toEqual([]);
+    } finally {
+      await pool.query('DELETE FROM venues WHERE id = $1', [venueId]);
+      await pool.query('DELETE FROM launches WHERE chain_id = 4663 AND token_address = $1', [a]);
+      await pool.query('DELETE FROM sources WHERE id = $1', [source]);
+    }
+  });
+
   it('paginates with deterministic ties and preserves exact membership', async () => {
     const first = await store.listPools({ chainId: 4663, limit: 1, tokenAddress: b });
     expect(first.items).toHaveLength(1);

@@ -117,7 +117,7 @@ export function LaunchDetail({ detail, trades, candles, pools }: LaunchDetailPro
         </Card>
       </section>
 
-      {pools && <section aria-label="Pools for this token"><h2 className="mb-3 text-lg font-semibold">Pools for this token</h2>
+      {pools && <section aria-label="Other pools"><h2 className="mb-3 text-lg font-semibold">Other pools</h2>
         <PoolList page={pools} tokenAddress={detail.tokenAddress} /></section>}
 
       {candles && (
