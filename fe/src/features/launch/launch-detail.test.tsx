@@ -584,4 +584,48 @@ describe('LaunchDetail', () => {
     );
     expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
   });
+
+  it('shows the V3 swap panel for a V1 launch whose V3 pool venue is currently active', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v1', officialVenues: [venue({ kind: 'v3_pool', effectiveToBlock: null })] })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /flip|swap direction/i })).toBeInTheDocument();
+  });
+
+  it('hides the V3 swap panel once that venue is no longer active', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v1', officialVenues: [venue({ kind: 'v3_pool', effectiveToBlock: '500' })] })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the V3 swap panel when tokenDecimals has not resolved yet, rather than guessing it', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v1', officialVenues: [venue({ kind: 'v3_pool', effectiveToBlock: null })], tokenDecimals: null })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the V3 swap panel when the quote asset decimals has not resolved yet, rather than guessing it', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v1', officialVenues: [venue({ kind: 'v3_pool', effectiveToBlock: null })], quoteAsset: { address: '0xquote', symbol: 'ROBIN', decimals: null } })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();
+  });
 });

@@ -11,6 +11,7 @@ import { DEFAULT_CHART_INTERVAL, OfficialChart } from './official-chart';
 import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
 import { CurveTradePanel } from '@/trading/curve-trade-panel';
+import { SwapPanel } from '@/trading/swap-panel';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
@@ -47,6 +48,12 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
   const activeCurveVenue = detail.lifecycleStatus === 'trading'
     ? detail.officialVenues.find((venue) => venue.kind === 'curve' && venue.effectiveToBlock === null)
     : undefined;
+
+  // Unlike the curve gate above, this deliberately has no `lifecycleStatus` condition: a V1 launch's
+  // V3 pool is its venue from launch with no curve-to-pool transition to distinguish — every
+  // lifecycleStatus a V1 launch can have ('trading' or 'graduated') maps to exactly one active
+  // v3_pool venue.
+  const activeV3Venue = detail.officialVenues.find((venue) => venue.kind === 'v3_pool' && venue.effectiveToBlock === null);
 
   return (
     <article className="flex flex-col gap-4">
@@ -120,6 +127,16 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
                 tokenAddress={detail.tokenAddress as `0x${string}`}
                 tokenDecimals={detail.tokenDecimals}
                 quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
+                explorerBase={explorerBase ?? null}
+              />
+            </div>
+          )}
+          {activeV3Venue && detail.tokenDecimals !== null && detail.quoteAsset.decimals !== null && (
+            <div className="mt-4 border-t border-border pt-4">
+              <SwapPanel
+                poolAddress={activeV3Venue.ref as `0x${string}`}
+                tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals }}
+                tokenB={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
                 explorerBase={explorerBase ?? null}
               />
             </div>
