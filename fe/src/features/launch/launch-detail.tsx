@@ -145,13 +145,23 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
                 value: 'transactions',
                 label: 'Transactions',
                 content: transactions ? (
-                  <TransactionList
-                    transactions={transactions.items}
-                    venues={detail.officialVenues}
-                    tokenSymbol={detail.symbol}
-                    quoteAsset={detail.quoteAsset}
-                    explorerBase={explorerBase}
-                  />
+                  <>
+                    <TransactionList
+                      transactions={transactions.items}
+                      venues={detail.officialVenues}
+                      tokenSymbol={detail.symbol}
+                      quoteAsset={detail.quoteAsset}
+                      explorerBase={explorerBase}
+                    />
+                    {transactions.nextCursor && (
+                      <a
+                        className="mt-3 block underline"
+                        href={`/launches/${detail.chainId}/${detail.tokenAddress}?cursor=${encodeURIComponent(transactions.nextCursor)}`}
+                      >
+                        Next transactions
+                      </a>
+                    )}
+                  </>
                 ) : (
                   <p role="status">Could not load transactions.</p>
                 ),

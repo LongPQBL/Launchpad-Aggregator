@@ -130,6 +130,18 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('Could not load pools.')).toBeInTheDocument();
   });
 
+  it('shows a Next transactions link with the cursor when there is a next page, and hides it when there is none', () => {
+    const view = render(<LaunchDetail detail={detail({ chainId: 4663, tokenAddress: '0xabc' })}
+      transactions={{ items: [], nextCursor: 'abc123' }} candles={null} />);
+    const link = view.container.querySelector('a[href*="cursor="]');
+    expect(link).not.toBeNull();
+    expect(link).toHaveAttribute('href', '/launches/4663/0xabc?cursor=abc123');
+
+    view.rerender(<LaunchDetail detail={detail({ chainId: 4663, tokenAddress: '0xabc' })}
+      transactions={{ items: [], nextCursor: null }} candles={null} />);
+    expect(view.container.querySelector('a[href*="cursor="]')).toBeNull();
+  });
+
   it('shows token, Robinhood Chain, and Pons brand images in the header', () => {
     render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} transactions={null} candles={null} />);
 

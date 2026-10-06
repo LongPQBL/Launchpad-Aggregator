@@ -25,6 +25,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   const chartCurrency: 'quote' | 'usd' = search.currency === 'usd' ? 'usd' : 'quote';
   const intervalParam = Number(search.interval);
   const chartInterval = [60, 300, 900, 3600, 86400].includes(intervalParam) ? intervalParam : 3600;
+  const transactionsCursor = typeof search.cursor === 'string' ? search.cursor : undefined;
   const chainId = parseChainId(chainIdParam);
   if (chainId === null || !isTokenAddress(tokenAddress)) notFound();
 
@@ -44,7 +45,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   if (detail === null) notFound();
 
   const [transactions, candles, pools] = await Promise.all([
-    getLaunchTransactions(chainId, tokenAddress).catch(() => null),
+    getLaunchTransactions(chainId, tokenAddress, { cursor: transactionsCursor }).catch(() => null),
     getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, intervalSeconds: chartInterval }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
   ]);

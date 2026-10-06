@@ -44,6 +44,38 @@ describe('TransactionList', () => {
     expect(screen.getByText(/pool/i)).toBeInTheDocument();
   });
 
+  it('never shows a protocol activity label for a pool-sourced row, even when activityKind looks like one', () => {
+    render(<TransactionList transactions={[transaction({ source: 'pool', venueId: null,
+      pool: { protocol: 'uniswap_v4', poolId: '0xpool' }, activityKind: 'protocol_buyback' })]}
+      venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.queryByText('Buyback by Pons')).not.toBeInTheDocument();
+  });
+
+  it('labels an unattributed internal Pons swap neutrally', () => {
+    render(<TransactionList transactions={[transaction({ activityKind: 'protocol_internal' })]} venues={noVenues}
+      tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getByText('Internal Pons transaction')).toBeInTheDocument();
+  });
+
+  it('shows an ordinary user trade as a buy/sell side, not a protocol label', () => {
+    render(<TransactionList transactions={[transaction({ activityKind: 'user_trade', side: 'buy' })]} venues={noVenues}
+      tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getByText('Buy')).toBeInTheDocument();
+  });
+
+  it('shows the historical USD value for a priced row, with a tooltip explaining it is historical not current', () => {
+    render(<TransactionList transactions={[transaction({ usdValue: '5.25', usdValueApprox: true, usdValueStatus: 'priced' })]}
+      venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getByText(/5\.25/)).toBeInTheDocument();
+    expect(screen.getByTitle(/historical.*not the current price/i)).toBeInTheDocument();
+  });
+
+  it('shows "—" for a row USD value instead of a fabricated number when usdValue is null', () => {
+    render(<TransactionList transactions={[transaction({ usdValue: null, usdValueApprox: false, usdValueStatus: 'unavailable' })]}
+      venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
   it('shows a truncated wallet address linking to the explorer address page', () => {
     render(<TransactionList transactions={[transaction({ traderAddress: '0x1234567890123456789012345678901234567890' })]}
       venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} explorerBase="https://explorer.example" />);
