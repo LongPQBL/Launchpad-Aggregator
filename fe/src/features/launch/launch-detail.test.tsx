@@ -437,7 +437,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    expect(screen.getByText(/0\.00000015 ROBIN/)).toBeInTheDocument();
+    expect(screen.getByText(/0\.000000152 ROBIN/)).toBeInTheDocument();
   });
 
   it('labels the price as stale instead of presenting it as the current market price', () => {

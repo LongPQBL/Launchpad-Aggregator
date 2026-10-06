@@ -16,7 +16,25 @@ function dynamicDecimals(numeric: number, baseDecimals: number): number {
 export function formatPrice(value: string | null, symbol: string | null): string {
   if (value === null) return '—';
   const numeric = Number(value);
-  return `${numeric.toFixed(dynamicDecimals(numeric, 2))} ${symbol ?? '—'}`;
+  // Below 1 unit, show exactly 3 significant (non-zero-leading) digits instead of a fixed decimal
+  // count — a fixed 2-decimal count would round every Pons-scale price (far below $1) to 0.00.
+  // At or above 1 unit, 2 decimals is always enough and this intentionally does NOT scale up to 3.
+  const decimals = Number.isFinite(numeric) && numeric > 0 && numeric < 1
+    ? -Math.floor(Math.log10(numeric)) + 2
+    : 2;
+  return `${numeric.toFixed(decimals)} ${symbol ?? '—'}`;
+}
+
+// Transaction-row amounts (token/quote/USD columns): 2 decimals, but never silently round a real
+// non-zero amount down to "0.00" — show the honest "<0.01" instead. Distinct from formatUsd's
+// dynamic-decimals behavior (FDV/TVL/market cap), which expands precision instead of truncating
+// the display — do not reuse this for those call sites.
+export function formatAmount(value: string | null, decimals = 2): string {
+  if (value === null) return '—';
+  const numeric = Number(value);
+  if (numeric === 0) return (0).toFixed(0);
+  if (Math.abs(numeric) < 0.01) return '<0.01';
+  return numeric.toFixed(decimals);
 }
 
 // decimals is required, not defaulted: callers state their own context explicitly (1 for list/detail

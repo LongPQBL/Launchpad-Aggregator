@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   computeChartPrecision,
   formatActivityKind,
+  formatAmount,
   formatLifecycleStatus,
   formatPercent,
   formatPrice,
@@ -73,11 +74,38 @@ describe('formatPrice', () => {
   });
 
   it('keeps enough decimal digits that a sub-1 Pons-scale price is not rounded away to 0.00', () => {
-    expect(formatPrice('0.000000152480063034', 'ETH')).toBe('0.00000015 ETH');
+    expect(formatPrice('0.000000152480063034', 'ETH')).toBe('0.000000152 ETH');
+  });
+
+  it('rounds to exactly 3 significant (non-zero-leading) digits below 1 unit', () => {
+    expect(formatPrice('0.00312344', 'ETH')).toBe('0.00312 ETH');
+    expect(formatPrice('0.0003426', 'ETH')).toBe('0.000343 ETH');
   });
 
   it('shows exactly 0 at the standard 2 decimal places, not an unbounded number of zeros', () => {
     expect(formatPrice('0', 'ETH')).toBe('0.00 ETH');
+  });
+});
+
+describe('formatAmount', () => {
+  it('shows "—" instead of a fabricated value when null', () => {
+    expect(formatAmount(null)).toBe('—');
+  });
+
+  it('shows exactly 0, not <0.01, for a true zero', () => {
+    expect(formatAmount('0')).toBe('0');
+  });
+
+  it('shows "<0.01" instead of rounding a sub-cent amount down to 0.00', () => {
+    expect(formatAmount('0.004')).toBe('<0.01');
+  });
+
+  it('rounds an ordinary amount to 2 decimal places by default', () => {
+    expect(formatAmount('12.9649')).toBe('12.96');
+  });
+
+  it('accepts a custom decimals count', () => {
+    expect(formatAmount('12.9649', 1)).toBe('13.0');
   });
 });
 
