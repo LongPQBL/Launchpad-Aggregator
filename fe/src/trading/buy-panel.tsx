@@ -71,10 +71,12 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
   const submission = useTradeSubmission();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
-  const needsApproval = !isNativeQuote && amountIn > 0n && allowance.allowance < amountIn;
   const hasInsufficientBalance = isNativeQuote
     ? (nativeBalance.data?.value ?? 0n) < amountIn
     : (quoteTokenBalance ?? 0n) < amountIn;
+  // Don't prompt the user to approve an amount they're already known not to hold — mirrors
+  // SellPanel's equivalent check.
+  const needsApproval = !isNativeQuote && amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
 
   function submitBuy() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;

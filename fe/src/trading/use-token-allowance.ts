@@ -20,7 +20,7 @@ export interface TokenAllowance {
 
 export function useTokenAllowance(tokenAddress: Address | undefined, spender: Address | undefined): TokenAllowance {
   const { address: owner } = useAccount();
-  const { data: allowance, isLoading, refetch } = useReadContract({
+  const { data: allowance, isLoading, isFetching, refetch } = useReadContract({
     address: tokenAddress,
     abi: erc20Abi,
     functionName: 'allowance',
@@ -28,7 +28,7 @@ export function useTokenAllowance(tokenAddress: Address | undefined, spender: Ad
     query: { enabled: Boolean(tokenAddress && owner && spender) },
   });
   const { writeContract, isPending, error, data: approveTxHash } = useWriteContract();
-  const { status: receiptStatus } = useWaitForTransactionReceipt({
+  const { status: receiptStatus, error: receiptError } = useWaitForTransactionReceipt({
     hash: approveTxHash,
     query: { enabled: Boolean(approveTxHash) },
   });
@@ -45,12 +45,21 @@ export function useTokenAllowance(tokenAddress: Address | undefined, spender: Ad
     writeContract({ address: tokenAddress, abi: erc20Abi, functionName: 'approve', args: [spender, amount] });
   }
 
+  // Prefer the receipt error — a mined-but-reverted approval is a later, more specific failure
+  // than whatever the wallet-write step reported (which may not have errored at all).
+  const reportedError = receiptError ?? error;
+
   return {
     allowance: allowance ?? 0n,
     isAllowanceLoading: isLoading,
     approve,
     isApproving: isPending,
-    isConfirmingApproval: Boolean(approveTxHash) && receiptStatus === 'pending',
-    approveError: error ? decodeTradeError(error) : null,
+    // Covers both "broadcast but not yet mined" and "mined, allowance refetch still in flight" —
+    // isFetching is TanStack Query's own live refetch indicator (gated on approveTxHash existing
+    // so it never fires on this hook's very first, pre-approval allowance load). Without the
+    // second half, needsApproval briefly reads the stale pre-approval allowance for one RPC round
+    // trip and the Approve button comes back clickable (final review, Important 1's exact gap).
+    isConfirmingApproval: Boolean(approveTxHash) && (receiptStatus === 'pending' || isFetching),
+    approveError: reportedError ? decodeTradeError(reportedError) : null,
   };
 }

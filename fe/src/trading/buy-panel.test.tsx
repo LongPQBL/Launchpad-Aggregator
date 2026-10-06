@@ -89,6 +89,15 @@ describe('BuyPanel', () => {
     expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
   });
 
+  it('shows a disabled Buy, not Approve, when the ERC20 quote-asset balance is already known insufficient', () => {
+    hooks.allowance = 0n;
+    hooks.quoteBalance = 0n;
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+  });
+
   it('shows Buy once allowance covers the amount for an ERC20-quoted launch', () => {
     hooks.allowance = 2000000000000000000n;
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
