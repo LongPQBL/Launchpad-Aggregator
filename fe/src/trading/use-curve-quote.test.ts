@@ -7,13 +7,14 @@ const hooks = vi.hoisted(() => ({
   isLoading: false,
   error: null as Error | null,
   simulateArgs: undefined as unknown,
+  refetch: vi.fn(),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useSimulateContract: (args: unknown) => {
     hooks.simulateArgs = args;
-    return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error };
+    return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error, refetch: hooks.refetch };
   },
 }));
 
@@ -24,6 +25,7 @@ beforeEach(() => {
   hooks.data = undefined;
   hooks.isLoading = false;
   hooks.error = null;
+  hooks.refetch.mockReset();
 });
 
 describe('useCurveQuote', () => {
@@ -53,5 +55,13 @@ describe('useCurveQuote', () => {
       useCurveQuote({ curveAddress: curve, direction: 'sell', amountIn: 1000n, recipient, nativeValue: undefined }),
     );
     expect((hooks.simulateArgs as { args: unknown[] }).args).toEqual([1000n, 0n, recipient]);
+  });
+
+  it('exposes the underlying refetch, so a caller can re-run the quote after an approval confirms', () => {
+    const { result } = renderHook(() =>
+      useCurveQuote({ curveAddress: curve, direction: 'buy', amountIn: 1000000000000000n, recipient, nativeValue: undefined }),
+    );
+    result.current.refetch();
+    expect(hooks.refetch).toHaveBeenCalled();
   });
 });

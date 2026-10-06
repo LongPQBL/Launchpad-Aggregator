@@ -7,13 +7,14 @@ const hooks = vi.hoisted(() => ({
   isLoading: false,
   error: null as Error | null,
   simulateArgs: undefined as unknown,
+  refetch: vi.fn(),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useSimulateContract: (args: unknown) => {
     hooks.simulateArgs = args;
-    return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error };
+    return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error, refetch: hooks.refetch };
   },
 }));
 
@@ -25,6 +26,7 @@ beforeEach(() => {
   hooks.data = undefined;
   hooks.isLoading = false;
   hooks.error = null;
+  hooks.refetch.mockReset();
 });
 
 describe('useSwapQuote', () => {
@@ -60,5 +62,13 @@ describe('useSwapQuote', () => {
       useSwapQuote({ tokenIn, tokenOut, fee: 10000, amountIn: 1000000n, recipient }),
     );
     expect(result.current.errorMessage).toBe('pool does not exist');
+  });
+
+  it('exposes the underlying refetch, so a caller can re-run the quote after an approval confirms', () => {
+    const { result } = renderHook(() =>
+      useSwapQuote({ tokenIn, tokenOut, fee: 10000, amountIn: 1000000n, recipient }),
+    );
+    result.current.refetch();
+    expect(hooks.refetch).toHaveBeenCalled();
   });
 });

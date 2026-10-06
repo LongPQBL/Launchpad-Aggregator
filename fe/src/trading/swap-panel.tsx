@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Address, encodeFunctionData, formatUnits } from 'viem';
 import { useAccount, useReadContract } from 'wagmi';
 import { Button } from '@/components/ui/button';
@@ -57,10 +57,27 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
   const hasInsufficientBalance = (tokenInBalance ?? 0n) < amountIn;
   const needsApproval = amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
 
+  // useSimulateContract caches a pre-approval revert (e.g. "STF") under the same query key,
+  // since none of tokenIn/tokenOut/fee/amountIn/recipient change across the approval — so once
+  // the approval actually confirms, the stale quote error must be explicitly refetched rather
+  // than relying on the hook's own (already-exhausted) retry budget. Same true-to-false
+  // transition pattern as use-token-allowance.ts's own refetch-after-approval effect.
+  const wasConfirmingApproval = useRef(false);
+  const refetchQuote = quote.refetch;
+  useEffect(() => {
+    if (wasConfirmingApproval.current && !allowance.isConfirmingApproval) {
+      refetchQuote();
+    }
+    wasConfirmingApproval.current = allowance.isConfirmingApproval;
+  }, [allowance.isConfirmingApproval, refetchQuote]);
+
   function submitSwap() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;
     const amountOutMinimum = applySlippage(quote.outputAmount, settings.slippageBps, 'pool');
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + settings.deadlineMinutes * 60);
+    // Floor the whole computed deadline, not just the current-timestamp half — a fractional
+    // settings.deadlineMinutes (e.g. a user typed "1.01" into the settings popover) otherwise
+    // makes the sum non-integer, and BigInt() throws a RangeError on a non-integer number.
+    const deadline = BigInt(Math.floor(Date.now() / 1000 + settings.deadlineMinutes * 60));
     const innerCalldata = encodeFunctionData({
       abi: swapRouterAbi,
       functionName: 'exactInputSingle',

@@ -13,6 +13,14 @@ export function decodeTradeError(error: unknown): string {
     const revertError = error.walk((e) => e instanceof ContractFunctionRevertedError);
     if (revertError instanceof ContractFunctionRevertedError) {
       const errorName = revertError.data?.errorName;
+      // A standard Solidity `require(condition, "reason")` revert decodes with errorName
+      // literally 'Error' (the canonical name for the built-in Error(string) selector) — the
+      // actual human-readable reason lives on `.reason` instead, not in the known-custom-errors
+      // map. Without this branch the fallback below would discard it and show the useless
+      // literal string "Transaction would fail: Error".
+      if (errorName === 'Error' && revertError.reason) {
+        return `Transaction would fail: ${revertError.reason}`;
+      }
       if (errorName) return KNOWN_ERRORS[errorName] ?? `Transaction would fail: ${errorName}`;
     }
     return error.shortMessage;

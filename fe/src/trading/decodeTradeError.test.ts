@@ -14,6 +14,21 @@ function revertError(errorName: string) {
   return new BaseError('execution reverted', { cause: inner });
 }
 
+// A standard Solidity `require(condition, "reason")` revert decodes with errorName literally
+// 'Error' (the canonical name for the built-in Error(string) selector) and the human-readable
+// text on `.reason` instead of `.data.errorName` — simulate that shape directly, same technique
+// as revertError() above.
+function revertErrorWithReason(reason: string) {
+  const inner = new ContractFunctionRevertedError({
+    abi: [{ type: 'error', name: 'Error', inputs: [{ type: 'string' }] }],
+    data: undefined,
+    functionName: 'buy',
+  });
+  Object.defineProperty(inner, 'data', { value: { errorName: 'Error', args: [reason] } });
+  Object.defineProperty(inner, 'reason', { value: reason });
+  return new BaseError('execution reverted', { cause: inner });
+}
+
 describe('decodeTradeError', () => {
   it('maps CurveGraduated to a plain-language message', () => {
     expect(decodeTradeError(revertError('CurveGraduated'))).toBe(
@@ -29,6 +44,12 @@ describe('decodeTradeError', () => {
 
   it('falls back to the revert name for an unrecognized custom error', () => {
     expect(decodeTradeError(revertError('SlippageExceeded'))).toBe('Transaction would fail: SlippageExceeded');
+  });
+
+  it('surfaces the real string reason for a standard Error(string) revert, instead of the literal useless "Error"', () => {
+    const message = decodeTradeError(revertErrorWithReason('STF'));
+    expect(message).not.toBe('Transaction would fail: Error');
+    expect(message).toContain('STF');
   });
 
   it('falls back to a plain Error message for a non-viem error', () => {

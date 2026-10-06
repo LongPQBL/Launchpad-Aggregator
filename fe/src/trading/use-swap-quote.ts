@@ -17,11 +17,16 @@ export interface SwapQuoteResult {
   outputAmount: bigint | null;
   isLoading: boolean;
   errorMessage: string | null;
+  // Exposed so a caller can re-run the quote once an approval confirms — useSimulateContract
+  // caches a pre-approval revert (e.g. "STF") under the same query key, since none of
+  // tokenIn/tokenOut/fee/amountIn/recipient change across the approval, and its own retry budget
+  // is already exhausted by the time a real user finishes approving.
+  refetch: () => void;
 }
 
 export function useSwapQuote({ tokenIn, tokenOut, fee, amountIn, recipient }: SwapQuoteParams): SwapQuoteResult {
   const enabled = Boolean(tokenIn && tokenOut && fee !== null && recipient && amountIn > 0n);
-  const { data, isLoading, error } = useSimulateContract({
+  const { data, isLoading, error, refetch } = useSimulateContract({
     address: SWAP_ROUTER_ADDRESS,
     abi: swapRouterAbi,
     functionName: 'exactInputSingle',
@@ -41,5 +46,6 @@ export function useSwapQuote({ tokenIn, tokenOut, fee, amountIn, recipient }: Sw
     outputAmount: data?.result ?? null,
     isLoading,
     errorMessage: error ? decodeTradeError(error) : null,
+    refetch: () => { void refetch(); },
   };
 }

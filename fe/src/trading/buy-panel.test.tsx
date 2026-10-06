@@ -6,14 +6,17 @@ const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
   balance: { data: { value: 10000000000000000n }, isLoading: false },
   allowance: 0n,
+  allowanceIsFetching: false,
   quoteBalance: 10000000000000000000n,
   simulateData: undefined as { result: bigint } | undefined,
   simulateError: null as Error | null,
+  refetchQuote: vi.fn(),
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
   writePending: false,
   writeError: null as Error | null,
   writeHash: undefined as `0x${string}` | undefined,
+  receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
@@ -22,9 +25,9 @@ vi.mock('wagmi', async (importOriginal) => ({
   useBalance: () => hooks.balance,
   useReadContract: (args: { functionName: string }) => {
     if (args.functionName === 'balanceOf') return { data: hooks.quoteBalance, refetch: vi.fn() };
-    return { data: hooks.allowance, refetch: vi.fn() };
+    return { data: hooks.allowance, isFetching: hooks.allowanceIsFetching, refetch: vi.fn() };
   },
-  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: hooks.simulateError }),
+  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: hooks.simulateError, refetch: hooks.refetchQuote }),
   useWriteContract: () => ({
     writeContract: hooks.writeContract,
     status: hooks.writeStatus,
@@ -32,7 +35,7 @@ vi.mock('wagmi', async (importOriginal) => ({
     error: hooks.writeError,
     data: hooks.writeHash,
   }),
-  useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
+  useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus, error: null }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;
@@ -45,14 +48,17 @@ beforeEach(() => {
   hooks.account.chainId = 4663;
   hooks.balance = { data: { value: 10000000000000000n }, isLoading: false };
   hooks.allowance = 0n;
+  hooks.allowanceIsFetching = false;
   hooks.quoteBalance = 10000000000000000000n;
   hooks.simulateData = undefined;
   hooks.simulateError = null;
+  hooks.refetchQuote.mockReset();
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
   hooks.writePending = false;
   hooks.writeError = null;
   hooks.writeHash = undefined;
+  hooks.receiptStatus = 'idle';
 });
 
 describe('BuyPanel', () => {
@@ -143,6 +149,28 @@ describe('BuyPanel', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('alert')).toHaveTextContent(/user rejected/i);
+  });
+
+  it('refetches the quote once an ERC20 approval transitions from confirming to confirmed, so a stale pre-approval "quote unavailable" error does not block Buy forever', () => {
+    hooks.allowance = 0n;
+    hooks.simulateData = { result: 1000000000000000000n };
+    const { rerender } = render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+
+    // Approval broadcast, now confirming on-chain — isConfirmingApproval is true.
+    hooks.writeHash = '0xabc';
+    hooks.receiptStatus = 'pending';
+    rerender(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    expect(hooks.refetchQuote).not.toHaveBeenCalled();
+
+    // Approval receipt confirms and the post-confirmation allowance refetch has settled —
+    // isConfirmingApproval transitions from true to false. This exact transition must trigger a
+    // quote refetch; "isConfirmingApproval is eventually false" alone is not enough, since that
+    // is also true before any approval ever happened.
+    hooks.receiptStatus = 'success';
+    hooks.allowanceIsFetching = false;
+    rerender(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    expect(hooks.refetchQuote).toHaveBeenCalled();
   });
 
   it('shows the real decoded quote error message instead of silently hiding it', () => {

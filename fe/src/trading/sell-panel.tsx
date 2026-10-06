@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Address, formatUnits } from 'viem';
 import { useAccount, useReadContract } from 'wagmi';
 import { Button } from '@/components/ui/button';
@@ -46,6 +46,21 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
 
   const hasInsufficientBalance = (tokenBalance ?? 0n) < amountIn;
   const needsApproval = amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
+
+  // useSimulateContract caches a pre-approval revert (the curve's transferFrom — a sell is
+  // always ERC20-quoted) under the same query key, since none of curveAddress/amountIn/recipient
+  // change across the approval — so once the approval actually confirms, the stale quote error
+  // must be explicitly refetched rather than relying on the hook's own (already-exhausted) retry
+  // budget. Same true-to-false transition pattern as use-token-allowance.ts's own
+  // refetch-after-approval effect; see swap-panel.tsx's identical fix for the same bug shape.
+  const wasConfirmingApproval = useRef(false);
+  const refetchQuote = quote.refetch;
+  useEffect(() => {
+    if (wasConfirmingApproval.current && !allowance.isConfirmingApproval) {
+      refetchQuote();
+    }
+    wasConfirmingApproval.current = allowance.isConfirmingApproval;
+  }, [allowance.isConfirmingApproval, refetchQuote]);
 
   function submitSell() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;

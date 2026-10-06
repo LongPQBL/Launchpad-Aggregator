@@ -19,6 +19,12 @@ export interface CurveQuoteResult {
   outputAmount: bigint | null;
   isLoading: boolean;
   errorMessage: string | null;
+  // Exposed so a caller can re-run the quote once an approval confirms — useSimulateContract
+  // caches a pre-approval revert (e.g. the curve's transferFrom on an ERC20-quoted buy/sell)
+  // under the same query key, since none of curveAddress/direction/amountIn/recipient change
+  // across the approval, and its own retry budget is already exhausted by the time a real user
+  // finishes approving. See use-swap-quote.ts's identical fix for the same bug shape.
+  refetch: () => void;
 }
 
 export function useCurveQuote({ curveAddress, direction, amountIn, recipient, nativeValue }: CurveQuoteParams): CurveQuoteResult {
@@ -41,11 +47,12 @@ export function useCurveQuote({ curveAddress, direction, amountIn, recipient, na
     query: { enabled: enabled && direction === 'sell' },
   });
 
-  const { data, isLoading, error } = direction === 'buy' ? buyResult : sellResult;
+  const { data, isLoading, error, refetch } = direction === 'buy' ? buyResult : sellResult;
 
   return {
     outputAmount: data?.result ?? null,
     isLoading,
     errorMessage: error ? decodeTradeError(error) : null,
+    refetch: () => { void refetch(); },
   };
 }
