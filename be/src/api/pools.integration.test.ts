@@ -70,4 +70,21 @@ describe('pool catalog API reader', () => {
     expect(await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] }, c)).toBeNull();
     await expect(store.listPools({ limit: 1, cursor: 'garbage' })).rejects.toThrow('Invalid pool cursor');
   });
+  it('leaves currency decimals null when no rpcClient is configured', async () => {
+    const pool0 = await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] });
+    expect(pool0?.currency0Decimals).toBeNull();
+    expect(pool0?.currency1Decimals).toBeNull();
+  });
+  it('resolves currency decimals on-chain when an rpcClient is configured', async () => {
+    // Stub rpcClient so decimals resolution (assetDecimals) doesn't need a real chain —
+    // mirrors the pattern in store.integration.test.ts's own txRpcClient fixture.
+    const rpcClient = { async readContract({ functionName }: { functionName: string }) {
+      if (functionName === 'decimals') return 18;
+      throw new Error(`Unexpected ${functionName}`);
+    } };
+    const storeWithRpc = createPoolApiStore(pool, rpcClient);
+    const pool0 = await storeWithRpc.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] });
+    expect(pool0?.currency0Decimals).toBe(18);
+    expect(pool0?.currency1Decimals).toBe(18);
+  });
 });

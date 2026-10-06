@@ -1,26 +1,42 @@
 import { launchHref, poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
-import { chainName } from '@/api/chains';
+import { chainExplorerBase, chainName } from '@/api/chains';
 import { formatPercent, formatPrice, formatUsd } from '@/api/format';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import { SwapPanel } from '@/trading/swap-panel';
 import { PoolChart } from './pool-chart';
-import { poolAge } from './pool-list';
+import { PoolLogo } from './pool-logo';
+import { poolAge, short as symbol } from './pool-list';
 
-const zero = '0x0000000000000000000000000000000000000000';
-function symbol(address: string): string { return address === zero ? 'ETH' : `${address.slice(0, 6)}…${address.slice(-4)}`; }
 export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null }) {
   const other = pool.displayedToken === pool.currency0 ? pool.currency1 : pool.currency0;
-  const quote = symbol(other);
+  const otherSymbol = pool.displayedToken === pool.currency0 ? pool.currency1Symbol : pool.currency0Symbol;
+  const quote = otherSymbol ?? symbol(other);
+  const explorerBase = chainExplorerBase(pool.chainId);
   return <article className="space-y-4">
     <Link href="/pools" className="text-sm underline">← Pools</Link>
-    <Card><CardHeader><h1 className="text-2xl font-semibold">{symbol(pool.currency0)} / {symbol(pool.currency1)}</h1>
-      <p>{chainName(pool.chainId)} · Uniswap {pool.protocol.replace('uniswap_', 'V')} {pool.ponsDesignated && '· Pons designated pool'}</p></CardHeader>
+    <Card><CardHeader className="flex-row items-center gap-3">
+      <PoolLogo
+        token0={{ symbol: pool.currency0Symbol ?? symbol(pool.currency0), logoUri: pool.currency0LogoUri }}
+        token1={{ symbol: pool.currency1Symbol ?? symbol(pool.currency1), logoUri: pool.currency1LogoUri }}
+        chainId={pool.chainId}
+      />
+      <div>
+        <h1 className="text-2xl font-semibold">{pool.currency0Symbol ?? symbol(pool.currency0)} / {pool.currency1Symbol ?? symbol(pool.currency1)}</h1>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-sm text-muted-foreground">{chainName(pool.chainId)}</span>
+          <Badge variant="secondary">{`${pool.protocol.replace('uniswap_', '')} · ${pool.fee / 10_000}%`}</Badge>
+          {pool.ponsDesignated && <span className="text-sm">Pons designated pool</span>}
+        </div>
+      </div>
+    </CardHeader>
       <CardContent className="space-y-4"><div className="flex flex-wrap gap-2">
         <a className="rounded border px-3 py-1" aria-current={pool.displayedToken === pool.currency0 ? 'page' : undefined}
-          href={poolHref(pool, pool.currency0)}>View {symbol(pool.currency0)}</a>
+          href={poolHref(pool, pool.currency0)}>View {pool.currency0Symbol ?? symbol(pool.currency0)}</a>
         <a className="rounded border px-3 py-1" aria-current={pool.displayedToken === pool.currency1 ? 'page' : undefined}
-          href={poolHref(pool, pool.currency1)}>View {symbol(pool.currency1)}</a></div>
+          href={poolHref(pool, pool.currency1)}>View {pool.currency1Symbol ?? symbol(pool.currency1)}</a></div>
       <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
         <div><dt>Price in {quote}</dt><dd>{formatPrice(pool.priceInQuote, quote)}</dd></div>
         <div><dt>Price USD</dt><dd>{formatUsd(pool.priceUsd, 1)}</dd></div>
@@ -38,6 +54,20 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
         <div><dt>Last trade</dt><dd>{pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</dd></div>
       </dl>{pool.launchTokenAddress && <a className="underline" href={launchHref(pool.chainId, pool.launchTokenAddress)}>View Pons launch</a>}
       </CardContent></Card>
+    {/* Swap execution is only built for Uniswap V3 pools today (SwapRouter02's exactInputSingle)
+        — V4's shared PoolManager needs Universal Router command encoding, a separate, not-yet-built
+        follow-up. Hidden, never guessed, when either currency's decimals is unknown (same
+        convention as launch-detail.tsx's own SwapPanel gate). */}
+    {pool.protocol === 'uniswap_v3' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
+      <Card><CardContent className="pt-6">
+        <SwapPanel
+          poolAddress={pool.poolId as `0x${string}`}
+          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals }}
+          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals }}
+          explorerBase={explorerBase ?? null}
+        />
+      </CardContent></Card>
+    )}
     {candles && <PoolChart candles={candles} coverageStatus={pool.coverageStatus} quoteSymbol={quote} />}
     <Card><CardHeader><h2 className="font-semibold">Pool trades</h2></CardHeader><CardContent>
       {trades ? <><div className="space-y-2 text-sm">{trades.items.map((trade) => <p key={`${trade.txHash}:${trade.logIndex}`}>

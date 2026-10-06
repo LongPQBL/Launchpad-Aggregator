@@ -1,11 +1,17 @@
 import type { Pool } from 'pg';
 import type { UsdPriceClient } from '../market/usdPricing.js';
+import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { readPoolCandles, type PoolCandleResponse } from '../pools/candleCache.js';
-import { readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
+import { assetDecimals, readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
+import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
 export interface PoolSummary extends PoolStats {
   chainId: number; protocol: PoolKey['protocol']; poolId: string;
   currency0: string; currency1: string; displayedToken: string;
+  currency0Symbol: string | null; currency0Name: string | null; currency0LogoUri: string | null;
+  currency0Decimals: number | null;
+  currency1Symbol: string | null; currency1Name: string | null; currency1LogoUri: string | null;
+  currency1Decimals: number | null;
   fee: number; tickSpacing: number; hooks: string; createdBlock: string;
   createdTimestamp: number | null;
   ponsDesignated: boolean; launchTokenAddress: string | null;
@@ -46,8 +52,14 @@ function encodeCursor(row: Row): string {
     row.protocol, row.pool_id])).toString('base64url');
 }
 
-export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient): PoolApiStore {
+export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
+  tokenMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined): PoolApiStore {
   const blockTimeCache = new Map<string, number | null>();
+  const emptyMetadata: TokenMetadata = { symbol: null, name: null, logoUri: null };
+  async function currencyMetadata(address: string): Promise<TokenMetadata> {
+    if (!tokenMetadataResolver) return emptyMetadata;
+    try { return await tokenMetadataResolver.resolve(address); } catch { return emptyMetadata; }
+  }
   async function createdTimestamp(block: string): Promise<number | null> {
     if (blockTimeCache.has(block)) return blockTimeCache.get(block)!;
     const client = rpcClient as (UsdPriceClient & {
@@ -73,12 +85,20 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient): Pool
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
-    const [stats, createdAt] = await Promise.all([
+    const [stats, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
       readPoolStats(pool, key, displayedToken, Math.floor(Date.now() / 1000), { rpcClient }),
       createdTimestamp(String(row.block_number)),
+      currencyMetadata(row.currency0),
+      currencyMetadata(row.currency1),
+      assetDecimals(rpcClient, row.currency0),
+      assetDecimals(rpcClient, row.currency1),
     ]);
     return { chainId: key.chainId, protocol: key.protocol, poolId: key.poolId,
       currency0: row.currency0, currency1: row.currency1, displayedToken, fee: Number(row.fee),
+      currency0Symbol: currency0Metadata.symbol, currency0Name: currency0Metadata.name, currency0LogoUri: currency0Metadata.logoUri,
+      currency0Decimals,
+      currency1Symbol: currency1Metadata.symbol, currency1Name: currency1Metadata.name, currency1LogoUri: currency1Metadata.logoUri,
+      currency1Decimals,
       tickSpacing: Number(row.tick_spacing), hooks: row.hooks, createdBlock: String(row.block_number),
       createdTimestamp: createdAt,
       ponsDesignated: row.pons_designated, launchTokenAddress: row.launch_token_address, ...stats };

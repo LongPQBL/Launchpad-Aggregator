@@ -876,6 +876,10 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "currency0Decimals": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "currency1Symbol": {
                             "type": "string",
                             "nullable": true
@@ -886,6 +890,10 @@
                           },
                           "currency1LogoUri": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Decimals": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "fee": {
@@ -1030,6 +1038,10 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "currency0Decimals": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "currency1Symbol": {
                             "type": "string",
                             "nullable": true
@@ -1040,6 +1052,10 @@
                           },
                           "currency1LogoUri": {
                             "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Decimals": {
+                            "type": "integer",
                             "nullable": true
                           },
                           "fee": {
@@ -1187,6 +1203,10 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "currency0Decimals": {
+                      "type": "integer",
+                      "nullable": true
+                    },
                     "currency1Symbol": {
                       "type": "string",
                       "nullable": true
@@ -1197,6 +1217,10 @@
                     },
                     "currency1LogoUri": {
                       "type": "string",
+                      "nullable": true
+                    },
+                    "currency1Decimals": {
+                      "type": "integer",
                       "nullable": true
                     },
                     "fee": {

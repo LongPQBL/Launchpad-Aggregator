@@ -478,9 +478,11 @@ export interface paths {
                                 currency0Symbol?: string | null;
                                 currency0Name?: string | null;
                                 currency0LogoUri?: string | null;
+                                currency0Decimals?: number | null;
                                 currency1Symbol?: string | null;
                                 currency1Name?: string | null;
                                 currency1LogoUri?: string | null;
+                                currency1Decimals?: number | null;
                                 fee?: number;
                                 tickSpacing?: number;
                                 hooks?: string;
@@ -549,9 +551,11 @@ export interface paths {
                                 currency0Symbol?: string | null;
                                 currency0Name?: string | null;
                                 currency0LogoUri?: string | null;
+                                currency0Decimals?: number | null;
                                 currency1Symbol?: string | null;
                                 currency1Name?: string | null;
                                 currency1LogoUri?: string | null;
+                                currency1Decimals?: number | null;
                                 fee?: number;
                                 tickSpacing?: number;
                                 hooks?: string;
@@ -620,9 +624,11 @@ export interface paths {
                             currency0Symbol?: string | null;
                             currency0Name?: string | null;
                             currency0LogoUri?: string | null;
+                            currency0Decimals?: number | null;
                             currency1Symbol?: string | null;
                             currency1Name?: string | null;
                             currency1LogoUri?: string | null;
+                            currency1Decimals?: number | null;
                             fee?: number;
                             tickSpacing?: number;
                             hooks?: string;
