@@ -23,14 +23,22 @@ export interface CurveQuoteResult {
 
 export function useCurveQuote({ curveAddress, direction, amountIn, recipient, nativeValue }: CurveQuoteParams): CurveQuoteResult {
   const enabled = Boolean(curveAddress && recipient && amountIn > 0n);
-  const { data, isLoading, error } = useSimulateContract({
-    address: curveAddress,
-    abi: curveTradeAbi,
-    functionName: direction,
-    args: recipient ? [amountIn, 0n, recipient] : undefined,
-    value: direction === 'buy' ? nativeValue : undefined,
-    query: { enabled },
-  });
+  const { data, isLoading, error } = direction === 'buy'
+    ? useSimulateContract({
+        address: curveAddress,
+        abi: curveTradeAbi,
+        functionName: 'buy',
+        args: recipient ? [amountIn, 0n, recipient] : undefined,
+        value: nativeValue,
+        query: { enabled },
+      })
+    : useSimulateContract({
+        address: curveAddress,
+        abi: curveTradeAbi,
+        functionName: 'sell',
+        args: recipient ? [amountIn, 0n, recipient] : undefined,
+        query: { enabled },
+      });
 
   return {
     outputAmount: data?.result ?? null,
