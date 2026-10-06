@@ -1293,6 +1293,7 @@ describe('SellPanel', () => {
 
   it('submits sell once allowance covers the amount', () => {
     hooks.allowance = 2000000000000000000n;
+    hooks.simulateData = { result: 1000000000000000000n };
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sell' }));
@@ -1308,6 +1309,13 @@ describe('SellPanel', () => {
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByText(/quote unavailable/i)).toBeInTheDocument();
+  });
+
+  it('keeps Sell disabled until the quote resolves, never submitting with zero slippage protection', () => {
+    hooks.allowance = 2000000000000000000n;
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
   });
 
   it('disables Sell and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {
@@ -1408,7 +1416,7 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
           {allowance.isApproving ? 'Approving…' : 'Approve'}
         </Button>
       ) : (
-        <Button type="button" disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain} onClick={submitSell}>
+        <Button type="button" disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null} onClick={submitSell}>
           Sell
         </Button>
       )}
@@ -1421,7 +1429,7 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
 - [ ] **Step 4: Run it to verify it passes**
 
 Run: `cd fe && npx vitest run src/trading/sell-panel.test.tsx`
-Expected: PASS, 6 tests
+Expected: PASS, 7 tests
 
 - [ ] **Step 5: Commit**
 
