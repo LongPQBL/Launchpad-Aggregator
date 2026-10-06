@@ -10,6 +10,7 @@ import { CoverageBadge } from './coverage-badge';
 import { DEFAULT_CHART_INTERVAL, OfficialChart } from './official-chart';
 import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
+import { CurveTradePanel } from '@/trading/curve-trade-panel';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
@@ -42,6 +43,10 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
   // isn't resolved yet falls back to the quote-denominated price rather than showing nothing.
   const priceText = detail.priceUsd !== null ? formatUsd(detail.priceUsd, 2)
     : detail.priceQuote !== null ? formatPrice(detail.priceQuote, detail.quoteAsset.symbol) : '—';
+
+  const activeCurveVenue = detail.lifecycleStatus === 'trading'
+    ? detail.officialVenues.find((venue) => venue.kind === 'curve' && venue.effectiveToBlock === null)
+    : undefined;
 
   return (
     <article className="flex flex-col gap-4">
@@ -108,6 +113,17 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
             {priceText}
             {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
           </p>
+          {activeCurveVenue && detail.tokenDecimals !== null && (
+            <div className="mt-4 border-t border-border pt-4">
+              <CurveTradePanel
+                curveAddress={activeCurveVenue.ref as `0x${string}`}
+                tokenAddress={detail.tokenAddress as `0x${string}`}
+                tokenDecimals={detail.tokenDecimals}
+                quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals ?? 18 }}
+                explorerBase={explorerBase ?? null}
+              />
+            </div>
+          )}
           {candles && (
             <OfficialChart
               candles={candles.items}

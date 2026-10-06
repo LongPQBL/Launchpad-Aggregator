@@ -17,6 +17,16 @@ vi.mock('lightweight-charts', () => ({
   CandlestickSeries: 'CandlestickSeries',
 }));
 
+vi.mock('wagmi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('wagmi')>(),
+  useAccount: () => ({ address: undefined }),
+  useBalance: () => ({ data: undefined, isLoading: false }),
+  useReadContract: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  useSimulateContract: () => ({ data: undefined, isLoading: false, error: null }),
+  useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
+  useWaitForTransactionReceipt: () => ({ status: 'idle' }),
+}));
+
 beforeEach(() => {
   setDataMock.mockClear();
   applyOptionsMock.mockClear();
@@ -520,5 +530,47 @@ describe('LaunchDetail', () => {
     expect(screen.queryByRole('link', { name: /website/i })).not.toBeInTheDocument();
     const twitterLink = screen.getByRole('link', { name: /twitter/i });
     expect(twitterLink).toHaveAttribute('href', 'https://x.com/example');
+  });
+
+  it('shows the curve trade panel only when the curve is the current venue and the launch is trading', () => {
+    const { rerender } = render(
+      <LaunchDetail
+        detail={detail({ officialVenues: [venue({ kind: 'curve', effectiveToBlock: null })], lifecycleStatus: 'trading' })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeInTheDocument();
+
+    rerender(
+      <LaunchDetail
+        detail={detail({ officialVenues: [venue({ kind: 'curve', effectiveToBlock: '500' }), venue({ id: 'pons-v2-v4:0xpool', kind: 'v4_pool', effectiveToBlock: null })], lifecycleStatus: 'graduated' })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+  });
+
+  it('hides the curve trade panel once the curve is swept, even though it is still the latest venue row', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ officialVenues: [venue({ kind: 'curve', effectiveToBlock: null })], lifecycleStatus: 'swept' })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+  });
+
+  it('hides the curve trade panel when tokenDecimals has not resolved yet, rather than guessing it', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ officialVenues: [venue({ kind: 'curve', effectiveToBlock: null })], lifecycleStatus: 'trading', tokenDecimals: null })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
   });
 });
