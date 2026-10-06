@@ -51,6 +51,7 @@ describe('BuyPanel', () => {
   });
 
   it('submits buy directly with native value for a native-ETH-quoted launch, no approval step', () => {
+    hooks.simulateData = { result: 1000000000000000000n };
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
@@ -82,6 +83,12 @@ describe('BuyPanel', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
     expect(screen.getByText(/588938/)).toBeInTheDocument();
+  });
+
+  it('keeps Buy disabled until the quote resolves, never submitting with zero slippage protection', () => {
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
   });
 
   it('disables Buy and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {

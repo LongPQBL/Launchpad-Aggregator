@@ -86,7 +86,11 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
           {allowance.isApproving ? 'Approving…' : 'Approve'}
         </Button>
       ) : (
-        <Button type="button" disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain} onClick={submitBuy}>
+        <Button
+          type="button"
+          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null}
+          onClick={submitBuy}
+        >
           Buy
         </Button>
       )}
