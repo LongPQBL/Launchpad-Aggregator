@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Candle, LaunchDetail as LaunchDetailData, OfficialVenue, Trade } from '@/api/client';
+import type { Candle, LaunchDetail as LaunchDetailData, OfficialVenue, Transaction } from '@/api/client';
 import { LaunchDetail } from './launch-detail';
 
 const setDataMock = vi.fn();
@@ -77,9 +77,11 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
   };
 }
 
-function trade(overrides: Partial<Trade> = {}): Trade {
+function transaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
+    source: 'official',
     venueId: 'pons-v2-curve:0xtoken',
+    pool: null,
     blockNumber: '100',
     txHash: '0xtx1',
     logIndex: 0,
@@ -88,7 +90,7 @@ function trade(overrides: Partial<Trade> = {}): Trade {
     activityKind: 'user_trade',
     tokenAmount: '10',
     quoteAmount: '1',
-    priceQuote: '0.1',
+    quoteAssetAddress: '0xquote',
     traderAddress: '0xtrader',
     usdValue: null,
     usdValueApprox: false,
@@ -111,7 +113,7 @@ function candle(overrides: Partial<Candle> = {}): Candle {
 }
 
 describe('LaunchDetail', () => {
-  it('lists other pools under the Other pools heading and omits the section when pools are unavailable', () => {
+  it('shows other pools under the Pools tab and shows empty-state content when pools are unavailable', () => {
     const otherPool = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'b'.repeat(64)}`,
       currency0: '0x1111111111111111111111111111111111111111', currency1: '0x2222222222222222222222222222222222222222',
       displayedToken: '0x1111111111111111111111111111111111111111', fee: 3000, tickSpacing: 60,
@@ -119,16 +121,17 @@ describe('LaunchDetail', () => {
       ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, priceInQuote: null,
       priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
       coverageStatus: 'backfilling', lastTradeTimestamp: null };
-    const view = render(<LaunchDetail detail={detail()} trades={null} candles={null}
+    const view = render(<LaunchDetail detail={detail()} transactions={null} candles={null}
       pools={{ items: [otherPool], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
-    expect(screen.getByRole('heading', { name: 'Other pools' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
     expect(view.container.querySelector(`a[href^="/pools/4663/uniswap_v4/0x${'b'.repeat(64)}"]`)).not.toBeNull();
-    view.rerender(<LaunchDetail detail={detail()} trades={null} candles={null} pools={null} />);
-    expect(screen.queryByRole('heading', { name: 'Other pools' })).not.toBeInTheDocument();
+    view.rerender(<LaunchDetail detail={detail()} transactions={null} candles={null} pools={null} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
+    expect(screen.getByText('Could not load pools.')).toBeInTheDocument();
   });
 
   it('shows token, Robinhood Chain, and Pons brand images in the header', () => {
-    render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} trades={null} candles={null} />);
+    render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} transactions={null} candles={null} />);
 
     expect(screen.getByRole('img', { name: 'Token logo' })).toHaveAttribute('src', 'https://example.com/token.png');
     expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toBeInTheDocument();
@@ -136,7 +139,7 @@ describe('LaunchDetail', () => {
   });
 
   it('does not show Robinhood or Pons branding for another source', () => {
-    render(<LaunchDetail detail={detail({ chainId: 1, platform: 'other' })} trades={null} candles={null} />);
+    render(<LaunchDetail detail={detail({ chainId: 1, platform: 'other' })} transactions={null} candles={null} />);
 
     expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Pons logo' })).not.toBeInTheDocument();
@@ -147,7 +150,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ name: null, symbol: null, quoteAsset: { address: '0xquote', symbol: null, decimals: null } })}
-        trades={null}
+        transactions={null}
         candles={null}
       />,
     );
@@ -156,12 +159,12 @@ describe('LaunchDetail', () => {
   });
 
   it('hides the About section explorer pill for a chain with no registered explorer', () => {
-    render(<LaunchDetail detail={detail({ chainId: 999999 })} trades={null} candles={null} />);
+    render(<LaunchDetail detail={detail({ chainId: 999999 })} transactions={null} candles={null} />);
     expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();
   });
 
   it('shows source, protocol version, chain, quote asset, and 24h volume', () => {
-    render(<LaunchDetail detail={detail()} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
+    render(<LaunchDetail detail={detail()} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
 
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
@@ -178,7 +181,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -191,22 +194,22 @@ describe('LaunchDetail', () => {
 
   it('explains the phase-specific TVL basis and missing quote prices', () => {
     const view = render(<LaunchDetail detail={detail({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })}
-      trades={{ items: [], nextCursor: null }} candles={null} />);
+      transactions={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('real quote'));
 
     view.rerender(<LaunchDetail detail={detail({ tvlUsd: '42', tvlBasis: 'pool_principal', tvlUnavailableReason: null })}
-      trades={{ items: [], nextCursor: null }} candles={null} />);
+      transactions={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('both tokens'));
 
     view.rerender(<LaunchDetail detail={detail({ tvlUsd: null, tvlUnavailableReason: 'quote_price_unavailable' })}
-      trades={{ items: [], nextCursor: null }} candles={null} />);
+      transactions={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.getByText(/TVL/)).toHaveTextContent('—');
     expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('USD price'));
   });
 
   it('shows "—" for FDV instead of a fabricated number when fdvUsd is null', () => {
     render(
-      <LaunchDetail detail={detail({ fdvUsd: null })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+      <LaunchDetail detail={detail({ fdvUsd: null })} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
     expect(screen.getByText(/FDV/)).toHaveTextContent('—');
   });
@@ -215,7 +218,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ lifecycleStatus: 'swept' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -227,7 +230,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ lifecycleStatus: 'rescued' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -239,7 +242,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ officialVenues: [venue({ kind: 'curve' }), venue({ id: 'pons-v2-v4:0xpool', kind: 'v4_pool' })] })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -251,7 +254,7 @@ describe('LaunchDetail', () => {
 
   it('updates data on the existing chart instance instead of recreating it on refresh, so the user\'s zoom/pan is not reset', () => {
     const { rerender } = render(
-      <LaunchDetail detail={detail()} trades={{ items: [], nextCursor: null }} candles={{ items: [candle()], complete: true }} />,
+      <LaunchDetail detail={detail()} transactions={{ items: [], nextCursor: null }} candles={{ items: [candle()], complete: true }} />,
     );
     expect(createChartMock).toHaveBeenCalledTimes(1);
     expect(removeMock).not.toHaveBeenCalled();
@@ -260,7 +263,7 @@ describe('LaunchDetail', () => {
     rerender(
       <LaunchDetail
         detail={detail()}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [candle({ close: '0.2' })], complete: true }}
       />,
     );
@@ -275,7 +278,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail()}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: candlesWithGap, complete: true }}
       />,
     );
@@ -295,7 +298,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail()}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: newestFirst, complete: true }}
       />,
     );
@@ -308,7 +311,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail()}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [candle({ open: '0.000000152', high: '0.000000160', low: '0.000000140', close: '0.000000155' })], complete: true }}
       />,
     );
@@ -323,7 +326,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ coverageStatus: 'backfilling' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -336,7 +339,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ coverageStatus: 'caught_up' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [candle()], complete: false }}
       />,
     );
@@ -345,18 +348,18 @@ describe('LaunchDetail', () => {
     expect(badges.some((badge) => badge.textContent === 'Backfilling')).toBe(true);
   });
 
-  it('places the curve-to-V4 marker at the earliest V4 trade, not the newest, even though the API returns trades newest-first', () => {
-    // be/src/api/store.ts's listTrades orders `ORDER BY block_number DESC`: the first V4 trade
-    // in the array is the most recent one, not the graduation-adjacent one.
+  it('places the curve-to-V4 marker at the earliest V4 trade, not the newest, even though the API returns transactions newest-first', () => {
+    // be/src/api/store.ts's listTransactions orders `ORDER BY block_number DESC`: the first V4
+    // row in the array is the most recent one, not the graduation-adjacent one.
     const v4VenueId = 'pons-v2-v4:0xpool';
     render(
       <LaunchDetail
         detail={detail({ officialVenues: [venue({ kind: 'curve' }), venue({ id: v4VenueId, kind: 'v4_pool' })] })}
-        trades={{
+        transactions={{
           items: [
-            trade({ venueId: v4VenueId, timestamp: 1_700_000_300, txHash: '0xtx3' }),
-            trade({ venueId: v4VenueId, timestamp: 1_700_000_200, txHash: '0xtx2' }),
-            trade({ venueId: 'pons-v2-curve:0xtoken', timestamp: 1_700_000_100 }),
+            transaction({ venueId: v4VenueId, timestamp: 1_700_000_300, txHash: '0xtx3' }),
+            transaction({ venueId: v4VenueId, timestamp: 1_700_000_200, txHash: '0xtx2' }),
+            transaction({ venueId: 'pons-v2-curve:0xtoken', timestamp: 1_700_000_100 }),
           ],
           nextCursor: null,
         }}
@@ -369,70 +372,11 @@ describe('LaunchDetail', () => {
     expect(markers).toEqual([expect.objectContaining({ time: 1_700_000_200 })]);
   });
 
-  it('labels a protocol buyback trade as done by Pons, never as the user\'s own order', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ activityKind: 'protocol_buyback', txHash: '0xbuyback' })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    expect(screen.getByText('Buyback by Pons')).toBeInTheDocument();
-  });
-
-  it('labels an unattributed internal Pons swap neutrally', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ activityKind: 'protocol_internal', txHash: '0xinternal' })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    expect(screen.getByText('Internal Pons transaction')).toBeInTheDocument();
-  });
-
-  it('shows an ordinary user trade as a buy/sell side, not a protocol label', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ activityKind: 'user_trade', side: 'buy', txHash: '0xuser' })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    expect(screen.getByText('Buy')).toBeInTheDocument();
-  });
-
-  it('shows the historical USD value for a priced trade, with a tooltip explaining it is historical not current', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ usdValue: '5.25', usdValueApprox: true, usdValueStatus: 'priced' })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-    expect(screen.getByText(/5\.25/)).toBeInTheDocument();
-    expect(screen.getByTitle(/historical.*not the current price/i)).toBeInTheDocument();
-  });
-
-  it('shows "—" for a trade USD value instead of a fabricated number when usdValue is null', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ usdValue: null, usdValueApprox: false })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
-  });
-
   it('shows the current official price', () => {
     render(
       <LaunchDetail
         detail={detail({ priceQuote: '0.000000152480063034', priceStale: false })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -444,7 +388,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ priceQuote: '0.0001', priceStale: true })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
@@ -456,24 +400,12 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ priceQuote: null })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
 
     expect(screen.getByText(/Current price/)).toHaveTextContent('—');
-  });
-
-  it('keeps the exact decimal string for a 6-decimal token trade amount, without rounding it', () => {
-    render(
-      <LaunchDetail
-        detail={detail()}
-        trades={{ items: [trade({ tokenAmount: '123.456789', txHash: '0xsixdec' })], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    expect(screen.getByText('123.456789')).toBeInTheDocument();
   });
 
   it('renders the About section with description, truncated with Show more when long', () => {
@@ -488,7 +420,7 @@ describe('LaunchDetail', () => {
       render(
         <LaunchDetail
           detail={detail({ description: longDescription })}
-          trades={{ items: [], nextCursor: null }}
+          transactions={{ items: [], nextCursor: null }}
           candles={{ items: [], complete: true }}
         />,
       );
@@ -507,7 +439,7 @@ describe('LaunchDetail', () => {
 
   it('hides the About section description entirely when null', () => {
     render(
-      <LaunchDetail detail={detail({ description: null })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+      <LaunchDetail detail={detail({ description: null })} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
 
     expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument();
@@ -515,7 +447,7 @@ describe('LaunchDetail', () => {
 
   it('always renders the token address and a chain-named explorer pill', () => {
     render(
-      <LaunchDetail detail={detail({ tokenAddress: '0xabc' })} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+      <LaunchDetail detail={detail({ tokenAddress: '0xabc' })} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
 
     const explorerLink = screen.getByRole('link', { name: /robinhood chain explorer/i });
@@ -527,7 +459,7 @@ describe('LaunchDetail', () => {
     render(
       <LaunchDetail
         detail={detail({ websiteUrl: null, twitterUrl: 'https://x.com/example' })}
-        trades={{ items: [], nextCursor: null }}
+        transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );

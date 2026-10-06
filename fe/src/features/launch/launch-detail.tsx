@@ -1,31 +1,34 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
 import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
-import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, TradePage } from '@/api/client';
+import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Tabs } from '@/components/ui/tabs';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
 import { TokenLogo } from '@/features/launches/token-logo';
 import { AboutSection } from './about-section';
 import { CoverageBadge } from './coverage-badge';
 import { DEFAULT_CHART_INTERVAL, OfficialChart } from './official-chart';
-import { TradeList } from './trade-list';
+import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
-  trades: TradePage | null;
+  transactions: TransactionPage | null;
   candles: CandlePage | null;
   pools?: PoolPage | null;
   chartCurrency?: 'quote' | 'usd';
   chartInterval?: number;
 }
 
-export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
+export function LaunchDetail({ detail, transactions, candles, pools, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
-  // be/src/api/store.ts's listTrades orders newest-first; take the earliest V4 trade in the
+  // be/src/api/store.ts's listTransactions orders newest-first; take the earliest V4 trade in the
   // loaded page (the one closest to the curve→V4 transition), not the first array element.
-  const v4TradeTimestamps = v4Venue ? trades?.items.filter((trade) => trade.venueId === v4Venue.id).map((trade) => trade.timestamp) : undefined;
+  const v4TradeTimestamps = v4Venue
+    ? transactions?.items.filter((row) => row.source === 'official' && row.venueId === v4Venue.id).map((row) => row.timestamp)
+    : undefined;
   const graduationTime = v4TradeTimestamps && v4TradeTimestamps.length > 0 ? Math.min(...v4TradeTimestamps) : null;
 
   const chartCoverageStatus =
@@ -119,9 +122,6 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
         </Card>
       </section>
 
-      {pools && <section aria-label="Other pools"><h2 className="mb-3 text-lg font-semibold">Other pools</h2>
-        <PoolList page={pools} tokenAddress={detail.tokenAddress} /></section>}
-
       {candles && (
         <Card>
           <CardContent className="pt-4">
@@ -137,15 +137,38 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
         </Card>
       )}
 
-      {trades ? (
-        <Card>
-          <CardContent className="pt-4">
-            <TradeList trades={trades.items} venues={detail.officialVenues} quoteSymbol={detail.quoteAsset.symbol} explorerBase={explorerBase} />
-          </CardContent>
-        </Card>
-      ) : (
-        <p role="status">Could not load trades.</p>
-      )}
+      <Card>
+        <CardContent className="pt-4">
+          <Tabs
+            tabs={[
+              {
+                value: 'transactions',
+                label: 'Transactions',
+                content: transactions ? (
+                  <TransactionList
+                    transactions={transactions.items}
+                    venues={detail.officialVenues}
+                    tokenSymbol={detail.symbol}
+                    quoteAsset={detail.quoteAsset}
+                    explorerBase={explorerBase}
+                  />
+                ) : (
+                  <p role="status">Could not load transactions.</p>
+                ),
+              },
+              {
+                value: 'pools',
+                label: 'Pools',
+                content: pools ? (
+                  <PoolList page={pools} tokenAddress={detail.tokenAddress} />
+                ) : (
+                  <p role="status">Could not load pools.</p>
+                ),
+              },
+            ]}
+          />
+        </CardContent>
+      </Card>
     </article>
   );
 }
