@@ -1,6 +1,8 @@
 import { launchHref, poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
 import { chainName } from '@/api/chains';
+import { formatPercent, formatUsd } from '@/api/format';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { PoolChart } from './pool-chart';
 import { poolAge } from './pool-list';
@@ -22,12 +24,12 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
           href={poolHref(pool, pool.currency1)}>View {symbol(pool.currency1)}</a></div>
       <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
         <div><dt>Price in {quote}</dt><dd>{metric(pool.priceInQuote, '', ` ${quote}`)}</dd></div>
-        <div><dt>Price USD</dt><dd>{metric(pool.priceUsd, '$')}</dd></div>
-        <div><dt>24h volume USD</dt><dd>{metric(pool.volume24hUsd, '$')}</dd></div>
-        <div><dt>Liquidity USD</dt><dd>{metric(pool.tvlUsd, '$')}</dd></div>
-        <div><dt>FDV (pool price)</dt><dd>{metric(pool.fdvUsd, '$')}</dd></div>
-        <div><dt>1h change</dt><dd>{metric(pool.change1h, '', '%')}</dd></div>
-        <div><dt>1d change</dt><dd>{metric(pool.change1d, '', '%')}</dd></div>
+        <div><dt>Price USD</dt><dd>{formatUsd(pool.priceUsd, 1)}</dd></div>
+        <div><dt>24h volume USD</dt><dd>{formatUsd(pool.volume24hUsd, 1)}</dd></div>
+        <div><dt>Liquidity USD</dt><dd>{formatUsd(pool.tvlUsd, 1)}</dd></div>
+        <div><dt>FDV (pool price)</dt><dd>{formatUsd(pool.fdvUsd, 1)}</dd></div>
+        <div><dt>1h change</dt><dd className={cn(formatPercent(pool.change1h).className)}>{formatPercent(pool.change1h).text}</dd></div>
+        <div><dt>1d change</dt><dd className={cn(formatPercent(pool.change1d).className)}>{formatPercent(pool.change1d).text}</dd></div>
         <div><dt>Coverage</dt><dd>{pool.coverageStatus.replace('_', ' ')}</dd></div>
         <div><dt>Fee</dt><dd>{pool.fee / 10_000}%</dd></div>
         {pool.protocol !== 'uniswap_v2' && <div><dt>Tick spacing</dt><dd>{pool.tickSpacing}</dd></div>}
@@ -40,7 +42,7 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
     {candles && <PoolChart candles={candles} coverageStatus={pool.coverageStatus} quoteSymbol={quote} />}
     <Card><CardHeader><h2 className="font-semibold">Pool trades</h2></CardHeader><CardContent>
       {trades ? <><div className="space-y-2 text-sm">{trades.items.map((trade) => <p key={`${trade.txHash}:${trade.logIndex}`}>
-        {new Date(trade.timestamp * 1000).toLocaleString('en-US')} · {trade.side} · {metric(trade.usdValue, '$')} · {trade.usdValueStatus}
+        {new Date(trade.timestamp * 1000).toLocaleString('en-US')} · {trade.side} · {formatUsd(trade.usdValue, 2)} · {trade.usdValueStatus}
       </p>)}</div>{trades.nextCursor && <a className="mt-3 block underline" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</a>}</>
         : <p role="status">Could not load pool trades.</p>}</CardContent></Card>
   </article>;

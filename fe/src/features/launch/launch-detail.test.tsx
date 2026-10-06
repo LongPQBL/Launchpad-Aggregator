@@ -182,9 +182,9 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.getByText(/FDV/)).toHaveTextContent('269.17');
-    expect(screen.getByText(/Market cap/)).toHaveTextContent('269.17');
-    expect(screen.getByText(/TVL/)).toHaveTextContent('1200.50');
+    expect(screen.getByText(/FDV/)).toHaveTextContent('269.2');
+    expect(screen.getByText(/Market cap/)).toHaveTextContent('269.2');
+    expect(screen.getByText(/TVL/)).toHaveTextContent('1200.5');
     expect(screen.getByText(/52W High/)).toHaveTextContent('0.08');
     expect(screen.getByText(/52W Low/)).toHaveTextContent('0.001');
   });

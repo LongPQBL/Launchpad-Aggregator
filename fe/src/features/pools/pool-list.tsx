@@ -1,8 +1,9 @@
 import { chainName } from '@/api/chains';
+import { formatPercent, formatUsd } from '@/api/format';
 import { poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
-function metric(value: string | null, prefix = ''): string { return value === null ? '—' : `${prefix}${value}`; }
 function short(address: string): string { return address === '0x0000000000000000000000000000000000000000' ? 'ETH' : `${address.slice(0, 6)}…${address.slice(-4)}`; }
 function pair(pool: PoolSummary): string { return `${short(pool.currency0)} / ${short(pool.currency1)}`; }
 export function poolAge(timestamp: number | null): string {
@@ -25,9 +26,10 @@ export function PoolList({ page, error = false, tokenAddress, chainId }: {
         <p className="text-xs text-muted-foreground">{chainName(pool.chainId)} · Uniswap {pool.protocol.replace('uniswap_', 'V')} · Fee {pool.fee / 10_000}%</p>
         {pool.ponsDesignated && <span className="text-xs">Pons designated pool</span>}</CardHeader>
       <CardContent className="grid grid-cols-2 gap-2 text-sm">
-        <p>24h volume: {metric(pool.volume24hUsd, '$')}</p><p>Liquidity: {metric(pool.tvlUsd, '$')}</p>
-        <p>Price: {metric(pool.priceUsd, '$')}</p><p>FDV (pool price): {metric(pool.fdvUsd, '$')}</p>
-        <p>1h: {metric(pool.change1h, '')}</p><p>1d: {metric(pool.change1d, '')}</p>
+        <p>24h volume: {formatUsd(pool.volume24hUsd, 1)}</p><p>Liquidity: {formatUsd(pool.tvlUsd, 1)}</p>
+        <p>Price: {formatUsd(pool.priceUsd, 1)}</p><p>FDV (pool price): {formatUsd(pool.fdvUsd, 1)}</p>
+        <p>1h: <span className={cn(formatPercent(pool.change1h).className)}>{formatPercent(pool.change1h).text}</span></p>
+        <p>1d: <span className={cn(formatPercent(pool.change1d).className)}>{formatPercent(pool.change1d).text}</span></p>
         <p>Coverage: {pool.coverageStatus.replace('_', ' ')}</p>
         <p>Age: {poolAge(pool.createdTimestamp)}</p>
         <p>Last trade: {pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</p>

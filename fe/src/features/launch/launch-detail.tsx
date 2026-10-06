@@ -70,9 +70,9 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
               Lifecycle: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
             </p>
             <p>24h volume: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
-            <p>FDV: {formatUsd(detail.fdvUsd)}</p>
-            <p>Market cap: {formatUsd(detail.marketCapUsd)}</p>
-            <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd)}</p>
+            <p>FDV: {formatUsd(detail.fdvUsd, 1)}</p>
+            <p>Market cap: {formatUsd(detail.marketCapUsd, 1)}</p>
+            <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd, 1)}</p>
             <p>52W High: {formatQuote(detail.week52High, detail.quoteAsset.symbol)}</p>
             <p>52W Low: {formatQuote(detail.week52Low, detail.quoteAsset.symbol)}</p>
           </dl>

@@ -1,5 +1,5 @@
 import { chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatPercent, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -52,14 +52,6 @@ function nextPageHref(cursor: string, current: CurrentFilters): string {
   if (current.platform) params.set('platform', current.platform);
   if (current.tab && current.tab !== 'all') params.set('tab', current.tab);
   return `/?${params.toString()}`;
-}
-
-function formatPercentChange(value: string | null): { text: string; className: string } {
-  if (value === null) return { text: '—', className: 'text-muted-foreground' };
-  const numeric = Number(value);
-  if (numeric > 0) return { text: `+${value}%`, className: 'text-emerald-600' };
-  if (numeric < 0) return { text: `${value}%`, className: 'text-red-600' };
-  return { text: `${value}%`, className: 'text-muted-foreground' };
 }
 
 // No date library dependency for a single relative-age cell — see plan Task 7 Step 7.
@@ -191,8 +183,8 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
           {items.map((launch, index) => {
-            const change1h = formatPercentChange(launch.change1h);
-            const change1d = formatPercentChange(launch.change1d);
+            const change1h = formatPercent(launch.change1h);
+            const change1d = formatPercent(launch.change1d);
             return (
               <div
                 key={`${launch.chainId}-${launch.tokenAddress}`}
@@ -224,17 +216,17 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">FDV</span>
-                  <span className="font-mono">{formatUsd(launch.fdvUsd)}</span>
+                  <span className="font-mono">{formatUsd(launch.fdvUsd, 1)}</span>
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">24H volume</span>
                   <span className="font-mono" title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
-                    {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                    {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
                   </span>
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>
-                  <span className="font-mono" title={tvlTooltip(launch)}>{formatUsd(launch.tvlUsd)}</span>
+                  <span className="font-mono" title={tvlTooltip(launch)}>{formatUsd(launch.tvlUsd, 1)}</span>
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">1H %</span>

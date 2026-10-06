@@ -3,6 +3,7 @@ import {
   computeChartPrecision,
   formatActivityKind,
   formatLifecycleStatus,
+  formatPercent,
   formatQuote,
   formatSide,
   formatUsd,
@@ -12,11 +13,33 @@ import {
 
 describe('formatUsd', () => {
   it('shows "—" instead of a fabricated value when null', () => {
-    expect(formatUsd(null)).toBe('—');
+    expect(formatUsd(null, 1)).toBe('—');
   });
 
-  it('prefixes the value with $', () => {
-    expect(formatUsd('269.17')).toBe('$269.17');
+  it('prefixes the value with $ and rounds to the given decimal places (list/detail figures: 1)', () => {
+    expect(formatUsd('269.17', 1)).toBe('$269.2');
+  });
+
+  it('rounds to 2 decimal places for transaction figures', () => {
+    expect(formatUsd('45.875', 2)).toBe('$45.88');
+  });
+});
+
+describe('formatPercent', () => {
+  it('shows "—" instead of a fabricated value when null', () => {
+    expect(formatPercent(null)).toEqual({ text: '—', className: 'text-muted-foreground' });
+  });
+
+  it('rounds a positive change to 2 decimal places with a leading + and a green class', () => {
+    expect(formatPercent('12.3456')).toEqual({ text: '+12.35%', className: 'text-emerald-600' });
+  });
+
+  it('rounds a negative change to 2 decimal places, keeping its own minus sign, with a red class', () => {
+    expect(formatPercent('-3.456')).toEqual({ text: '-3.46%', className: 'text-red-600' });
+  });
+
+  it('shows exactly zero without a sign, in a neutral class', () => {
+    expect(formatPercent('0')).toEqual({ text: '0.00%', className: 'text-muted-foreground' });
   });
 });
 

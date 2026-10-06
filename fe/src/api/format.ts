@@ -3,9 +3,21 @@ export function formatQuote(value: string | null, symbol: string | null): string
   return `${value} ${symbol ?? '—'}`;
 }
 
-export function formatUsd(value: string | null): string {
+// decimals is required, not defaulted: callers state their own context explicitly (1 for list/detail
+// figures — FDV, TVL, market cap, volume, liquidity; 2 for transaction-row figures) rather than
+// silently inheriting whatever a shared default happens to be.
+export function formatUsd(value: string | null, decimals: number): string {
   if (value === null) return '—';
-  return `$${value}`;
+  return `$${Number(value).toFixed(decimals)}`;
+}
+
+export function formatPercent(value: string | null): { text: string; className: string } {
+  if (value === null) return { text: '—', className: 'text-muted-foreground' };
+  const numeric = Number(value);
+  const rounded = numeric.toFixed(2);
+  if (numeric > 0) return { text: `+${rounded}%`, className: 'text-emerald-600' };
+  if (numeric < 0) return { text: `${rounded}%`, className: 'text-red-600' };
+  return { text: `${rounded}%`, className: 'text-muted-foreground' };
 }
 
 // A near-realtime-synced launch is visible before its core metadata (name/symbol/decimals) resolves —

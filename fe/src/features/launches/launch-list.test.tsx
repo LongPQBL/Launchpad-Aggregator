@@ -160,7 +160,7 @@ describe('LaunchList', () => {
     );
 
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByText(/\$269\.17/)).toBeInTheDocument();
+    expect(within(table).getByText(/\$269\.2/)).toBeInTheDocument();
   });
 
   it('shows TVL in the list, under the Liquidity column, with the correct phase explanation', () => {
@@ -193,9 +193,9 @@ describe('LaunchList', () => {
     expect(within(table).getByRole('columnheader', { name: '1H %' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: '1D %' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
-    expect(within(table).getByText('$1000')).toBeInTheDocument();
-    expect(within(table).getByText('+12.5%')).toBeInTheDocument();
-    expect(within(table).getByText('-5%')).toBeInTheDocument();
+    expect(within(table).getByText('$1000.0')).toBeInTheDocument();
+    expect(within(table).getByText('+12.50%')).toBeInTheDocument();
+    expect(within(table).getByText('-5.00%')).toBeInTheDocument();
     expect(within(table).getByText('2d')).toBeInTheDocument();
   });
 
@@ -353,7 +353,7 @@ describe('LaunchList', () => {
       />,
     );
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByText(/~\$1234\.56/)).toBeInTheDocument();
+    expect(within(table).getByText(/~\$1234\.6/)).toBeInTheDocument();
   });
 
   it('explains that the volume ranking is updating on 503, and points to the recent tab instead of a generic error', () => {
