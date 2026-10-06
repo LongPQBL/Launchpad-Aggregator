@@ -573,4 +573,15 @@ describe('LaunchDetail', () => {
     );
     expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
   });
+
+  it('hides the curve trade panel when the quote asset decimals has not resolved yet, rather than guessing it', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ officialVenues: [venue({ kind: 'curve', effectiveToBlock: null })], lifecycleStatus: 'trading', quoteAsset: { address: '0xquote', symbol: 'ROBIN', decimals: null } })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+  });
 });

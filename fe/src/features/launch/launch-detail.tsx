@@ -113,13 +113,13 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
             {priceText}
             {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
           </p>
-          {activeCurveVenue && detail.tokenDecimals !== null && (
+          {activeCurveVenue && detail.tokenDecimals !== null && detail.quoteAsset.decimals !== null && (
             <div className="mt-4 border-t border-border pt-4">
               <CurveTradePanel
                 curveAddress={activeCurveVenue.ref as `0x${string}`}
                 tokenAddress={detail.tokenAddress as `0x${string}`}
                 tokenDecimals={detail.tokenDecimals}
-                quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals ?? 18 }}
+                quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
                 explorerBase={explorerBase ?? null}
               />
             </div>
