@@ -64,4 +64,12 @@ describe('useCurveQuote', () => {
     result.current.refetch();
     expect(hooks.refetch).toHaveBeenCalled();
   });
+
+  it('does not call the underlying refetch while the query is disabled (e.g. amount cleared mid-approval)', () => {
+    const { result } = renderHook(() =>
+      useCurveQuote({ curveAddress: curve, direction: 'buy', amountIn: 0n, recipient, nativeValue: undefined }),
+    );
+    result.current.refetch();
+    expect(hooks.refetch).not.toHaveBeenCalled();
+  });
 });

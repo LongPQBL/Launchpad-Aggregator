@@ -71,4 +71,12 @@ describe('useSwapQuote', () => {
     result.current.refetch();
     expect(hooks.refetch).toHaveBeenCalled();
   });
+
+  it('does not call the underlying refetch while the query is disabled (e.g. amount cleared mid-approval)', () => {
+    const { result } = renderHook(() =>
+      useSwapQuote({ tokenIn, tokenOut, fee: 10000, amountIn: 0n, recipient }),
+    );
+    result.current.refetch();
+    expect(hooks.refetch).not.toHaveBeenCalled();
+  });
 });

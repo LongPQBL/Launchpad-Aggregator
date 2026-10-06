@@ -18,6 +18,14 @@ describe('TradeSettingsPopover', () => {
     expect(onChange).toHaveBeenCalledWith({ slippageBps: 250, deadlineMinutes: 30 });
   });
 
+  it('rejects a custom slippage value above 50%, never reporting an out-of-range value via onChange', () => {
+    const onChange = vi.fn();
+    render(<TradeSettingsPopover settings={{ slippageBps: 'auto', deadlineMinutes: 30 }} onChange={onChange} venueKind="curve" />);
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    fireEvent.change(screen.getByLabelText(/custom slippage/i), { target: { value: '150' } });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
   it('shows the deadline control for pool venues, which do take a deadline', () => {
     const onChange = vi.fn();
     render(<TradeSettingsPopover settings={{ slippageBps: 'auto', deadlineMinutes: 30 }} onChange={onChange} venueKind="pool" />);

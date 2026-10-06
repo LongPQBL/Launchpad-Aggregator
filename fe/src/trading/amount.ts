@@ -14,6 +14,11 @@ export function parseAmountSafe(amount: string, decimals: number): bigint {
 }
 
 export function applySlippage(amount: bigint, slippageBps: number | 'auto', venueKind: 'curve' | 'pool'): bigint {
-  const bps = slippageBps === 'auto' ? resolveAutoSlippageBps(venueKind) : slippageBps;
+  const rawBps = slippageBps === 'auto' ? resolveAutoSlippageBps(venueKind) : slippageBps;
+  // Clamp defensively — a custom value above 100% (10_000 bps) would make (10_000 - bps)
+  // negative, producing a negative minimum-output and throwing when it's later ABI-encoded.
+  // The settings UI already caps what a user can type, but this is the one place that actually
+  // computes the on-chain parameter, so it must never trust an out-of-range value to reach it.
+  const bps = Math.min(10_000, Math.max(0, rawBps));
   return (amount * BigInt(10_000 - bps)) / 10_000n;
 }

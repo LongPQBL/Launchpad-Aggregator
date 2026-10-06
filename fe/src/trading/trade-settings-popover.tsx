@@ -37,7 +37,10 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
               value={settings.slippageBps === 'auto' ? '' : (settings.slippageBps / 100).toString()}
               onChange={(event) => {
                 const percent = Number(event.target.value);
-                if (!Number.isFinite(percent) || percent <= 0) return;
+                // Above 50% is rejected outright, not clamped — a user who means to type this is
+                // almost certainly making a mistake, and amount.ts's applySlippage separately
+                // clamps defensively in case any other caller ever skips this check.
+                if (!Number.isFinite(percent) || percent <= 0 || percent > 50) return;
                 onChange({ ...settings, slippageBps: Math.round(percent * 100) });
               }}
               className="w-20"

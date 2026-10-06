@@ -46,6 +46,8 @@ export function useSwapQuote({ tokenIn, tokenOut, fee, amountIn, recipient }: Sw
     outputAmount: data?.result ?? null,
     isLoading,
     errorMessage: error ? decodeTradeError(error) : null,
-    refetch: () => { void refetch(); },
+    // Guarded on `enabled` — a caller re-running this right as the amount clears or the wallet
+    // disconnects must not fire a query the hook itself has already decided to suppress.
+    refetch: () => { if (enabled) void refetch(); },
   };
 }

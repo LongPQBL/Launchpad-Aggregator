@@ -32,4 +32,10 @@ describe('applySlippage', () => {
     expect(applySlippage(1_000_000n, 500, 'pool')).toBe(950_000n);
     expect(applySlippage(1_000_000n, 500, 'curve')).toBe(950_000n);
   });
+
+  it('clamps an out-of-range custom value instead of ever producing a negative minimum', () => {
+    // 15_000 bps = 150% — would make (10_000 - bps) negative without clamping.
+    expect(applySlippage(1_000_000n, 15_000, 'pool')).toBe(0n);
+    expect(applySlippage(1_000_000n, -500, 'pool')).toBe(1_000_000n);
+  });
 });
