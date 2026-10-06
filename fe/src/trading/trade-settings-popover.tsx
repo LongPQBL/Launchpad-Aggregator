@@ -43,20 +43,22 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
               className="w-20"
             />
           </label>
-          <label className="mt-2 flex items-center justify-between gap-2">
-            <span>Swap deadline (minutes)</span>
-            <Input
-              aria-label="Deadline minutes"
-              type="number"
-              value={settings.deadlineMinutes}
-              onChange={(event) => {
-                const minutes = Number(event.target.value);
-                if (!Number.isFinite(minutes) || minutes <= 0) return;
-                onChange({ ...settings, deadlineMinutes: minutes });
-              }}
-              className="w-20"
-            />
-          </label>
+          {venueKind === 'pool' && (
+            <label className="mt-2 flex items-center justify-between gap-2">
+              <span>Swap deadline (minutes)</span>
+              <Input
+                aria-label="Deadline minutes"
+                type="number"
+                value={settings.deadlineMinutes}
+                onChange={(event) => {
+                  const minutes = Number(event.target.value);
+                  if (!Number.isFinite(minutes) || minutes <= 0) return;
+                  onChange({ ...settings, deadlineMinutes: minutes });
+                }}
+                className="w-20"
+              />
+            </label>
+          )}
           <p className="mt-2 text-xs text-muted-foreground">
             {venueKind === 'curve' ? 'Curve-phase trades tolerate more slippage by default — price moves fast on a thin curve.' : null}
           </p>

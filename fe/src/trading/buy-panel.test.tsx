@@ -6,19 +6,33 @@ const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
   balance: { data: { value: 10000000000000000n }, isLoading: false },
   allowance: 0n,
+  quoteBalance: 10000000000000000000n,
   simulateData: undefined as { result: bigint } | undefined,
+  simulateError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
+  writePending: false,
+  writeError: null as Error | null,
+  writeHash: undefined as `0x${string}` | undefined,
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
   useBalance: () => hooks.balance,
-  useReadContract: () => ({ data: hooks.allowance, refetch: vi.fn() }),
-  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: null }),
-  useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
-  useWaitForTransactionReceipt: () => ({ status: 'idle' }),
+  useReadContract: (args: { functionName: string }) => {
+    if (args.functionName === 'balanceOf') return { data: hooks.quoteBalance, refetch: vi.fn() };
+    return { data: hooks.allowance, refetch: vi.fn() };
+  },
+  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: hooks.simulateError }),
+  useWriteContract: () => ({
+    writeContract: hooks.writeContract,
+    status: hooks.writeStatus,
+    isPending: hooks.writePending,
+    error: hooks.writeError,
+    data: hooks.writeHash,
+  }),
+  useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;
@@ -31,9 +45,14 @@ beforeEach(() => {
   hooks.account.chainId = 4663;
   hooks.balance = { data: { value: 10000000000000000n }, isLoading: false };
   hooks.allowance = 0n;
+  hooks.quoteBalance = 10000000000000000000n;
   hooks.simulateData = undefined;
+  hooks.simulateError = null;
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
+  hooks.writePending = false;
+  hooks.writeError = null;
+  hooks.writeHash = undefined;
 });
 
 describe('BuyPanel', () => {
@@ -97,5 +116,45 @@ describe('BuyPanel', () => {
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
     expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
     expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
+  });
+
+  it('disables Buy and explains why when the ERC20 quote-asset balance is insufficient', () => {
+    hooks.allowance = 2000000000000000000n;
+    hooks.quoteBalance = 0n;
+    hooks.simulateData = { result: 1000000000000000000n };
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByText(/insufficient/i)).toBeInTheDocument();
+  });
+
+  it('shows a decoded approval error message when the approval fails', () => {
+    hooks.allowance = 0n;
+    hooks.writeError = new Error('User rejected the request');
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/user rejected/i);
+  });
+
+  it('shows the real decoded quote error message instead of silently hiding it', () => {
+    hooks.simulateError = new Error('could not decode result data');
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
+    expect(screen.getByText(/quote unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not decode result data/i)).toBeInTheDocument();
+  });
+
+  it('disables Buy while a submission is already in flight, to prevent a double-click double-submit', () => {
+    hooks.simulateData = { result: 1000000000000000000n };
+    hooks.writeStatus = 'pending';
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+  });
+
+  it('does not crash on scientific-notation input and leaves Buy disabled', () => {
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    expect(() => fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } })).not.toThrow();
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
   });
 });

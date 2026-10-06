@@ -10,6 +10,9 @@ const hooks = vi.hoisted(() => ({
   simulateError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
+  writePending: false,
+  writeError: null as Error | null,
+  writeHash: undefined as `0x${string}` | undefined,
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
@@ -20,8 +23,14 @@ vi.mock('wagmi', async (importOriginal) => ({
     return { data: hooks.allowance, refetch: vi.fn() };
   },
   useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: hooks.simulateError }),
-  useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
-  useWaitForTransactionReceipt: () => ({ status: 'idle' }),
+  useWriteContract: () => ({
+    writeContract: hooks.writeContract,
+    status: hooks.writeStatus,
+    isPending: hooks.writePending,
+    error: hooks.writeError,
+    data: hooks.writeHash,
+  }),
+  useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;
@@ -37,6 +46,9 @@ beforeEach(() => {
   hooks.simulateError = null;
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
+  hooks.writePending = false;
+  hooks.writeError = null;
+  hooks.writeHash = undefined;
 });
 
 describe('SellPanel', () => {
@@ -45,11 +57,12 @@ describe('SellPanel', () => {
     expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
   });
 
-  it('disables Sell when the token balance is insufficient', () => {
+  it('disables Sell and explains why when the token balance is insufficient', () => {
     hooks.tokenBalance = 0n;
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
+    expect(screen.getByText(/insufficient/i)).toBeInTheDocument();
   });
 
   it('always requires approval first — the launched token is never native ETH', () => {
@@ -72,12 +85,13 @@ describe('SellPanel', () => {
     );
   });
 
-  it('shows "quote unavailable" instead of crashing if the simulated sell result cannot be decoded', () => {
+  it('shows "quote unavailable" plus the real decoded error instead of crashing if the simulated sell result cannot be decoded', () => {
     hooks.allowance = 2000000000000000000n;
     hooks.simulateError = new Error('could not decode result data');
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByText(/quote unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/could not decode result data/i)).toBeInTheDocument();
   });
 
   it('keeps Sell disabled until the quote resolves, never submitting with zero slippage protection', () => {
@@ -94,5 +108,29 @@ describe('SellPanel', () => {
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
     expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
+  });
+
+  it('shows a decoded approval error message when the approval fails', () => {
+    hooks.allowance = 0n;
+    hooks.writeError = new Error('User rejected the request');
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(/user rejected/i);
+  });
+
+  it('disables Sell while a submission is already in flight, to prevent a double-click double-submit', () => {
+    hooks.allowance = 2000000000000000000n;
+    hooks.simulateData = { result: 1000000000000000000n };
+    hooks.writeStatus = 'pending';
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
+  });
+
+  it('does not crash on scientific-notation input and leaves Sell disabled', () => {
+    hooks.allowance = 2000000000000000000n;
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    expect(() => fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } })).not.toThrow();
+    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
   });
 });

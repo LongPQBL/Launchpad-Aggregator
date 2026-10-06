@@ -29,13 +29,25 @@ function applySlippage(amount: bigint, slippageBps: number | 'auto'): bigint {
   return (amount * BigInt(10_000 - bps)) / 10_000n;
 }
 
+// A plain decimal string only — rejects scientific notation ("1e5") and anything else
+// viem's parseUnits would throw on. This runs during render (computing amountIn), so a
+// throw here would crash the whole page, not just this panel.
+function parseAmountSafe(amount: string, decimals: number): bigint {
+  if (amount === '' || !/^\d*\.?\d*$/.test(amount)) return 0n;
+  try {
+    return parseUnits(amount, decimals);
+  } catch {
+    return 0n;
+  }
+}
+
 export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset, explorerBase }: SellPanelProps) {
   const [amount, setAmount] = useState('');
   const { address: account, chainId } = useAccount();
   const { settings, update } = useTradeSettings();
   const isWrongChain = chainId !== robinhoodChain.id;
 
-  const amountIn = amount === '' ? 0n : parseUnits(amount, tokenDecimals);
+  const amountIn = parseAmountSafe(amount, tokenDecimals);
   const { data: tokenBalance } = useReadContract({
     address: tokenAddress,
     abi: erc20Abi,
@@ -46,13 +58,14 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
   const allowance = useTokenAllowance(tokenAddress, curveAddress);
   const quote = useCurveQuote({ curveAddress, direction: 'sell', amountIn, recipient: account, nativeValue: undefined });
   const submission = useTradeSubmission();
+  const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = (tokenBalance ?? 0n) < amountIn;
   const needsApproval = amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
 
   function submitSell() {
-    if (amountIn === 0n || !account) return;
-    const minQuoteOut = quote.outputAmount !== null ? applySlippage(quote.outputAmount, settings.slippageBps) : 0n;
+    if (amountIn === 0n || !account || quote.outputAmount === null) return;
+    const minQuoteOut = applySlippage(quote.outputAmount, settings.slippageBps);
     submission.submit(
       { address: curveAddress, abi: curveTradeAbi, functionName: 'sell', args: [amountIn, minQuoteOut, account] },
       { onSuccess: () => setAmount('') },
@@ -71,15 +84,31 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
       {quote.outputAmount !== null ? (
         <p className="text-sm text-muted-foreground">You receive ≈ {formatUnits(quote.outputAmount, quoteAsset.decimals)} {quoteAsset.symbol ?? ''}</p>
       ) : amountIn > 0n && quote.errorMessage ? (
-        <p className="text-sm text-muted-foreground">Quote unavailable</p>
+        <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
       ) : null}
       {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
+      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
+        <p className="text-sm text-destructive">Insufficient token balance.</p>
+      )}
+      {allowance.approveError && (
+        <p role="alert" className="text-sm text-destructive">
+          {allowance.approveError}
+        </p>
+      )}
       {needsApproval ? (
-        <Button type="button" disabled={allowance.isApproving || isWrongChain} onClick={() => allowance.approve(amountIn)}>
-          {allowance.isApproving ? 'Approving…' : 'Approve'}
+        <Button
+          type="button"
+          disabled={allowance.isApproving || allowance.isConfirmingApproval || isWrongChain}
+          onClick={() => allowance.approve(amountIn)}
+        >
+          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
         </Button>
       ) : (
-        <Button type="button" disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null} onClick={submitSell}>
+        <Button
+          type="button"
+          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null || isSubmitting}
+          onClick={submitSell}
+        >
           Sell
         </Button>
       )}

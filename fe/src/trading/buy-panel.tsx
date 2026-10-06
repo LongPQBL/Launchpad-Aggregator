@@ -2,11 +2,12 @@
 
 import { useState } from 'react';
 import { type Address, formatUnits, parseUnits, zeroAddress } from 'viem';
-import { useAccount, useBalance } from 'wagmi';
+import { useAccount, useBalance, useReadContract } from 'wagmi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { robinhoodChain } from '@/wallet/config';
 import { curveTradeAbi } from './curveAbi';
+import { erc20Abi } from './erc20Abi';
 import { useCurveQuote } from './use-curve-quote';
 import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings, resolveAutoSlippageBps } from './use-trade-settings';
@@ -31,6 +32,18 @@ function applySlippage(amount: bigint, slippageBps: number | 'auto'): bigint {
   return (amount * BigInt(10_000 - bps)) / 10_000n;
 }
 
+// A plain decimal string only — rejects scientific notation ("1e5") and anything else
+// viem's parseUnits would throw on. This runs during render (computing amountIn), so a
+// throw here would crash the whole page, not just this panel.
+function parseAmountSafe(amount: string, decimals: number): bigint {
+  if (amount === '' || !/^\d*\.?\d*$/.test(amount)) return 0n;
+  try {
+    return parseUnits(amount, decimals);
+  } catch {
+    return 0n;
+  }
+}
+
 export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset, explorerBase }: BuyPanelProps) {
   const [amount, setAmount] = useState('');
   const { address: account, chainId } = useAccount();
@@ -38,8 +51,15 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
   const isNativeQuote = quoteAsset.address === zeroAddress;
   const isWrongChain = chainId !== robinhoodChain.id;
 
-  const amountIn = amount === '' ? 0n : parseUnits(amount, quoteAsset.decimals);
+  const amountIn = parseAmountSafe(amount, quoteAsset.decimals);
   const nativeBalance = useBalance({ address: account, query: { enabled: isNativeQuote && Boolean(account) } });
+  const { data: quoteTokenBalance } = useReadContract({
+    address: quoteAsset.address,
+    abi: erc20Abi,
+    functionName: 'balanceOf',
+    args: account ? [account] : undefined,
+    query: { enabled: !isNativeQuote && Boolean(account) },
+  });
   const allowance = useTokenAllowance(isNativeQuote ? undefined : quoteAsset.address, isNativeQuote ? undefined : curveAddress);
   const quote = useCurveQuote({
     curveAddress,
@@ -49,13 +69,16 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
     nativeValue: isNativeQuote ? amountIn : undefined,
   });
   const submission = useTradeSubmission();
+  const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const needsApproval = !isNativeQuote && amountIn > 0n && allowance.allowance < amountIn;
-  const hasInsufficientBalance = isNativeQuote && (nativeBalance.data?.value ?? 0n) < amountIn;
+  const hasInsufficientBalance = isNativeQuote
+    ? (nativeBalance.data?.value ?? 0n) < amountIn
+    : (quoteTokenBalance ?? 0n) < amountIn;
 
   function submitBuy() {
-    if (amountIn === 0n || !account) return;
-    const minTokensOut = quote.outputAmount !== null ? applySlippage(quote.outputAmount, settings.slippageBps) : 0n;
+    if (amountIn === 0n || !account || quote.outputAmount === null) return;
+    const minTokensOut = applySlippage(quote.outputAmount, settings.slippageBps);
     submission.submit(
       {
         address: curveAddress,
@@ -77,18 +100,32 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
         </label>
         <TradeSettingsPopover settings={settings} onChange={update} venueKind="curve" />
       </div>
-      {quote.outputAmount !== null && (
+      {quote.outputAmount !== null ? (
         <p className="text-sm text-muted-foreground">You receive ≈ {formatUnits(quote.outputAmount, tokenDecimals)}</p>
-      )}
+      ) : amountIn > 0n && quote.errorMessage ? (
+        <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
+      ) : null}
       {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
+      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
+        <p className="text-sm text-destructive">Insufficient {quoteAsset.symbol ?? 'quote asset'} balance.</p>
+      )}
+      {allowance.approveError && (
+        <p role="alert" className="text-sm text-destructive">
+          {allowance.approveError}
+        </p>
+      )}
       {needsApproval ? (
-        <Button type="button" disabled={allowance.isApproving || isWrongChain} onClick={() => allowance.approve(amountIn)}>
-          {allowance.isApproving ? 'Approving…' : 'Approve'}
+        <Button
+          type="button"
+          disabled={allowance.isApproving || allowance.isConfirmingApproval || isWrongChain}
+          onClick={() => allowance.approve(amountIn)}
+        >
+          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
         </Button>
       ) : (
         <Button
           type="button"
-          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null}
+          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null || isSubmitting}
           onClick={submitBuy}
         >
           Buy

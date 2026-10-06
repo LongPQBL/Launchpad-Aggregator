@@ -9,13 +9,16 @@ const hooks = vi.hoisted(() => ({
   writeContract: vi.fn(),
   writePending: false,
   writeError: null as Error | null,
+  writeHash: undefined as `0x${string}` | undefined,
+  receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: hooks.account.address }),
   useReadContract: () => ({ data: hooks.allowanceData, refetch: hooks.refetch }),
-  useWriteContract: () => ({ writeContract: hooks.writeContract, isPending: hooks.writePending, error: hooks.writeError }),
+  useWriteContract: () => ({ writeContract: hooks.writeContract, isPending: hooks.writePending, error: hooks.writeError, data: hooks.writeHash }),
+  useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus }),
 }));
 
 const token = '0x2222222222222222222222222222222222222222' as const;
@@ -26,6 +29,8 @@ beforeEach(() => {
   hooks.allowanceData = 0n;
   hooks.writePending = false;
   hooks.writeError = null;
+  hooks.writeHash = undefined;
+  hooks.receiptStatus = 'idle';
   hooks.refetch.mockReset();
   hooks.writeContract.mockReset();
 });
@@ -48,7 +53,6 @@ describe('useTokenAllowance', () => {
     result.current.approve(1000n);
     expect(hooks.writeContract).toHaveBeenCalledWith(
       expect.objectContaining({ address: token, functionName: 'approve', args: [spender, 1000n] }),
-      expect.anything(),
     );
   });
 
@@ -56,5 +60,30 @@ describe('useTokenAllowance', () => {
     hooks.writeError = new Error('User rejected the request');
     const { result } = renderHook(() => useTokenAllowance(token, spender));
     expect(result.current.approveError).toBe('User rejected the request');
+  });
+
+  it('reports approving while the wallet write is in flight, not yet confirming', () => {
+    hooks.writePending = true;
+    const { result } = renderHook(() => useTokenAllowance(token, spender));
+    expect(result.current.isApproving).toBe(true);
+    expect(result.current.isConfirmingApproval).toBe(false);
+  });
+
+  it('reports confirming once the approval is broadcast but not yet mined, and does not refetch yet', () => {
+    hooks.writePending = false;
+    hooks.writeHash = '0xabc';
+    hooks.receiptStatus = 'pending';
+    const { result } = renderHook(() => useTokenAllowance(token, spender));
+    expect(result.current.isApproving).toBe(false);
+    expect(result.current.isConfirmingApproval).toBe(true);
+    expect(hooks.refetch).not.toHaveBeenCalled();
+  });
+
+  it('refetches the allowance only once the approval receipt confirms, not on broadcast', () => {
+    hooks.writeHash = '0xabc';
+    hooks.receiptStatus = 'success';
+    const { result } = renderHook(() => useTokenAllowance(token, spender));
+    expect(result.current.isConfirmingApproval).toBe(false);
+    expect(hooks.refetch).toHaveBeenCalled();
   });
 });

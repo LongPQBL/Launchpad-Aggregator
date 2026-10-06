@@ -15,17 +15,22 @@ export interface TradeSubmission {
 
 export function useTradeSubmission(): TradeSubmission {
   const { writeContract, status: writeStatus, error, data: txHash } = useWriteContract();
-  const { status: receiptStatus } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: Boolean(txHash) } });
+  const { status: receiptStatus, error: receiptError } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: Boolean(txHash) } });
 
   let status: TradeSubmissionStatus = 'idle';
   if (writeStatus === 'pending') status = 'pending';
   else if (writeStatus === 'error') status = 'failed';
   else if (writeStatus === 'success') status = receiptStatus === 'success' ? 'confirmed' : receiptStatus === 'error' ? 'failed' : 'confirming';
 
+  // Prefer the receipt error — a mined-but-reverted transaction (e.g. a real
+  // slippage/minOut revert at inclusion time) is a later, more specific failure
+  // than whatever the wallet-write step reported (which may not have errored at all).
+  const reportedError = receiptError ?? error;
+
   return {
     submit: writeContract,
     status,
     txHash,
-    errorMessage: error ? decodeTradeError(error) : null,
+    errorMessage: reportedError ? decodeTradeError(reportedError) : null,
   };
 }

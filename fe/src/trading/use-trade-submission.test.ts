@@ -8,12 +8,13 @@ const hooks = vi.hoisted(() => ({
   writeError: null as Error | null,
   hash: undefined as `0x${string}` | undefined,
   receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
+  receiptError: null as Error | null,
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: hooks.writeError, data: hooks.hash }),
-  useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus }),
+  useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus, error: hooks.receiptError }),
 }));
 
 beforeEach(() => {
@@ -22,6 +23,7 @@ beforeEach(() => {
   hooks.writeError = null;
   hooks.hash = undefined;
   hooks.receiptStatus = 'idle';
+  hooks.receiptError = null;
 });
 
 describe('useTradeSubmission', () => {
@@ -59,5 +61,15 @@ describe('useTradeSubmission', () => {
     const { result } = renderHook(() => useTradeSubmission());
     expect(result.current.status).toBe('failed');
     expect(result.current.errorMessage).toBe('User rejected the request');
+  });
+
+  it('reports failed with the decoded receipt error when a mined transaction reverts', () => {
+    hooks.writeStatus = 'success';
+    hooks.hash = '0xabc';
+    hooks.receiptStatus = 'error';
+    hooks.receiptError = new Error('Slippage exceeded minOut');
+    const { result } = renderHook(() => useTradeSubmission());
+    expect(result.current.status).toBe('failed');
+    expect(result.current.errorMessage).toBe('Slippage exceeded minOut');
   });
 });
