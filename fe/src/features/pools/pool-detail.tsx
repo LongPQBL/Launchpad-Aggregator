@@ -1,6 +1,6 @@
 import { launchHref, poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
 import { chainName } from '@/api/chains';
-import { formatPercent, formatUsd } from '@/api/format';
+import { formatPercent, formatPrice, formatUsd } from '@/api/format';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
@@ -9,7 +9,6 @@ import { poolAge } from './pool-list';
 
 const zero = '0x0000000000000000000000000000000000000000';
 function symbol(address: string): string { return address === zero ? 'ETH' : `${address.slice(0, 6)}…${address.slice(-4)}`; }
-function metric(value: string | null, prefix = '', suffix = ''): string { return value === null ? '—' : `${prefix}${value}${suffix}`; }
 export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null }) {
   const other = pool.displayedToken === pool.currency0 ? pool.currency1 : pool.currency0;
   const quote = symbol(other);
@@ -23,7 +22,7 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
         <a className="rounded border px-3 py-1" aria-current={pool.displayedToken === pool.currency1 ? 'page' : undefined}
           href={poolHref(pool, pool.currency1)}>View {symbol(pool.currency1)}</a></div>
       <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-        <div><dt>Price in {quote}</dt><dd>{metric(pool.priceInQuote, '', ` ${quote}`)}</dd></div>
+        <div><dt>Price in {quote}</dt><dd>{formatPrice(pool.priceInQuote, quote)}</dd></div>
         <div><dt>Price USD</dt><dd>{formatUsd(pool.priceUsd, 1)}</dd></div>
         <div><dt>24h volume USD</dt><dd>{formatUsd(pool.volume24hUsd, 1)}</dd></div>
         <div><dt>Liquidity USD</dt><dd>{formatUsd(pool.tvlUsd, 1)}</dd></div>

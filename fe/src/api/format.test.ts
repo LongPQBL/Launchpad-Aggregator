@@ -4,6 +4,7 @@ import {
   formatActivityKind,
   formatLifecycleStatus,
   formatPercent,
+  formatPrice,
   formatQuote,
   formatSide,
   formatUsd,
@@ -22,6 +23,11 @@ describe('formatUsd', () => {
 
   it('rounds to 2 decimal places for transaction figures', () => {
     expect(formatUsd('45.875', 2)).toBe('$45.88');
+  });
+
+  it('keeps enough decimal digits for a sub-$1 FDV that the fixed decimal count alone would round away to $0.0', () => {
+    // A freshly launched curve's first trade: see be/src/market/tokenStats.test.ts for the same figure.
+    expect(formatUsd('0.00000000000002437968643389', 1)).toBe('$0.00000000000002');
   });
 });
 
@@ -54,6 +60,24 @@ describe('formatQuote', () => {
 
   it('keeps the exact decimal string for a 6-decimal ERC-20 amount, without rounding', () => {
     expect(formatQuote('123.456789', 'USDC')).toBe('123.456789 USDC');
+  });
+});
+
+describe('formatPrice', () => {
+  it('shows "—" instead of a fabricated value when null', () => {
+    expect(formatPrice(null, 'ETH')).toBe('—');
+  });
+
+  it('rounds to 2 decimal places once the price is at or above 1 unit', () => {
+    expect(formatPrice('1459.0671', 'USDG')).toBe('1459.07 USDG');
+  });
+
+  it('keeps enough decimal digits that a sub-1 Pons-scale price is not rounded away to 0.00', () => {
+    expect(formatPrice('0.000000152480063034', 'ETH')).toBe('0.00000015 ETH');
+  });
+
+  it('shows exactly 0 at the standard 2 decimal places, not an unbounded number of zeros', () => {
+    expect(formatPrice('0', 'ETH')).toBe('0.00 ETH');
   });
 });
 

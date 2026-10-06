@@ -3,12 +3,30 @@ export function formatQuote(value: string | null, symbol: string | null): string
   return `${value} ${symbol ?? '—'}`;
 }
 
+// Below 1 unit, baseDecimals alone would round a routine Pons-scale value (FDV in the low cents,
+// a per-token price far below $1) away to "0" — add enough extra digits to keep it meaningful.
+// At or above 1 unit, every caller's stated baseDecimals applies unchanged.
+function dynamicDecimals(numeric: number, baseDecimals: number): number {
+  if (!Number.isFinite(numeric) || numeric <= 0 || numeric >= 1) return baseDecimals;
+  return -Math.floor(Math.log10(numeric)) + baseDecimals - 1;
+}
+
+// For a per-token unit price, not a token/quote amount — formatQuote above keeps those exact,
+// unrounded.
+export function formatPrice(value: string | null, symbol: string | null): string {
+  if (value === null) return '—';
+  const numeric = Number(value);
+  return `${numeric.toFixed(dynamicDecimals(numeric, 2))} ${symbol ?? '—'}`;
+}
+
 // decimals is required, not defaulted: callers state their own context explicitly (1 for list/detail
 // figures — FDV, TVL, market cap, volume, liquidity; 2 for transaction-row figures) rather than
-// silently inheriting whatever a shared default happens to be.
+// silently inheriting whatever a shared default happens to be. Only applies once the value reaches
+// 1 unit — see dynamicDecimals.
 export function formatUsd(value: string | null, decimals: number): string {
   if (value === null) return '—';
-  return `$${Number(value).toFixed(decimals)}`;
+  const numeric = Number(value);
+  return `$${numeric.toFixed(dynamicDecimals(numeric, decimals))}`;
 }
 
 export function formatPercent(value: string | null): { text: string; className: string } {

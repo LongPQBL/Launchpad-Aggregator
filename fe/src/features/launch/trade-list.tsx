@@ -1,4 +1,4 @@
-import { displaySymbol, formatActivityKind, formatQuote, formatSide, formatUsd, formatVenueKind } from '@/api/format';
+import { displaySymbol, formatActivityKind, formatPrice, formatSide, formatUsd, formatVenueKind } from '@/api/format';
 import type { OfficialVenue, Trade } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
@@ -48,7 +48,7 @@ export function TradeList({ trades, venues, quoteSymbol, explorerBase }: TradeLi
               <TableCell className="text-right font-mono">
                 {trade.quoteAmount ?? '—'} {displaySymbol(quoteSymbol)}
               </TableCell>
-              <TableCell className="text-right font-mono">{formatQuote(trade.priceQuote, quoteSymbol)}</TableCell>
+              <TableCell className="text-right font-mono">{formatPrice(trade.priceQuote, quoteSymbol)}</TableCell>
               <TableCell
                 className="text-right font-mono"
                 title={trade.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}

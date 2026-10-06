@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, TradePage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
@@ -60,7 +60,7 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
         </CardHeader>
         <CardContent>
           <p className="font-mono text-3xl font-semibold">
-            Current price: {formatQuote(detail.priceQuote, detail.quoteAsset.symbol)}
+            Current price: {formatPrice(detail.priceQuote, detail.quoteAsset.symbol)}
             {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
           </p>
 
@@ -73,8 +73,8 @@ export function LaunchDetail({ detail, trades, candles, pools, chartCurrency = '
             <p>FDV: {formatUsd(detail.fdvUsd, 1)}</p>
             <p>Market cap: {formatUsd(detail.marketCapUsd, 1)}</p>
             <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd, 1)}</p>
-            <p>52W High: {formatQuote(detail.week52High, detail.quoteAsset.symbol)}</p>
-            <p>52W Low: {formatQuote(detail.week52Low, detail.quoteAsset.symbol)}</p>
+            <p>52W High: {formatPrice(detail.week52High, detail.quoteAsset.symbol)}</p>
+            <p>52W Low: {formatPrice(detail.week52Low, detail.quoteAsset.symbol)}</p>
           </dl>
 
           {explorerBase && (
