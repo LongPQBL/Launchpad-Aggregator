@@ -29,13 +29,17 @@ export function formatUsd(value: string | null, decimals: number): string {
   return `$${numeric.toFixed(dynamicDecimals(numeric, decimals))}`;
 }
 
-export function formatPercent(value: string | null): { text: string; className: string } {
-  if (value === null) return { text: '—', className: 'text-muted-foreground' };
+export type PercentDirection = 'up' | 'down' | 'flat';
+
+// text is unsigned — the caller renders a ▲/▼ for direction (see PercentChange in launch-list.tsx)
+// instead of a +/- sign, matching the reference UI, so direction is reported separately.
+export function formatPercent(value: string | null): { text: string; className: string; direction: PercentDirection } {
+  if (value === null) return { text: '—', className: 'text-muted-foreground', direction: 'flat' };
   const numeric = Number(value);
-  const rounded = numeric.toFixed(2);
-  if (numeric > 0) return { text: `+${rounded}%`, className: 'text-emerald-600' };
-  if (numeric < 0) return { text: `${rounded}%`, className: 'text-red-600' };
-  return { text: `${rounded}%`, className: 'text-muted-foreground' };
+  const rounded = Math.abs(numeric).toFixed(2);
+  if (numeric > 0) return { text: `${rounded}%`, className: 'text-emerald-600', direction: 'up' };
+  if (numeric < 0) return { text: `${rounded}%`, className: 'text-red-600', direction: 'down' };
+  return { text: `${rounded}%`, className: 'text-muted-foreground', direction: 'flat' };
 }
 
 // A near-realtime-synced launch is visible before its core metadata (name/symbol/decimals) resolves —

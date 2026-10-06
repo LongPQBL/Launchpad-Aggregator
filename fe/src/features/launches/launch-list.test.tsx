@@ -194,8 +194,8 @@ describe('LaunchList', () => {
     expect(within(table).getByRole('columnheader', { name: '1D %' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
     expect(within(table).getByText('$1000.0')).toBeInTheDocument();
-    expect(within(table).getByText('+12.50%')).toBeInTheDocument();
-    expect(within(table).getByText('-5.00%')).toBeInTheDocument();
+    expect(within(table).getAllByText((_, el) => el?.textContent === '▲12.50%').length).toBeGreaterThan(0);
+    expect(within(table).getAllByText((_, el) => el?.textContent === '▼5.00%').length).toBeGreaterThan(0);
     expect(within(table).getByText('2d')).toBeInTheDocument();
   });
 
@@ -258,10 +258,10 @@ describe('LaunchList', () => {
     expect(within(table).getByText('T')).toBeInTheDocument();
   });
 
-  it('hides the chain filter when every source shares the same chain', () => {
+  it('always shows the chain filter, even with a single indexed chain (it doubles as the chain switcher)', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
 
-    expect(screen.queryByRole('navigation', { name: /filter by chain/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: /filter by chain/i })).toBeInTheDocument();
   });
 
   it('shows the chain filter when sources span more than one chain', () => {
@@ -273,16 +273,16 @@ describe('LaunchList', () => {
   it('renders a real Launchpad filter populated from distinct platforms in sources, even with a single option', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
 
-    const select = screen.getByRole('combobox', { name: /filter by launchpad/i });
-    expect(within(select).getByRole('option', { name: /pons/i })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: /filter by launchpad/i });
+    expect(within(nav).getByRole('link', { name: /pons/i })).toBeInTheDocument();
   });
 
   it('lists every distinct platform from sources in the Launchpad filter, deduped', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={twoChainsTwoPlatforms} error={false} />);
 
-    const select = screen.getByRole('combobox', { name: /filter by launchpad/i });
-    expect(within(select).getAllByRole('option')).toHaveLength(3); // "All launchpads" + pons + other
-    expect(within(select).getByRole('option', { name: /other/i })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: /filter by launchpad/i });
+    expect(within(nav).getAllByRole('link')).toHaveLength(3); // "All launchpads" + pons + other
+    expect(within(nav).getByRole('link', { name: /other/i })).toBeInTheDocument();
   });
 
   it('keeps the selected Launchpad filter on the next-page link', () => {

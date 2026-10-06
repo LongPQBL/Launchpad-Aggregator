@@ -33,19 +33,19 @@ describe('formatUsd', () => {
 
 describe('formatPercent', () => {
   it('shows "—" instead of a fabricated value when null', () => {
-    expect(formatPercent(null)).toEqual({ text: '—', className: 'text-muted-foreground' });
+    expect(formatPercent(null)).toEqual({ text: '—', className: 'text-muted-foreground', direction: 'flat' });
   });
 
-  it('rounds a positive change to 2 decimal places with a leading + and a green class', () => {
-    expect(formatPercent('12.3456')).toEqual({ text: '+12.35%', className: 'text-emerald-600' });
+  it('rounds a positive change to 2 decimal places, unsigned, with an "up" direction and a green class', () => {
+    expect(formatPercent('12.3456')).toEqual({ text: '12.35%', className: 'text-emerald-600', direction: 'up' });
   });
 
-  it('rounds a negative change to 2 decimal places, keeping its own minus sign, with a red class', () => {
-    expect(formatPercent('-3.456')).toEqual({ text: '-3.46%', className: 'text-red-600' });
+  it('rounds a negative change to 2 decimal places, unsigned (the caller renders the down arrow), with a red class', () => {
+    expect(formatPercent('-3.456')).toEqual({ text: '3.46%', className: 'text-red-600', direction: 'down' });
   });
 
-  it('shows exactly zero without a sign, in a neutral class', () => {
-    expect(formatPercent('0')).toEqual({ text: '0.00%', className: 'text-muted-foreground' });
+  it('shows exactly zero with a flat direction, in a neutral class', () => {
+    expect(formatPercent('0')).toEqual({ text: '0.00%', className: 'text-muted-foreground', direction: 'flat' });
   });
 });
 
