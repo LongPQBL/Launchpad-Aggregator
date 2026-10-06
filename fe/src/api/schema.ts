@@ -325,6 +325,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/launches/{chainId}/{tokenAddress}/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    tokenAddress: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                /** @enum {string} */
+                                source?: "official" | "pool";
+                                venueId?: string | null;
+                                pool?: {
+                                    protocol?: string;
+                                    poolId?: string;
+                                } | null;
+                                blockNumber?: string;
+                                txHash?: string;
+                                logIndex?: number;
+                                timestamp?: number;
+                                side?: string;
+                                activityKind?: string | null;
+                                tokenAmount?: string | null;
+                                quoteAmount?: string | null;
+                                quoteAssetAddress?: string | null;
+                                traderAddress?: string;
+                                usdValue?: string | null;
+                                usdValueApprox?: boolean;
+                                /** @enum {string} */
+                                usdValueStatus?: "priced" | "pending" | "unavailable";
+                            }[];
+                            nextCursor?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/launches/{chainId}/{tokenAddress}/candles": {
         parameters: {
             query?: never;

@@ -107,6 +107,15 @@ export interface TradeQuery {
   limit?: number;
 }
 
+type TransactionsBody = paths['/v1/launches/{chainId}/{tokenAddress}/transactions']['get']['responses'][200]['content']['application/json'];
+
+export type Transaction = Required<NonNullable<TransactionsBody['items']>[number]>;
+
+export interface TransactionPage {
+  items: readonly Transaction[];
+  nextCursor: string | null;
+}
+
 type CandlesBody = paths['/v1/launches/{chainId}/{tokenAddress}/candles']['get']['responses'][200]['content']['application/json'];
 
 export type Candle = Required<Pick<NonNullable<CandlesBody['items']>[number], 'intervalSeconds' | 'bucketStart' | 'open' | 'high' | 'low' | 'close' | 'quoteVolume'>>;
@@ -132,6 +141,10 @@ export async function getLaunchDetail(chainId: number, tokenAddress: string): Pr
 
 export async function getLaunchTrades(chainId: number, tokenAddress: string, query: TradeQuery = {}): Promise<TradePage> {
   return request<TradePage>(`/v1/launches/${chainId}/${tokenAddress}/trades`, { cursor: query.cursor, limit: query.limit });
+}
+
+export async function getLaunchTransactions(chainId: number, tokenAddress: string, query: TradeQuery = {}): Promise<TransactionPage> {
+  return request<TransactionPage>(`/v1/launches/${chainId}/${tokenAddress}/transactions`, { cursor: query.cursor, limit: query.limit });
 }
 
 export async function getLaunchCandles(chainId: number, tokenAddress: string, query: CandleQuery = {}): Promise<CandlePage> {

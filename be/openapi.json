@@ -617,6 +617,126 @@
         }
       }
     },
+    "/v1/launches/{chainId}/{tokenAddress}/transactions": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "tokenAddress",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "official",
+                              "pool"
+                            ]
+                          },
+                          "venueId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "pool": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "protocol": {
+                                "type": "string"
+                              },
+                              "poolId": {
+                                "type": "string"
+                              }
+                            }
+                          },
+                          "blockNumber": {
+                            "type": "string"
+                          },
+                          "txHash": {
+                            "type": "string"
+                          },
+                          "logIndex": {
+                            "type": "integer"
+                          },
+                          "timestamp": {
+                            "type": "integer"
+                          },
+                          "side": {
+                            "type": "string"
+                          },
+                          "activityKind": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tokenAmount": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "quoteAmount": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "quoteAssetAddress": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "traderAddress": {
+                            "type": "string"
+                          },
+                          "usdValue": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "usdValueApprox": {
+                            "type": "boolean"
+                          },
+                          "usdValueStatus": {
+                            "type": "string",
+                            "enum": [
+                              "priced",
+                              "pending",
+                              "unavailable"
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "nextCursor": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/launches/{chainId}/{tokenAddress}/candles": {
       "get": {
         "parameters": [
