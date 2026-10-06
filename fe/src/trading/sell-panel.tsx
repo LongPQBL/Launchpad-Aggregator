@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { type Address, formatUnits, parseUnits } from 'viem';
+import { type Address, formatUnits } from 'viem';
 import { useAccount, useReadContract } from 'wagmi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,10 +10,11 @@ import { curveTradeAbi } from './curveAbi';
 import { erc20Abi } from './erc20Abi';
 import { useCurveQuote } from './use-curve-quote';
 import { useTokenAllowance } from './use-token-allowance';
-import { useTradeSettings, resolveAutoSlippageBps } from './use-trade-settings';
+import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { TradeStatus } from './trade-status';
+import { applySlippage, parseAmountSafe } from './amount';
 
 export interface SellPanelProps {
   curveAddress: Address;
@@ -22,23 +23,6 @@ export interface SellPanelProps {
   tokenDecimals: number;
   quoteAsset: { address: Address; symbol: string | null; decimals: number };
   explorerBase: string | null;
-}
-
-function applySlippage(amount: bigint, slippageBps: number | 'auto'): bigint {
-  const bps = slippageBps === 'auto' ? resolveAutoSlippageBps('curve') : slippageBps;
-  return (amount * BigInt(10_000 - bps)) / 10_000n;
-}
-
-// A plain decimal string only — rejects scientific notation ("1e5") and anything else
-// viem's parseUnits would throw on. This runs during render (computing amountIn), so a
-// throw here would crash the whole page, not just this panel.
-function parseAmountSafe(amount: string, decimals: number): bigint {
-  if (amount === '' || !/^\d*\.?\d*$/.test(amount)) return 0n;
-  try {
-    return parseUnits(amount, decimals);
-  } catch {
-    return 0n;
-  }
 }
 
 export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset, explorerBase }: SellPanelProps) {
@@ -65,7 +49,7 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
 
   function submitSell() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;
-    const minQuoteOut = applySlippage(quote.outputAmount, settings.slippageBps);
+    const minQuoteOut = applySlippage(quote.outputAmount, settings.slippageBps, 'curve');
     submission.submit(
       { address: curveAddress, abi: curveTradeAbi, functionName: 'sell', args: [amountIn, minQuoteOut, account] },
       { onSuccess: () => setAmount('') },
