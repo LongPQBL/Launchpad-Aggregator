@@ -18,7 +18,11 @@ export function decodeTradeError(error: unknown): string {
       // actual human-readable reason lives on `.reason` instead, not in the known-custom-errors
       // map. Without this branch the fallback below would discard it and show the useless
       // literal string "Transaction would fail: Error".
-      if (errorName === 'Error' && revertError.reason) {
+      // A Panic(uint256) revert (assert failures, arithmetic overflow, etc.) decodes with
+      // errorName literally 'Panic' — viem itself already resolves the human-readable reason
+      // (e.g. "Arithmetic operation resulted in underflow or overflow.") onto `.reason` from the
+      // panic code, same shape as the Error(string) case just below.
+      if ((errorName === 'Error' || errorName === 'Panic') && revertError.reason) {
         return `Transaction would fail: ${revertError.reason}`;
       }
       if (errorName) return KNOWN_ERRORS[errorName] ?? `Transaction would fail: ${errorName}`;

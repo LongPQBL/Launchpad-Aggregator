@@ -29,6 +29,20 @@ function revertErrorWithReason(reason: string) {
   return new BaseError('execution reverted', { cause: inner });
 }
 
+// A Solidity Panic(uint256) revert (assert failures, arithmetic overflow, etc.) decodes with
+// errorName literally 'Panic' — viem itself already resolves the human-readable reason onto
+// `.reason` from the panic code, same shape as the string-reason Error(string) case above.
+function revertErrorWithPanicReason(reason: string) {
+  const inner = new ContractFunctionRevertedError({
+    abi: [{ type: 'error', name: 'Panic', inputs: [{ type: 'uint256' }] }],
+    data: undefined,
+    functionName: 'buy',
+  });
+  Object.defineProperty(inner, 'data', { value: { errorName: 'Panic', args: [17n] } });
+  Object.defineProperty(inner, 'reason', { value: reason });
+  return new BaseError('execution reverted', { cause: inner });
+}
+
 describe('decodeTradeError', () => {
   it('maps CurveGraduated to a plain-language message', () => {
     expect(decodeTradeError(revertError('CurveGraduated'))).toBe(
@@ -50,6 +64,12 @@ describe('decodeTradeError', () => {
     const message = decodeTradeError(revertErrorWithReason('STF'));
     expect(message).not.toBe('Transaction would fail: Error');
     expect(message).toContain('STF');
+  });
+
+  it('surfaces the real panic reason for a Panic(uint256) revert, instead of the useless literal "Panic"', () => {
+    const message = decodeTradeError(revertErrorWithPanicReason('Arithmetic operation resulted in underflow or overflow.'));
+    expect(message).not.toBe('Transaction would fail: Panic');
+    expect(message).toContain('underflow or overflow');
   });
 
   it('falls back to a plain Error message for a non-viem error', () => {
