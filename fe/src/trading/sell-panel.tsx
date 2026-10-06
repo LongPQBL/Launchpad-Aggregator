@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { type Address, formatUnits } from 'viem';
 import { useAccount, useReadContract } from 'wagmi';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { robinhoodChain } from '@/wallet/config';
 import { curveTradeAbi } from './curveAbi';
@@ -13,6 +12,8 @@ import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
+import { useRefetchQuoteAfterApproval } from './use-refetch-quote-after-approval';
+import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
 import { applySlippage, parseAmountSafe } from './amount';
 
@@ -47,20 +48,7 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
   const hasInsufficientBalance = (tokenBalance ?? 0n) < amountIn;
   const needsApproval = amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
 
-  // useSimulateContract caches a pre-approval revert (the curve's transferFrom — a sell is
-  // always ERC20-quoted) under the same query key, since none of curveAddress/amountIn/recipient
-  // change across the approval — so once the approval actually confirms, the stale quote error
-  // must be explicitly refetched rather than relying on the hook's own (already-exhausted) retry
-  // budget. Same true-to-false transition pattern as use-token-allowance.ts's own
-  // refetch-after-approval effect; see swap-panel.tsx's identical fix for the same bug shape.
-  const wasConfirmingApproval = useRef(false);
-  const refetchQuote = quote.refetch;
-  useEffect(() => {
-    if (wasConfirmingApproval.current && !allowance.isConfirmingApproval) {
-      refetchQuote();
-    }
-    wasConfirmingApproval.current = allowance.isConfirmingApproval;
-  }, [allowance.isConfirmingApproval, refetchQuote]);
+  useRefetchQuoteAfterApproval(allowance.isConfirmingApproval, quote.refetch);
 
   function submitSell() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;
@@ -89,28 +77,17 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
       {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
         <p className="text-sm text-destructive">Insufficient token balance.</p>
       )}
-      {allowance.approveError && (
-        <p role="alert" className="text-sm text-destructive">
-          {allowance.approveError}
-        </p>
-      )}
-      {needsApproval ? (
-        <Button
-          type="button"
-          disabled={allowance.isApproving || allowance.isConfirmingApproval || isWrongChain}
-          onClick={() => allowance.approve(amountIn)}
-        >
-          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
-        </Button>
-      ) : (
-        <Button
-          type="button"
-          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || quote.outputAmount === null || isSubmitting}
-          onClick={submitSell}
-        >
-          Sell
-        </Button>
-      )}
+      <ApproveOrActionButton
+        needsApproval={needsApproval}
+        amountIn={amountIn}
+        isWrongChain={isWrongChain}
+        hasInsufficientBalance={hasInsufficientBalance}
+        outputAmount={quote.outputAmount}
+        isSubmitting={isSubmitting}
+        allowance={allowance}
+        actionLabel="Sell"
+        onAction={submitSell}
+      />
       <TradeStatus status={submission.status} txHash={submission.txHash} errorMessage={submission.errorMessage} explorerBase={explorerBase} />
     </div>
   );
