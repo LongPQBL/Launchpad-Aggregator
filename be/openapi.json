@@ -224,6 +224,10 @@
                               }
                             }
                           },
+                          "tokenDecimals": {
+                            "type": "integer",
+                            "nullable": true
+                          },
                           "lifecycleStatus": {
                             "type": "string"
                           },
@@ -239,6 +243,10 @@
                             "nullable": true
                           },
                           "marketCapUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "priceUsd": {
                             "type": "string",
                             "nullable": true
                           },
@@ -389,6 +397,10 @@
                         }
                       }
                     },
+                    "tokenDecimals": {
+                      "type": "integer",
+                      "nullable": true
+                    },
                     "lifecycleStatus": {
                       "type": "string"
                     },
@@ -404,6 +416,10 @@
                       "nullable": true
                     },
                     "marketCapUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "priceUsd": {
                       "type": "string",
                       "nullable": true
                     },
@@ -848,6 +864,30 @@
                           "displayedToken": {
                             "type": "string"
                           },
+                          "currency0Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency0Name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency0LogoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1LogoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "fee": {
                             "type": "integer"
                           },
@@ -977,6 +1017,30 @@
                           },
                           "displayedToken": {
                             "type": "string"
+                          },
+                          "currency0Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency0Name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency0LogoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1LogoUri": {
+                            "type": "string",
+                            "nullable": true
                           },
                           "fee": {
                             "type": "integer"
@@ -1110,6 +1174,30 @@
                     },
                     "displayedToken": {
                       "type": "string"
+                    },
+                    "currency0Symbol": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "currency0Name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "currency0LogoUri": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "currency1Symbol": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "currency1Name": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "currency1LogoUri": {
+                      "type": "string",
+                      "nullable": true
                     },
                     "fee": {
                       "type": "integer"

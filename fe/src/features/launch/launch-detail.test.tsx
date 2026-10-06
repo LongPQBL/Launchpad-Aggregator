@@ -47,6 +47,7 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     platform: 'pons',
     protocolVersion: 'v2',
     quoteAsset: { address: '0xquote', symbol: 'ROBIN', decimals: 18 },
+    tokenDecimals: 18,
     lifecycleStatus: 'trading',
     officialVolume24h: '12.5',
     coverageStatus: 'caught_up',
@@ -55,6 +56,7 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     priceStale: false,
     fdvUsd: null,
     marketCapUsd: null,
+    priceUsd: null,
     tvlUsd: null,
     tvlBasis: null,
     tvlBlockNumber: null,
@@ -117,6 +119,8 @@ describe('LaunchDetail', () => {
     const otherPool = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'b'.repeat(64)}`,
       currency0: '0x1111111111111111111111111111111111111111', currency1: '0x2222222222222222222222222222222222222222',
       displayedToken: '0x1111111111111111111111111111111111111111', fee: 3000, tickSpacing: 60,
+      currency0Symbol: null, currency0Name: null, currency0LogoUri: null,
+      currency1Symbol: null, currency1Name: null, currency1LogoUri: null,
       hooks: '0x0000000000000000000000000000000000000000', createdBlock: '123', createdTimestamp: null,
       ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, priceInQuote: null,
       priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
@@ -142,12 +146,23 @@ describe('LaunchDetail', () => {
     expect(view.container.querySelector('a[href*="cursor="]')).toBeNull();
   });
 
-  it('shows token, Robinhood Chain, and Pons brand images in the header', () => {
-    render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png' })} transactions={null} candles={null} />);
+  it('shows a Launches > Symbol breadcrumb', () => {
+    render(<LaunchDetail detail={detail({ symbol: 'TKA' })} transactions={null} candles={null} />);
+
+    const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i });
+    expect(within(breadcrumb).getByRole('link', { name: 'Launches' })).toHaveAttribute('href', '/');
+    expect(within(breadcrumb).getByText('TKA')).toBeInTheDocument();
+  });
+
+  it('shows token, Robinhood Chain, and Pons brand images in the header, plus the plain token address', () => {
+    render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png', tokenAddress: '0xabc0000000000000000000000000000000001e18' })} transactions={null} candles={null} />);
 
     expect(screen.getByRole('img', { name: 'Token logo' })).toHaveAttribute('src', 'https://example.com/token.png');
     expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Pons logo' })).toBeInTheDocument();
+    // The Description section's copy-address button (fe/src/features/launch/about-section.tsx)
+    // renders the same short-address format — scoped by test id to avoid an ambiguous match.
+    expect(screen.getByTestId('header-token-address')).toHaveTextContent('0xabc0…1e18');
   });
 
   it('does not show Robinhood or Pons branding for another source', () => {
@@ -170,7 +185,7 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('Quote asset: —')).toBeInTheDocument();
   });
 
-  it('hides the About section explorer pill for a chain with no registered explorer', () => {
+  it('hides the Description section explorer pill for a chain with no registered explorer', () => {
     render(<LaunchDetail detail={detail({ chainId: 999999 })} transactions={null} candles={null} />);
     expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();
   });
@@ -180,7 +195,7 @@ describe('LaunchDetail', () => {
 
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
-    // Scoped to the source line, not a bare substring match — the About section's explorer pill
+    // Scoped to the source line, not a bare substring match — the Description section's explorer pill
     // also renders "Robinhood Chain" (as part of "Robinhood Chain Explorer") and would otherwise
     // make this an ambiguous "found multiple elements" match.
     const sourceLine = screen.getByText(/Source:/).closest('p')!;
@@ -189,19 +204,26 @@ describe('LaunchDetail', () => {
     expect(screen.getByText(/12\.5 ROBIN/)).toBeInTheDocument();
   });
 
-  it('shows FDV, market cap, TVL, and 52-week high/low in the stats grid when available', () => {
+  it('shows a Stats heading with TVL, market cap, FDV, 1 day volume (USD), and 52-week high/low, in that order', () => {
     render(
       <LaunchDetail
-        detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001' })}
+        detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001',
+          officialVolume24hUsd: '10.4' })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.getByText(/FDV/)).toHaveTextContent('269.2');
-    expect(screen.getByText(/Market cap/)).toHaveTextContent('269.2');
-    expect(screen.getByText(/TVL/)).toHaveTextContent('1200.5');
-    expect(screen.getByText(/52W High/)).toHaveTextContent('0.08');
-    expect(screen.getByText(/52W Low/)).toHaveTextContent('0.001');
+    const stats = screen.getByRole('region', { name: 'Stats' });
+    expect(within(stats).getByRole('heading', { name: 'Stats' })).toBeInTheDocument();
+    expect(within(stats).getByText(/TVL/)).toHaveTextContent('1200.5');
+    expect(within(stats).getByText(/Market cap/)).toHaveTextContent('269.2');
+    expect(within(stats).getByText(/FDV/)).toHaveTextContent('269.2');
+    expect(within(stats).getByText(/1 day volume/)).toHaveTextContent('10.4');
+    expect(within(stats).getByText(/52W High/)).toHaveTextContent('0.08');
+    expect(within(stats).getByText(/52W Low/)).toHaveTextContent('0.001');
+    const statLabels = within(stats).getAllByText(/TVL|Market cap|FDV|1 day volume|52W High|52W Low/)
+      .map((el) => el.textContent?.split(':')[0]);
+    expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
   });
 
   it('explains the phase-specific TVL basis and missing quote prices', () => {
@@ -384,16 +406,28 @@ describe('LaunchDetail', () => {
     expect(markers).toEqual([expect.objectContaining({ time: 1_700_000_200 })]);
   });
 
-  it('shows the current official price', () => {
+  it('shows the big headline price in USD above the chart when priceUsd is available', () => {
     render(
       <LaunchDetail
-        detail={detail({ priceQuote: '0.000000152480063034', priceStale: false })}
+        detail={detail({ priceUsd: '0.113', priceQuote: '0.000000152480063034', priceStale: false })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
 
-    expect(screen.getByText(/0\.000000152 ROBIN/)).toBeInTheDocument();
+    expect(screen.getByTestId('official-price')).toHaveTextContent('$0.11');
+  });
+
+  it('falls back to the quote-denominated price above the chart when priceUsd is unavailable', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ priceUsd: null, priceQuote: '0.000000152480063034', priceStale: false })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+      />,
+    );
+
+    expect(screen.getByTestId('official-price')).toHaveTextContent('0.000000152 ROBIN');
   });
 
   it('labels the price as stale instead of presenting it as the current market price', () => {
@@ -408,21 +442,28 @@ describe('LaunchDetail', () => {
     expect(screen.getByText(/stale price/i)).toBeInTheDocument();
   });
 
-  it('shows "—" for price instead of a fabricated value when the price is not yet available', () => {
+  it('shows "—" for price instead of a fabricated value when neither priceUsd nor priceQuote is yet available', () => {
     render(
       <LaunchDetail
-        detail={detail({ priceQuote: null })}
+        detail={detail({ priceUsd: null, priceQuote: null })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
 
-    expect(screen.getByText(/Current price/)).toHaveTextContent('—');
+    expect(screen.getByTestId('official-price')).toHaveTextContent('—');
   });
 
-  it('renders the About section with description, truncated with Show more when long', () => {
+  it('renders a Description heading (not About)', () => {
+    render(<LaunchDetail detail={detail()} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
+
+    expect(screen.getByRole('heading', { name: 'Description' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'About' })).not.toBeInTheDocument();
+  });
+
+  it('renders the Description section with description, truncated with Show more when long', () => {
     const longDescription = 'A'.repeat(260);
-    // jsdom never computes real layout, so the About section's overflow-gated Show more control
+    // jsdom never computes real layout, so the Description section's overflow-gated Show more control
     // (fe/src/features/launch/about-section.tsx) needs a mocked scrollHeight/clientHeight to
     // simulate a collapsed paragraph that overflows three lines — see about-section.test.tsx for
     // the full matrix of overflow-detection cases; this test only exercises the integration.
@@ -449,7 +490,7 @@ describe('LaunchDetail', () => {
     }
   });
 
-  it('hides the About section description entirely when null', () => {
+  it('hides the Description section description entirely when null', () => {
     render(
       <LaunchDetail detail={detail({ description: null })} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );

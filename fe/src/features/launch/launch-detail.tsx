@@ -20,6 +20,10 @@ export interface LaunchDetailProps {
   chartInterval?: number;
 }
 
+function shortAddress(address: string): string {
+  return `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
 export function LaunchDetail({ detail, transactions, candles, pools, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
@@ -34,21 +38,33 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
   const chartCoverageStatus =
     detail.coverageStatus !== 'caught_up' ? detail.coverageStatus : candles && !candles.complete ? 'backfilling' : detail.coverageStatus;
 
+  // The USD price is the headline figure (matches the reference design); a launch whose USD oracle
+  // isn't resolved yet falls back to the quote-denominated price rather than showing nothing.
+  const priceText = detail.priceUsd !== null ? formatUsd(detail.priceUsd, 2)
+    : detail.priceQuote !== null ? formatPrice(detail.priceQuote, detail.quoteAsset.symbol) : '—';
+
   return (
     <article className="flex flex-col gap-4">
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
-          component router-context-free for unit tests, matching launch-list.tsx's retry link. */}
-      <a href="/" className="text-sm text-muted-foreground hover:text-primary hover:underline">
-        ← Launches
-      </a>
+      <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
+            component router-context-free for unit tests, matching launch-list.tsx's retry link. */}
+        <a href="/" className="hover:text-primary hover:underline">Launches</a>
+        <span aria-hidden="true">›</span>
+        <span className="font-medium text-foreground">{displaySymbol(detail.symbol)}</span>
+      </nav>
 
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-3">
             <TokenLogo logoUri={detail.logoUri} symbol={displaySymbol(detail.symbol)} chainId={detail.chainId} />
-            <h1 className="text-xl font-semibold leading-none">
-              {displayName(detail.name, detail.tokenAddress)} <span className="text-muted-foreground">({displaySymbol(detail.symbol)})</span>
-            </h1>
+            <div>
+              <h1 className="text-xl font-semibold leading-none">
+                {displayName(detail.name, detail.tokenAddress)} <span className="text-muted-foreground">({displaySymbol(detail.symbol)})</span>
+              </h1>
+              <p data-testid="header-token-address" className="mt-1 font-mono text-xs text-muted-foreground">
+                {shortAddress(detail.tokenAddress)}
+              </p>
+            </div>
           </div>
           <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
             <span>Source:</span>
@@ -62,51 +78,15 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
           </p>
         </CardHeader>
         <CardContent>
-          <p className="font-mono text-3xl font-semibold">
-            Current price: {formatPrice(detail.priceQuote, detail.quoteAsset.symbol)}
-            {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
-          </p>
-
-          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-border pt-4 sm:grid-cols-3">
+          <dl className="flex flex-wrap gap-x-6 gap-y-2 border-t border-border pt-4 text-sm">
             <p>Quote asset: {displaySymbol(detail.quoteAsset.symbol)}</p>
             <p className="flex items-center gap-2">
               Lifecycle: {formatLifecycleStatus(detail.lifecycleStatus)} <CoverageBadge status={detail.coverageStatus} />
             </p>
             <p>24h volume: {formatQuote(detail.officialVolume24h, detail.quoteAsset.symbol)}</p>
-            <p>FDV: {formatUsd(detail.fdvUsd, 1)}</p>
-            <p>Market cap: {formatUsd(detail.marketCapUsd, 1)}</p>
-            <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd, 1)}</p>
-            <p>52W High: {formatPrice(detail.week52High, detail.quoteAsset.symbol)}</p>
-            <p>52W Low: {formatPrice(detail.week52Low, detail.quoteAsset.symbol)}</p>
           </dl>
-
-          {explorerBase && (
-            <a
-              href={`${explorerBase}/address/${detail.tokenAddress}`}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-4 inline-block text-sm underline hover:text-primary"
-            >
-              View on Blockscout
-            </a>
-          )}
         </CardContent>
       </Card>
-
-      <section aria-label="About">
-        <Card>
-          <CardContent className="pt-4">
-            <AboutSection
-              description={detail.description}
-              tokenAddress={detail.tokenAddress}
-              explorerUrl={explorerBase ? `${explorerBase}/token/${detail.tokenAddress}` : undefined}
-              explorerLabel={explorerBase ? `${chainName(detail.chainId)} Explorer` : undefined}
-              websiteUrl={detail.websiteUrl}
-              twitterUrl={detail.twitterUrl}
-            />
-          </CardContent>
-        </Card>
-      </section>
 
       <section aria-label="Official trading venues">
         <Card>
@@ -122,9 +102,13 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
         </Card>
       </section>
 
-      {candles && (
-        <Card>
-          <CardContent className="pt-4">
+      <Card>
+        <CardContent className="pt-4">
+          <p data-testid="official-price" className="mb-2 text-3xl font-semibold">
+            {priceText}
+            {detail.priceStale && <span className="ml-2 text-sm font-normal text-muted-foreground">(stale price)</span>}
+          </p>
+          {candles && (
             <OfficialChart
               candles={candles.items}
               graduationTime={graduationTime}
@@ -133,9 +117,37 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
               currency={chartCurrency}
               intervalSeconds={chartInterval}
             />
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
+
+      <div className="flex flex-col gap-4 lg:max-w-2xl">
+        <section aria-label="Stats">
+          <h2 className="text-lg font-semibold">Stats</h2>
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3">
+            <p title={tvlTooltip(detail)}>TVL: {formatUsd(detail.tvlUsd, 1)}</p>
+            <p>Market cap: {formatUsd(detail.marketCapUsd, 1)}</p>
+            <p>FDV: {formatUsd(detail.fdvUsd, 1)}</p>
+            <p>1 day volume: {formatUsd(detail.officialVolume24hUsd, 1)}</p>
+            <p>52W High: {formatPrice(detail.week52High, detail.quoteAsset.symbol)}</p>
+            <p>52W Low: {formatPrice(detail.week52Low, detail.quoteAsset.symbol)}</p>
+          </dl>
+        </section>
+
+        <section aria-label="Description">
+          <h2 className="text-lg font-semibold">Description</h2>
+          <div className="mt-3">
+            <AboutSection
+              description={detail.description}
+              tokenAddress={detail.tokenAddress}
+              explorerUrl={explorerBase ? `${explorerBase}/token/${detail.tokenAddress}` : undefined}
+              explorerLabel={explorerBase ? `${chainName(detail.chainId)} Explorer` : undefined}
+              websiteUrl={detail.websiteUrl}
+              twitterUrl={detail.twitterUrl}
+            />
+          </div>
+        </section>
+      </div>
 
       <Card>
         <CardContent className="pt-4">
@@ -170,7 +182,8 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
                 value: 'pools',
                 label: 'Pools',
                 content: pools ? (
-                  <PoolList page={pools} tokenAddress={detail.tokenAddress} />
+                  <PoolList page={pools} tokenAddress={detail.tokenAddress}
+                    displayedToken={{ address: detail.tokenAddress, symbol: displaySymbol(detail.symbol), logoUri: detail.logoUri }} />
                 ) : (
                   <p role="status">Could not load pools.</p>
                 ),

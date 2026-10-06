@@ -418,6 +418,9 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(detail!.marketCapUsd).toBe(detail!.fdvUsd);
     expect(detail!.week52High).toBe('1');
     expect(detail!.week52Low).toBe('1');
+    expect(detail!.priceUsd).not.toBeNull();
+    expect(Number(detail!.priceUsd)).toBeCloseTo(2691.70223591, 5);
+    expect(detail!.tokenDecimals).toBe(18);
   });
 
   it('computes 52-week high/low and 1h/1d change from one formatting pass (no duplicate formatRational work)', async () => {

@@ -41,6 +41,7 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
     platform: string(row.platform), protocolVersion: string(row.protocol_version),
     quoteAsset: { address: string(row.quote_asset_address), symbol: nullableString(row.quote_asset_symbol), decimals: nullableNumber(row.quote_asset_decimals) },
     lifecycleStatus: string(row.lifecycle_status),
+    tokenDecimals: nullableNumber(row.token_decimals),
     officialVolume24h: complete && row.official_volume_raw !== undefined && row.quote_asset_decimals !== null
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
     coverageStatus,
@@ -56,8 +57,8 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
   };
 }
 
-export interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
-const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
+export interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; priceUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
+const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
 
 // The launch page recomputes these per request; the RPC answers change on the scale of minutes, and
 // the page is re-fetched on every visit, so a short per-(pool, client) cache keeps repeat loads fast.
@@ -141,6 +142,11 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
         priceRow ? BigInt(string(priceRow.price_numerator_raw)) : null,
         priceRow ? BigInt(string(priceRow.price_denominator_raw)) : null,
         usdPrice?.priceUsd ?? null) : null;
+    // Same math as computeFdvUsd minus the totalSupply dependency — a per-token USD price only
+    // needs the quote asset's USD rate, not the full supply.
+    const priceUsd = priceRow && usdPrice
+      ? (Number(priceRow.price_numerator_raw) / Number(priceRow.price_denominator_raw) * usdPrice.priceUsd).toString()
+      : null;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
@@ -193,7 +199,7 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
     const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
     const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
-    return { fdvUsd, marketCapUsd: fdvUsd, week52High: high, week52Low: low, change1h, change1d, ...(await tvlPromise) };
+    return { fdvUsd, marketCapUsd: fdvUsd, priceUsd, week52High: high, week52Low: low, change1h, change1d, ...(await tvlPromise) };
   } catch {
     return { ...NULL_STATS, ...(await tvlPromise) };
   }

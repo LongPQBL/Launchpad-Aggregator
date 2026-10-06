@@ -36,8 +36,9 @@ export const launchSummary = { type: 'object', properties: {
   // UI falls back to displaying tokenAddress as the name in that window.
   name: { type: 'string', nullable: true }, symbol: { type: 'string', nullable: true },
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,
+  tokenDecimals: { type: 'integer', nullable: true },
   lifecycleStatus: { type: 'string' }, officialVolume24h: { type: 'string', nullable: true }, coverageStatus: { type: 'string' },
-  fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true },
+  fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true }, priceUsd: { type: 'string', nullable: true },
   tvlUsd: { type: 'string', nullable: true }, tvlBasis: { type: 'string', nullable: true },
   tvlBlockNumber: { type: 'string', nullable: true }, tvlPriceSource: { type: 'string', nullable: true },
   tvlPriceUpdatedAt: { type: 'integer', nullable: true }, tvlUnavailableReason: { type: 'string', nullable: true },
@@ -102,6 +103,8 @@ const nullableMetric = { type: 'string', nullable: true } as const;
 export const poolSummary = { type: 'object', properties: {
   chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' },
   currency0: { type: 'string' }, currency1: { type: 'string' }, displayedToken: { type: 'string' },
+  currency0Symbol: nullableMetric, currency0Name: nullableMetric, currency0LogoUri: nullableMetric,
+  currency1Symbol: nullableMetric, currency1Name: nullableMetric, currency1LogoUri: nullableMetric,
   fee: { type: 'integer' }, tickSpacing: { type: 'integer' }, hooks: { type: 'string' },
   createdBlock: { type: 'string' }, createdTimestamp: { type: 'integer', nullable: true },
   ponsDesignated: { type: 'boolean' },
