@@ -6,7 +6,7 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
-import { poolPriceInQuote, sumUsdValues } from './valuation.js';
+import { poolPriceInQuote, poolPriceRational, sumUsdValues } from './valuation.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const erc20DecimalsAbi = parseAbi(['function decimals() view returns (uint8)']);
@@ -172,8 +172,11 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     : null;
   const supply = options.rpcClient && displayed !== ZERO_ADDRESS
     ? await readTotalSupply(options.rpcClient, displayed as Address) : null;
+  const priceRational = last ? poolPriceRational(BigInt(last.sqrt_price_x96), displayedDecimals, quoteDecimals,
+    displayedIsCurrency0) : null;
   const fdvUsd = supply !== null && displayedDecimals !== null
-    ? computeFdvUsd(supply, displayedDecimals, priceInQuote, currentQuoteUsd?.priceUsd ?? null) : null;
+    ? computeFdvUsd(supply, displayedDecimals, priceRational?.numerator ?? null, priceRational?.denominator ?? null,
+      currentQuoteUsd?.priceUsd ?? null) : null;
   const tvlUsd = key.protocol === 'uniswap_v4' ? await poolTvlUsd(options.rpcClient, catalog,
     displayedIsCurrency0, displayedDecimals, quoteDecimals, currentQuoteUsd?.priceUsd ?? null) : null;
 

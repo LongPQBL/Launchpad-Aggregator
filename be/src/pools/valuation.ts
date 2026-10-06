@@ -2,16 +2,26 @@ import { formatRational } from '../market/price.js';
 
 const Q192 = 2n ** 192n;
 
-/** Spot price of the displayed token, denominated in the other token. */
-export function poolPriceInQuote(sqrtPriceX96: bigint, displayedDecimals: number | null,
-  quoteDecimals: number | null, displayedIsCurrency0: boolean): string | null {
+/** Spot price of the displayed token, denominated in the other token, as a raw fraction — for
+ * callers (e.g. FDV) that need full precision rather than poolPriceInQuote's fixed 18 decimal
+ * places, which rounds a price far below 1e-18 away to "0". */
+export function poolPriceRational(sqrtPriceX96: bigint, displayedDecimals: number | null,
+  quoteDecimals: number | null, displayedIsCurrency0: boolean): { numerator: bigint; denominator: bigint } | null {
   if (sqrtPriceX96 <= 0n || displayedDecimals === null || quoteDecimals === null
     || !Number.isInteger(displayedDecimals) || !Number.isInteger(quoteDecimals)
     || displayedDecimals < 0 || quoteDecimals < 0 || displayedDecimals > 36 || quoteDecimals > 36) return null;
   const square = sqrtPriceX96 * sqrtPriceX96;
-  const numerator = (displayedIsCurrency0 ? square : Q192) * 10n ** BigInt(displayedDecimals);
-  const denominator = (displayedIsCurrency0 ? Q192 : square) * 10n ** BigInt(quoteDecimals);
-  return formatRational(numerator, denominator, 18);
+  return {
+    numerator: (displayedIsCurrency0 ? square : Q192) * 10n ** BigInt(displayedDecimals),
+    denominator: (displayedIsCurrency0 ? Q192 : square) * 10n ** BigInt(quoteDecimals),
+  };
+}
+
+/** Spot price of the displayed token, denominated in the other token. */
+export function poolPriceInQuote(sqrtPriceX96: bigint, displayedDecimals: number | null,
+  quoteDecimals: number | null, displayedIsCurrency0: boolean): string | null {
+  const rational = poolPriceRational(sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0);
+  return rational ? formatRational(rational.numerator, rational.denominator, 18) : null;
 }
 
 /** Sum already-valued trade amounts exactly as decimal strings, including exponent notation. */

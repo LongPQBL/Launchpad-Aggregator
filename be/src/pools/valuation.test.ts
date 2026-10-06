@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { poolPriceInQuote, sumUsdValues } from './valuation.js';
+import { poolPriceInQuote, poolPriceRational, sumUsdValues } from './valuation.js';
 
 const q96 = 2n ** 96n;
+describe('poolPriceRational', () => {
+  it('returns the same numerator/denominator pair poolPriceInQuote formats, for FDV math that needs full precision', () => {
+    const rational = poolPriceRational(2n * q96, 18, 18, false);
+    expect(rational).not.toBeNull();
+    expect(Number(rational!.numerator) / Number(rational!.denominator)).toBe(0.25);
+  });
+  it('rejects the same unavailable inputs as poolPriceInQuote', () => {
+    expect(poolPriceRational(0n, 18, 6, true)).toBeNull();
+    expect(poolPriceRational(q96, null, 6, true)).toBeNull();
+  });
+});
+
 describe('poolPriceInQuote', () => {
   it('calculates either displayed side from the same verified sqrt price', () => {
     expect(poolPriceInQuote(q96, 18, 18, true)).toBe('1');

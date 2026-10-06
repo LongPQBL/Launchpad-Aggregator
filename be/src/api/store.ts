@@ -135,10 +135,11 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [number(row.chain_id), string(row.token_address)]),
     ]);
     const priceRow = priceResult.rows[0] as Row | undefined;
-    const priceInQuoteAsset = priceRow
-      ? formatRational(BigInt(string(priceRow.price_numerator_raw)), BigInt(string(priceRow.price_denominator_raw)), 18) : null;
     const fdvUsd = totalSupply !== null && row.token_decimals !== null
-      ? computeFdvUsd(totalSupply, number(row.token_decimals), priceInQuoteAsset, usdPrice?.priceUsd ?? null) : null;
+      ? computeFdvUsd(totalSupply, number(row.token_decimals),
+        priceRow ? BigInt(string(priceRow.price_numerator_raw)) : null,
+        priceRow ? BigInt(string(priceRow.price_denominator_raw)) : null,
+        usdPrice?.priceUsd ?? null) : null;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
