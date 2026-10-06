@@ -76,6 +76,18 @@ export const trade = { type: 'object', properties: {
   usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
 } } as const;
 
+export const transaction = { type: 'object', properties: {
+  source: { type: 'string', enum: ['official', 'pool'] },
+  venueId: { type: 'string', nullable: true },
+  pool: { type: 'object', nullable: true, properties: { protocol: { type: 'string' }, poolId: { type: 'string' } } },
+  blockNumber: { type: 'string' }, txHash: { type: 'string' }, logIndex: { type: 'integer' }, timestamp: { type: 'integer' },
+  side: { type: 'string' }, activityKind: { type: 'string', nullable: true },
+  tokenAmount: { type: 'string', nullable: true }, quoteAmount: { type: 'string', nullable: true },
+  quoteAssetAddress: { type: 'string', nullable: true }, traderAddress: { type: 'string' },
+  usdValue: { type: 'string', nullable: true }, usdValueApprox: { type: 'boolean' },
+  usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
+} } as const;
+
 export const candle = { type: 'object', properties: {
   intervalSeconds: { type: 'integer' }, bucketStart: { type: 'integer' },
   open: { type: 'string' }, high: { type: 'string' }, low: { type: 'string' }, close: { type: 'string' },

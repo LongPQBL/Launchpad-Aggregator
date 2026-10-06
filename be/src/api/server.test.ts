@@ -25,6 +25,7 @@ function data() {
     listLaunches: async () => ({ items: [launchSummary], nextCursor: null }),
     getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false }),
     listTrades: async () => ({ items: [], nextCursor: null }),
+    listTransactions: async () => ({ items: [], nextCursor: null }),
     listCandles: async () => ({ items: [], complete: false }),
     listUsdCandles: async () => ({ items: [], complete: false }),
   };
@@ -110,6 +111,22 @@ describe('read-only API', () => {
     const candles = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?intervalSeconds=60` });
     expect(candles.statusCode).toBe(200);
     expect(candles.json()).toEqual({ items: [], complete: false });
+    await app.close();
+  });
+
+  it('serves merged transactions without fabricating pagination when there are none', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(),
+      listTransactions: async (_chainId, _tokenAddress, query) => { expect(query.limit).toBe(2); return { items: [], nextCursor: null }; } } });
+    const response = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/transactions?limit=2` });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [], nextCursor: null });
+    await app.close();
+  });
+
+  it('rejects an invalid transactions query the same way /trades does', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    const response = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/transactions?limit=0` });
+    expect(response.statusCode).toBe(400);
     await app.close();
   });
 
@@ -206,6 +223,7 @@ describe('read-only API', () => {
     const response = await app.inject({ method: 'GET', url: '/openapi.json' });
     expect(response.statusCode).toBe(200);
     expect(Object.keys(response.json().paths)).toContain('/v1/launches/{chainId}/{tokenAddress}/trades');
+    expect(Object.keys(response.json().paths)).toContain('/v1/launches/{chainId}/{tokenAddress}/transactions');
     expect(response.json().paths['/v1/launches'].get.responses['200'].content['application/json'].schema.properties.items).toBeDefined();
     await app.close();
   });

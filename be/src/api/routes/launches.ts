@@ -3,7 +3,7 @@ import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
-import { candle, launchDetail, launchSummary, pageSchema, trade } from '../schemas.js';
+import { candle, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
 const LIFECYCLE_STATUSES = new Set(['trading', 'swept', 'graduated', 'rescued']);
@@ -89,6 +89,16 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       if (!identity) return reply.code(404).send({ error: 'Launch not found' });
       if (!query) return reply.code(400).send({ error: 'Invalid trade query' });
       return deps.data.listTrades(identity.chainId, identity.tokenAddress, query);
+    },
+  );
+
+  app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
+    '/v1/launches/:chainId/:tokenAddress/transactions', { schema: { response: { 200: pageSchema(transaction) } } }, async (request, reply) => {
+      const identity = tokenParams(request.params);
+      const query = listQuery(request.query);
+      if (!identity) return reply.code(404).send({ error: 'Launch not found' });
+      if (!query) return reply.code(400).send({ error: 'Invalid transaction query' });
+      return deps.data.listTransactions(identity.chainId, identity.tokenAddress, query);
     },
   );
 
