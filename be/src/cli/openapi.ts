@@ -7,7 +7,7 @@ const app = await createApiServer({
   pools: { listPools: unavailable, getPool: unavailable, resolvePoolSide: unavailable,
     listPoolTrades: unavailable, listPoolCandles: unavailable },
   data: { listSources: unavailable, getCoverage: unavailable, listLaunches: unavailable,
-    getLaunch: unavailable, listTrades: unavailable, listCandles: unavailable, listUsdCandles: unavailable },
+    getLaunch: unavailable, listTrades: unavailable, listTransactions: unavailable, listCandles: unavailable, listUsdCandles: unavailable },
 });
 const document = `${JSON.stringify(app.swagger(), null, 2)}\n`;
 const path = new URL('../../openapi.json', import.meta.url);

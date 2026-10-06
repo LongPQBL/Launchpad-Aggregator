@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest';
 import { createDatabase } from '../db/client.js';
 import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
 import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
@@ -717,5 +717,111 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     const a = page.items.find((item) => item.tokenAddress === launchA);
     expect(a?.officialVolume24hUsd).toBeNull();
     expect(a?.officialVolume24hUsdApprox).toBe(false);
+  });
+});
+
+describe('listTransactions', () => {
+  const txToken = '0x1616161616161616161616161616161616161616';
+  const txSource = 'store-test-transactions';
+  const txVenueId = `pons-v2-curve:${txToken}`;
+  const officialTxHash = '0x' + 'c'.repeat(64);
+
+  async function seedOfficialOnly() {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v2',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [txSource, txToken]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'TxTest','TXT',18,'pons','v2',$1,$1,1,$3,0,$1,'ROBIN',18,'trading') ON CONFLICT DO NOTHING`,
+    [txToken, txSource, officialTxHash]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'curve',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`,
+    [txVenueId, txToken, txSource]);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,1,$3,$4,0,1700000000,'buy','1000000000000000000','2000000000000000000',$1,'CurveBuy','user_trade',$1)
+      ON CONFLICT DO NOTHING`,
+    [txToken, txVenueId, blockHash, officialTxHash]);
+  }
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [txToken]);
+    await pool.query('DELETE FROM pool_trades WHERE chain_id = 4663 AND trader_address = $1', [txToken]);
+    await pool.query('DELETE FROM pool_members WHERE chain_id = 4663 AND token_address = $1', [txToken]);
+    await pool.query('DELETE FROM pool_catalog WHERE chain_id = 4663 AND (currency0 = $1 OR currency1 = $1)', [txToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [txToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [txToken]);
+    await pool.query('DELETE FROM sources WHERE id = $1', [txSource]);
+  });
+
+  it('returns only official trades for a token with no other pools, same shape as listTrades', async () => {
+    await seedOfficialOnly();
+    const page = await store.listTransactions(4663, txToken, { limit: 10 });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ source: 'official', venueId: txVenueId, pool: null,
+      side: 'buy', tokenAmount: '1', quoteAmount: '2', usdValueStatus: 'unavailable' });
+    expect(page.nextCursor).toBeNull();
+  });
+
+  it('excludes a pool that is also the official venue from the pool branch — no double-counted swap', async () => {
+    await seedOfficialOnly();
+    const v4PoolId = `0x${'d'.repeat(64)}`;
+    const quote = '0x0000000000000000000000000000000000000000';
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (4663,'uniswap_v4',$1,$2,$3,3000,60,$4,2,$5,$6,0,true,'caught_up') ON CONFLICT DO NOTHING`,
+    [v4PoolId, txToken < quote ? txToken : quote, txToken < quote ? quote : txToken, quote, blockHash, officialTxHash]);
+    await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES (4663,'uniswap_v4',$1,$2) ON CONFLICT DO NOTHING`,
+      [v4PoolId, txToken]);
+    // The venue row IS this same pool_id as its `ref`, marked official — this is exactly the
+    // Pons-graduated-V4-pool case the exclusion must catch.
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v4_pool',$3,$4,2,true) ON CONFLICT (id) DO NOTHING`,
+      [`pons-v2-v4:${txToken}`, txToken, v4PoolId, txSource]);
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,timestamp,
+      amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES (4663,$1,1,'uniswap_v4',$2,2,$3,1700000100,'-1000000000000000000','2000000000000000000','79228162514264337593543950336',$4,$4,3000)
+      ON CONFLICT DO NOTHING`,
+    [officialTxHash, v4PoolId, blockHash, txToken]);
+
+    const page = await store.listTransactions(4663, txToken, { limit: 10 });
+    expect(page.items.filter((item) => item.source === 'pool')).toHaveLength(0);
+
+    await pool.query('DELETE FROM pool_trades WHERE pool_id = $1', [v4PoolId]);
+    await pool.query('DELETE FROM venues WHERE id = $1', [`pons-v2-v4:${txToken}`]);
+    await pool.query('DELETE FROM pool_members WHERE pool_id = $1', [v4PoolId]);
+    await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [v4PoolId]);
+  });
+
+  it('interleaves official and pool rows by (block, tx, logIndex) and paginates the merged sequence without gaps or repeats', async () => {
+    await seedOfficialOnly(); // block_number=1, tx=officialTxHash, log_index=0, side=buy
+    const otherPoolId = `0x${'e'.repeat(64)}`;
+    const quote = '0x0000000000000000000000000000000000000000';
+    const poolTx = '0x' + 'f'.repeat(64);
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (4663,'uniswap_v4',$1,$2,$3,3000,60,$4,0,$5,$6,0,true,'caught_up') ON CONFLICT DO NOTHING`,
+    [otherPoolId, txToken < quote ? txToken : quote, txToken < quote ? quote : txToken, quote, blockHash, poolTx]);
+    await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES (4663,'uniswap_v4',$1,$2) ON CONFLICT DO NOTHING`,
+      [otherPoolId, txToken]);
+    // block_number=2, i.e. AFTER the official trade at block 1 — must sort first (DESC).
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,timestamp,
+      amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES (4663,$1,0,'uniswap_v4',$2,2,$3,1700000200,'-1000000000000000000','2000000000000000000','79228162514264337593543950336',$4,$4,3000)
+      ON CONFLICT DO NOTHING`,
+    [poolTx, otherPoolId, blockHash, txToken]);
+
+    const first = await store.listTransactions(4663, txToken, { limit: 1 });
+    expect(first.items).toHaveLength(1);
+    expect(first.items[0]!.source).toBe('pool'); // block 2, newest first
+    expect(first.nextCursor).not.toBeNull();
+    const second = await store.listTransactions(4663, txToken, { limit: 1, cursor: first.nextCursor! });
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]!.source).toBe('official'); // block 1
+    expect(second.nextCursor).toBeNull();
+
+    await pool.query('DELETE FROM pool_trades WHERE pool_id = $1', [otherPoolId]);
+    await pool.query('DELETE FROM pool_members WHERE pool_id = $1', [otherPoolId]);
+    await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [otherPoolId]);
   });
 });

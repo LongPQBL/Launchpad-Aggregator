@@ -11,6 +11,7 @@ import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
+import { assetDecimals } from '../pools/stats.js';
 import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
@@ -22,7 +23,7 @@ import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
-import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse } from './server.js';
+import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -206,7 +207,7 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
   }) : null };
 }
 
-export function createApiStore(pool: Pool): ApiDeps['data'] {
+export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
   // "use whichever source has a reading, prefer the more current one" behavior needed here.
   // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
@@ -436,6 +437,130 @@ export function createApiStore(pool: Pool): ApiDeps['data'] {
         usdValueApprox: valuations[i]!.status === 'priced',
         usdValueStatus: valuations[i]!.status,
       })) as Page<TradeResponse>;
+    },
+    async listTransactions(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TransactionResponse>> {
+      const token = tokenAddress.toLowerCase();
+      const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+      const result = await pool.query(`
+        WITH merged AS (
+          SELECT 'official' AS source, t.venue_id, NULL::text AS protocol, NULL::text AS pool_id,
+            t.tx_hash, t.log_index, t.block_number, t.timestamp, t.side, t.activity_kind,
+            t.token_amount_raw AS amount_a_raw, t.quote_amount_raw AS amount_b_raw, t.trader_address,
+            l.quote_asset_address, l.quote_asset_decimals, l.token_decimals
+          FROM trades t
+          JOIN venues v ON v.id = t.venue_id
+          JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
+          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+
+          UNION ALL
+
+          SELECT 'pool' AS source, NULL::text AS venue_id, pt.protocol, pt.pool_id,
+            pt.tx_hash, pt.log_index, pt.block_number, pt.timestamp, NULL::text AS side, NULL::text AS activity_kind,
+            pt.amount0_raw AS amount_a_raw, pt.amount1_raw AS amount_b_raw, pt.trader_address,
+            NULL::text AS quote_asset_address, NULL::integer AS quote_asset_decimals, NULL::integer AS token_decimals
+          FROM pool_trades pt
+          JOIN pool_catalog pc ON pc.chain_id = pt.chain_id AND pc.protocol = pt.protocol AND pc.pool_id = pt.pool_id
+          WHERE pc.verified = true
+            AND EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id = pc.chain_id AND m.protocol = pc.protocol
+              AND m.pool_id = pc.pool_id AND m.token_address = $2)
+            AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
+              AND ov.kind IN ('v4_pool','v3_pool') AND ov.ref = pc.pool_id AND ov.official = true)
+        )
+        SELECT * FROM merged
+        WHERE ($3::bigint IS NULL OR (block_number, tx_hash, log_index) < ($3::bigint, $4::text, $5::integer))
+        ORDER BY block_number DESC, tx_hash DESC, log_index DESC
+        LIMIT $6`,
+      [chainId, token, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
+        cursor?.logIndex ?? null, query.limit + 1]);
+      const rows = result.rows as Row[];
+      const visible = rows.slice(0, query.limit);
+
+      // Pool rows only carry raw amount0/amount1 — resolve which side is this launch's own token
+      // vs the pool's quote asset (and each side's decimals) once per distinct pool on this page,
+      // not once per row (mirrors readPoolTrades' one-pool case, generalized to many pools).
+      const poolKeys = [...new Map(visible.filter((row) => row.source === 'pool')
+        .map((row) => [`${string(row.protocol)}:${string(row.pool_id)}`, { protocol: string(row.protocol), poolId: string(row.pool_id) }]))
+        .values()];
+      const poolCurrencies = new Map<string, { currency0: string; currency1: string }>();
+      if (poolKeys.length > 0) {
+        const catalogRows = (await pool.query(
+          `SELECT protocol, pool_id, currency0, currency1 FROM pool_catalog
+           WHERE chain_id = $1 AND (protocol, pool_id) IN (SELECT * FROM unnest($2::text[], $3::text[]))`,
+          [chainId, poolKeys.map((k) => k.protocol), poolKeys.map((k) => k.poolId)],
+        )).rows as Row[];
+        for (const row of catalogRows) {
+          poolCurrencies.set(`${string(row.protocol)}:${string(row.pool_id)}`, { currency0: string(row.currency0), currency1: string(row.currency1) });
+        }
+      }
+      const distinctAddresses = [...new Set([...poolCurrencies.values()].flatMap((c) => [c.currency0, c.currency1]))];
+      const decimalsByAddress = new Map<string, number | null>(
+        await Promise.all(distinctAddresses.map(async (address) => [address, await assetDecimals(rpcClient, address)] as const)),
+      );
+
+      interface Interpreted { side: 'buy' | 'sell'; tokenAmountRaw: bigint; quoteAmountRaw: bigint;
+        quoteAssetAddress: string | null; quoteAssetDecimals: number | null; tokenDecimals: number | null }
+      function interpret(row: Row): Interpreted {
+        if (row.source === 'official') {
+          return { side: string(row.side) as 'buy' | 'sell', tokenAmountRaw: BigInt(string(row.amount_a_raw)),
+            quoteAmountRaw: BigInt(string(row.amount_b_raw)), quoteAssetAddress: nullableString(row.quote_asset_address),
+            quoteAssetDecimals: nullableNumber(row.quote_asset_decimals), tokenDecimals: nullableNumber(row.token_decimals) };
+        }
+        const key = `${string(row.protocol)}:${string(row.pool_id)}`;
+        const currencies = poolCurrencies.get(key);
+        const displayedIsCurrency0 = currencies?.currency0 === token;
+        const signed = BigInt(string(displayedIsCurrency0 ? row.amount_a_raw : row.amount_b_raw));
+        const quoteSigned = BigInt(string(displayedIsCurrency0 ? row.amount_b_raw : row.amount_a_raw));
+        const quoteAssetAddress = currencies ? (displayedIsCurrency0 ? currencies.currency1 : currencies.currency0) : null;
+        return { side: signed < 0n ? 'buy' : 'sell', tokenAmountRaw: signed < 0n ? -signed : signed,
+          quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned, quoteAssetAddress,
+          quoteAssetDecimals: quoteAssetAddress ? decimalsByAddress.get(quoteAssetAddress) ?? null : null,
+          tokenDecimals: currencies ? decimalsByAddress.get(token) ?? null : null };
+      }
+      const interpreted = visible.map(interpret);
+
+      // Resolve one verified feed per DISTINCT quote asset on this page (not per row), then value
+      // each row and coalesce pending-backfill ranges per feed — generalizes listTrades' single-feed
+      // coalescing (that method only ever has one quote asset per page; this one can have many,
+      // since different pools can quote in different assets).
+      const distinctQuoteAssets = [...new Set(interpreted.map((i) => i.quoteAssetAddress).filter((a): a is string => a !== null))];
+      const feedByQuoteAsset = new Map(await Promise.all(distinctQuoteAssets.map(async (address) =>
+        [address, await resolveVerifiedFeed(pool, chainId, address)] as const)));
+      const valuations = await Promise.all(visible.map((row, i) => {
+        const info = interpreted[i]!;
+        if (info.quoteAssetDecimals === null || info.quoteAssetAddress === null) return Promise.resolve({ status: 'unavailable' as const });
+        return valueTradeUsd(pool, chainId, info.quoteAssetAddress, { timestamp: number(row.timestamp),
+          quoteAmountRaw: info.quoteAmountRaw, quoteAssetDecimals: info.quoteAssetDecimals,
+          blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index) });
+      }));
+      const pendingByFeed = new Map<string, number[]>();
+      valuations.forEach((valuation, i) => {
+        if (valuation.status !== 'pending') return;
+        const feed = feedByQuoteAsset.get(interpreted[i]!.quoteAssetAddress ?? '');
+        if (!feed) return;
+        const list = pendingByFeed.get(feed.feedAddress) ?? [];
+        list.push(number(visible[i]!.timestamp));
+        pendingByFeed.set(feed.feedAddress, list);
+      });
+      await Promise.all([...pendingByFeed.entries()].map(([feedAddress, timestamps]) =>
+        enqueueRoundBackfillJob(pool, chainId, feedAddress, Math.min(...timestamps) - 3600, Math.max(...timestamps) + 3600).catch(() => {})));
+
+      return page(rows, query.limit, (row, i) => {
+        const info = interpreted[i]!;
+        return {
+          source: row.source as 'official' | 'pool',
+          venueId: nullableString(row.venue_id),
+          pool: row.protocol ? { protocol: string(row.protocol) as 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2', poolId: string(row.pool_id) } : null,
+          blockNumber: string(row.block_number), txHash: string(row.tx_hash), logIndex: number(row.log_index),
+          timestamp: number(row.timestamp), side: info.side, activityKind: nullableString(row.activity_kind),
+          tokenAmount: info.tokenDecimals === null ? null : formatUnits(info.tokenAmountRaw, info.tokenDecimals),
+          quoteAmount: info.quoteAssetDecimals === null ? null : formatUnits(info.quoteAmountRaw, info.quoteAssetDecimals),
+          quoteAssetAddress: info.quoteAssetAddress,
+          traderAddress: string(row.trader_address),
+          usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
+          usdValueApprox: valuations[i]!.status === 'priced',
+          usdValueStatus: valuations[i]!.status,
+        };
+      }) as Page<TransactionResponse>;
     },
     async listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }> {
       const head = await safeHead();

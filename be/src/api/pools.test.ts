@@ -23,7 +23,8 @@ function setup() {
   };
   const data = { listSources: async () => [], getCoverage: async () => ({ complete: false, pendingSourceIds: [], missingRanges: [] }),
     listLaunches: async () => ({ items: [], nextCursor: null }), getLaunch: async () => ({ tokenAddress: token } as never),
-    listTrades: async () => ({ items: [], nextCursor: null }), listCandles: async () => ({ items: [], complete: false }), listUsdCandles: async () => ({ items: [], complete: false }) };
+    listTrades: async () => ({ items: [], nextCursor: null }), listTransactions: async () => ({ items: [], nextCursor: null }),
+    listCandles: async () => ({ items: [], complete: false }), listUsdCandles: async () => ({ items: [], complete: false }) };
   return { calls, pools, data };
 }
 describe('pool API', () => {

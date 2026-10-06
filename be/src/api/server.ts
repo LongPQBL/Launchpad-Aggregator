@@ -41,6 +41,16 @@ export interface TradeResponse {
   activityKind: string; tokenAmount: string | null; quoteAmount: string | null; priceQuote: string | null; traderAddress: string;
   usdValue: string | null; usdValueApprox: boolean; usdValueStatus: 'priced' | 'pending' | 'unavailable';
 }
+export interface TransactionResponse {
+  source: 'official' | 'pool';
+  venueId: string | null;
+  pool: { protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string } | null;
+  blockNumber: string; txHash: string; logIndex: number; timestamp: number;
+  side: 'buy' | 'sell'; activityKind: string | null;
+  tokenAmount: string | null; quoteAmount: string | null; quoteAssetAddress: string | null;
+  traderAddress: string;
+  usdValue: string | null; usdValueApprox: boolean; usdValueStatus: 'priced' | 'pending' | 'unavailable';
+}
 export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
@@ -79,6 +89,7 @@ export interface ApiDeps {
     listLaunches(query: LaunchListQuery): Promise<Page<LaunchSummary>>;
     getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null>;
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
+    listTransactions(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TransactionResponse>>;
     listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
     listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }>;
   };
