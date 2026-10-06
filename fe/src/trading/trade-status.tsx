@@ -19,7 +19,9 @@ export function TradeStatus({ status, txHash, errorMessage, explorerBase }: Trad
   if (status === 'confirmed') return <p className="text-sm text-emerald-600">Confirmed. {explorerLink}</p>;
   return (
     <p role="alert" className="text-sm text-destructive">
-      {errorMessage ?? 'Transaction failed.'} {explorerLink}
+      {/* A replayed revert whose eth_call now succeeds can decode to an empty string (see
+          decodeTradeError) — `||` falls through for that case too, not just null/undefined. */}
+      {errorMessage || 'Transaction failed.'} {explorerLink}
     </p>
   );
 }

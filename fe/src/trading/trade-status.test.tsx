@@ -23,6 +23,14 @@ describe('TradeStatus', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('User rejected the request');
   });
 
+  it('falls back to the generic failure message when the decoded error is an empty string, not a blank alert', () => {
+    // A revert whose replayed eth_call now succeeds (e.g. the price moved back before replay) can
+    // decode to an empty string via decodeTradeError — '' is not nullish, so the old `??` fallback
+    // never kicked in and the user saw a red alert with no text at all.
+    render(<TradeStatus status="failed" txHash={undefined} errorMessage="" explorerBase={null} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Transaction failed.');
+  });
+
   it('shows a confirmed message', () => {
     render(<TradeStatus status="confirmed" txHash="0xabc" errorMessage={null} explorerBase="https://robinhoodchain.blockscout.com" />);
     expect(screen.getByText(/confirmed/i)).toBeInTheDocument();
