@@ -71,6 +71,15 @@ describe('readPoolStats', () => {
     expect(statsB.priceInQuote).toBe('1');
   });
 
+  it('labels side using the same sign convention as the official V4 decoder (be/src/launchpads/pons/v2/v4Swaps.ts) — token amount negative means the trader gave the token away, a sell', async () => {
+    // Fixture seeds amount0_raw (token a, the displayed/currency0 side) = -1e18 and
+    // amount1_raw (quote b) = +1e18 for both rows — the trader's token balance decreased, so
+    // this is a sell from the trader's perspective, matching v4Swaps.ts's
+    // `quoteSigned < 0n ? 'buy' : 'sell'` (quote positive here, so 'sell').
+    const page = await readPoolTrades(pool, key, a, { limit: 2, rpcClient });
+    expect(page.items.every((item) => item.side === 'sell')).toBe(true);
+  });
+
   it('pages only this pool and values each transaction at its historical round', async () => {
     const first = await readPoolTrades(pool, key, a, { limit: 1, rpcClient });
     expect(first.items).toHaveLength(1);

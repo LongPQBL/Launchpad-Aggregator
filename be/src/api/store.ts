@@ -441,12 +441,21 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     async listTransactions(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TransactionResponse>> {
       const token = tokenAddress.toLowerCase();
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+      // Fetched once regardless of branch — official rows already had this via their l.* join,
+      // but pool rows never did (a pool_catalog row carries no decimals at all). One lookup for
+      // the launch's own token decimals is cheap and avoids an RPC round trip per distinct pool
+      // (final-review Important 3: the previous version called assetDecimals for the launch token
+      // itself, redundant with this already-known, already-indexed value).
+      const launchRow = (await pool.query('SELECT token_decimals FROM launches WHERE chain_id = $1 AND token_address = $2',
+        [chainId, token])).rows[0] as Row | undefined;
+      const tokenDecimals = launchRow ? nullableNumber(launchRow.token_decimals) : null;
       const result = await pool.query(`
         WITH merged AS (
           SELECT 'official' AS source, t.venue_id, NULL::text AS protocol, NULL::text AS pool_id,
+            NULL::text AS currency0, NULL::text AS currency1,
             t.tx_hash, t.log_index, t.block_number, t.timestamp, t.side, t.activity_kind,
             t.token_amount_raw AS amount_a_raw, t.quote_amount_raw AS amount_b_raw, t.trader_address,
-            l.quote_asset_address, l.quote_asset_decimals, l.token_decimals
+            l.quote_asset_address, l.quote_asset_decimals
           FROM trades t
           JOIN venues v ON v.id = t.venue_id
           JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
@@ -454,13 +463,17 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
 
           UNION ALL
 
+          -- pt.chain_id = $1 is required (not implied by the pool_catalog join alone): without it,
+          -- a token at the same address on another chain could pull that chain's pool swaps into
+          -- this launch's feed (final-review Important 1).
           SELECT 'pool' AS source, NULL::text AS venue_id, pt.protocol, pt.pool_id,
+            pc.currency0, pc.currency1,
             pt.tx_hash, pt.log_index, pt.block_number, pt.timestamp, NULL::text AS side, NULL::text AS activity_kind,
             pt.amount0_raw AS amount_a_raw, pt.amount1_raw AS amount_b_raw, pt.trader_address,
-            NULL::text AS quote_asset_address, NULL::integer AS quote_asset_decimals, NULL::integer AS token_decimals
+            NULL::text AS quote_asset_address, NULL::integer AS quote_asset_decimals
           FROM pool_trades pt
           JOIN pool_catalog pc ON pc.chain_id = pt.chain_id AND pc.protocol = pt.protocol AND pc.pool_id = pt.pool_id
-          WHERE pc.verified = true
+          WHERE pt.chain_id = $1 AND pc.verified = true
             AND EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id = pc.chain_id AND m.protocol = pc.protocol
               AND m.pool_id = pc.pool_id AND m.token_address = $2)
             AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
@@ -475,46 +488,37 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const rows = result.rows as Row[];
       const visible = rows.slice(0, query.limit);
 
-      // Pool rows only carry raw amount0/amount1 — resolve which side is this launch's own token
-      // vs the pool's quote asset (and each side's decimals) once per distinct pool on this page,
-      // not once per row (mirrors readPoolTrades' one-pool case, generalized to many pools).
-      const poolKeys = [...new Map(visible.filter((row) => row.source === 'pool')
-        .map((row) => [`${string(row.protocol)}:${string(row.pool_id)}`, { protocol: string(row.protocol), poolId: string(row.pool_id) }]))
-        .values()];
-      const poolCurrencies = new Map<string, { currency0: string; currency1: string }>();
-      if (poolKeys.length > 0) {
-        const catalogRows = (await pool.query(
-          `SELECT protocol, pool_id, currency0, currency1 FROM pool_catalog
-           WHERE chain_id = $1 AND (protocol, pool_id) IN (SELECT * FROM unnest($2::text[], $3::text[]))`,
-          [chainId, poolKeys.map((k) => k.protocol), poolKeys.map((k) => k.poolId)],
-        )).rows as Row[];
-        for (const row of catalogRows) {
-          poolCurrencies.set(`${string(row.protocol)}:${string(row.pool_id)}`, { currency0: string(row.currency0), currency1: string(row.currency1) });
-        }
-      }
-      const distinctAddresses = [...new Set([...poolCurrencies.values()].flatMap((c) => [c.currency0, c.currency1]))];
+      // Pool rows only carry raw amount0/amount1 — resolve the pool's counter (quote) asset's
+      // decimals once per distinct address on this page, not once per row. The launch token's own
+      // decimals (tokenDecimals, above) never needs this: only the OTHER side of a pool swap is an
+      // arbitrary ERC20 with no already-known decimals.
+      const distinctQuoteAddresses = [...new Set(visible
+        .filter((row) => row.source === 'pool' && row.currency0 !== null)
+        .map((row) => (string(row.currency0) === token ? string(row.currency1) : string(row.currency0))))];
       const decimalsByAddress = new Map<string, number | null>(
-        await Promise.all(distinctAddresses.map(async (address) => [address, await assetDecimals(rpcClient, address)] as const)),
+        await Promise.all(distinctQuoteAddresses.map(async (address) => [address, await assetDecimals(rpcClient, address)] as const)),
       );
 
       interface Interpreted { side: 'buy' | 'sell'; tokenAmountRaw: bigint; quoteAmountRaw: bigint;
-        quoteAssetAddress: string | null; quoteAssetDecimals: number | null; tokenDecimals: number | null }
+        quoteAssetAddress: string | null; quoteAssetDecimals: number | null }
       function interpret(row: Row): Interpreted {
         if (row.source === 'official') {
           return { side: string(row.side) as 'buy' | 'sell', tokenAmountRaw: BigInt(string(row.amount_a_raw)),
             quoteAmountRaw: BigInt(string(row.amount_b_raw)), quoteAssetAddress: nullableString(row.quote_asset_address),
-            quoteAssetDecimals: nullableNumber(row.quote_asset_decimals), tokenDecimals: nullableNumber(row.token_decimals) };
+            quoteAssetDecimals: nullableNumber(row.quote_asset_decimals) };
         }
-        const key = `${string(row.protocol)}:${string(row.pool_id)}`;
-        const currencies = poolCurrencies.get(key);
-        const displayedIsCurrency0 = currencies?.currency0 === token;
+        const currency0 = nullableString(row.currency0);
+        const currency1 = nullableString(row.currency1);
+        const displayedIsCurrency0 = currency0 === token;
         const signed = BigInt(string(displayedIsCurrency0 ? row.amount_a_raw : row.amount_b_raw));
         const quoteSigned = BigInt(string(displayedIsCurrency0 ? row.amount_b_raw : row.amount_a_raw));
-        const quoteAssetAddress = currencies ? (displayedIsCurrency0 ? currencies.currency1 : currencies.currency0) : null;
-        return { side: signed < 0n ? 'buy' : 'sell', tokenAmountRaw: signed < 0n ? -signed : signed,
+        const quoteAssetAddress = currency0 && currency1 ? (displayedIsCurrency0 ? currency1 : currency0) : null;
+        // Same sign convention as the official V4 decoder (be/src/launchpads/pons/v2/v4Swaps.ts) and
+        // readPoolTrades (be/src/pools/stats.ts): the trader's displayed-token balance increasing
+        // (positive) means they received it, a buy — NOT the inverse (final-review Critical 1).
+        return { side: signed > 0n ? 'buy' : 'sell', tokenAmountRaw: signed < 0n ? -signed : signed,
           quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned, quoteAssetAddress,
-          quoteAssetDecimals: quoteAssetAddress ? decimalsByAddress.get(quoteAssetAddress) ?? null : null,
-          tokenDecimals: currencies ? decimalsByAddress.get(token) ?? null : null };
+          quoteAssetDecimals: quoteAssetAddress ? decimalsByAddress.get(quoteAssetAddress) ?? null : null };
       }
       const interpreted = visible.map(interpret);
 
@@ -552,7 +556,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           pool: row.protocol ? { protocol: string(row.protocol) as 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2', poolId: string(row.pool_id) } : null,
           blockNumber: string(row.block_number), txHash: string(row.tx_hash), logIndex: number(row.log_index),
           timestamp: number(row.timestamp), side: info.side, activityKind: nullableString(row.activity_kind),
-          tokenAmount: info.tokenDecimals === null ? null : formatUnits(info.tokenAmountRaw, info.tokenDecimals),
+          tokenAmount: tokenDecimals === null ? null : formatUnits(info.tokenAmountRaw, tokenDecimals),
           quoteAmount: info.quoteAssetDecimals === null ? null : formatUnits(info.quoteAmountRaw, info.quoteAssetDecimals),
           quoteAssetAddress: info.quoteAssetAddress,
           traderAddress: string(row.trader_address),

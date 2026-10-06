@@ -725,6 +725,13 @@ describe('listTransactions', () => {
   const txSource = 'store-test-transactions';
   const txVenueId = `pons-v2-curve:${txToken}`;
   const officialTxHash = '0x' + 'c'.repeat(64);
+  // A stub RPC client so pool-branch decimal resolution (assetDecimals) doesn't need a real chain —
+  // mirrors the pattern in stats.integration.test.ts's own rpcClient fixture.
+  const txRpcClient = { async readContract({ functionName }: { functionName: string }) {
+    if (functionName === 'decimals') return 18;
+    throw new Error(`Unexpected ${functionName}`);
+  } };
+  const storeWithRpc = createApiStore(pool, txRpcClient);
 
   async function seedOfficialOnly() {
     await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
@@ -814,6 +821,9 @@ describe('listTransactions', () => {
     const first = await store.listTransactions(4663, txToken, { limit: 1 });
     expect(first.items).toHaveLength(1);
     expect(first.items[0]!.source).toBe('pool'); // block 2, newest first
+    // txToken is currency1 here (quote 0x0000... < txToken 0x1616...); amount1_raw is positive
+    // (+2e18), i.e. the trader's txToken balance increased — a buy (final-review Critical 1).
+    expect(first.items[0]!.side).toBe('buy');
     expect(first.nextCursor).not.toBeNull();
     const second = await store.listTransactions(4663, txToken, { limit: 1, cursor: first.nextCursor! });
     expect(second.items).toHaveLength(1);
@@ -823,5 +833,94 @@ describe('listTransactions', () => {
     await pool.query('DELETE FROM pool_trades WHERE pool_id = $1', [otherPoolId]);
     await pool.query('DELETE FROM pool_members WHERE pool_id = $1', [otherPoolId]);
     await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [otherPoolId]);
+  });
+
+  it('labels a pool-sell correctly when the launch token is currency0 (opposite orientation from the interleave test above)', async () => {
+    await seedOfficialOnly();
+    const poolId = `0x${'1'.repeat(64)}`;
+    const other = '0xffffffffffffffffffffffffffffffffffffffff'; // > txToken, so txToken is currency0
+    const poolTx = '0x' + '2'.repeat(64);
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (4663,'uniswap_v4',$1,$2,$3,3000,60,$4,5,$5,$6,0,true,'caught_up') ON CONFLICT DO NOTHING`,
+    [poolId, txToken, other, other, blockHash, poolTx]);
+    await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES (4663,'uniswap_v4',$1,$2) ON CONFLICT DO NOTHING`,
+      [poolId, txToken]);
+    // txToken is currency0 here; amount0_raw is negative (-3e18) — the trader's txToken balance
+    // decreased, a sell. amount1_raw (currency1/quote) is positive (+7e18).
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,timestamp,
+      amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES (4663,$1,0,'uniswap_v4',$2,5,$3,1700000050,'-3000000000000000000','7000000000000000000','79228162514264337593543950336',$4,$4,3000)
+      ON CONFLICT DO NOTHING`,
+    [poolTx, poolId, blockHash, txToken]);
+
+    const page = await storeWithRpc.listTransactions(4663, txToken, { limit: 10 });
+    const row = page.items.find((item) => item.source === 'pool')!;
+    expect(row).toMatchObject({ side: 'sell', tokenAmount: '3', quoteAmount: '7', quoteAssetAddress: other });
+
+    await pool.query('DELETE FROM pool_trades WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM pool_members WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [poolId]);
+  });
+
+  it('values a pool row at its historical quote price, same as an official row', async () => {
+    await seedOfficialOnly();
+    const poolId = `0x${'3'.repeat(64)}`;
+    const quote = '0x0000000000000000000000000000000000000000'; // ETH, < txToken
+    const poolTx = '0x' + '4'.repeat(64);
+    const feed = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (4663,'uniswap_v4',$1,$2,$3,3000,60,$4,6,$5,$6,0,true,'caught_up') ON CONFLICT DO NOTHING`,
+    [poolId, quote, txToken, quote, blockHash, poolTx]);
+    await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES (4663,'uniswap_v4',$1,$2) ON CONFLICT DO NOTHING`,
+      [poolId, txToken]);
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,timestamp,
+      amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES (4663,$1,0,'uniswap_v4',$2,6,$3,1700000060,'-1000000000000000000','5000000000000000000','79228162514264337593543950336',$4,$4,3000)
+      ON CONFLICT DO NOTHING`,
+    [poolTx, poolId, blockHash, txToken]);
+    await upsertQuoteFeed(pool, { chainId: 4663, quoteAssetAddress: quote as `0x${string}`, feedAddress: feed as `0x${string}`,
+      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now: new Date() });
+    await upsertPriceRounds(pool, 4663, feed, [
+      { roundId: 1n, answerRaw: 300000000000n, decimals: 8, startedAt: 1700000000, updatedAt: 1700000000, blockNumber: 0n, logIndex: 0 },
+    ]);
+
+    const page = await storeWithRpc.listTransactions(4663, txToken, { limit: 10 });
+    const row = page.items.find((item) => item.source === 'pool')!;
+    expect(row.usdValueStatus).toBe('priced');
+    expect(Number(row.usdValue)).toBeCloseTo(3000, 2); // 1 ETH quote amount * $3000/ETH
+
+    await pool.query('DELETE FROM pool_trades WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM pool_members WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = 4663 AND feed_address = $1', [feed]);
+    await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [quote]);
+  });
+
+  it('never pulls another chain\'s pool swaps into this token\'s feed, even for the same token address', async () => {
+    await seedOfficialOnly();
+    const otherChainId = 999999;
+    const poolId = `0x${'5'.repeat(64)}`;
+    const other = '0xdddddddddddddddddddddddddddddddddddddddd';
+    const poolTx = '0x' + '6'.repeat(64);
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES ($1,'uniswap_v4',$2,$3,$4,3000,60,$5,7,$6,$7,0,true,'caught_up') ON CONFLICT DO NOTHING`,
+    [otherChainId, poolId, txToken, other, other, blockHash, poolTx]);
+    await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES ($1,'uniswap_v4',$2,$3) ON CONFLICT DO NOTHING`,
+      [otherChainId, poolId, txToken]);
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,timestamp,
+      amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES ($1,$2,0,'uniswap_v4',$3,7,$4,1700000070,'1000000000000000000','-1000000000000000000','79228162514264337593543950336',$5,$5,3000)
+      ON CONFLICT DO NOTHING`,
+    [otherChainId, poolTx, poolId, blockHash, txToken]);
+
+    const page = await store.listTransactions(4663, txToken, { limit: 10 });
+    expect(page.items.filter((item) => item.source === 'pool')).toHaveLength(0);
+
+    await pool.query('DELETE FROM pool_trades WHERE chain_id = $1 AND pool_id = $2', [otherChainId, poolId]);
+    await pool.query('DELETE FROM pool_members WHERE chain_id = $1 AND pool_id = $2', [otherChainId, poolId]);
+    await pool.query('DELETE FROM pool_catalog WHERE chain_id = $1 AND pool_id = $2', [otherChainId, poolId]);
   });
 });

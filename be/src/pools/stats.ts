@@ -96,7 +96,9 @@ export async function readPoolTrades(pool: Pool, key: PoolKey, displayedToken: s
       quoteAssetDecimals: pricedSide.decimals, blockNumber: BigInt(row.block_number), logIndex: Number(row.log_index),
     }) : { status: 'unavailable' as const };
     items.push({ txHash: row.tx_hash, logIndex: Number(row.log_index), blockNumber: String(row.block_number),
-      timestamp: Number(row.timestamp), traderAddress: row.trader_address, side: signed < 0n ? 'buy' : 'sell',
+      // Same convention as the official V4 decoder (be/src/launchpads/pons/v2/v4Swaps.ts):
+      // the trader's displayed-token balance increasing (positive) means they received it, a buy.
+      timestamp: Number(row.timestamp), traderAddress: row.trader_address, side: signed > 0n ? 'buy' : 'sell',
       amount0Raw: row.amount0_raw, amount1Raw: row.amount1_raw,
       priceInQuote: poolPriceInQuote(BigInt(row.sqrt_price_x96), displayedIsCurrency0 ? decimals0 : decimals1,
         displayedIsCurrency0 ? decimals1 : decimals0, displayedIsCurrency0),
