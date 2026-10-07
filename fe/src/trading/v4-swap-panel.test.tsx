@@ -1,7 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { decodeAbiParameters, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { V4SwapPanel } from './v4-swap-panel';
 import type { V4PoolKey } from './v4SwapEncoding';
+
+// Mirrors v4SwapEncoding.test.ts's own decode pattern: actions string, then each params[]
+// element decoded by position (params[0] is the swap struct itself).
+const SWAP_PARAMS_ABI = parseAbiParameters(
+  '((address currency0, address currency1, uint24 fee, int24 tickSpacing, address hooks) poolKey, bool zeroForOne, uint128 amountIn, uint128 amountOutMinimum, uint256 minHopPriceX36, bytes hookData)',
+);
+
+function decodeZeroForOne(swapInput: `0x${string}`): boolean {
+  const [, params] = decodeAbiParameters(parseAbiParameters('bytes actions, bytes[] params'), swapInput);
+  const [swapParams] = decodeAbiParameters(SWAP_PARAMS_ABI, params[0]);
+  return swapParams.zeroForOne;
+}
 
 const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
@@ -67,6 +80,29 @@ describe('V4SwapPanel', () => {
   it('defaults to swapping tokenA for tokenB, deriving zeroForOne from the real pool key', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     expect(screen.getByText(new RegExp(`Sell.*${tokenA.symbol}`, 'i'))).toBeInTheDocument();
+  });
+
+  it('encodes the real zeroForOne bit matching the UI direction, not just the displayed label', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    const inputs = args[1];
+    expect(decodeZeroForOne(inputs[inputs.length - 1])).toBe(true);
+  });
+
+  it('flips the encoded zeroForOne bit to false after the direction toggle, not just the displayed label', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    const inputs = args[1];
+    expect(decodeZeroForOne(inputs[inputs.length - 1])).toBe(false);
   });
 
   it('flips direction when the toggle is clicked', () => {
