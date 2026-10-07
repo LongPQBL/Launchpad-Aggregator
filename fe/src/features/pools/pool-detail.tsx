@@ -63,8 +63,8 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
       <Card><CardContent className="pt-6">
         <SwapPanel
           poolAddress={pool.poolId as `0x${string}`}
-          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals }}
-          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals }}
+          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals, logoUri: pool.currency0LogoUri }}
+          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals, logoUri: pool.currency1LogoUri }}
           explorerBase={explorerBase ?? null}
         />
       </CardContent></Card>

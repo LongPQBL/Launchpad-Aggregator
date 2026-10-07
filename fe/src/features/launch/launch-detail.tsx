@@ -149,8 +149,8 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             <div className="mt-4 border-t border-border pt-4">
               <SwapPanel
                 poolAddress={activeV3Venue.ref as `0x${string}`}
-                tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals }}
-                tokenB={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
+                tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals, logoUri: detail.logoUri }}
+                tokenB={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals, logoUri: null }}
                 explorerBase={explorerBase ?? null}
               />
             </div>
