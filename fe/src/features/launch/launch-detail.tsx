@@ -62,6 +62,13 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
   // activeCurveVenue's own lifecycleStatus === 'trading' gate above.
   const activeV4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool' && venue.effectiveToBlock === null);
 
+  // V4SwapPanel's tokenA/tokenB props are a presentation default (which side starts as "being
+  // sold"), independent of zeroForOne — V4SwapPanel derives that itself from address comparison
+  // regardless of prop order. Always put the launch's own token on tokenA, like the V3 SwapPanel
+  // wiring above already does, instead of letting it depend on which currency happens to sort
+  // first in poolKey's real, unmodified order.
+  const v4LaunchTokenIsCurrency0 = v4Pool ? v4Pool.currency0.toLowerCase() === detail.tokenAddress.toLowerCase() : true;
+
   return (
     <article className="flex flex-col gap-4">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm text-muted-foreground">
@@ -153,8 +160,12 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
               <V4SwapPanel
                 poolKey={{ currency0: v4Pool.currency0 as `0x${string}`, currency1: v4Pool.currency1 as `0x${string}`,
                   fee: v4Pool.fee, tickSpacing: v4Pool.tickSpacing, hooks: v4Pool.hooks as `0x${string}` }}
-                tokenA={{ address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }}
-                tokenB={{ address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }}
+                tokenA={v4LaunchTokenIsCurrency0
+                  ? { address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }
+                  : { address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }}
+                tokenB={v4LaunchTokenIsCurrency0
+                  ? { address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }
+                  : { address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }}
                 explorerBase={explorerBase ?? null}
               />
             </div>

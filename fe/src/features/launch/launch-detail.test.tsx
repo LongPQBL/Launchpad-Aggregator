@@ -657,6 +657,34 @@ describe('LaunchDetail', () => {
     expect(screen.getByRole('button', { name: /flip|swap direction/i })).toBeInTheDocument();
   });
 
+  it('defaults the V4 swap panel to selling the launch token even when it is currency1, not currency0', () => {
+    const tokenAddress = '0x9999999999999999999999999999999999999999';
+    render(
+      <LaunchDetail
+        detail={detail({
+          protocolVersion: 'v2', lifecycleStatus: 'graduated', tokenAddress, symbol: 'MYTOK',
+          officialVenues: [venue({ kind: 'v4_pool', effectiveToBlock: null })],
+        })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+        v4Pool={{
+          chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'c'.repeat(64)}`,
+          // currency0 is numerically smaller than tokenAddress, so the launch's own token lands
+          // on currency1 here — the panel must still default to selling it, not the quote asset.
+          currency0: '0x1111111111111111111111111111111111111111', currency1: tokenAddress,
+          displayedToken: tokenAddress, fee: 0, tickSpacing: 200,
+          currency0Symbol: 'ROBIN', currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
+          currency1Symbol: 'MYTOK', currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
+          hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
+          ponsDesignated: true, launchTokenAddress: tokenAddress,
+          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
+        }}
+      />,
+    );
+    expect(screen.getByText(/Sell.*MYTOK/i)).toBeInTheDocument();
+  });
+
   it('hides the V4 swap panel when the venue is active but its pool data did not resolve', () => {
     render(
       <LaunchDetail
