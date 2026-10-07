@@ -59,4 +59,18 @@ describe('quote feed discovery', () => {
     const registry = createQuoteFeedRegistry(fetchJson, () => 1000);
     expect(await registry.resolve(eth)).toBe('0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9');
   });
+
+  it('resolves an asset\'s name/logo even when it has no USD feed match', async () => {
+    const fetchJson = vi.fn(async (url: string) => url.includes('/rhj/assets')
+      ? { assets: [{ tokenSymbol: 'NVDA', tokenName: 'NVIDIA • Robinhood Token',
+        logoUrl: 'https://cdn.robinhood.com/ncw_assets/logos/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png',
+        status: 'ASSET_STATUS_ACTIVE', deployments: [{ chainId: 4663, contractAddress: nvda }] }] }
+      : []);
+    const registry = createQuoteFeedRegistry(fetchJson, () => 1000);
+    expect(await registry.resolveMetadata(nvda)).toEqual({
+      name: 'NVIDIA • Robinhood Token',
+      logoUri: 'https://cdn.robinhood.com/ncw_assets/logos/0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec.png',
+    });
+    expect(await registry.resolveMetadata(fakeNvda)).toBeNull();
+  });
 });
