@@ -34,7 +34,11 @@ describe('TokenLogo', () => {
   it('shows the Robinhood Chain badge even when the token logo is unavailable', () => {
     render(<TokenLogo logoUri={null} symbol="TKA" chainId={4663} />);
 
-    expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toHaveAttribute(
+    // The badge is decorative (redundant with context, same as its sibling letter-fallback span)
+    // and aria-hidden, so it has no accessible name/role for a screen reader — query by its raw
+    // `alt` attribute instead of role+name. This still asserts the badge visually renders with the
+    // right image, just not as an AT-announced role.
+    expect(screen.getByAltText('Robinhood Chain')).toHaveAttribute(
       'src',
       expect.stringContaining('/images/chains/robinhood-chain.png'),
     );
@@ -44,7 +48,7 @@ describe('TokenLogo', () => {
   it('does not show a Robinhood badge for another chain', () => {
     render(<TokenLogo logoUri={null} symbol="TKA" chainId={1} />);
 
-    expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
+    expect(screen.queryByAltText('Robinhood Chain')).not.toBeInTheDocument();
   });
 
   it('falls back to the placeholder for a malformed logo URI', () => {

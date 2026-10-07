@@ -174,7 +174,10 @@ describe('LaunchDetail', () => {
     render(<LaunchDetail detail={detail({ logoUri: 'https://example.com/token.png', tokenAddress: '0xabc0000000000000000000000000000000001e18' })} transactions={null} candles={null} />);
 
     expect(screen.getByRole('img', { name: 'Token logo' })).toHaveAttribute('src', 'https://example.com/token.png');
-    expect(screen.getByRole('img', { name: 'Robinhood Chain' })).toBeInTheDocument();
+    // The Robinhood Chain badge is decorative (aria-hidden, same treatment as its sibling
+    // letter-fallback span) — it has no accessible name/role, so it's queried by its raw `alt`
+    // attribute instead of role+name.
+    expect(screen.getByAltText('Robinhood Chain')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Pons logo' })).toBeInTheDocument();
     // The Description section's copy-address button (fe/src/features/launch/about-section.tsx)
     // renders the same short-address format — scoped by test id to avoid an ambiguous match.
@@ -184,7 +187,7 @@ describe('LaunchDetail', () => {
   it('does not show Robinhood or Pons branding for another source', () => {
     render(<LaunchDetail detail={detail({ chainId: 1, platform: 'other' })} transactions={null} candles={null} />);
 
-    expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
+    expect(screen.queryByAltText('Robinhood Chain')).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Pons logo' })).not.toBeInTheDocument();
     expect(screen.getByText('other')).toBeInTheDocument();
   });

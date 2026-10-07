@@ -46,6 +46,7 @@ export function TokenLogo({ logoUri, symbol, chainId }: TokenLogoProps) {
         <Image
           src="/images/chains/robinhood-chain.png"
           alt="Robinhood Chain"
+          aria-hidden="true"
           width={16}
           height={16}
           unoptimized

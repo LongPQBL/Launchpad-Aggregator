@@ -180,6 +180,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
           options={sideOptions(tokenIn)}
           selected={selectedOption(tokenIn)}
           onSelect={(key) => handleSelect(tokenIn, key)}
+          chainId={robinhoodChain.id}
         />
       </div>
       <Button type="button" variant="ghost" size="sm" aria-label="Flip swap direction"
@@ -196,6 +197,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
           options={sideOptions(tokenOut)}
           selected={selectedOption(tokenOut)}
           onSelect={(key) => handleSelect(tokenOut, key)}
+          chainId={robinhoodChain.id}
         />
       </div>
       {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
