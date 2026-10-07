@@ -19,6 +19,7 @@ import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
 import { TokenSelector, type TokenSelectorOption } from './token-selector';
+import { useCanBatchCalls } from './use-can-batch-calls';
 import { applySlippage, parseAmountSafe } from './amount';
 import { encodePermit2PermitInput } from './v4SwapEncoding';
 import {
@@ -78,6 +79,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
   const permit2 = usePermit2Permit(nativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
   const quote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn });
   const submission = useTradeSubmission();
+  const canBatch = useCanBatchCalls();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = nativeIn
@@ -136,14 +138,18 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
     // RangeError on a non-integer number (same fix already applied in the V4 panel).
     const deadline = BigInt(Math.floor(Date.now() / 1000 + settings.deadlineMinutes * 60));
 
-    submission.submit(
-      {
-        address: UNIVERSAL_ROUTER_ADDRESS, abi: universalRouterAbi, functionName: 'execute',
-        args: [commands, inputs, deadline],
-        value: nativeIn ? amountIn : undefined,
-      },
-      { onSuccess: () => setAmount('') },
-    );
+    const executeCall = {
+      address: UNIVERSAL_ROUTER_ADDRESS, abi: universalRouterAbi, functionName: 'execute',
+      args: [commands, inputs, deadline],
+      value: nativeIn ? amountIn : undefined,
+    };
+
+    if (needsErc20Approval && canBatch) {
+      const approveCall = { address: tokenIn.address, abi: erc20Abi, functionName: 'approve', args: [PERMIT2_ADDRESS, maxUint256] };
+      submission.submitBatch([approveCall, executeCall], { onSuccess: () => setAmount('') });
+    } else {
+      submission.submit(executeCall, { onSuccess: () => setAmount('') });
+    }
   }
 
   function sideOptions(token: SwapToken): readonly TokenSelectorOption[] {
@@ -215,6 +221,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={displaySymbol(tokenIn, nativeIn)}
+        canBatchApprove={canBatch}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
