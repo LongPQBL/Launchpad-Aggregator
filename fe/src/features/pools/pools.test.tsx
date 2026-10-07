@@ -7,10 +7,12 @@ import { PoolDetail } from './pool-detail';
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: undefined }),
+  useBalance: () => ({ data: undefined, isLoading: false }),
   useReadContract: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
   useSimulateContract: () => ({ data: undefined, isLoading: false, error: null, refetch: vi.fn() }),
   useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
+  useSignTypedData: () => ({ signTypedDataAsync: vi.fn(), isPending: false, error: null }),
 }));
 
 const a = '0x1111111111111111111111111111111111111111';
@@ -64,8 +66,14 @@ describe('Pools UI', () => {
     expect(screen.getByRole('heading', { name: 'GUY / ETH' })).toBeInTheDocument();
     expect(screen.getByText('v4 · 0.3%')).toBeInTheDocument();
   });
-  it('PoolDetail does not show a Swap panel for a V4 pool (not yet supported)', () => {
-    render(<PoolDetail pool={pool} trades={{ items: [], nextCursor: null }} candles={null} />);
+  it('PoolDetail shows a V4 Swap panel for a V4 pool once both currencies\' decimals are known', () => {
+    const v4Pool: PoolSummary = { ...pool, protocol: 'uniswap_v4' };
+    render(<PoolDetail pool={v4Pool} trades={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.getByLabelText('Flip swap direction')).toBeInTheDocument();
+  });
+  it('PoolDetail hides the V4 Swap panel when a currency\'s decimals are unknown, rather than guessing', () => {
+    const v4Pool: PoolSummary = { ...pool, protocol: 'uniswap_v4', currency1Decimals: null };
+    render(<PoolDetail pool={v4Pool} trades={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.queryByLabelText('Flip swap direction')).not.toBeInTheDocument();
   });
   it('PoolDetail shows a Swap panel for a V3 pool once both currencies\' decimals are known', () => {

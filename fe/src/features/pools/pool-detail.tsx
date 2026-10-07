@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
 import { SwapPanel } from '@/trading/swap-panel';
+import { V4SwapPanel } from '@/trading/v4-swap-panel';
 import { PoolChart } from './pool-chart';
 import { PoolLogo } from './pool-logo';
 import { poolAge, short as symbol } from './pool-list';
@@ -54,14 +55,25 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
         <div><dt>Last trade</dt><dd>{pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</dd></div>
       </dl>{pool.launchTokenAddress && <a className="underline" href={launchHref(pool.chainId, pool.launchTokenAddress)}>View Pons launch</a>}
       </CardContent></Card>
-    {/* Swap execution is only built for Uniswap V3 pools today (SwapRouter02's exactInputSingle)
-        — V4's shared PoolManager needs Universal Router command encoding, a separate, not-yet-built
-        follow-up. Hidden, never guessed, when either currency's decimals is unknown (same
+    {/* Swap execution uses SwapRouter02's exactInputSingle for V3 pools and Universal Router's
+        V4_SWAP/PERMIT2_PERMIT commands for V4 pools (its shared PoolManager has no per-pool
+        router). Hidden, never guessed, when either currency's decimals is unknown (same
         convention as launch-detail.tsx's own SwapPanel gate). */}
     {pool.protocol === 'uniswap_v3' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
       <Card><CardContent className="pt-6">
         <SwapPanel
           poolAddress={pool.poolId as `0x${string}`}
+          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals }}
+          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals }}
+          explorerBase={explorerBase ?? null}
+        />
+      </CardContent></Card>
+    )}
+    {pool.protocol === 'uniswap_v4' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
+      <Card><CardContent className="pt-6">
+        <V4SwapPanel
+          poolKey={{ currency0: pool.currency0 as `0x${string}`, currency1: pool.currency1 as `0x${string}`,
+            fee: pool.fee, tickSpacing: pool.tickSpacing, hooks: pool.hooks as `0x${string}` }}
           tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals }}
           tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals }}
           explorerBase={explorerBase ?? null}
