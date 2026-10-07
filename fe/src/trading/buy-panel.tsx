@@ -53,7 +53,7 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
     nativeValue: isNativeQuote ? amountIn : undefined,
   });
   const submission = useTradeSubmission();
-  const canBatch = useCanBatchCalls();
+  const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = isNativeQuote

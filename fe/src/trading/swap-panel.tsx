@@ -79,7 +79,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
   const permit2 = usePermit2Permit(nativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
   const quote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn });
   const submission = useTradeSubmission();
-  const canBatch = useCanBatchCalls();
+  const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   // A batched approve+swap confirms the ERC20->Permit2 approval without ever going through

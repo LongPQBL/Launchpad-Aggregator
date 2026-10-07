@@ -53,6 +53,7 @@ const nativeQuote = { address: '0x0000000000000000000000000000000000000000' as c
 const erc20Quote = { address: '0x6666666666666666666666666666666666666666' as const, symbol: 'USDG', decimals: 18 };
 
 beforeEach(() => {
+  localStorage.clear();
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
   hooks.balance = { data: { value: 10000000000000000n }, isLoading: false };
@@ -248,5 +249,21 @@ describe('BuyPanel', () => {
     hooks.callsStatusData = { status: 'success' };
     rerender(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     expect(hooks.allowanceRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('attempts a batch for a "ready"-status wallet once the user opts in to 1-click trade via settings', () => {
+    hooks.allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'ready' } } };
+    hooks.simulateData = { result: 1000000000000000000n };
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(); // not opted in yet
+
+    fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
+    fireEvent.click(screen.getByRole('button', { name: /1-click trade/i }));
+    expect(screen.getByRole('button', { name: 'Buy' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
+    expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
   });
 });

@@ -47,7 +47,7 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymb
   const allowance = useTokenAllowance(tokenAddress, curveAddress);
   const quote = useCurveQuote({ curveAddress, direction: 'sell', amountIn, recipient: account, nativeValue: undefined });
   const submission = useTradeSubmission();
-  const canBatch = useCanBatchCalls();
+  const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = (tokenBalance ?? 0n) < amountIn;

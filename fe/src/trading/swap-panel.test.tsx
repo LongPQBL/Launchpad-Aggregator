@@ -98,6 +98,7 @@ const tokenB: SwapToken = { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73
 const tokenNoWeth: SwapToken = { address: '0x3333333333333333333333333333333333333333', symbol: 'USDG', decimals: 18, logoUri: null };
 
 beforeEach(() => {
+  localStorage.clear();
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
   hooks.poolFee = 10000;
@@ -443,6 +444,22 @@ describe('SwapPanel', () => {
     hooks.callsStatusData = { status: 'success' };
     rerender(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     expect(hooks.erc20AllowanceRefetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('attempts a batch for a "ready"-status wallet once the user opts in to 1-click trade via settings', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'ready' } } };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(); // not opted in yet
+
+    fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
+    fireEvent.click(screen.getByRole('button', { name: /1-click trade/i }));
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
   });
 
   it('keeps Swap disabled while the ERC20->Permit2 allowance is still loading, instead of assuming approval is unnecessary', () => {

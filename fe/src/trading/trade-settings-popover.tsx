@@ -65,6 +65,17 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
           <p className="mt-2 text-xs text-muted-foreground">
             {venueKind === 'curve' ? 'Curve-phase trades tolerate more slippage by default — price moves fast on a thin curve.' : null}
           </p>
+          <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2">
+            <span>1-click trade</span>
+            <Button type="button" size="sm" aria-label="1-click trade" variant={settings.oneClickTradeOptIn ? 'default' : 'outline'}
+              onClick={() => onChange({ ...settings, oneClickTradeOptIn: !settings.oneClickTradeOptIn })}>
+              {settings.oneClickTradeOptIn ? 'On' : 'Off'}
+            </Button>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Lets a wallet that can combine approve + trade into one confirmation do so, even when it
+            only reports this as possible with your permission, not guaranteed.
+          </p>
         </div>
       )}
     </div>

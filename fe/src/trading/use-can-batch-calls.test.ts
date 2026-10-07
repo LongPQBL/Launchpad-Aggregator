@@ -36,7 +36,7 @@ describe('useCanBatchCalls', () => {
     expect(result.current).toBe(true);
   });
 
-  it('returns false when only "ready", not a guaranteed commitment, is reported on either key', () => {
+  it('returns false when only "ready", not a guaranteed commitment, is reported on either key, by default', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'ready' } }, 0: { atomic: { status: 'ready' } } };
     const { result } = renderHook(() => useCanBatchCalls());
     expect(result.current).toBe(false);
@@ -51,6 +51,24 @@ describe('useCanBatchCalls', () => {
   it('returns false when the wallet reports no capability entries at all', () => {
     hooks.capabilities = {};
     const { result } = renderHook(() => useCanBatchCalls());
+    expect(result.current).toBe(false);
+  });
+
+  it('returns true for a "ready" per-chain entry when the user has opted in to 1-click trade', () => {
+    hooks.capabilities = { 4663: { atomic: { status: 'ready' } } };
+    const { result } = renderHook(() => useCanBatchCalls(true));
+    expect(result.current).toBe(true);
+  });
+
+  it('returns true for a "ready" chain-agnostic (key 0) entry when the user has opted in to 1-click trade', () => {
+    hooks.capabilities = { 0: { atomic: { status: 'ready' } } };
+    const { result } = renderHook(() => useCanBatchCalls(true));
+    expect(result.current).toBe(true);
+  });
+
+  it('stays false for "unsupported" even when the user has opted in to 1-click trade', () => {
+    hooks.capabilities = { 4663: { atomic: { status: 'unsupported' } } };
+    const { result } = renderHook(() => useCanBatchCalls(true));
     expect(result.current).toBe(false);
   });
 });

@@ -59,7 +59,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const permit2 = usePermit2Permit(isNativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
   const quote = useV4SwapQuote({ poolKey, zeroForOne, amountIn });
   const submission = useTradeSubmission();
-  const canBatch = useCanBatchCalls();
+  const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   // A batched approve+swap confirms the ERC20->Permit2 approval without ever going through
