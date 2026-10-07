@@ -21,8 +21,14 @@ vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: undefined }),
   useBalance: () => ({ data: undefined, isLoading: false }),
-  useReadContract: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
+  useReadContract: (args: { functionName?: string; address?: string }) => {
+    if (args?.functionName === 'allowance' && args?.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
+      return { data: undefined, isLoading: false };
+    }
+    return { data: undefined, isLoading: false, refetch: vi.fn() };
+  },
   useSimulateContract: () => ({ data: undefined, isLoading: false, error: null }),
+  useSignTypedData: () => ({ signTypedDataAsync: vi.fn(), isPending: false, error: null }),
   useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle' }),
 }));
@@ -624,6 +630,62 @@ describe('LaunchDetail', () => {
         detail={detail({ protocolVersion: 'v1', officialVenues: [venue({ kind: 'v3_pool', effectiveToBlock: null })], quoteAsset: { address: '0xquote', symbol: 'ROBIN', decimals: null } })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the V4 swap panel for a V2 launch whose V4 pool venue is currently active and whose pool data resolved', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v2', lifecycleStatus: 'graduated', officialVenues: [venue({ kind: 'v4_pool', effectiveToBlock: null })] })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+        v4Pool={{
+          chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'c'.repeat(64)}`,
+          currency0: '0x1111111111111111111111111111111111111111', currency1: '0x2222222222222222222222222222222222222222',
+          displayedToken: '0x1111111111111111111111111111111111111111', fee: 0, tickSpacing: 200,
+          currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
+          currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
+          hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
+          ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
+          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
+        }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /flip|swap direction/i })).toBeInTheDocument();
+  });
+
+  it('hides the V4 swap panel when the venue is active but its pool data did not resolve', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v2', lifecycleStatus: 'graduated', officialVenues: [venue({ kind: 'v4_pool', effectiveToBlock: null })] })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+        v4Pool={null}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the V4 swap panel once that venue is no longer active, even with resolved pool data', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ protocolVersion: 'v2', lifecycleStatus: 'graduated', officialVenues: [venue({ kind: 'v4_pool', effectiveToBlock: '500' })] })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [], complete: true }}
+        v4Pool={{
+          chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'c'.repeat(64)}`,
+          currency0: '0x1111111111111111111111111111111111111111', currency1: '0x2222222222222222222222222222222222222222',
+          displayedToken: '0x1111111111111111111111111111111111111111', fee: 0, tickSpacing: 200,
+          currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
+          currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
+          hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
+          ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
+          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
+        }}
       />,
     );
     expect(screen.queryByRole('button', { name: /flip|swap direction/i })).not.toBeInTheDocument();

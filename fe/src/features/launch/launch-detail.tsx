@@ -1,6 +1,6 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
 import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
-import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, TransactionPage } from '@/api/client';
+import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, PoolSummary, TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
@@ -12,12 +12,14 @@ import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
 import { CurveTradePanel } from '@/trading/curve-trade-panel';
 import { SwapPanel } from '@/trading/swap-panel';
+import { V4SwapPanel } from '@/trading/v4-swap-panel';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
   transactions: TransactionPage | null;
   candles: CandlePage | null;
   pools?: PoolPage | null;
+  v4Pool?: PoolSummary | null;
   chartCurrency?: 'quote' | 'usd';
   chartInterval?: number;
 }
@@ -26,7 +28,7 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function LaunchDetail({ detail, transactions, candles, pools, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
+export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = null, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -54,6 +56,11 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
   // lifecycleStatus a V1 launch can have ('trading' or 'graduated') maps to exactly one active
   // v3_pool venue.
   const activeV3Venue = detail.officialVenues.find((venue) => venue.kind === 'v3_pool' && venue.effectiveToBlock === null);
+
+  // Mirrors activeV3Venue's reasoning: a V2 launch's V4 pool venue has no curve-to-pool lifecycle
+  // condition to add beyond effectiveToBlock — the curve-vs-V4 distinction already lives in
+  // activeCurveVenue's own lifecycleStatus === 'trading' gate above.
+  const activeV4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool' && venue.effectiveToBlock === null);
 
   return (
     <article className="flex flex-col gap-4">
@@ -137,6 +144,17 @@ export function LaunchDetail({ detail, transactions, candles, pools, chartCurren
                 poolAddress={activeV3Venue.ref as `0x${string}`}
                 tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals }}
                 tokenB={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
+                explorerBase={explorerBase ?? null}
+              />
+            </div>
+          )}
+          {activeV4Venue && v4Pool && v4Pool.currency0Decimals !== null && v4Pool.currency1Decimals !== null && (
+            <div className="mt-4 border-t border-border pt-4">
+              <V4SwapPanel
+                poolKey={{ currency0: v4Pool.currency0 as `0x${string}`, currency1: v4Pool.currency1 as `0x${string}`,
+                  fee: v4Pool.fee, tickSpacing: v4Pool.tickSpacing, hooks: v4Pool.hooks as `0x${string}` }}
+                tokenA={{ address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }}
+                tokenB={{ address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }}
                 explorerBase={explorerBase ?? null}
               />
             </div>

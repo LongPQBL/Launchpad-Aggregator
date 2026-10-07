@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchDetail } from '@/features/launch/launch-detail';
-import { getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions } from '@/api/client';
+import { getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions, getPoolDetail } from '@/api/client';
 import { launchResourceKey } from '@/hooks/resource-keys';
 
 interface LaunchDetailPageProps {
@@ -44,10 +44,13 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   }
   if (detail === null) notFound();
 
-  const [transactions, candles, pools] = await Promise.all([
+  const activeV4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool' && venue.effectiveToBlock === null);
+
+  const [transactions, candles, pools, v4Pool] = await Promise.all([
     getLaunchTransactions(chainId, tokenAddress, { cursor: transactionsCursor }).catch(() => null),
     getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, intervalSeconds: chartInterval }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
+    activeV4Venue ? getPoolDetail(chainId, 'uniswap_v4', activeV4Venue.ref).catch(() => null) : Promise.resolve(null),
   ]);
   const hasPendingTrade = transactions?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 
@@ -57,7 +60,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
-      <LaunchDetail detail={detail} transactions={transactions} candles={candles} pools={pools} chartCurrency={chartCurrency} chartInterval={chartInterval} />
+      <LaunchDetail detail={detail} transactions={transactions} candles={candles} pools={pools} v4Pool={v4Pool} chartCurrency={chartCurrency} chartInterval={chartInterval} />
     </AppShell>
   );
 }
