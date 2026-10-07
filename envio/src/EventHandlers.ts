@@ -1,5 +1,32 @@
 import { indexer } from "envio";
 
+function knownLaunchTokenId(chainId: number, tokenAddress: string): string {
+  return `${chainId}-${tokenAddress.toLowerCase()}`;
+}
+
+function relevantV4PoolId(chainId: number, poolId: string): string {
+  return `${chainId}-${poolId.toLowerCase()}`;
+}
+
+function relevantPoolId(chainId: number, address: string): string {
+  return `${chainId}-${address.toLowerCase()}`;
+}
+
+interface KnownLaunchTokenReader { KnownLaunchToken: { get(id: string): Promise<unknown> } }
+
+/** Pons tokens always launch before anyone can create a pool referencing them, and chain events
+ * are processed in block order, so by the time a pool-creation event for a token is handled, that
+ * token's KnownLaunchToken row (written from its own TokenLaunched event) already exists. */
+async function involvesLaunchToken(
+  context: KnownLaunchTokenReader, chainId: number, tokenA: string, tokenB: string,
+): Promise<boolean> {
+  const [a, b] = await Promise.all([
+    context.KnownLaunchToken.get(knownLaunchTokenId(chainId, tokenA)),
+    context.KnownLaunchToken.get(knownLaunchTokenId(chainId, tokenB)),
+  ]);
+  return a !== undefined || b !== undefined;
+}
+
 indexer.onEvent(
   { contract: "PonsV1LegacyFactory", event: "TokenLaunched" },
   async ({ event, context }) => {
@@ -15,6 +42,11 @@ indexer.onEvent(
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
       logIndex: event.logIndex,
+    });
+    context.KnownLaunchToken.set({
+      id: knownLaunchTokenId(event.chainId, event.params.token),
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
     });
   },
 );
@@ -45,6 +77,11 @@ indexer.onEvent(
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
       logIndex: event.logIndex,
+    });
+    context.KnownLaunchToken.set({
+      id: knownLaunchTokenId(event.chainId, event.params.token),
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
     });
   },
 );
@@ -93,6 +130,11 @@ indexer.onEvent(
       blockHash: event.block.hash,
       txHash: event.transaction.hash,
       logIndex: event.logIndex,
+    });
+    context.KnownLaunchToken.set({
+      id: knownLaunchTokenId(event.chainId, event.params.token),
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
     });
   },
 );
@@ -224,6 +266,15 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "UniswapV4PoolManager", event: "Initialize" },
   async ({ event, context }) => {
+    // V4 has no per-pool contract to selectively watch (see RelevantV4Pool's schema comment), so
+    // this is the only point where a V4 pool can be judged relevant — once seen here, its poolId
+    // is remembered for every later V4Swap on it, whether or not this specific row is kept.
+    if (!(await involvesLaunchToken(context, event.chainId, event.params.currency0, event.params.currency1))) return;
+    context.RelevantV4Pool.set({
+      id: relevantV4PoolId(event.chainId, event.params.id),
+      chainId: event.chainId,
+      poolId: event.params.id.toLowerCase(),
+    });
     context.RawV4Initialize.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
@@ -246,6 +297,10 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "UniswapV4PoolManager", event: "V4Swap" },
   async ({ event, context }) => {
+    // V4Swap carries only `id`/`sender`, never currency0/currency1 (see RelevantV4Pool's schema
+    // comment) — relevance was already decided at Initialize time and recorded under this poolId.
+    const relevant = await context.RelevantV4Pool.get(relevantV4PoolId(event.chainId, event.params.id));
+    if (!relevant) return;
     if (!event.transaction.from) throw new Error(`Missing transaction.from for V4 swap ${event.transaction.hash}`);
     context.RawV4Swap.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
@@ -270,8 +325,17 @@ indexer.onEvent(
   },
 );
 
-// All-pool V3/V2 sources are registered only from the canonical Uniswap factories.
+// V3/V2 pool/pair contracts are still registered for every pool from the canonical Uniswap
+// factories, Pons-related or not — contractRegister has no entity-store access (see
+// RelevantPool's schema comment), so relevance can't gate registration itself, only what gets
+// written once a pool's Swap/Sync events arrive.
 indexer.onEvent({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {
+  if (!(await involvesLaunchToken(context, event.chainId, event.params.token0, event.params.token1))) return;
+  context.RelevantPool.set({
+    id: relevantPoolId(event.chainId, event.params.pool),
+    chainId: event.chainId,
+    address: event.params.pool.toLowerCase(),
+  });
   context.RawV3PoolCreated.set({
     id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
     chainId: event.chainId, factoryAddress: event.srcAddress.toLowerCase(),
@@ -285,6 +349,8 @@ indexer.contractRegister({ contract: "UniswapV3Factory", event: "PoolCreated" },
   context.chain.UniswapV3Pool.add(event.params.pool);
 });
 indexer.onEvent({ contract: "UniswapV3Pool", event: "V3Swap" }, async ({ event, context }) => {
+  const relevant = await context.RelevantPool.get(relevantPoolId(event.chainId, event.srcAddress));
+  if (!relevant) return;
   if (!event.transaction.from) throw new Error(`Missing transaction.from for V3 swap ${event.transaction.hash}`);
   context.RawV3Swap.set({
     id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
@@ -297,6 +363,12 @@ indexer.onEvent({ contract: "UniswapV3Pool", event: "V3Swap" }, async ({ event, 
   });
 });
 indexer.onEvent({ contract: "UniswapV2Factory", event: "PairCreated" }, async ({ event, context }) => {
+  if (!(await involvesLaunchToken(context, event.chainId, event.params.token0, event.params.token1))) return;
+  context.RelevantPool.set({
+    id: relevantPoolId(event.chainId, event.params.pair),
+    chainId: event.chainId,
+    address: event.params.pair.toLowerCase(),
+  });
   context.RawV2PairCreated.set({
     id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
     chainId: event.chainId, factoryAddress: event.srcAddress.toLowerCase(),
@@ -309,6 +381,8 @@ indexer.contractRegister({ contract: "UniswapV2Factory", event: "PairCreated" },
   context.chain.UniswapV2Pair.add(event.params.pair);
 });
 indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Swap" }, async ({ event, context }) => {
+  const relevant = await context.RelevantPool.get(relevantPoolId(event.chainId, event.srcAddress));
+  if (!relevant) return;
   if (!event.transaction.from) throw new Error(`Missing transaction.from for V2 swap ${event.transaction.hash}`);
   context.RawV2Swap.set({
     id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
@@ -321,6 +395,8 @@ indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Swap" }, async ({ event, 
   });
 });
 indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Sync" }, async ({ event, context }) => {
+  const relevant = await context.RelevantPool.get(relevantPoolId(event.chainId, event.srcAddress));
+  if (!relevant) return;
   context.RawV2Sync.set({
     id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
     chainId: event.chainId, pairAddress: event.srcAddress.toLowerCase(),

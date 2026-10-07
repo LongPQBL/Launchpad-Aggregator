@@ -4,6 +4,40 @@
 # `id`'s own index already exists as the primary key. Added through this schema (a supported Envio
 # migration that builds the index in the background before future reads need it), not live DDL against
 # Envio's managed Postgres.
+# Lookup set of every token address launched on Pons (V1 or V2), written alongside RawLaunch/
+# RawLaunchV2 at TokenLaunched time. Used only to decide, at Uniswap V3/V2 pool-creation and V4
+# pool-Initialize time, whether a pool is worth tracking at all — see RelevantV4Pool below and the
+# contractRegister/Initialize handlers in EventHandlers.ts. Not itself raw evidence of anything.
+type KnownLaunchToken {
+  id: ID! # `${chainId}-${tokenAddress}`, lowercase
+  chainId: Int!
+  tokenAddress: String!
+}
+
+# V4 has no per-pool contract to selectively watch (all pools share one PoolManager address), and
+# its Swap event carries only `id`/`sender`, not currency0/currency1 — so there is no way to decide
+# "is this swap worth keeping" from the Swap event alone. This entity records, at Initialize time
+# (when currency0/currency1 ARE known), which poolIds matched a KnownLaunchToken; the V4Swap handler
+# checks membership here before writing RawV4Swap, instead of keeping every V4 pool's full swap
+# history on a chain shared with unrelated Uniswap activity.
+type RelevantV4Pool {
+  id: ID! # `${chainId}-${poolId}`, lowercase
+  chainId: Int!
+  poolId: String!
+}
+
+# Same purpose as RelevantV4Pool, for V3/V2: their Swap/Sync events are emitted by the pool/pair's
+# own contract address and never carry token0/token1 either, so relevance (decided at PoolCreated/
+# PairCreated time, when the tokens ARE known) is recorded here keyed by that address and checked
+# before writing RawV3Swap/RawV2Swap/RawV2Sync. V3Pool/V2Pair contracts are still registered for
+# every pool regardless (contractRegister has no entity-store access to check this), so this only
+# saves DB writes, not HyperSync fetch volume — see EventHandlers.ts's contractRegister comments.
+type RelevantPool {
+  id: ID! # `${chainId}-${address}`, lowercase
+  chainId: Int!
+  address: String!
+}
+
 type RawLaunch @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
   id: ID!
   chainId: Int!
