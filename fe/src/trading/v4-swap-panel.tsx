@@ -71,7 +71,17 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
 
     let permitInput: `0x${string}` | null = null;
     if (!isNativeIn && permit2.needsPermit) {
-      const signed = await permit2.signPermit();
+      // signPermit() calls signTypedDataAsync, which throws when the user rejects the wallet's
+      // signature request (or the wallet errors). submitSwap is invoked as `void submitSwap()`
+      // from the UI, so an uncaught throw here would become an unhandled promise rejection. Just
+      // stop — permit2.signError already reflects the rejection once useSignTypedData's own error
+      // state updates, so there is nothing more to surface here.
+      let signed;
+      try {
+        signed = await permit2.signPermit();
+      } catch {
+        return;
+      }
       if (!signed) return;
       permitInput = encodePermit2PermitInput(signed.permitSingle, signed.signature);
     }

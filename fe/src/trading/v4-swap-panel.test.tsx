@@ -169,6 +169,21 @@ describe('V4SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
+  it('does not leave an unhandled promise rejection when the wallet rejects the Permit2 signature', async () => {
+    hooks.permit2Allowance = [0n, 0, 2];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    hooks.signTypedDataAsync.mockRejectedValueOnce(new Error('User rejected the request'));
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
+    // Give a would-be unhandled rejection a turn to surface before asserting the flow stopped
+    // cleanly — submitSwap must swallow the rejection (signError from the hook already reflects
+    // it) rather than let it escape the void-called click handler.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(hooks.writeContract).not.toHaveBeenCalled();
+  });
+
   it('skips both the ERC20 approval and the Permit2 signature for a native-ETH input, sending value instead', async () => {
     const nativePoolKey: V4PoolKey = { ...poolKey, currency0: '0x0000000000000000000000000000000000000000' };
     const nativeTokenA = { address: '0x0000000000000000000000000000000000000000' as const, symbol: 'ETH', decimals: 18 };
