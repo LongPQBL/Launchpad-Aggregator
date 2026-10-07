@@ -7,6 +7,10 @@ const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
   allowanceData: undefined as readonly [bigint, number, number] | undefined,
   isAllowanceLoading: false,
+  // Defaults to mirroring whatever allowanceData is at call time (matching real refetch
+  // behavior when nothing has changed on chain); individual tests override this to prove a
+  // genuinely fresh value is used instead of the stale render-time `data`.
+  refetch: vi.fn(async () => ({ data: hooks.allowanceData })),
   signTypedDataAsync: vi.fn(async () => '0xsignature' as `0x${string}`),
   isSigning: false,
   signError: null as Error | null,
@@ -15,7 +19,7 @@ const hooks = vi.hoisted(() => ({
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
-  useReadContract: () => ({ data: hooks.allowanceData, isLoading: hooks.isAllowanceLoading }),
+  useReadContract: () => ({ data: hooks.allowanceData, isLoading: hooks.isAllowanceLoading, refetch: hooks.refetch }),
   useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: hooks.isSigning, error: hooks.signError }),
 }));
 
@@ -28,6 +32,8 @@ beforeEach(() => {
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.allowanceData = undefined;
   hooks.isAllowanceLoading = false;
+  hooks.refetch.mockReset();
+  hooks.refetch.mockImplementation(async () => ({ data: hooks.allowanceData }));
   hooks.signTypedDataAsync.mockClear();
   hooks.isSigning = false;
   hooks.signError = null;
@@ -76,6 +82,33 @@ describe('usePermit2Permit', () => {
 
   it('returns null from signPermit without calling the wallet when required inputs are missing', async () => {
     const { result } = renderHook(() => usePermit2Permit(undefined, spender, 1_000_000n));
+    const signed = await result.current.signPermit();
+    expect(signed).toBeNull();
+    expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+  });
+
+  it('signs with a freshly refetched nonce, not the stale render-time nonce, so a second swap in the same session never reuses a consumed nonce', async () => {
+    // Render-time data says nonce 7 (e.g. from the initial mount), but the chain has since moved
+    // on — a prior permit() in this same session already consumed nonce 7. A refetch right before
+    // signing must see the real current nonce (42) and sign that, not the stale 7.
+    hooks.allowanceData = [0n, 0, 7];
+    hooks.refetch.mockImplementation(async () => ({ data: [0n, 0, 42] as const }));
+    const { result } = renderHook(() => usePermit2Permit(token, spender, 1_000_000n));
+    let signed;
+    await act(async () => { signed = await result.current.signPermit(); });
+    expect(hooks.refetch).toHaveBeenCalled();
+    expect(hooks.signTypedDataAsync).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.objectContaining({ details: expect.objectContaining({ nonce: 42 }) }),
+    }));
+    expect(signed).toEqual(expect.objectContaining({
+      permitSingle: expect.objectContaining({ details: expect.objectContaining({ nonce: 42 }) }),
+    }));
+  });
+
+  it('returns null without signing when the fresh refetch has no usable data', async () => {
+    hooks.allowanceData = [0n, 0, 7];
+    hooks.refetch.mockImplementation(async () => ({ data: undefined }));
+    const { result } = renderHook(() => usePermit2Permit(token, spender, 1_000_000n));
     const signed = await result.current.signPermit();
     expect(signed).toBeNull();
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();

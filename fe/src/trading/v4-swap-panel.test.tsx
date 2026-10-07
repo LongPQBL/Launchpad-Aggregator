@@ -7,6 +7,10 @@ const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
   erc20Allowance: 0n,
   permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
+  // Mirrors permit2Allowance at call time by default (same convention as
+  // use-permit2-permit.test.ts's own refetch mock); tests that need a rejecting signature can
+  // still override signTypedDataAsync below without needing to touch this.
+  permit2Refetch: vi.fn(async () => ({ data: hooks.permit2Allowance })),
   balanceA: 10_000_000_000_000_000_000n,
   balanceB: 10_000_000_000_000_000_000n,
   nativeBalance: 10_000_000_000_000_000_000n,
@@ -22,7 +26,7 @@ vi.mock('wagmi', async (importOriginal) => ({
   useBalance: () => ({ data: { value: hooks.nativeBalance }, isLoading: false }),
   useReadContract: (args: { functionName: string; address: string }) => {
     if (args.functionName === 'allowance' && args.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
-      return { data: hooks.permit2Allowance, isLoading: false };
+      return { data: hooks.permit2Allowance, isLoading: false, refetch: hooks.permit2Refetch };
     }
     if (args.functionName === 'allowance') return { data: hooks.erc20Allowance, isFetching: false, refetch: vi.fn() };
     if (args.address === tokenA.address) return { data: hooks.balanceA, refetch: vi.fn() };
@@ -49,6 +53,8 @@ beforeEach(() => {
   hooks.account.chainId = 4663;
   hooks.erc20Allowance = 2_000_000_000_000_000_000n;
   hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+  hooks.permit2Refetch.mockReset();
+  hooks.permit2Refetch.mockImplementation(async () => ({ data: hooks.permit2Allowance }));
   hooks.balanceA = 10_000_000_000_000_000_000n;
   hooks.balanceB = 10_000_000_000_000_000_000n;
   hooks.simulateData = undefined;

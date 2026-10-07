@@ -34,7 +34,7 @@ function permitWindow(): number {
 
 export function usePermit2Permit(tokenAddress: Address | undefined, spender: Address | undefined, amountIn: bigint): Permit2PermitResult {
   const { address: owner, chainId } = useAccount();
-  const { data, isLoading } = useReadContract({
+  const { data, isLoading, refetch } = useReadContract({
     address: PERMIT2_ADDRESS,
     abi: permit2Abi,
     functionName: 'allowance',
@@ -48,9 +48,18 @@ export function usePermit2Permit(tokenAddress: Address | undefined, spender: Add
 
   async function signPermit() {
     if (!owner || !tokenAddress || !spender || !chainId) return null;
+    // Permit2.permit() reverts with InvalidNonce unless the signed nonce exactly matches the
+    // current on-chain value, and every successful permit() call increments it. Since the signed
+    // amount is always exactly amountIn (never a standing allowance — see PERMIT_WINDOW_SECONDS'
+    // comment above), a second swap of the same token in one session must not reuse the render-time
+    // `data` captured at mount/last-render: it may already be stale. Fetch a genuinely fresh value
+    // right before constructing and signing the PermitSingle.
+    const fresh = await refetch();
+    if (!fresh.data) return null;
+    const [, , freshNonce] = fresh.data;
     const expiresAt = permitWindow();
     const permitSingle: PermitSingle = {
-      details: { token: tokenAddress, amount: amountIn, expiration: expiresAt, nonce },
+      details: { token: tokenAddress, amount: amountIn, expiration: expiresAt, nonce: freshNonce },
       spender,
       sigDeadline: BigInt(expiresAt),
     };
