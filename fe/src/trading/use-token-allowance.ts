@@ -16,6 +16,10 @@ export interface TokenAllowance {
   // "Confirming approval…" instead of implying the wallet prompt is still open.
   isConfirmingApproval: boolean;
   approveError: string | null;
+  // Lets a caller manually invalidate the cached allowance after a change this hook didn't itself
+  // drive — e.g. a batched wallet_sendCalls approve+swap, which never calls this hook's own
+  // approve() and so never triggers the receiptStatus-watching refetch below.
+  refetch: () => void;
 }
 
 export function useTokenAllowance(tokenAddress: Address | undefined, spender: Address | undefined): TokenAllowance {
@@ -61,5 +65,6 @@ export function useTokenAllowance(tokenAddress: Address | undefined, spender: Ad
     // trip and the Approve button comes back clickable (final review, Important 1's exact gap).
     isConfirmingApproval: Boolean(approveTxHash) && (receiptStatus === 'pending' || isFetching),
     approveError: reportedError ? decodeTradeError(reportedError) : null,
+    refetch: () => { void refetch(); },
   };
 }

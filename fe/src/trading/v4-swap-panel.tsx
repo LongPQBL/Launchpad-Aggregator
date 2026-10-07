@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Address, formatUnits, maxUint256, zeroAddress } from 'viem';
 import { useAccount, useBalance, useReadContract } from 'wagmi';
 import { Input } from '@/components/ui/input';
@@ -61,6 +61,20 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
+
+  // A batched approve+swap confirms the ERC20->Permit2 approval without ever going through
+  // erc20Allowance's own approve() (which is what its internal refetch-after-receipt is watching
+  // for) — without this, the cached pre-batch allowance (0) stays stale, so a later swap of the
+  // same token would wrongly believe approval is still needed and re-batch a redundant approve.
+  // The ref-guarded edge trigger (not just "status === 'confirmed'") matches
+  // use-refetch-quote-after-approval.ts's existing pattern: erc20Allowance.refetch is a fresh
+  // closure every render, so depending on it directly would call refetch() on every re-render
+  // while status stays 'confirmed', not just once per confirmation.
+  const wasConfirmed = useRef(false);
+  useEffect(() => {
+    if (!wasConfirmed.current && submission.status === 'confirmed') erc20Allowance.refetch();
+    wasConfirmed.current = submission.status === 'confirmed';
+  }, [submission.status, erc20Allowance]);
 
   const hasInsufficientBalance = isNativeIn
     ? (nativeBalance.data?.value ?? 0n) < amountIn

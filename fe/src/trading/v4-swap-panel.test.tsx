@@ -35,6 +35,10 @@ const hooks = vi.hoisted(() => ({
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
   capabilities: undefined as { atomic?: { status: 'supported' | 'ready' | 'unsupported' } } | undefined,
   sendCalls: vi.fn(),
+  sendStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
+  sendData: undefined as { id: string } | undefined,
+  callsStatusData: undefined as { status: 'pending' | 'success' | 'failure' } | undefined,
+  erc20AllowanceRefetch: vi.fn(),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
@@ -45,7 +49,7 @@ vi.mock('wagmi', async (importOriginal) => ({
     if (args.functionName === 'allowance' && args.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
       return { data: hooks.permit2Allowance, isLoading: false, refetch: hooks.permit2Refetch };
     }
-    if (args.functionName === 'allowance') return { data: hooks.erc20Allowance, isFetching: false, refetch: vi.fn() };
+    if (args.functionName === 'allowance') return { data: hooks.erc20Allowance, isFetching: false, refetch: hooks.erc20AllowanceRefetch };
     if (args.address === tokenA.address) return { data: hooks.balanceA, refetch: vi.fn() };
     if (args.address === tokenB.address) return { data: hooks.balanceB, refetch: vi.fn() };
     return { data: undefined, refetch: vi.fn() };
@@ -55,8 +59,8 @@ vi.mock('wagmi', async (importOriginal) => ({
   useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
   useCapabilities: () => ({ data: hooks.capabilities }),
-  useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: 'idle', error: null, data: undefined }),
-  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
+  useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: hooks.sendStatus, error: null, data: hooks.sendData }),
+  useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
 }));
 
 const poolKey: V4PoolKey = {
@@ -85,6 +89,10 @@ beforeEach(() => {
   hooks.writeStatus = 'idle';
   hooks.capabilities = undefined;
   hooks.sendCalls.mockReset();
+  hooks.sendStatus = 'idle';
+  hooks.sendData = undefined;
+  hooks.callsStatusData = undefined;
+  hooks.erc20AllowanceRefetch.mockReset();
 });
 
 describe('V4SwapPanel', () => {
@@ -282,5 +290,21 @@ describe('V4SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
     expect(hooks.sendCalls).not.toHaveBeenCalled();
+  });
+
+  it('refetches the ERC20->Permit2 allowance once a batched approve+swap confirms, so a later swap of the same token does not re-batch a redundant approve', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.capabilities = { atomic: { status: 'supported' } };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    const { rerender } = render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.erc20AllowanceRefetch).not.toHaveBeenCalled();
+
+    hooks.sendStatus = 'success';
+    hooks.sendData = { id: '0xbatch' };
+    hooks.callsStatusData = { status: 'success' };
+    rerender(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(hooks.erc20AllowanceRefetch).toHaveBeenCalledTimes(1);
   });
 });

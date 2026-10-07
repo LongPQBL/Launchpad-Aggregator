@@ -48,7 +48,13 @@ export function useTradeSubmission(): TradeSubmission {
 
   function submitBatch(calls: readonly TradeCall[], options?: { onSuccess?: () => void }) {
     setMode('batch');
-    sendCalls({ calls } as never, options);
+    // viem's sendCalls reads each call's `to`, not `address` (TradeCall's field, matching
+    // writeContract's convention) — a straight passthrough sends every call with no destination.
+    // forceAtomic is always true here: batching is only ever attempted once useCanBatchCalls has
+    // confirmed the wallet reports atomic.status === 'supported', so requiring it costs nothing
+    // and is what the "every receipt shares one transactionHash" assumption below actually needs.
+    const mappedCalls = calls.map(({ address, abi, functionName, args, value }) => ({ to: address, abi, functionName, args, value }));
+    sendCalls({ calls: mappedCalls, forceAtomic: true } as never, options);
   }
 
   let status: TradeSubmissionStatus = 'idle';
@@ -59,9 +65,12 @@ export function useTradeSubmission(): TradeSubmission {
     if (sendStatus === 'pending') status = 'pending';
     else if (sendStatus === 'error') status = 'failed';
     else if (sendStatus === 'success') {
-      if (!callsStatus) status = 'confirming';
-      else if (callsStatus.status === 'success') status = 'confirmed';
-      else if (callsStatus.status === 'failure') status = 'failed';
+      if (callsStatus?.status === 'success') status = 'confirmed';
+      else if (callsStatus?.status === 'failure') status = 'failed';
+      // The status query itself can error out (e.g. time out) before ever resolving a status —
+      // without this, that case reads as "still confirming" forever, leaving the button stuck
+      // disabled until the page is reloaded.
+      else if (callsStatusError) status = 'failed';
       else status = 'confirming';
     }
     txHash = callsStatus?.receipts?.[callsStatus.receipts.length - 1]?.transactionHash;

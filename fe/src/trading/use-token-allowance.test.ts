@@ -122,4 +122,10 @@ describe('useTokenAllowance', () => {
     const { result } = renderHook(() => useTokenAllowance(token, spender));
     expect(result.current.approveError).toBe('approve reverted');
   });
+
+  it('exposes refetch so a caller can manually invalidate the cached allowance (e.g. after a batched approve+swap that never went through this hook\'s own approve())', () => {
+    const { result } = renderHook(() => useTokenAllowance(token, spender));
+    result.current.refetch();
+    expect(hooks.refetch).toHaveBeenCalledTimes(1);
+  });
 });

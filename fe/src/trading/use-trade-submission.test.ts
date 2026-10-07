@@ -89,11 +89,17 @@ describe('useTradeSubmission', () => {
     expect(result.current.errorMessage).toBe('Slippage exceeded minOut');
   });
 
-  it('sends the given calls array via sendCalls when submitBatch is called', () => {
+  it('maps each call\'s address to "to" and requires atomic execution when submitBatch is called', () => {
+    // viem's sendCalls reads call.to, not call.address (confirmed in node_modules/viem/_esm/actions/wallet/sendCalls.js) —
+    // a call shaped like writeContract's {address, abi, functionName, args} has no destination at
+    // all once passed straight through, so every batched call would be sent with no `to`.
     const { result } = renderHook(() => useTradeSubmission());
     const onSuccess = vi.fn();
     act(() => { result.current.submitBatch([call, call], { onSuccess }); });
-    expect(hooks.sendCalls).toHaveBeenCalledWith({ calls: [call, call] }, { onSuccess });
+    expect(hooks.sendCalls).toHaveBeenCalledWith(
+      { calls: [{ to: call.address, abi: call.abi, functionName: call.functionName, args: call.args }, { to: call.address, abi: call.abi, functionName: call.functionName, args: call.args }], forceAtomic: true },
+      { onSuccess },
+    );
   });
 
   it('reports pending while the batch wallet prompt is open', () => {
@@ -144,6 +150,18 @@ describe('useTradeSubmission', () => {
     rerender();
     expect(result.current.status).toBe('failed');
     expect(result.current.errorMessage).toBe('Reverted on-chain');
+  });
+
+  it('reports failed, not stuck confirming, when the batch status query itself errors (e.g. times out) before ever resolving', () => {
+    const { result, rerender } = renderHook(() => useTradeSubmission());
+    act(() => { result.current.submitBatch([call], {}); });
+    hooks.sendStatus = 'success';
+    hooks.sendData = { id: '0xbatch' };
+    hooks.callsStatusData = undefined;
+    hooks.callsStatusError = new Error('Timed out while waiting for call status');
+    rerender();
+    expect(result.current.status).toBe('failed');
+    expect(result.current.errorMessage).toBe('Timed out while waiting for call status');
   });
 
   it('falls back to reading single-call status once submit() is called again after an earlier submitBatch', () => {
