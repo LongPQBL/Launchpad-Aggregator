@@ -12,6 +12,10 @@ export interface ApproveOrActionAllowance {
 export interface ApproveOrActionButtonProps {
   needsApproval: boolean;
   amountIn: bigint;
+  // Defaults to amountIn when omitted — only V4SwapPanel needs this to differ (it always
+  // approves maxUint256 to Permit2, while amountIn keeps meaning the real trade amount for the
+  // action button's own disabled check below).
+  approveAmount?: bigint;
   isWrongChain: boolean;
   hasInsufficientBalance: boolean;
   outputAmount: bigint | null;
@@ -27,6 +31,7 @@ export interface ApproveOrActionButtonProps {
 export function ApproveOrActionButton({
   needsApproval,
   amountIn,
+  approveAmount,
   isWrongChain,
   hasInsufficientBalance,
   outputAmount,
@@ -46,7 +51,7 @@ export function ApproveOrActionButton({
         <Button
           type="button"
           disabled={allowance.isApproving || allowance.isConfirmingApproval || isWrongChain}
-          onClick={() => allowance.approve(amountIn)}
+          onClick={() => allowance.approve(approveAmount ?? amountIn)}
         >
           {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
         </Button>

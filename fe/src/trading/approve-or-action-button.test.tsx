@@ -140,6 +140,45 @@ describe('ApproveOrActionButton', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
+  it('approves a separately-provided approveAmount instead of amountIn, when given one', () => {
+    const allowance = baseAllowance();
+    render(
+      <ApproveOrActionButton
+        needsApproval
+        amountIn={1_000n}
+        approveAmount={2n ** 256n - 1n}
+        isWrongChain={false}
+        hasInsufficientBalance={false}
+        outputAmount={500n}
+        isSubmitting={false}
+        allowance={allowance}
+        actionLabel="Buy"
+        onAction={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(allowance.approve).toHaveBeenCalledWith(2n ** 256n - 1n);
+  });
+
+  it('falls back to approving amountIn when approveAmount is not given, unchanged from before', () => {
+    const allowance = baseAllowance();
+    render(
+      <ApproveOrActionButton
+        needsApproval
+        amountIn={1_000n}
+        isWrongChain={false}
+        hasInsufficientBalance={false}
+        outputAmount={500n}
+        isSubmitting={false}
+        allowance={allowance}
+        actionLabel="Buy"
+        onAction={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(allowance.approve).toHaveBeenCalledWith(1_000n);
+  });
+
   it('shows the approve error alert when present', () => {
     render(
       <ApproveOrActionButton
