@@ -33,6 +33,8 @@ const hooks = vi.hoisted(() => ({
   signTypedDataError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
+  capabilities: undefined as { atomic?: { status: 'supported' | 'ready' | 'unsupported' } } | undefined,
+  sendCalls: vi.fn(),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
@@ -52,6 +54,9 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: false, error: hooks.signTypedDataError, reset: hooks.resetSignTypedData }),
   useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
+  useCapabilities: () => ({ data: hooks.capabilities }),
+  useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: 'idle', error: null, data: undefined }),
+  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
 }));
 
 const poolKey: V4PoolKey = {
@@ -78,6 +83,8 @@ beforeEach(() => {
   hooks.signTypedDataError = null;
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
+  hooks.capabilities = undefined;
+  hooks.sendCalls.mockReset();
 });
 
 describe('V4SwapPanel', () => {
@@ -249,5 +256,31 @@ describe('V4SwapPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+  });
+
+  it('submits approve+execute as one batch when approval is needed and the wallet supports atomic call batching', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.capabilities = { atomic: { status: 'supported' } };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
+    const [{ calls }] = hooks.sendCalls.mock.calls[0] as [{ calls: { functionName: string }[] }];
+    expect(calls).toHaveLength(2);
+    expect(calls[0].functionName).toBe('approve');
+    expect(calls[1].functionName).toBe('execute');
+  });
+
+  it('keeps the plain two-step Approve-then-Swap flow when the wallet cannot batch calls', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.capabilities = { atomic: { status: 'unsupported' } };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
+    expect(hooks.sendCalls).not.toHaveBeenCalled();
   });
 });

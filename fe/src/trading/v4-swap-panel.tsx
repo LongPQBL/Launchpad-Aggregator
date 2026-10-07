@@ -17,6 +17,7 @@ import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
+import { useCanBatchCalls } from './use-can-batch-calls';
 import { applySlippage, parseAmountSafe } from './amount';
 import { encodeExecuteCommands, encodePermit2PermitInput, encodeV4SwapInput, type V4PoolKey } from './v4SwapEncoding';
 
@@ -58,6 +59,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const permit2 = usePermit2Permit(isNativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
   const quote = useV4SwapQuote({ poolKey, zeroForOne, amountIn });
   const submission = useTradeSubmission();
+  const canBatch = useCanBatchCalls();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = isNativeIn
@@ -99,14 +101,18 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
     // already applied in swap-panel.tsx for the identical bug shape).
     const deadline = BigInt(Math.floor(Date.now() / 1000 + settings.deadlineMinutes * 60));
 
-    submission.submit(
-      {
-        address: UNIVERSAL_ROUTER_ADDRESS, abi: universalRouterAbi, functionName: 'execute',
-        args: [commands, inputs, deadline],
-        value: isNativeIn ? amountIn : undefined,
-      },
-      { onSuccess: () => setAmount('') },
-    );
+    const executeCall = {
+      address: UNIVERSAL_ROUTER_ADDRESS, abi: universalRouterAbi, functionName: 'execute',
+      args: [commands, inputs, deadline],
+      value: isNativeIn ? amountIn : undefined,
+    };
+
+    if (needsErc20Approval && canBatch) {
+      const approveCall = { address: tokenIn.address, abi: erc20Abi, functionName: 'approve', args: [PERMIT2_ADDRESS, maxUint256] };
+      submission.submitBatch([approveCall, executeCall], { onSuccess: () => setAmount('') });
+    } else {
+      submission.submit(executeCall, { onSuccess: () => setAmount('') });
+    }
   }
 
   return (
@@ -142,6 +148,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={tokenIn.symbol ?? undefined}
+        canBatchApprove={canBatch}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
