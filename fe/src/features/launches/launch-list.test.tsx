@@ -78,7 +78,7 @@ describe('LaunchList', () => {
     );
     const row = screen.getAllByRole('row')[1];
     expect(within(row).getByText('0xaaa')).toBeInTheDocument();
-    expect(within(row).getByText('(—)')).toBeInTheDocument();
+    expect(within(row).getByTestId('token-symbol')).toHaveTextContent('—');
   });
 
   it('shows a human-readable lifecycle label and chain name instead of raw enum/id values', () => {

@@ -1,5 +1,5 @@
 import { chainIcon, chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
+import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
 import { launchHref, type LaunchPage, type Source } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { PercentChange } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
 import { LaunchpadIcon } from './launchpad-icon';
-import { TokenLogo } from './token-logo';
+import { TokenCell } from './token-cell';
 
 export interface LaunchListProps {
   page: LaunchPage | null;
@@ -256,23 +256,14 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 key={`${launch.chainId}-${launch.tokenAddress}`}
                 role="row"
                 className={cn(
-                  'rounded-lg border border-border bg-card p-3',
+                  'group rounded-lg border border-border bg-card p-3',
                   'md:table-row md:rounded-none md:border-0 md:border-b md:border-border md:bg-transparent md:p-0 md:transition-colors md:hover:bg-muted/60',
                 )}
               >
                 <div role="cell" className="text-muted-foreground md:table-cell md:p-4 md:align-middle">{index + 1}</div>
                 <div role="cell" className="md:table-cell md:p-4 md:align-middle">
-                  <div className="flex items-center gap-3">
-                    <TokenLogo logoUri={launch.logoUri} symbol={displaySymbol(launch.symbol)} chainId={launch.chainId} />
-                    <div className="flex flex-col">
-                      <a href={launchHref(launch.chainId, launch.tokenAddress)} className="font-medium text-foreground hover:text-primary hover:underline">
-                        {displayName(launch.name, launch.tokenAddress)} <span className="text-muted-foreground">({displaySymbol(launch.symbol)})</span>
-                      </a>
-                      <span className="text-xs text-muted-foreground">
-                        <span>{chainName(launch.chainId)}</span> · <span>{formatLifecycleStatus(launch.lifecycleStatus)}</span>
-                      </span>
-                    </div>
-                  </div>
+                  <TokenCell chainId={launch.chainId} tokenAddress={launch.tokenAddress} name={launch.name}
+                    symbol={launch.symbol} logoUri={launch.logoUri} lifecycleStatus={launch.lifecycleStatus} />
                 </div>
                 <div role="cell" className="md:table-cell md:p-4 md:align-middle">
                   <span className="inline-flex items-center gap-2" title={`${launch.platform} ${launch.protocolVersion}`}>
