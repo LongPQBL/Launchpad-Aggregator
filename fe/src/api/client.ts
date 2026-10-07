@@ -93,6 +93,10 @@ export type LaunchDetail = Required<Omit<LaunchDetailBody, 'quoteAsset' | 'offic
   officialVenues: readonly OfficialVenue[];
 };
 
+export function findActiveVenue(officialVenues: readonly OfficialVenue[], kind: string): OfficialVenue | undefined {
+  return officialVenues.find((venue) => venue.kind === kind && venue.effectiveToBlock === null);
+}
+
 type TradesBody = paths['/v1/launches/{chainId}/{tokenAddress}/trades']['get']['responses'][200]['content']['application/json'];
 
 export type Trade = Required<NonNullable<TradesBody['items']>[number]>;

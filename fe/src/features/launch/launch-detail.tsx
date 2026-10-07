@@ -1,6 +1,6 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
 import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatQuote, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
-import type { CandlePage, LaunchDetail as LaunchDetailData, PoolPage, PoolSummary, TransactionPage } from '@/api/client';
+import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
 import { LaunchpadIcon } from '@/features/launches/launchpad-icon';
@@ -60,7 +60,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
   // Mirrors activeV3Venue's reasoning: a V2 launch's V4 pool venue has no curve-to-pool lifecycle
   // condition to add beyond effectiveToBlock — the curve-vs-V4 distinction already lives in
   // activeCurveVenue's own lifecycleStatus === 'trading' gate above.
-  const activeV4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool' && venue.effectiveToBlock === null);
+  const activeV4Venue = findActiveVenue(detail.officialVenues, 'v4_pool');
 
   // V4SwapPanel's tokenA/tokenB props are a presentation default (which side starts as "being
   // sold"), independent of zeroForOne — V4SwapPanel derives that itself from address comparison

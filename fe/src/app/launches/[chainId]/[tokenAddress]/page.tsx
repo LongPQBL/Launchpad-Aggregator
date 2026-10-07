@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchDetail } from '@/features/launch/launch-detail';
-import { getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions, getPoolDetail } from '@/api/client';
+import { findActiveVenue, getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions, getPoolDetail } from '@/api/client';
 import { launchResourceKey } from '@/hooks/resource-keys';
 
 interface LaunchDetailPageProps {
@@ -44,7 +44,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   }
   if (detail === null) notFound();
 
-  const activeV4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool' && venue.effectiveToBlock === null);
+  const activeV4Venue = findActiveVenue(detail.officialVenues, 'v4_pool');
 
   const [transactions, candles, pools, v4Pool] = await Promise.all([
     getLaunchTransactions(chainId, tokenAddress, { cursor: transactionsCursor }).catch(() => null),

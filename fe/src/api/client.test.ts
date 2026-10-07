@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, getLaunches, getSources, launchHref } from './client';
+import { ApiError, findActiveVenue, getLaunches, getSources, launchHref, type OfficialVenue } from './client';
 
 function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {}): Response {
   return {
@@ -113,5 +113,30 @@ describe('client', () => {
     expect(hrefOnRobinhood).not.toBe(hrefOnOtherChain);
     expect(hrefOnRobinhood).toBe('/launches/4663/0xabc');
     expect(hrefOnOtherChain).toBe('/launches/1/0xabc');
+  });
+});
+
+describe('findActiveVenue', () => {
+  function venue(overrides: Partial<OfficialVenue>): OfficialVenue {
+    return { id: 'venue-1', kind: 'v4_pool', ref: '0xpool', effectiveFromBlock: '1', effectiveToBlock: null, ...overrides };
+  }
+
+  it('returns the matching venue when one exists and is active', () => {
+    const active = venue({ kind: 'v4_pool', effectiveToBlock: null });
+    const result = findActiveVenue([active], 'v4_pool');
+
+    expect(result).toBe(active);
+  });
+
+  it('returns undefined when the matching kind exists but effectiveToBlock is not null (inactive)', () => {
+    const inactive = venue({ kind: 'v4_pool', effectiveToBlock: '100' });
+
+    expect(findActiveVenue([inactive], 'v4_pool')).toBeUndefined();
+  });
+
+  it('returns undefined when no venue of that kind exists at all', () => {
+    const curve = venue({ kind: 'curve', effectiveToBlock: null });
+
+    expect(findActiveVenue([curve], 'v4_pool')).toBeUndefined();
   });
 });
