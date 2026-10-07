@@ -9,7 +9,7 @@ const chainId = 4663;
 const source = 'launch-stats-test-src';
 const tokenWithStats = `0x${'f1'.repeat(20)}`;
 const tokenWithout = `0x${'f2'.repeat(20)}`;
-const stats = { fdvUsd: '1000', marketCapUsd: '1000', week52High: null, week52Low: null, change1h: '1.5', change1d: null,
+const stats = { fdvUsd: '1000', marketCapUsd: '1000', priceUsd: null, week52High: null, week52Low: null, change1h: '1.5', change1d: null,
   tvlUsd: '250', tvlBasis: 'pool_principal' as const, tvlBlockNumber: '10', tvlPriceSource: 'chainlink' as const, tvlPriceUpdatedAt: null, tvlUnavailableReason: null };
 
 beforeAll(async () => {
