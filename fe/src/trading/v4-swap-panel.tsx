@@ -163,7 +163,10 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={tokenIn.symbol ?? undefined}
         canBatchApprove={canBatch}
-        outputAmount={quote.outputAmount}
+        // While the ERC20->Permit2 allowance read is still loading, it reads back as 0n (not yet
+        // known) — disabling via a null outputAmount (already-existing semantics: "not ready to
+        // submit yet") avoids a batching wallet submitting with a guess either way.
+        outputAmount={erc20Allowance.isAllowanceLoading ? null : quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
         actionLabel="Swap"

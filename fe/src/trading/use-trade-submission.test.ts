@@ -140,16 +140,19 @@ describe('useTradeSubmission', () => {
     expect(result.current.errorMessage).toBe('User rejected the request');
   });
 
-  it('reports failed with the decoded error when the resolved batch status is failure', () => {
+  it('reports failed, with no decoded message, when the resolved batch status is failure', () => {
+    // viem's getCallsStatus (throwOnFailure: false, the default) resolves a failed batch with
+    // status: 'failure' and no error at all — TradeStatus already falls back to a generic
+    // "Transaction failed." when errorMessage is null, so there is nothing to decode here.
     const { result, rerender } = renderHook(() => useTradeSubmission());
     act(() => { result.current.submitBatch([call], {}); });
     hooks.sendStatus = 'success';
     hooks.sendData = { id: '0xbatch' };
     hooks.callsStatusData = { status: 'failure' };
-    hooks.callsStatusError = new Error('Reverted on-chain');
+    hooks.callsStatusError = null;
     rerender();
     expect(result.current.status).toBe('failed');
-    expect(result.current.errorMessage).toBe('Reverted on-chain');
+    expect(result.current.errorMessage).toBeNull();
   });
 
   it('reports failed, not stuck confirming, when the batch status query itself errors (e.g. times out) before ever resolving', () => {

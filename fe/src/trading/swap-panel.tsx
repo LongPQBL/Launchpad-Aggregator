@@ -236,7 +236,11 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={displaySymbol(tokenIn, nativeIn)}
         canBatchApprove={canBatch}
-        outputAmount={quote.outputAmount}
+        // While the ERC20->Permit2 allowance read is still loading, it reads back as 0n (not yet
+        // known), which could otherwise read as either "approval needed" or "not needed" before
+        // the real value is in — disabling via a null outputAmount (already-existing semantics:
+        // "not ready to submit yet") avoids a batching wallet submitting with a guess.
+        outputAmount={erc20Allowance.isAllowanceLoading ? null : quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
         actionLabel="Swap"
