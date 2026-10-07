@@ -7,6 +7,7 @@ const hooks = vi.hoisted(() => ({
   tokenBalance: 0n,
   allowance: 0n,
   allowanceIsFetching: false,
+  allowanceRefetch: vi.fn(),
   simulateData: undefined as { result: bigint } | undefined,
   simulateError: null as Error | null,
   refetchQuote: vi.fn(),
@@ -16,6 +17,11 @@ const hooks = vi.hoisted(() => ({
   writeError: null as Error | null,
   writeHash: undefined as `0x${string}` | undefined,
   receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
+  capabilities: undefined as Record<number, { atomic?: { status: 'supported' | 'ready' | 'unsupported' } }> | undefined,
+  sendCalls: vi.fn(),
+  sendStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
+  sendData: undefined as { id: string } | undefined,
+  callsStatusData: undefined as { status: 'pending' | 'success' | 'failure' } | undefined,
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
@@ -23,7 +29,7 @@ vi.mock('wagmi', async (importOriginal) => ({
   useAccount: () => hooks.account,
   useReadContract: (args: { functionName: string }) => {
     if (args.functionName === 'balanceOf') return { data: hooks.tokenBalance, refetch: vi.fn() };
-    return { data: hooks.allowance, isFetching: hooks.allowanceIsFetching, refetch: vi.fn() };
+    return { data: hooks.allowance, isFetching: hooks.allowanceIsFetching, refetch: hooks.allowanceRefetch };
   },
   useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: hooks.simulateError, refetch: hooks.refetchQuote }),
   useWriteContract: () => ({
@@ -34,9 +40,9 @@ vi.mock('wagmi', async (importOriginal) => ({
     data: hooks.writeHash,
   }),
   useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus, error: null }),
-  useSendCalls: () => ({ sendCalls: vi.fn(), status: 'idle', error: null, data: undefined }),
-  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
-  useCapabilities: () => ({ data: undefined }),
+  useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: hooks.sendStatus, error: null, data: hooks.sendData }),
+  useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
+  useCapabilities: () => ({ data: hooks.capabilities }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;
@@ -49,6 +55,7 @@ beforeEach(() => {
   hooks.tokenBalance = 2000000000000000000n;
   hooks.allowance = 0n;
   hooks.allowanceIsFetching = false;
+  hooks.allowanceRefetch.mockReset();
   hooks.simulateData = undefined;
   hooks.simulateError = null;
   hooks.refetchQuote.mockReset();
@@ -58,6 +65,11 @@ beforeEach(() => {
   hooks.writeError = null;
   hooks.writeHash = undefined;
   hooks.receiptStatus = 'idle';
+  hooks.capabilities = undefined;
+  hooks.sendCalls.mockReset();
+  hooks.sendStatus = 'idle';
+  hooks.sendData = undefined;
+  hooks.callsStatusData = undefined;
 });
 
 describe('SellPanel', () => {
@@ -161,5 +173,47 @@ describe('SellPanel', () => {
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     expect(() => fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } })).not.toThrow();
     expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  });
+
+  it('submits approve+sell as one batch when approval is needed and the wallet supports atomic call batching', () => {
+    hooks.allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
+    hooks.simulateData = { result: 1000000000000000000n };
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Sell' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sell' }));
+    expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
+    const [{ calls }] = hooks.sendCalls.mock.calls[0] as [{ calls: { to: string; functionName: string; args: readonly unknown[] }[] }];
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toEqual(expect.objectContaining({ to: token, functionName: 'approve', args: [curve, 1000000000000000000n] }));
+    expect(calls[1]).toEqual(expect.objectContaining({ to: curve, functionName: 'sell' }));
+  });
+
+  it('keeps the plain two-step Approve-then-Sell flow when the wallet cannot batch calls', () => {
+    hooks.allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'unsupported' } } };
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sell' })).not.toBeInTheDocument();
+    expect(hooks.sendCalls).not.toHaveBeenCalled();
+  });
+
+  it('refetches the launched-token allowance once a batched approve+sell confirms, so a later sell of the same token does not re-batch a redundant approve', () => {
+    hooks.allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
+    hooks.simulateData = { result: 1000000000000000000n };
+    const { rerender } = render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sell' }));
+    expect(hooks.allowanceRefetch).not.toHaveBeenCalled();
+
+    hooks.sendStatus = 'success';
+    hooks.sendData = { id: '0xbatch' };
+    hooks.callsStatusData = { status: 'success' };
+    rerender(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    expect(hooks.allowanceRefetch).toHaveBeenCalledTimes(1);
   });
 });

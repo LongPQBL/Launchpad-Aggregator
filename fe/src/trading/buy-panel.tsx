@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type Address, formatUnits, zeroAddress } from 'viem';
 import { useAccount, useBalance, useReadContract } from 'wagmi';
 import { Input } from '@/components/ui/input';
@@ -12,6 +12,7 @@ import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
+import { useCanBatchCalls } from './use-can-batch-calls';
 import { useRefetchQuoteAfterApproval } from './use-refetch-quote-after-approval';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
@@ -52,6 +53,7 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
     nativeValue: isNativeQuote ? amountIn : undefined,
   });
   const submission = useTradeSubmission();
+  const canBatch = useCanBatchCalls();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = isNativeQuote
@@ -63,19 +65,33 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
 
   useRefetchQuoteAfterApproval(allowance.isConfirmingApproval, quote.refetch);
 
+  // A batched approve+buy confirms the ERC20->curve allowance without ever going through
+  // allowance's own approve() (what its internal refetch-after-receipt watches for) — same
+  // reasoning as swap-panel.tsx's identical guard, applied to the plain ERC20->curve approval.
+  const wasConfirmed = useRef(false);
+  useEffect(() => {
+    if (!wasConfirmed.current && submission.status === 'confirmed') allowance.refetch();
+    wasConfirmed.current = submission.status === 'confirmed';
+  }, [submission.status, allowance]);
+
   function submitBuy() {
     if (amountIn === 0n || !account || quote.outputAmount === null) return;
     const minTokensOut = applySlippage(quote.outputAmount, settings.slippageBps, 'curve');
-    submission.submit(
-      {
-        address: curveAddress,
-        abi: curveTradeAbi,
-        functionName: 'buy',
-        args: [amountIn, minTokensOut, account],
-        value: isNativeQuote ? amountIn : undefined,
-      },
-      { onSuccess: () => setAmount('') },
-    );
+    const buyCall = {
+      address: curveAddress,
+      abi: curveTradeAbi,
+      functionName: 'buy',
+      args: [amountIn, minTokensOut, account],
+      value: isNativeQuote ? amountIn : undefined,
+    };
+    if (needsApproval && canBatch) {
+      // Exact amountIn, never maxUint256 — matches useTokenAllowance's own approve() convention
+      // for this plain ERC20->curve approval (unlike Permit2's always-maxUint256 approval).
+      const approveCall = { address: quoteAsset.address, abi: erc20Abi, functionName: 'approve', args: [curveAddress, amountIn] };
+      submission.submitBatch([approveCall, buyCall], { onSuccess: () => setAmount('') });
+    } else {
+      submission.submit(buyCall, { onSuccess: () => setAmount('') });
+    }
   }
 
   return (
@@ -98,6 +114,7 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={quoteAsset.symbol ?? undefined}
+        canBatchApprove={canBatch}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting}
         allowance={allowance}
