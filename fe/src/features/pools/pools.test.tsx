@@ -76,6 +76,11 @@ describe('Pools UI', () => {
     render(<PoolDetail pool={v4Pool} trades={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.queryByLabelText('Flip swap direction')).not.toBeInTheDocument();
   });
+  it('PoolDetail hides the V4 Swap panel when the other currency\'s decimals are unknown, rather than guessing', () => {
+    const v4Pool: PoolSummary = { ...pool, protocol: 'uniswap_v4', currency0Decimals: null };
+    render(<PoolDetail pool={v4Pool} trades={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.queryByLabelText('Flip swap direction')).not.toBeInTheDocument();
+  });
   it('PoolDetail shows a Swap panel for a V3 pool once both currencies\' decimals are known', () => {
     const v3Pool: PoolSummary = { ...pool, protocol: 'uniswap_v3' };
     render(<PoolDetail pool={v3Pool} trades={{ items: [], nextCursor: null }} candles={null} />);
