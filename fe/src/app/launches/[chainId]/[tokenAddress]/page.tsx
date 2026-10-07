@@ -50,7 +50,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
     getLaunchTransactions(chainId, tokenAddress, { cursor: transactionsCursor }).catch(() => null),
     getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, intervalSeconds: chartInterval }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
-    activeV4Venue ? getPoolDetail(chainId, 'uniswap_v4', activeV4Venue.ref).catch(() => null) : Promise.resolve(null),
+    activeV4Venue ? getPoolDetail(chainId, 'uniswap_v4', activeV4Venue.ref, tokenAddress).catch(() => null) : Promise.resolve(null),
   ]);
   const hasPendingTrade = transactions?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 
