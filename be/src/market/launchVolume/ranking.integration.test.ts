@@ -96,15 +96,18 @@ describe('assertVolumeRankingAvailable', () => {
     await pool.query('DELETE FROM launch_volume24h_state WHERE id = 1');
   });
 
-  it('is unavailable while the initial backfill has never completed', async () => {
-    await recordVolumeWorkerHeartbeat(pool, now);
+  it('is unavailable when the worker has never recorded a heartbeat', async () => {
     await expect(assertVolumeRankingAvailable(pool, now)).rejects.toBeInstanceOf(VolumeRankingUnavailableError);
   });
 
   it('is unavailable when the worker heartbeat is more than two minutes old', async () => {
-    await markVolumeBackfillComplete(pool, now);
     await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - 121_000));
     await expect(assertVolumeRankingAvailable(pool, now)).rejects.toBeInstanceOf(VolumeRankingUnavailableError);
+  });
+
+  it('is available with a fresh heartbeat even though the initial backfill has never completed', async () => {
+    await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - 60_000));
+    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toBeUndefined();
   });
 
   it('is available once backfill is complete and the heartbeat is fresh', async () => {
