@@ -12,9 +12,9 @@ export interface ApproveOrActionAllowance {
 export interface ApproveOrActionButtonProps {
   needsApproval: boolean;
   amountIn: bigint;
-  // Defaults to amountIn when omitted — only V4SwapPanel needs this to differ (it always
-  // approves maxUint256 to Permit2, while amountIn keeps meaning the real trade amount for the
-  // action button's own disabled check below).
+  // Defaults to amountIn when omitted — both SwapPanel and V4SwapPanel need this to differ (they
+  // always approve maxUint256 to Permit2, while amountIn keeps meaning the real trade amount for
+  // the action button's own disabled check below).
   approveAmount?: bigint;
   isWrongChain: boolean;
   hasInsufficientBalance: boolean;

@@ -55,10 +55,10 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
         <div><dt>Last trade</dt><dd>{pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</dd></div>
       </dl>{pool.launchTokenAddress && <a className="underline" href={launchHref(pool.chainId, pool.launchTokenAddress)}>View Pons launch</a>}
       </CardContent></Card>
-    {/* Swap execution uses SwapRouter02's exactInputSingle for V3 pools and Universal Router's
-        V4_SWAP/PERMIT2_PERMIT commands for V4 pools (its shared PoolManager has no per-pool
-        router). Hidden, never guessed, when either currency's decimals is unknown (same
-        convention as launch-detail.tsx's own SwapPanel gate). */}
+    {/* Swap execution uses Universal Router + Permit2 for both: V3_SWAP_EXACT_IN/PERMIT2_PERMIT
+        commands for V3 pools, V4_SWAP/PERMIT2_PERMIT commands for V4 pools (its shared
+        PoolManager has no per-pool router). Hidden, never guessed, when either currency's
+        decimals is unknown (same convention as launch-detail.tsx's own SwapPanel gate). */}
     {pool.protocol === 'uniswap_v3' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
       <Card><CardContent className="pt-6">
         <SwapPanel

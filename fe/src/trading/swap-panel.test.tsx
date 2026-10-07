@@ -2,14 +2,40 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SwapPanel, type SwapToken } from './swap-panel';
+import { applySlippage } from './amount';
+import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
+import { MSG_SENDER, ADDRESS_THIS } from './v3SwapEncoding';
 
 const SWAP_INPUT_ABI = parseAbiParameters(
   'address recipient, uint256 amount, uint256 amountOutMin, bytes path, bool payerIsUser, uint256[] minHopPriceX36',
 );
+const WRAP_UNWRAP_ABI = parseAbiParameters('address, uint256');
 
 function decodeV3SwapRecipient(swapInput: `0x${string}`): string {
   const [recipient] = decodeAbiParameters(SWAP_INPUT_ABI, swapInput);
   return (recipient as string).toLowerCase();
+}
+
+function decodeV3SwapInput(swapInput: `0x${string}`) {
+  const [recipient, amount, amountOutMin, path, payerIsUser] = decodeAbiParameters(SWAP_INPUT_ABI, swapInput);
+  return {
+    recipient: (recipient as string).toLowerCase(),
+    amount: amount as bigint,
+    amountOutMin: amountOutMin as bigint,
+    path: path as `0x${string}`,
+    payerIsUser: payerIsUser as boolean,
+  };
+}
+
+// Packed V3 path: tokenIn (20 bytes) + fee (3 bytes) + tokenOut (20 bytes), tightly packed —
+// see v3SwapEncoding.ts's packV3Path and its own test's identical slicing.
+function pathTokens(path: `0x${string}`): { tokenIn: string; tokenOut: string } {
+  return { tokenIn: path.slice(0, 42).toLowerCase(), tokenOut: `0x${path.slice(-40)}`.toLowerCase() };
+}
+
+function decodeWrapOrUnwrap(input: `0x${string}`) {
+  const [recipient, amountMinimum] = decodeAbiParameters(WRAP_UNWRAP_ABI, input);
+  return { recipient: (recipient as string).toLowerCase(), amountMinimum: amountMinimum as bigint };
 }
 
 const hooks = vi.hoisted(() => ({
@@ -20,6 +46,7 @@ const hooks = vi.hoisted(() => ({
   permit2Refetch: vi.fn(async () => ({ data: hooks.permit2Allowance })),
   balanceA: 10_000_000_000_000_000_000n,
   balanceB: 10_000_000_000_000_000_000n,
+  balanceNoWeth: 10_000_000_000_000_000_000n,
   nativeBalance: 10_000_000_000_000_000_000n,
   simulateData: undefined as { result: readonly [bigint, bigint, number, bigint] } | undefined,
   signTypedDataAsync: vi.fn(async () => '0xsignature' as `0x${string}`),
@@ -44,6 +71,7 @@ vi.mock('wagmi', async (importOriginal) => ({
     if (args.functionName === 'allowance') return { data: hooks.erc20Allowance, refetch: vi.fn() };
     if (args.address === tokenA.address) return { data: hooks.balanceA, refetch: vi.fn() };
     if (args.address === tokenB.address) return { data: hooks.balanceB, refetch: vi.fn() };
+    if (args.address === tokenNoWeth.address) return { data: hooks.balanceNoWeth, refetch: vi.fn() };
     return { data: undefined, refetch: vi.fn() };
   },
   useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: null }),
@@ -68,6 +96,7 @@ beforeEach(() => {
   hooks.permit2Refetch.mockImplementation(async () => ({ data: hooks.permit2Allowance }));
   hooks.balanceA = 10_000_000_000_000_000_000n;
   hooks.balanceB = 10_000_000_000_000_000_000n;
+  hooks.balanceNoWeth = 10_000_000_000_000_000_000n;
   hooks.nativeBalance = 10_000_000_000_000_000_000n;
   hooks.simulateData = undefined;
   hooks.signTypedDataAsync.mockClear();
@@ -169,6 +198,12 @@ describe('SwapPanel', () => {
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
     const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
     expect(args[0]).toBe('0x0b00'); // WRAP_ETH then V3_SWAP_EXACT_IN, no PERMIT2_PERMIT
+    // The command byte alone doesn't prove where the wrapped ETH or the swap's payment actually
+    // land — decode both inputs to confirm the real routing, not just the top-level byte.
+    const wrapInput = decodeWrapOrUnwrap(args[1][0]);
+    expect(wrapInput.recipient).toBe(ADDRESS_THIS.toLowerCase());
+    const swapInput = decodeV3SwapInput(args[1][1]);
+    expect(swapInput.payerIsUser).toBe(false); // the router itself pays, from the WETH it just wrapped
   });
 
   it('appends UNWRAP_WETH and settles the swap itself to the router (ADDRESS_THIS), for a native-ETH-out output (the default WETH-leg choice)', async () => {
@@ -182,6 +217,11 @@ describe('SwapPanel', () => {
     expect(args[0]).toBe('0x000c'); // V3_SWAP_EXACT_IN then UNWRAP_WETH (allowance already sufficient, no permit)
     const swapInput = args[1][0];
     expect(decodeV3SwapRecipient(swapInput)).toBe('0x0000000000000000000000000000000000000002'); // ADDRESS_THIS
+    // The unwrap step is what actually delivers funds to the user — decode its recipient and
+    // confirm its amountMinimum is the real slippage-adjusted quoted output, not a magic number.
+    const unwrapInput = decodeWrapOrUnwrap(args[1][args[1].length - 1]);
+    expect(unwrapInput.recipient).toBe(MSG_SENDER.toLowerCase());
+    expect(unwrapInput.amountMinimum).toBe(applySlippage(500_000_000_000_000_000n, 'auto', 'pool'));
   });
 
   it('becomes immediately actionable with no Approve button and no signature when switching an already-Permit2-approved token to native-ETH-in', () => {
@@ -252,5 +292,94 @@ describe('SwapPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+  });
+
+  it('keeps an explicit WETH choice (not reverted to ETH) after flipping direction, and submits via plain V3_SWAP_EXACT_IN, never WRAP_ETH', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    // tokenB (WETH) starts on the output side, defaulting to ETH — switch it to WETH explicitly.
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
+    // The WETH leg is now the input side; its choice must still read WETH, not revert to ETH.
+    expect(screen.getByRole('button', { name: /^WETH$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^ETH$/ })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+    const [{ address, args, value }] = hooks.writeContract.mock.calls[0] as [
+      { address: string; args: readonly [`0x${string}`, readonly `0x${string}`[], bigint]; value: bigint | undefined },
+    ];
+    expect(address).toBe(UNIVERSAL_ROUTER_ADDRESS);
+    expect(args[0]).toBe('0x00'); // plain V3_SWAP_EXACT_IN — never 0x0b00 (WRAP_ETH)
+    expect(value).toBeUndefined();
+  });
+
+  it('produces a byte-identical plain ERC20-ERC20 swap when neither side is WETH — no WRAP/UNWRAP ever injected', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+    const [{ address, args, value }] = hooks.writeContract.mock.calls[0] as [
+      { address: string; args: readonly [`0x${string}`, readonly `0x${string}`[], bigint]; value: bigint | undefined },
+    ];
+    expect(address).toBe(UNIVERSAL_ROUTER_ADDRESS);
+    expect(args[0]).toBe('0x00');
+    expect(value).toBeUndefined();
+    const swapInput = decodeV3SwapInput(args[1][0]);
+    expect(swapInput.recipient).toBe(MSG_SENDER.toLowerCase());
+    expect(swapInput.payerIsUser).toBe(true);
+  });
+
+  it('is a no-op when clicking the single inert option on a non-WETH side', () => {
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /LAUNCH/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^LAUNCH$/ }));
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+  });
+
+  it('flips tokenIn/tokenOut order in the packed path when direction flips', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledTimes(1));
+    const firstArgs = (hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }])[0].args;
+    const firstPath = pathTokens(decodeV3SwapInput(firstArgs[1][0]).path);
+    expect(firstPath.tokenIn).toBe(tokenA.address.toLowerCase());
+    expect(firstPath.tokenOut).toBe(tokenNoWeth.address.toLowerCase());
+
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledTimes(2));
+    const secondArgs = (hooks.writeContract.mock.calls[1] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }])[0].args;
+    const secondPath = pathTokens(decodeV3SwapInput(secondArgs[1][0]).path);
+    expect(secondPath.tokenIn).toBe(tokenNoWeth.address.toLowerCase());
+    expect(secondPath.tokenOut).toBe(tokenA.address.toLowerCase());
+  });
+
+  it('re-targets the balance check to the new input side after flipping, not left pointed at the original side', () => {
+    hooks.balanceNoWeth = 0n;
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // tokenNoWeth now "in"
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+  });
+
+  it('submits the swap without throwing when the deadline setting is a fractional number of minutes', () => {
+    // A user who typed "1.01" into the settings popover's deadline-minutes field previously
+    // crashed the click handler: deadlineMinutes * 60 = 60.6 (non-integer), and BigInt() throws a
+    // RangeError on a non-integer number since only the current-timestamp half of the deadline
+    // expression was floored. (A value like "10.5" would not have caught this: 10.5 * 60 = 630,
+    // itself an integer, so it must be a value whose product with 60 is fractional.)
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
+    fireEvent.change(screen.getByLabelText(/deadline minutes/i), { target: { value: '1.01' } });
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(() => fireEvent.click(screen.getByRole('button', { name: 'Swap' }))).not.toThrow();
+    expect(hooks.writeContract).toHaveBeenCalled();
   });
 });

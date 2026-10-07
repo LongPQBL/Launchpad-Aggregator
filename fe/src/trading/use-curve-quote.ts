@@ -23,7 +23,7 @@ export interface CurveQuoteResult {
   // caches a pre-approval revert (e.g. the curve's transferFrom on an ERC20-quoted buy/sell)
   // under the same query key, since none of curveAddress/direction/amountIn/recipient change
   // across the approval, and its own retry budget is already exhausted by the time a real user
-  // finishes approving. See use-swap-quote.ts's identical fix for the same bug shape.
+  // finishes approving. See use-v3-swap-quote.ts's identical fix for the same bug shape.
   refetch: () => void;
 }
 
