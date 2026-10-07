@@ -21,6 +21,10 @@ export interface ApproveOrActionButtonProps {
   // Symbol of the token amountIn is denominated in, for the "Not enough {symbol}" label. Falls
   // back to the generic "token" when not given (e.g. sell-panel.tsx doesn't thread one through yet).
   tokenInSymbol?: string;
+  // When true, a wallet that supports EIP-5792 atomic call batching skips the plain Approve step
+  // and goes straight to the action button — onAction is responsible for bundling the approve
+  // call into the batch itself. Defaults falsy, so omitting it preserves today's behavior exactly.
+  canBatchApprove?: boolean;
   outputAmount: bigint | null;
   isSubmitting: boolean;
   allowance: ApproveOrActionAllowance;
@@ -42,6 +46,7 @@ export function ApproveOrActionButton({
   isWrongChain,
   hasInsufficientBalance,
   tokenInSymbol,
+  canBatchApprove,
   outputAmount,
   isSubmitting,
   allowance,
@@ -64,7 +69,7 @@ export function ApproveOrActionButton({
     );
   }
 
-  if (needsApproval) {
+  if (needsApproval && !canBatchApprove) {
     return (
       <>
         {approveError}

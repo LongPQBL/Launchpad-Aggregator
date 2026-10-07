@@ -248,6 +248,31 @@ describe('ApproveOrActionButton', () => {
     expect(allowance.approve).toHaveBeenCalledWith(1_000n);
   });
 
+  it('renders the action button instead of Approve when approval is needed but the wallet can batch calls', () => {
+    const onAction = vi.fn();
+    const allowance = baseAllowance();
+    render(
+      <ApproveOrActionButton
+        needsApproval
+        canBatchApprove
+        amountIn={1_000n}
+        isWrongChain={false}
+        hasInsufficientBalance={false}
+        outputAmount={500n}
+        isSubmitting={false}
+        allowance={allowance}
+        actionLabel="Swap"
+        onAction={onAction}
+      />,
+    );
+    const button = screen.getByRole('button', { name: 'Swap' });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+    expect(onAction).toHaveBeenCalledTimes(1);
+    expect(allowance.approve).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
   it('shows the approve error alert when present', () => {
     render(
       <ApproveOrActionButton
