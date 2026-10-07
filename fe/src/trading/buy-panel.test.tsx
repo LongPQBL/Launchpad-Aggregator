@@ -4,6 +4,7 @@ import { BuyPanel } from './buy-panel';
 
 const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
+  paymasterServiceUrl: undefined as string | undefined,
   balance: { data: { value: 10000000000000000n }, isLoading: false },
   allowance: 0n,
   allowanceIsFetching: false,
@@ -18,7 +19,7 @@ const hooks = vi.hoisted(() => ({
   writeError: null as Error | null,
   writeHash: undefined as `0x${string}` | undefined,
   receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
-  capabilities: undefined as Record<number, { atomic?: { status: 'supported' | 'ready' | 'unsupported' } }> | undefined,
+  capabilities: undefined as Record<number, { atomic?: { status: 'supported' | 'ready' | 'unsupported' }; paymasterService?: { supported: boolean } }> | undefined,
   sendCalls: vi.fn(),
   sendStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
   sendData: undefined as { id: string } | undefined,
@@ -47,6 +48,10 @@ vi.mock('wagmi', async (importOriginal) => ({
   useCapabilities: () => ({ data: hooks.capabilities }),
 }));
 
+vi.mock('./paymasterConfig', () => ({
+  get PAYMASTER_SERVICE_URL() { return hooks.paymasterServiceUrl; },
+}));
+
 const curve = '0x4444444444444444444444444444444444444444' as const;
 const token = '0x2222222222222222222222222222222222222222' as const;
 const nativeQuote = { address: '0x0000000000000000000000000000000000000000' as const, symbol: 'ETH', decimals: 18 };
@@ -54,6 +59,7 @@ const erc20Quote = { address: '0x6666666666666666666666666666666666666666' as co
 
 beforeEach(() => {
   localStorage.clear();
+  hooks.paymasterServiceUrl = undefined;
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
   hooks.balance = { data: { value: 10000000000000000n }, isLoading: false };
@@ -265,5 +271,28 @@ describe('BuyPanel', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
     expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches a paymasterService capability to the batch when a paymaster URL is configured and the wallet reports support', () => {
+    hooks.allowance = 0n;
+    hooks.paymasterServiceUrl = 'https://example.com/paymaster';
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
+    hooks.simulateData = { result: 1000000000000000000n };
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
+    const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: { paymasterService: { url: string } } }];
+    expect(capabilities).toEqual({ paymasterService: { url: 'https://example.com/paymaster' } });
+  });
+
+  it('never attaches a paymasterService capability when no paymaster URL is configured, even if the wallet reports support', () => {
+    hooks.allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
+    hooks.simulateData = { result: 1000000000000000000n };
+    render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Buy' }));
+    const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: unknown }];
+    expect(capabilities).toBeUndefined();
   });
 });

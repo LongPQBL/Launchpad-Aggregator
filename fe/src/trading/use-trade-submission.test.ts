@@ -167,6 +167,25 @@ describe('useTradeSubmission', () => {
     expect(result.current.errorMessage).toBe('Timed out while waiting for call status');
   });
 
+  it('forwards an optional capabilities object (e.g. paymasterService) to sendCalls when given', () => {
+    const { result } = renderHook(() => useTradeSubmission());
+    const capabilities = { paymasterService: { url: 'https://example.com/paymaster' } };
+    act(() => { result.current.submitBatch([call], {}, capabilities); });
+    expect(hooks.sendCalls).toHaveBeenCalledWith(
+      { calls: [{ to: call.address, abi: call.abi, functionName: call.functionName, args: call.args }], forceAtomic: true, capabilities },
+      {},
+    );
+  });
+
+  it('omits capabilities from the sendCalls request when none is given, unchanged from today', () => {
+    const { result } = renderHook(() => useTradeSubmission());
+    act(() => { result.current.submitBatch([call], {}); });
+    expect(hooks.sendCalls).toHaveBeenCalledWith(
+      { calls: [{ to: call.address, abi: call.abi, functionName: call.functionName, args: call.args }], forceAtomic: true },
+      {},
+    );
+  });
+
   it('falls back to reading single-call status once submit() is called again after an earlier submitBatch', () => {
     const { result, rerender } = renderHook(() => useTradeSubmission());
     act(() => { result.current.submitBatch([call], {}); });

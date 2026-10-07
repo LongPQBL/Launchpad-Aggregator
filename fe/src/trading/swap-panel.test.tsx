@@ -55,7 +55,8 @@ const hooks = vi.hoisted(() => ({
   signTypedDataError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
-  capabilities: undefined as Record<number, { atomic?: { status: 'supported' | 'ready' | 'unsupported' } }> | undefined,
+  capabilities: undefined as Record<number, { atomic?: { status: 'supported' | 'ready' | 'unsupported' }; paymasterService?: { supported: boolean } }> | undefined,
+  paymasterServiceUrl: undefined as string | undefined,
   sendCalls: vi.fn(),
   sendStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
   sendData: undefined as { id: string } | undefined,
@@ -91,6 +92,10 @@ vi.mock('wagmi', async (importOriginal) => ({
   useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
 }));
 
+vi.mock('./paymasterConfig', () => ({
+  get PAYMASTER_SERVICE_URL() { return hooks.paymasterServiceUrl; },
+}));
+
 const poolAddress = '0x4444444444444444444444444444444444444444' as const;
 const tokenA: SwapToken = { address: '0x1111111111111111111111111111111111111112', symbol: 'LAUNCH', decimals: 18, logoUri: null };
 const tokenB: SwapToken = { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', symbol: 'WETH', decimals: 18, logoUri: null };
@@ -99,6 +104,7 @@ const tokenNoWeth: SwapToken = { address: '0x33333333333333333333333333333333333
 
 beforeEach(() => {
   localStorage.clear();
+  hooks.paymasterServiceUrl = undefined;
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
   hooks.poolFee = 10000;
@@ -460,6 +466,29 @@ describe('SwapPanel', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(hooks.sendCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('attaches a paymasterService capability to the batch when a paymaster URL is configured and the wallet reports support', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.paymasterServiceUrl = 'https://example.com/paymaster';
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: { paymasterService: { url: string } } }];
+    expect(capabilities).toEqual({ paymasterService: { url: 'https://example.com/paymaster' } });
+  });
+
+  it('never attaches a paymasterService capability when no paymaster URL is configured, even if the wallet reports support', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: unknown }];
+    expect(capabilities).toBeUndefined();
   });
 
   it('keeps Swap disabled while the ERC20->Permit2 allowance is still loading, instead of assuming approval is unnecessary', () => {

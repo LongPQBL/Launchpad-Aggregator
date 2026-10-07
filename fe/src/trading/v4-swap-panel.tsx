@@ -18,6 +18,8 @@ import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
 import { useCanBatchCalls } from './use-can-batch-calls';
+import { usePaymasterCapability } from './use-paymaster-capability';
+import { PAYMASTER_SERVICE_URL } from './paymasterConfig';
 import { applySlippage, parseAmountSafe } from './amount';
 import { encodeExecuteCommands, encodePermit2PermitInput, encodeV4SwapInput, type V4PoolKey } from './v4SwapEncoding';
 
@@ -60,6 +62,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const quote = useV4SwapQuote({ poolKey, zeroForOne, amountIn });
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
+  const paymasterCapable = usePaymasterCapability();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   // A batched approve+swap confirms the ERC20->Permit2 approval without ever going through
@@ -123,7 +126,9 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
 
     if (needsErc20Approval && canBatch) {
       const approveCall = { address: tokenIn.address, abi: erc20Abi, functionName: 'approve', args: [PERMIT2_ADDRESS, maxUint256] };
-      submission.submitBatch([approveCall, executeCall], { onSuccess: () => setAmount('') });
+      // Unset in every real environment today (paymasterConfig.ts) — see use-paymaster-capability.ts.
+      const capabilities = PAYMASTER_SERVICE_URL && paymasterCapable ? { paymasterService: { url: PAYMASTER_SERVICE_URL } } : undefined;
+      submission.submitBatch([approveCall, executeCall], { onSuccess: () => setAmount('') }, capabilities);
     } else {
       submission.submit(executeCall, { onSuccess: () => setAmount('') });
     }

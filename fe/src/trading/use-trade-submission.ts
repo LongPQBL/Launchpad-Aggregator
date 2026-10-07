@@ -15,9 +15,14 @@ export interface TradeCall {
   value?: bigint;
 }
 
+// Only paymasterService is wired today (see use-paymaster-capability.ts/paymasterConfig.ts) —
+// kept as a loose record rather than viem's own capabilities type so this file doesn't need to
+// know about every EIP-5792 capability a future caller might add here.
+export type TradeSendCallsCapabilities = Record<string, unknown>;
+
 export interface TradeSubmission {
   submit: (call: TradeCall, options?: { onSuccess?: () => void }) => void;
-  submitBatch: (calls: readonly TradeCall[], options?: { onSuccess?: () => void }) => void;
+  submitBatch: (calls: readonly TradeCall[], options?: { onSuccess?: () => void }, capabilities?: TradeSendCallsCapabilities) => void;
   status: TradeSubmissionStatus;
   txHash: Address | undefined;
   errorMessage: string | null;
@@ -46,7 +51,7 @@ export function useTradeSubmission(): TradeSubmission {
     writeContract(call as never, options);
   }
 
-  function submitBatch(calls: readonly TradeCall[], options?: { onSuccess?: () => void }) {
+  function submitBatch(calls: readonly TradeCall[], options?: { onSuccess?: () => void }, capabilities?: TradeSendCallsCapabilities) {
     setMode('batch');
     // viem's sendCalls reads each call's `to`, not `address` (TradeCall's field, matching
     // writeContract's convention) — a straight passthrough sends every call with no destination.
@@ -54,7 +59,7 @@ export function useTradeSubmission(): TradeSubmission {
     // confirmed the wallet reports atomic.status === 'supported', so requiring it costs nothing
     // and is what the "every receipt shares one transactionHash" assumption below actually needs.
     const mappedCalls = calls.map(({ address, abi, functionName, args, value }) => ({ to: address, abi, functionName, args, value }));
-    sendCalls({ calls: mappedCalls, forceAtomic: true } as never, options);
+    sendCalls({ calls: mappedCalls, forceAtomic: true, ...(capabilities ? { capabilities } : {}) } as never, options);
   }
 
   let status: TradeSubmissionStatus = 'idle';

@@ -13,6 +13,8 @@ import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { useCanBatchCalls } from './use-can-batch-calls';
+import { usePaymasterCapability } from './use-paymaster-capability';
+import { PAYMASTER_SERVICE_URL } from './paymasterConfig';
 import { useRefetchQuoteAfterApproval } from './use-refetch-quote-after-approval';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { TradeStatus } from './trade-status';
@@ -54,6 +56,7 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
   });
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
+  const paymasterCapable = usePaymasterCapability();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
   const hasInsufficientBalance = isNativeQuote
@@ -88,7 +91,9 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
       // Exact amountIn, never maxUint256 — matches useTokenAllowance's own approve() convention
       // for this plain ERC20->curve approval (unlike Permit2's always-maxUint256 approval).
       const approveCall = { address: quoteAsset.address, abi: erc20Abi, functionName: 'approve', args: [curveAddress, amountIn] };
-      submission.submitBatch([approveCall, buyCall], { onSuccess: () => setAmount('') });
+      // Unset in every real environment today (paymasterConfig.ts) — see use-paymaster-capability.ts.
+      const capabilities = PAYMASTER_SERVICE_URL && paymasterCapable ? { paymasterService: { url: PAYMASTER_SERVICE_URL } } : undefined;
+      submission.submitBatch([approveCall, buyCall], { onSuccess: () => setAmount('') }, capabilities);
     } else {
       submission.submit(buyCall, { onSuccess: () => setAmount('') });
     }
