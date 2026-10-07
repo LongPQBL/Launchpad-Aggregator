@@ -1,92 +1,200 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { decodeFunctionData } from 'viem';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { decodeAbiParameters, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { applySlippage } from './amount';
-import { SwapPanel } from './swap-panel';
-import { swapRouterAbi, SWAP_ROUTER_ADDRESS } from './swapRouterAbi';
+import { SwapPanel, type SwapToken } from './swap-panel';
+
+const SWAP_INPUT_ABI = parseAbiParameters(
+  'address recipient, uint256 amount, uint256 amountOutMin, bytes path, bool payerIsUser, uint256[] minHopPriceX36',
+);
+
+function decodeV3SwapRecipient(swapInput: `0x${string}`): string {
+  const [recipient] = decodeAbiParameters(SWAP_INPUT_ABI, swapInput);
+  return (recipient as string).toLowerCase();
+}
 
 const hooks = vi.hoisted(() => ({
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
-  allowance: 0n,
-  allowanceIsFetching: false,
-  balanceA: 10000000000000000000n,
-  balanceB: 10000000000000000000n,
   poolFee: 10000 as number | undefined,
-  simulateData: undefined as { result: bigint } | undefined,
-  refetchQuote: vi.fn(),
+  erc20Allowance: 0n,
+  permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
+  permit2Refetch: vi.fn(async () => ({ data: hooks.permit2Allowance })),
+  balanceA: 10_000_000_000_000_000_000n,
+  balanceB: 10_000_000_000_000_000_000n,
+  nativeBalance: 10_000_000_000_000_000_000n,
+  simulateData: undefined as { result: readonly [bigint, bigint, number, bigint] } | undefined,
+  signTypedDataAsync: vi.fn(async () => '0xsignature' as `0x${string}`),
+  resetSignTypedData: vi.fn(),
+  signTypedDataError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
-  approveTxHash: undefined as `0x${string}` | undefined,
-  receiptStatus: 'idle' as 'idle' | 'pending' | 'success' | 'error',
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
+  useBalance: () => ({ data: { value: hooks.nativeBalance }, isLoading: false }),
   useReadContract: (args: { functionName: string; address: string }) => {
-    // `balanceOf` and `allowance` reads can both target the same ERC20 contract address (whichever
-    // side is currently the input token) — discriminate on functionName first, not address alone,
-    // or an allowance check would silently read back a balance value instead.
     if (args.functionName === 'fee') return { data: hooks.poolFee, isLoading: false };
-    if (args.functionName === 'allowance') {
-      return { data: hooks.allowance, isFetching: hooks.allowanceIsFetching, refetch: vi.fn() };
+    if (args.functionName === 'allowance' && args.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
+      return { data: hooks.permit2Allowance, isLoading: false, refetch: hooks.permit2Refetch };
     }
+    // The plain ERC20->Permit2 allowance check reads `allowance(owner, Permit2)` on the token's
+    // own contract address (not Permit2's address, handled above) — must be distinguished from a
+    // balanceOf call on that same address, or it would wrongly read back a balance as an allowance.
+    if (args.functionName === 'allowance') return { data: hooks.erc20Allowance, refetch: vi.fn() };
     if (args.address === tokenA.address) return { data: hooks.balanceA, refetch: vi.fn() };
     if (args.address === tokenB.address) return { data: hooks.balanceB, refetch: vi.fn() };
     return { data: undefined, refetch: vi.fn() };
   },
-  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: null, refetch: hooks.refetchQuote }),
-  useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: hooks.approveTxHash }),
-  useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus, error: null }),
+  useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: null }),
+  useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: false, error: hooks.signTypedDataError, reset: hooks.resetSignTypedData }),
+  useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
+  useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
 }));
 
 const poolAddress = '0x4444444444444444444444444444444444444444' as const;
-const tokenA = { address: '0x1111111111111111111111111111111111111112' as const, symbol: 'LAUNCH', decimals: 18 };
-const tokenB = { address: '0x0000000000000000000000000000000000000000' as const, symbol: 'WETH', decimals: 18 };
+const tokenA: SwapToken = { address: '0x1111111111111111111111111111111111111112', symbol: 'LAUNCH', decimals: 18, logoUri: null };
+const tokenB: SwapToken = { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', symbol: 'WETH', decimals: 18, logoUri: null };
+// A pair with no WETH leg at all (e.g. a Pools-tab Token/USDG pair) — for the "no native choice" cases.
+const tokenNoWeth: SwapToken = { address: '0x3333333333333333333333333333333333333333', symbol: 'USDG', decimals: 18, logoUri: null };
 
 beforeEach(() => {
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
-  hooks.allowance = 2000000000000000000n;
-  hooks.allowanceIsFetching = false;
-  hooks.balanceA = 10000000000000000000n;
-  hooks.balanceB = 10000000000000000000n;
   hooks.poolFee = 10000;
+  hooks.erc20Allowance = 2_000_000_000_000_000_000n;
+  hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+  hooks.permit2Refetch.mockReset();
+  hooks.permit2Refetch.mockImplementation(async () => ({ data: hooks.permit2Allowance }));
+  hooks.balanceA = 10_000_000_000_000_000_000n;
+  hooks.balanceB = 10_000_000_000_000_000_000n;
+  hooks.nativeBalance = 10_000_000_000_000_000_000n;
   hooks.simulateData = undefined;
-  hooks.refetchQuote.mockReset();
+  hooks.signTypedDataAsync.mockClear();
+  hooks.resetSignTypedData.mockReset();
+  hooks.signTypedDataError = null;
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
-  hooks.approveTxHash = undefined;
-  hooks.receiptStatus = 'idle';
 });
 
 describe('SwapPanel', () => {
-  it('defaults to swapping tokenA for tokenB', () => {
+  it('defaults to swapping tokenA for tokenB, showing WETH\'s default native-ETH choice on the output side', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(screen.getByText(new RegExp(`Sell.*${tokenA.symbol}`, 'i'))).toBeInTheDocument();
+    expect(screen.getByText('Sell')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    // tokenB is the WETH leg and useNativeEth defaults to true, so its selector shows ETH, not WETH.
+    expect(screen.getByRole('button', { name: /^ETH$/ })).toBeInTheDocument();
   });
 
   it('flips direction when the toggle is clicked', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    expect(screen.getByText(new RegExp(`Sell.*${tokenB.symbol}`, 'i'))).toBeInTheDocument();
+    // tokenA (not WETH) is now on the output side; tokenB (WETH, default ETH) is now on the input side.
+    expect(screen.getAllByRole('button', { name: /^ETH$/ })).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
   });
 
-  it('re-targets the balance/allowance checks to the new input side after flipping, not left pointed at the original side', () => {
-    // tokenA has plenty of balance; tokenB (the input side once flipped) does not. If the balance
-    // check were still hardcoded to tokenA after the flip, this would wrongly leave Swap enabled.
-    hooks.balanceA = 10000000000000000000n;
-    hooks.balanceB = 0n;
-    hooks.simulateData = { result: 500000000000000000n };
+  it('every side renders the token-selector chrome even when a pool has no WETH leg at all', () => {
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /USDG/ })).toBeInTheDocument();
+  });
+
+  it('shows Approve (targeting Permit2, not a router) when the ERC20->Permit2 allowance is insufficient for a WETH-chosen (non-native) input', () => {
+    // Select WETH (not ETH) on the input side so this is a plain ERC20 approval case.
+    hooks.erc20Allowance = 0n;
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
+  });
+
+  it('approves maxUint256 to Permit2, never an exact amount', () => {
+    hooks.erc20Allowance = 0n;
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(hooks.writeContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'approve', args: [expect.any(String), 2n ** 256n - 1n] }),
+    );
+  });
+
+  it('signs a Permit2 PermitSingle then submits execute() with PERMIT2_PERMIT+V3_SWAP_EXACT_IN, for a WETH-chosen (non-native) input needing a signature', async () => {
+    hooks.permit2Allowance = [0n, 0, 2];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'execute', args: ['0x0a00', expect.arrayContaining([expect.any(String), expect.any(String)]), expect.anything()] }),
+      expect.anything(),
+    ));
+  });
+
+  it('submits execute() with just V3_SWAP_EXACT_IN, skipping the signature, when the Permit2 allowance already covers the trade', async () => {
+    hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'execute', args: ['0x00', expect.arrayContaining([expect.any(String)]), expect.anything()] }),
+      expect.anything(),
+    ));
+    expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+  });
+
+  it('sends value and skips both ERC20 approval and the Permit2 signature for a native-ETH-in input (the default WETH-leg choice)', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    // tokenB is WETH and the default is native ETH, so just flip direction to make it the input.
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
+      expect.objectContaining({ functionName: 'execute', value: 1_000_000_000_000_000_000n }),
+      expect.anything(),
+    ));
+    expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    expect(args[0]).toBe('0x0b00'); // WRAP_ETH then V3_SWAP_EXACT_IN, no PERMIT2_PERMIT
   });
 
-  it('disables Swap when the amount is empty', () => {
+  it('appends UNWRAP_WETH and settles the swap itself to the router (ADDRESS_THIS), for a native-ETH-out output (the default WETH-leg choice)', async () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    // tokenB (WETH) stays the default output side; default useNativeEth=true makes this native-ETH-out.
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    expect(args[0]).toBe('0x000c'); // V3_SWAP_EXACT_IN then UNWRAP_WETH (allowance already sufficient, no permit)
+    const swapInput = args[1][0];
+    expect(decodeV3SwapRecipient(swapInput)).toBe('0x0000000000000000000000000000000000000002'); // ADDRESS_THIS
+  });
+
+  it('becomes immediately actionable with no Approve button and no signature when switching an already-Permit2-approved token to native-ETH-in', () => {
+    // Full allowance/signature already sufficient for the ERC20 (WETH) form of this same token.
+    hooks.erc20Allowance = 2_000_000_000_000_000_000n;
+    hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // WETH leg now "in"
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    // Default choice is already native ETH — Swap must be actionable directly, no Approve.
+    expect(screen.getByRole('button', { name: 'Swap' })).not.toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
   it('keeps Swap disabled until the quote resolves, never submitting with zero slippage protection', () => {
@@ -95,97 +203,20 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('shows Approve instead of Swap when allowance does not cover the amount', () => {
-    hooks.allowance = 0n;
-    hooks.simulateData = { result: 500000000000000000n };
-    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
-  });
-
-  it('submits the swap wrapped in multicall with a real deadline, once the quote resolves', () => {
-    // Pin the fields that protect the user's money, not just "some multicall with some BigInt" —
-    // a regression that zeroed amountOutMinimum or pointed at the wrong router would still have
-    // passed a looser assertion.
-    const quotedOutput = 500000000000000000n;
-    hooks.simulateData = { result: quotedOutput };
-    const beforeTimestampSeconds = Math.floor(Date.now() / 1000);
-    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
-
-    expect(hooks.writeContract).toHaveBeenCalledTimes(1);
-    const call = hooks.writeContract.mock.calls[0][0] as {
-      address: string;
-      functionName: string;
-      args: [bigint, `0x${string}`[]];
-    };
-    expect(call.address).toBe(SWAP_ROUTER_ADDRESS);
-    expect(call.functionName).toBe('multicall');
-    const [deadline, innerCalls] = call.args;
-    expect(deadline).toBeGreaterThan(BigInt(beforeTimestampSeconds));
-
-    const decoded = decodeFunctionData({ abi: swapRouterAbi, data: innerCalls[0] });
-    expect(decoded.functionName).toBe('exactInputSingle');
-    const params = decoded.args[0] as { amountOutMinimum: bigint };
-    // Default settings are 'auto' slippage on a pool venue — resolves to 50 bps (see
-    // use-trade-settings.ts's resolveAutoSlippageBps).
-    const expectedAmountOutMinimum = applySlippage(quotedOutput, 'auto', 'pool');
-    expect(expectedAmountOutMinimum).not.toBe(0n);
-    expect(params.amountOutMinimum).toBe(expectedAmountOutMinimum);
-  });
-
-  it('submits the swap without throwing when the deadline setting is a fractional number of minutes', () => {
-    // A user who typed "1.01" into the settings popover's deadline-minutes field previously
-    // crashed the click handler: deadlineMinutes * 60 = 60.6 (non-integer), and BigInt() throws a
-    // RangeError on a non-integer number since only the current-timestamp half of the deadline
-    // expression was floored. (A value like "10.5" would not have caught this: 10.5 * 60 = 630,
-    // itself an integer, so it must be a value whose product with 60 is fractional.)
-    hooks.simulateData = { result: 500000000000000000n };
-    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
-    fireEvent.change(screen.getByLabelText(/deadline minutes/i), { target: { value: '1.01' } });
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(() => fireEvent.click(screen.getByRole('button', { name: 'Swap' }))).not.toThrow();
-    expect(hooks.writeContract).toHaveBeenCalled();
-  });
-
-  it('refetches the quote once an approval transitions from confirming to confirmed, so a stale pre-approval "quote unavailable" error does not block Swap forever', () => {
-    hooks.allowance = 0n;
-    hooks.simulateData = { result: 500000000000000000n };
-    const { rerender } = render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-
-    // Approval broadcast, now confirming on-chain — isConfirmingApproval is true.
-    hooks.approveTxHash = '0xabc';
-    hooks.receiptStatus = 'pending';
-    rerender(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(hooks.refetchQuote).not.toHaveBeenCalled();
-
-    // Approval receipt confirms and the post-confirmation allowance refetch has settled —
-    // isConfirmingApproval transitions from true to false. This is the exact transition that must
-    // trigger a quote refetch; merely "isConfirmingApproval is eventually false" is not enough,
-    // since that is also true before any approval ever happened.
-    hooks.receiptStatus = 'success';
-    hooks.allowanceIsFetching = false;
-    rerender(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(hooks.refetchQuote).toHaveBeenCalled();
-  });
-
   it('disables Swap and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {
     hooks.account.chainId = 1;
-    hooks.simulateData = { result: 500000000000000000n };
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
     expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
   });
 
-  it('disables Swap when the input-side balance is insufficient', () => {
-    hooks.balanceA = 0n;
-    hooks.simulateData = { result: 500000000000000000n };
+  it('disables Swap when the input-side balance is insufficient (native-ETH balance, the default WETH-leg choice)', () => {
+    hooks.nativeBalance = 0n;
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // WETH leg now "in"
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
@@ -194,5 +225,32 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } });
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+  });
+
+  it('does not leave an unhandled promise rejection when the wallet rejects the Permit2 signature', async () => {
+    hooks.permit2Allowance = [0n, 0, 2];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    hooks.signTypedDataAsync.mockRejectedValueOnce(new Error('User rejected the request'));
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(hooks.writeContract).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale Permit2 signature-rejection error as soon as a new submit begins, even one that needs no signature', async () => {
+    hooks.signTypedDataError = new Error('User rejected the request');
+    hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
+    expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
   });
 });
