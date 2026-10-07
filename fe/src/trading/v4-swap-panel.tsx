@@ -66,6 +66,11 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const needsErc20Approval = !isNativeIn && amountIn > 0n && !hasInsufficientBalance && erc20Allowance.allowance < amountIn;
 
   async function submitSwap() {
+    // Clear any stale signature-rejection error from a previous attempt as soon as a new submit
+    // begins, regardless of outcome — otherwise a swap that needs no signature at all (e.g. an
+    // existing allowance now covers it) would never call signTypedDataAsync again and the old
+    // rejection message would keep showing even though this attempt is about to succeed.
+    permit2.resetSignError();
     if (amountIn === 0n || !account || quote.outputAmount === null) return;
     const amountOutMinimum = applySlippage(quote.outputAmount, settings.slippageBps, 'pool');
 

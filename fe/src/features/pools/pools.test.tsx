@@ -12,7 +12,7 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSimulateContract: () => ({ data: undefined, isLoading: false, error: null, refetch: vi.fn() }),
   useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
-  useSignTypedData: () => ({ signTypedDataAsync: vi.fn(), isPending: false, error: null }),
+  useSignTypedData: () => ({ signTypedDataAsync: vi.fn(), isPending: false, error: null, reset: vi.fn() }),
 }));
 
 const a = '0x1111111111111111111111111111111111111111';

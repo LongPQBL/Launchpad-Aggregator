@@ -29,6 +29,8 @@ const hooks = vi.hoisted(() => ({
   nativeBalance: 10_000_000_000_000_000_000n,
   simulateData: undefined as { result: readonly [bigint, bigint] } | undefined,
   signTypedDataAsync: vi.fn(async () => '0xsignature' as `0x${string}`),
+  resetSignTypedData: vi.fn(),
+  signTypedDataError: null as Error | null,
   writeContract: vi.fn(),
   writeStatus: 'idle' as 'idle' | 'pending' | 'error' | 'success',
 }));
@@ -47,7 +49,7 @@ vi.mock('wagmi', async (importOriginal) => ({
     return { data: undefined, refetch: vi.fn() };
   },
   useSimulateContract: () => ({ data: hooks.simulateData, isLoading: false, error: null }),
-  useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: false, error: null }),
+  useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: false, error: hooks.signTypedDataError, reset: hooks.resetSignTypedData }),
   useWriteContract: () => ({ writeContract: hooks.writeContract, status: hooks.writeStatus, error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle', error: null }),
 }));
@@ -72,6 +74,8 @@ beforeEach(() => {
   hooks.balanceB = 10_000_000_000_000_000_000n;
   hooks.simulateData = undefined;
   hooks.signTypedDataAsync.mockClear();
+  hooks.resetSignTypedData.mockReset();
+  hooks.signTypedDataError = null;
   hooks.writeContract.mockReset();
   hooks.writeStatus = 'idle';
 });
@@ -231,6 +235,20 @@ describe('V4SwapPanel', () => {
       expect.objectContaining({ functionName: 'execute', value: 1_000_000_000_000_000_000n }),
       expect.anything(),
     ));
+    expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale Permit2 signature-rejection error as soon as a new submit begins, even one that needs no signature', async () => {
+    // Simulate a prior attempt's rejected signature: useSignTypedData's own error state is
+    // already set, so the stale message is showing, even though this submit's allowance already
+    // covers the trade and will never call signTypedDataAsync again.
+    hooks.signTypedDataError = new Error('User rejected the request');
+    hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
   });
 });

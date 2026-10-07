@@ -12,6 +12,7 @@ export interface Permit2PermitResult {
   signPermit: () => Promise<{ permitSingle: PermitSingle; signature: Hex } | null>;
   isSigning: boolean;
   signError: string | null;
+  resetSignError: () => void;
 }
 
 // Both windows are deliberately short-lived: the signed amount is always exactly the trade's own
@@ -41,7 +42,7 @@ export function usePermit2Permit(tokenAddress: Address | undefined, spender: Add
     args: owner && tokenAddress && spender ? [owner, tokenAddress, spender] : undefined,
     query: { enabled: Boolean(owner && tokenAddress && spender) },
   });
-  const { signTypedDataAsync, isPending, error } = useSignTypedData();
+  const { signTypedDataAsync, isPending, error, reset } = useSignTypedData();
 
   const [amount, expiration, nonce] = data ?? [0n, 0, 0];
   const needsPermit = amountIn > 0n && !isAllowanceSufficient(amount, expiration, amountIn);
@@ -90,5 +91,6 @@ export function usePermit2Permit(tokenAddress: Address | undefined, spender: Add
     signPermit,
     isSigning: isPending,
     signError: error ? decodeTradeError(error) : null,
+    resetSignError: reset,
   };
 }

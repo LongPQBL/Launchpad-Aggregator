@@ -14,13 +14,14 @@ const hooks = vi.hoisted(() => ({
   signTypedDataAsync: vi.fn(async () => '0xsignature' as `0x${string}`),
   isSigning: false,
   signError: null as Error | null,
+  resetSignTypedData: vi.fn(),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
   useReadContract: () => ({ data: hooks.allowanceData, isLoading: hooks.isAllowanceLoading, refetch: hooks.refetch }),
-  useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: hooks.isSigning, error: hooks.signError }),
+  useSignTypedData: () => ({ signTypedDataAsync: hooks.signTypedDataAsync, isPending: hooks.isSigning, error: hooks.signError, reset: hooks.resetSignTypedData }),
 }));
 
 const token = '0x2222222222222222222222222222222222222222' as const;
@@ -37,6 +38,7 @@ beforeEach(() => {
   hooks.signTypedDataAsync.mockClear();
   hooks.isSigning = false;
   hooks.signError = null;
+  hooks.resetSignTypedData.mockReset();
 });
 
 describe('usePermit2Permit', () => {
