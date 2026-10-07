@@ -58,17 +58,16 @@ beforeEach(() => {
 });
 
 describe('SellPanel', () => {
-  it('disables Sell when the amount is empty', () => {
+  it('shows an "Enter an amount" label when the amount is empty', () => {
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
-    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 
-  it('disables Sell and explains why when the token balance is insufficient', () => {
+  it('shows a "Not enough {symbol}" label when the token balance is insufficient', () => {
     hooks.tokenBalance = 0n;
-    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
+    render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} tokenSymbol="MEME" quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
-    expect(screen.getByText(/insufficient/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not enough MEME' })).toBeDisabled();
   });
 
   it('always requires approval first — the launched token is never native ETH', () => {
@@ -129,13 +128,12 @@ describe('SellPanel', () => {
     expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
   });
 
-  it('disables Sell and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
     hooks.account.chainId = 1;
     hooks.allowance = 2000000000000000000n;
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
-    expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
   });
 
   it('shows a decoded approval error message when the approval fails', () => {
@@ -155,10 +153,10 @@ describe('SellPanel', () => {
     expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
   });
 
-  it('does not crash on scientific-notation input and leaves Sell disabled', () => {
+  it('does not crash on scientific-notation input and leaves the button disabled', () => {
     hooks.allowance = 2000000000000000000n;
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     expect(() => fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } })).not.toThrow();
-    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 });

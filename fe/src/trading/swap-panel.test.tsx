@@ -243,28 +243,27 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('disables Swap and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
     hooks.account.chainId = 1;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
-    expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
   });
 
-  it('disables Swap when the input-side balance is insufficient (native-ETH balance, the default WETH-leg choice)', () => {
+  it('shows a "Not enough {symbol}" label when the input-side balance is insufficient (native-ETH balance, the default WETH-leg choice)', () => {
     hooks.nativeBalance = 0n;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // WETH leg now "in"
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
   });
 
-  it('does not crash and leaves Swap disabled when the amount contains scientific notation', () => {
+  it('does not crash and shows an "Enter an amount" label when the amount contains scientific notation', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 
   it('does not leave an unhandled promise rejection when the wallet rejects the Permit2 signature', async () => {
@@ -365,7 +364,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // tokenNoWeth now "in"
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not enough USDG' })).toBeDisabled();
   });
 
   it('submits the swap without throwing when the deadline setting is a fractional number of minutes', () => {

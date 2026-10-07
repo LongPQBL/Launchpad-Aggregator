@@ -549,7 +549,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Buy' })).toBeInTheDocument();
 
     rerender(
       <LaunchDetail
@@ -558,7 +558,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Buy' })).not.toBeInTheDocument();
   });
 
   it('hides the curve trade panel once the curve is swept, even though it is still the latest venue row', () => {
@@ -569,7 +569,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Buy' })).not.toBeInTheDocument();
   });
 
   it('hides the curve trade panel when tokenDecimals has not resolved yet, rather than guessing it', () => {

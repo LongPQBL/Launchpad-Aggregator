@@ -92,15 +92,12 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
       ) : amountIn > 0n && quote.errorMessage ? (
         <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
       ) : null}
-      {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
-      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
-        <p className="text-sm text-destructive">Insufficient {quoteAsset.symbol ?? 'quote asset'} balance.</p>
-      )}
       <ApproveOrActionButton
         needsApproval={needsApproval}
         amountIn={amountIn}
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
+        tokenInSymbol={quoteAsset.symbol ?? undefined}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting}
         allowance={allowance}

@@ -140,6 +140,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                 curveAddress={activeCurveVenue.ref as `0x${string}`}
                 tokenAddress={detail.tokenAddress as `0x${string}`}
                 tokenDecimals={detail.tokenDecimals}
+                tokenSymbol={detail.symbol}
                 quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
                 explorerBase={explorerBase ?? null}
               />

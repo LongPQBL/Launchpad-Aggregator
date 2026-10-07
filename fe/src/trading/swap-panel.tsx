@@ -174,36 +174,35 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
         <span className="flex-1 text-sm">Sell</span>
         <TradeSettingsPopover settings={settings} onChange={update} venueKind="pool" />
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <Input aria-label="Amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="flex-1" />
-        <TokenSelector
-          options={sideOptions(tokenIn)}
-          selected={selectedOption(tokenIn)}
-          onSelect={(key) => handleSelect(tokenIn, key)}
-          chainId={robinhoodChain.id}
-        />
+      <div className="relative flex flex-col gap-1">
+        <div className="flex items-center justify-between gap-2">
+          <Input aria-label="Amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} className="flex-1" />
+          <TokenSelector
+            options={sideOptions(tokenIn)}
+            selected={selectedOption(tokenIn)}
+            onSelect={(key) => handleSelect(tokenIn, key)}
+            chainId={robinhoodChain.id}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="flex-1 text-sm text-muted-foreground">
+            {quote.outputAmount !== null
+              ? `You receive ≈ ${formatUnits(quote.outputAmount, tokenOut.decimals)} ${displaySymbol(tokenOut, nativeOut)}`
+              : amountIn > 0n && quote.errorMessage ? `Quote unavailable: ${quote.errorMessage}` : ''}
+          </span>
+          <TokenSelector
+            options={sideOptions(tokenOut)}
+            selected={selectedOption(tokenOut)}
+            onSelect={(key) => handleSelect(tokenOut, key)}
+            chainId={robinhoodChain.id}
+          />
+        </div>
+        <Button type="button" variant="outline" size="sm" aria-label="Flip swap direction"
+          className="absolute top-1/2 left-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-0 shadow-sm"
+          onClick={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); setAmount(''); }}>
+          ⇅
+        </Button>
       </div>
-      <Button type="button" variant="ghost" size="sm" aria-label="Flip swap direction"
-        onClick={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); setAmount(''); }}>
-        ⇅
-      </Button>
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex-1 text-sm text-muted-foreground">
-          {quote.outputAmount !== null
-            ? `You receive ≈ ${formatUnits(quote.outputAmount, tokenOut.decimals)} ${displaySymbol(tokenOut, nativeOut)}`
-            : amountIn > 0n && quote.errorMessage ? `Quote unavailable: ${quote.errorMessage}` : ''}
-        </span>
-        <TokenSelector
-          options={sideOptions(tokenOut)}
-          selected={selectedOption(tokenOut)}
-          onSelect={(key) => handleSelect(tokenOut, key)}
-          chainId={robinhoodChain.id}
-        />
-      </div>
-      {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
-      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
-        <p className="text-sm text-destructive">Insufficient {displaySymbol(tokenIn, nativeIn)} balance.</p>
-      )}
       {permit2.signError && (
         <p role="alert" className="text-sm text-destructive">
           {permit2.signError}
@@ -215,6 +214,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
         approveAmount={maxUint256}
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
+        tokenInSymbol={displaySymbol(tokenIn, nativeIn)}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}

@@ -22,11 +22,14 @@ export interface SellPanelProps {
   tokenAddress: Address;
   // The launched token's own decimals — see BuyPanelProps.tokenDecimals.
   tokenDecimals: number;
+  // The launched token's own symbol, for the "Not enough {symbol}" button label — distinct from
+  // quoteAsset.symbol, since selling spends the launched token itself, not the quote asset.
+  tokenSymbol?: string | null;
   quoteAsset: { address: Address; symbol: string | null; decimals: number };
   explorerBase: string | null;
 }
 
-export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset, explorerBase }: SellPanelProps) {
+export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymbol, quoteAsset, explorerBase }: SellPanelProps) {
   const [amount, setAmount] = useState('');
   const { address: account, chainId } = useAccount();
   const { settings, update } = useTradeSettings();
@@ -73,15 +76,12 @@ export function SellPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsse
       ) : amountIn > 0n && quote.errorMessage ? (
         <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
       ) : null}
-      {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
-      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
-        <p className="text-sm text-destructive">Insufficient token balance.</p>
-      )}
       <ApproveOrActionButton
         needsApproval={needsApproval}
         amountIn={amountIn}
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
+        tokenInSymbol={tokenSymbol ?? undefined}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting}
         allowance={allowance}

@@ -18,6 +18,9 @@ export interface ApproveOrActionButtonProps {
   approveAmount?: bigint;
   isWrongChain: boolean;
   hasInsufficientBalance: boolean;
+  // Symbol of the token amountIn is denominated in, for the "Not enough {symbol}" label. Falls
+  // back to the generic "token" when not given (e.g. sell-panel.tsx doesn't thread one through yet).
+  tokenInSymbol?: string;
   outputAmount: bigint | null;
   isSubmitting: boolean;
   allowance: ApproveOrActionAllowance;
@@ -25,45 +28,63 @@ export interface ApproveOrActionButtonProps {
   onAction: () => void;
 }
 
-// Shared by buy-panel.tsx, sell-panel.tsx, and swap-panel.tsx: each pairs a
-// useTokenAllowance with its own quote/submission hooks, but the approve-vs-act decision
-// and the approval-error alert were identical across all three.
+// Shared by buy-panel.tsx, sell-panel.tsx, swap-panel.tsx, and v4-swap-panel.tsx: each pairs a
+// useTokenAllowance with its own quote/submission hooks, but the approve-vs-act decision and the
+// approval-error alert were identical across all four.
+//
+// The label itself communicates the blocking reason (wrong chain / no amount / insufficient
+// balance), matching Uniswap's own convention, so callers no longer render a separate red warning
+// paragraph for those same three conditions above this button.
 export function ApproveOrActionButton({
   needsApproval,
   amountIn,
   approveAmount,
   isWrongChain,
   hasInsufficientBalance,
+  tokenInSymbol,
   outputAmount,
   isSubmitting,
   allowance,
   actionLabel,
   onAction,
 }: ApproveOrActionButtonProps) {
-  return (
-    <>
-      {allowance.approveError && (
-        <p role="alert" className="text-sm text-destructive">
-          {allowance.approveError}
-        </p>
-      )}
-      {needsApproval ? (
+  const approveError = allowance.approveError && (
+    <p role="alert" className="text-sm text-destructive">
+      {allowance.approveError}
+    </p>
+  );
+
+  if (isWrongChain || amountIn === 0n || hasInsufficientBalance) {
+    const label = isWrongChain ? 'Switch network' : amountIn === 0n ? 'Enter an amount' : `Not enough ${tokenInSymbol ?? 'token'}`;
+    return (
+      <>
+        {approveError}
+        <Button type="button" disabled>{label}</Button>
+      </>
+    );
+  }
+
+  if (needsApproval) {
+    return (
+      <>
+        {approveError}
         <Button
           type="button"
-          disabled={allowance.isApproving || allowance.isConfirmingApproval || isWrongChain}
+          disabled={allowance.isApproving || allowance.isConfirmingApproval}
           onClick={() => allowance.approve(approveAmount ?? amountIn)}
         >
           {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
         </Button>
-      ) : (
-        <Button
-          type="button"
-          disabled={amountIn === 0n || hasInsufficientBalance || isWrongChain || outputAmount === null || isSubmitting}
-          onClick={onAction}
-        >
-          {actionLabel}
-        </Button>
-      )}
+      </>
+    );
+  }
+
+  return (
+    <>
+      {approveError}
+      <Button type="button" disabled={outputAmount === null || isSubmitting} onClick={onAction}>
+        {actionLabel}
+      </Button>
     </>
   );
 }

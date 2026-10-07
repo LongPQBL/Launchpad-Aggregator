@@ -111,26 +111,25 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
+      <div className="flex justify-end">
+        <TradeSettingsPopover settings={settings} onChange={update} venueKind="pool" />
+      </div>
+      <div className="relative flex flex-col gap-1">
         <label className="flex-1 text-sm">
           Sell {tokenIn.symbol ?? '—'}
           <Input aria-label="Amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} />
         </label>
-        <TradeSettingsPopover settings={settings} onChange={update} venueKind="pool" />
+        {quote.outputAmount !== null ? (
+          <p className="text-sm text-muted-foreground">You receive ≈ {formatUnits(quote.outputAmount, tokenOut.decimals)} {tokenOut.symbol ?? ''}</p>
+        ) : amountIn > 0n && quote.errorMessage ? (
+          <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
+        ) : null}
+        <Button type="button" variant="outline" size="sm" aria-label="Flip swap direction"
+          className="absolute top-1/2 left-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-0 shadow-sm"
+          onClick={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); setAmount(''); }}>
+          ⇅
+        </Button>
       </div>
-      <Button type="button" variant="ghost" size="sm" aria-label="Flip swap direction"
-        onClick={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); setAmount(''); }}>
-        ⇅
-      </Button>
-      {quote.outputAmount !== null ? (
-        <p className="text-sm text-muted-foreground">You receive ≈ {formatUnits(quote.outputAmount, tokenOut.decimals)} {tokenOut.symbol ?? ''}</p>
-      ) : amountIn > 0n && quote.errorMessage ? (
-        <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
-      ) : null}
-      {isWrongChain && <p className="text-sm text-destructive">Switch to Robinhood Chain to trade.</p>}
-      {!isWrongChain && amountIn > 0n && hasInsufficientBalance && (
-        <p className="text-sm text-destructive">Insufficient {tokenIn.symbol ?? 'token'} balance.</p>
-      )}
       {permit2.signError && (
         <p role="alert" className="text-sm text-destructive">
           {permit2.signError}
@@ -142,6 +141,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
         approveAmount={maxUint256}
         isWrongChain={isWrongChain}
         hasInsufficientBalance={hasInsufficientBalance}
+        tokenInSymbol={tokenIn.symbol ?? undefined}
         outputAmount={quote.outputAmount}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}

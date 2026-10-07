@@ -123,7 +123,7 @@ describe('ApproveOrActionButton', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('disables the action button on the wrong chain', () => {
+  it('shows a "Switch network" label and disables the button on the wrong chain', () => {
     render(
       <ApproveOrActionButton
         needsApproval={false}
@@ -137,7 +137,76 @@ describe('ApproveOrActionButton', () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+  });
+
+  it('shows an "Enter an amount" label and disables the button when amountIn is zero', () => {
+    render(
+      <ApproveOrActionButton
+        needsApproval={false}
+        amountIn={0n}
+        isWrongChain={false}
+        hasInsufficientBalance={false}
+        outputAmount={null}
+        isSubmitting={false}
+        allowance={baseAllowance()}
+        actionLabel="Swap"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  });
+
+  it('shows a "Not enough {symbol}" label and disables the button when the balance is insufficient', () => {
+    render(
+      <ApproveOrActionButton
+        needsApproval={false}
+        amountIn={1_000n}
+        tokenInSymbol="ETH"
+        isWrongChain={false}
+        hasInsufficientBalance
+        outputAmount={null}
+        isSubmitting={false}
+        allowance={baseAllowance()}
+        actionLabel="Swap"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
+  });
+
+  it('falls back to "Not enough token" when tokenInSymbol is not given', () => {
+    render(
+      <ApproveOrActionButton
+        needsApproval={false}
+        amountIn={1_000n}
+        isWrongChain={false}
+        hasInsufficientBalance
+        outputAmount={null}
+        isSubmitting={false}
+        allowance={baseAllowance()}
+        actionLabel="Swap"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Not enough token' })).toBeDisabled();
+  });
+
+  it('prioritizes the wrong-chain label over an also-zero amount or insufficient balance', () => {
+    render(
+      <ApproveOrActionButton
+        needsApproval={false}
+        amountIn={0n}
+        isWrongChain
+        hasInsufficientBalance
+        outputAmount={null}
+        isSubmitting={false}
+        allowance={baseAllowance()}
+        actionLabel="Swap"
+        onAction={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Switch network' })).toBeInTheDocument();
   });
 
   it('approves a separately-provided approveAmount instead of amountIn, when given one', () => {

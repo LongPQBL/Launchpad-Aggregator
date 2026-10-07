@@ -62,16 +62,16 @@ beforeEach(() => {
 });
 
 describe('BuyPanel', () => {
-  it('disables Buy when the amount is empty', () => {
+  it('shows an "Enter an amount" label when the amount is empty', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 
   it('disables Buy when the native-ETH balance is insufficient, without a deposit prompt', () => {
     hooks.balance = { data: { value: 0n }, isLoading: false };
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
     expect(screen.queryByText(/deposit/i)).not.toBeInTheDocument();
   });
 
@@ -101,7 +101,7 @@ describe('BuyPanel', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Not enough USDG' })).toBeDisabled();
   });
 
   it('shows Buy once allowance covers the amount for an ERC20-quoted launch', () => {
@@ -125,22 +125,20 @@ describe('BuyPanel', () => {
     expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
   });
 
-  it('disables Buy and explains why when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
     hooks.account.chainId = 1;
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
-    expect(screen.getByText(/switch to robinhood chain/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
   });
 
-  it('disables Buy and explains why when the ERC20 quote-asset balance is insufficient', () => {
+  it('shows a "Not enough {symbol}" label when the ERC20 quote-asset balance is insufficient', () => {
     hooks.allowance = 2000000000000000000n;
     hooks.quoteBalance = 0n;
     hooks.simulateData = { result: 1000000000000000000n };
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
-    expect(screen.getByText(/insufficient/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Not enough USDG' })).toBeDisabled();
   });
 
   it('shows a decoded approval error message when the approval fails', () => {
@@ -189,9 +187,9 @@ describe('BuyPanel', () => {
     expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
   });
 
-  it('does not crash on scientific-notation input and leaves Buy disabled', () => {
+  it('does not crash on scientific-notation input and leaves the button disabled', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     expect(() => fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } })).not.toThrow();
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 });
