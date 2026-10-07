@@ -10,6 +10,9 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSimulateContract: () => ({ data: { result: 1_000_000_000_000_000_000n }, isLoading: false, error: null, refetch: vi.fn() }),
   useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle' }),
+  useSendCalls: () => ({ sendCalls: vi.fn(), status: 'idle', error: null, data: undefined }),
+  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
+  useCapabilities: () => ({ data: undefined }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;

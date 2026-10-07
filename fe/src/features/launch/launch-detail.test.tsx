@@ -31,6 +31,9 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSignTypedData: () => ({ signTypedDataAsync: vi.fn(), isPending: false, error: null, reset: vi.fn() }),
   useWriteContract: () => ({ writeContract: vi.fn(), status: 'idle', error: null, data: undefined }),
   useWaitForTransactionReceipt: () => ({ status: 'idle' }),
+  useSendCalls: () => ({ sendCalls: vi.fn(), status: 'idle', error: null, data: undefined }),
+  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
+  useCapabilities: () => ({ data: undefined }),
 }));
 
 beforeEach(() => {

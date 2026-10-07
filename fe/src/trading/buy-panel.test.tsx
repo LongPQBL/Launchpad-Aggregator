@@ -36,6 +36,9 @@ vi.mock('wagmi', async (importOriginal) => ({
     data: hooks.writeHash,
   }),
   useWaitForTransactionReceipt: () => ({ status: hooks.receiptStatus, error: null }),
+  useSendCalls: () => ({ sendCalls: vi.fn(), status: 'idle', error: null, data: undefined }),
+  useWaitForCallsStatus: () => ({ data: undefined, error: null }),
+  useCapabilities: () => ({ data: undefined }),
 }));
 
 const curve = '0x4444444444444444444444444444444444444444' as const;
