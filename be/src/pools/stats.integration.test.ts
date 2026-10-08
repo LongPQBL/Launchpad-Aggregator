@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { readPoolStats, readPoolTrades } from './stats.js';
+import { insertTvlSnapshot } from './tvlSnapshots.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -53,6 +54,7 @@ beforeAll(async () => {
   }
 });
 afterAll(async () => {
+  await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]);
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, poolId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id=$1 AND feed_address=$2', [chainId, feed]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id=$1 AND quote_asset_address=$2', [chainId, b]);
@@ -60,6 +62,19 @@ afterAll(async () => {
 });
 
 describe('readPoolStats', () => {
+  it('reports the TVL change against the snapshot taken ~24h earlier through the same quote asset', async () => {
+    await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 5n, capturedAtSeconds: 1600,
+      coreAmount0Raw: 1n, coreAmount1Raw: 1n, sqrtPriceX96: 1n, quoteAddress: b, tvlUsd: '25' });
+    try {
+      const stats = await readPoolStats(pool, key, a, 88_000, { rpcClient });
+      expect(stats.tvlUsd).toBe('20');
+      expect(Number(stats.tvlChange)).toBeCloseTo(-20);
+      const noSnapshot = await readPoolStats(pool, key, a, 4000, { rpcClient });
+      expect(noSnapshot.tvlChange).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]);
+    }
+  });
   it('compares the current 24h volume with the previous 24h window', async () => {
     const stats = await readPoolStats(pool, key, a, 88_000, { rpcClient });
     expect(stats.volume24hUsd).toBe('4');

@@ -6,6 +6,7 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { readLensSnapshot } from './lens.js';
+import { readTvlChange } from './tvlSnapshots.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { poolPriceInQuote, poolPriceRational, sumUsdValues, percentChange } from './valuation.js';
 
@@ -22,6 +23,7 @@ export interface PoolStats {
   priceUsd: string | null;
   fdvUsd: string | null;
   tvlUsd: string | null;
+  tvlChange: string | null;
   change1h: string | null;
   change1d: string | null;
   coverageStatus: string;
@@ -189,6 +191,9 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
       currentQuoteUsd?.priceUsd ?? null)
     : { poolBalances: null, tvlUsd: null };
 
+  const tvlChange = complete && key.protocol === 'uniswap_v4'
+    ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf) : null;
+
   const sides = [
     { address: catalog.currency1, decimals: decimals1, amount: 'amount1_raw' as const },
     { address: catalog.currency0, decimals: decimals0, amount: 'amount0_raw' as const },
@@ -237,7 +242,7 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   return {
     poolBalances: poolSnapshot.poolBalances,
     volume24hUsd, volume24hChange, priceInQuote: complete ? priceInQuote : null, priceUsd: complete ? priceUsd : null,
-    fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? poolSnapshot.tvlUsd : null,
+    fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? poolSnapshot.tvlUsd : null, tvlChange,
     change1h: complete ? computePriceChange(pricePoints, asOf, 3600) : null,
     change1d: complete ? computePriceChange(pricePoints, asOf, 86400) : null,
     coverageStatus: catalog.coverage_status, lastTradeTimestamp: last ? Number(last.timestamp) : null,

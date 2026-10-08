@@ -115,7 +115,7 @@ export const poolSummary = { type: 'object', properties: {
   ponsDesignated: { type: 'boolean' },
   poolBalances,
   launchTokenAddress: nullableMetric, volume24hUsd: nullableMetric, volume24hChange: nullableMetric, priceInQuote: nullableMetric,
-  priceUsd: nullableMetric, fdvUsd: nullableMetric, tvlUsd: nullableMetric, change1h: nullableMetric,
+  priceUsd: nullableMetric, fdvUsd: nullableMetric, tvlUsd: nullableMetric, tvlChange: nullableMetric, change1h: nullableMetric,
   change1d: nullableMetric, coverageStatus: { type: 'string' },
   lastTradeTimestamp: { type: 'integer', nullable: true },
 } } as const;
