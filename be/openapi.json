@@ -963,6 +963,10 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "tvlChange": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "change1h": {
                             "type": "string",
                             "nullable": true
@@ -1146,6 +1150,10 @@
                             "nullable": true
                           },
                           "tvlUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlChange": {
                             "type": "string",
                             "nullable": true
                           },
@@ -1335,6 +1343,10 @@
                       "nullable": true
                     },
                     "tvlUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tvlChange": {
                       "type": "string",
                       "nullable": true
                     },
