@@ -17,6 +17,7 @@
 - `null` means unavailable, never zero: a `$` line is hidden (not `$0`) when no real USD price exists; an unsolvable reverse quote shows "Quote unavailable" and disables the action button — it never guesses.
 - No `Limit` tab and no `Buy | Sell` tab bar anywhere in this work.
 - The venue (curve vs. V3/V4 pool) stays visible as a badge on the panel.
+- Slippage and deadline are edited only in the existing settings popover (as on Uniswap); the panel face shows just a read-only "Min received" row computed with the same `applySlippage` the submit path uses.
 - Light/dark: use existing theme tokens (`bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, …); introduce no new color.
 - Work directly on `main`. Run commands from `fe/` unless stated. Commit only the files a task lists (the working tree has many unrelated uncommitted changes — never `git add -A`).
 - Every commit message ends with: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
@@ -804,15 +805,17 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ### Task 4: `TradeCard`, `SwapShell`, USD helper
 
 **Files:**
-- Create: `fe/src/trading/trade-card.tsx`, `fe/src/trading/swap-shell.tsx`, `fe/src/trading/trade-usd.ts`
-- Test: `fe/src/trading/trade-card.test.tsx`, `fe/src/trading/swap-shell.test.tsx`, `fe/src/trading/trade-usd.test.ts`
+- Create: `fe/src/trading/trade-card.tsx`, `fe/src/trading/swap-shell.tsx`, `fe/src/trading/trade-usd.ts`, `fe/src/trading/trade-amount-format.ts`
+- Test: `fe/src/trading/trade-card.test.tsx`, `fe/src/trading/swap-shell.test.tsx`, `fe/src/trading/trade-usd.test.ts`, `fe/src/trading/trade-amount-format.test.ts`
 
 **Interfaces:**
 - Consumes: `Input` (`@/components/ui/input`), `Button`, `TradeSettingsPopover` (props `settings`, `onChange`, `venueKind`), `formatUsd(value: string | null, decimals: number)` from `@/api/format`.
 - Produces:
   - `TradeCardSide = { value: string; onChange: (value: string) => void; ariaLabel: string; selector: ReactNode; usdText: string | null; hint: string | null }`
-  - `TradeCard({ sell: TradeCardSide; buy: TradeCardSide; onFlip: () => void; footer?: ReactNode })`. The Sell side's label is "Sell", the Buy side's "Buy". Flip button has `aria-label="Flip swap direction"`.
+  - `TradeCard({ sell: TradeCardSide; buy: TradeCardSide; onFlip: () => void; minReceived?: string | null; footer?: ReactNode })` — `minReceived` is the already-formatted text (e.g. `27.0063M PROMETHEUS`); when `null`/omitted the "Min received" row is not rendered. The Sell side's label is "Sell", the Buy side's "Buy". Flip button has `aria-label="Flip swap direction"`.
   - `SwapShell({ venueLabel: string; settings: TradeSettings; onSettingsChange: (s: TradeSettings) => void; venueKind: 'curve' | 'pool'; children: ReactNode })` — header with a "Swap" pill, a venue badge, the settings gear; children rendered below.
+  - `formatTokenAmount(amount: bigint, decimals: number): string` — compact display (`27.0063M`), up to 4 fraction digits; a non-zero amount below 0.0001 → `<0.0001`; zero → `0`.
+  - `minReceivedText(outputAmount: bigint | null, slippageBps: number | 'auto', venueKind: 'curve' | 'pool', decimals: number, symbol: string | null): string | null` — `null` when `outputAmount` is `null`; else `` `${formatTokenAmount(applySlippage(outputAmount, slippageBps, venueKind), decimals)} ${symbol ?? ''}`.trim() `` (lives in `trade-amount-format.ts`; it must call the same `applySlippage` the submit path uses).
   - `usdText(amount: bigint | null, decimals: number, priceUsd: string | null | undefined): string | null` — `null` when amount is `null`/`0n` or price missing; else `formatUsd(String(Number(formatUnits(amount, decimals)) * Number(priceUsd)), 2)`.
 
 - [ ] **Step 1: Write failing tests**
@@ -859,6 +862,14 @@ describe('TradeCard', () => {
     expect(screen.getByText('Quote unavailable')).toBeInTheDocument();
   });
 
+  it('shows the Min received row only when provided', () => {
+    const { rerender } = render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} />);
+    expect(screen.queryByText(/min received/i)).not.toBeInTheDocument();
+    rerender(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} minReceived="27.0063M PROMETHEUS" />);
+    expect(screen.getByText(/min received/i)).toBeInTheDocument();
+    expect(screen.getByText('27.0063M PROMETHEUS')).toBeInTheDocument();
+  });
+
   it('flip button calls onFlip', () => {
     const onFlip = vi.fn();
     render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={onFlip} />);
@@ -894,6 +905,47 @@ describe('SwapShell', () => {
     render(<SwapShell venueLabel="Uniswap V4 pool" settings={settings} onSettingsChange={vi.fn()} venueKind="pool"><p>x</p></SwapShell>);
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
     expect(screen.queryByText('Limit')).not.toBeInTheDocument();
+  });
+});
+```
+
+```ts
+// fe/src/trading/trade-amount-format.test.ts
+import { describe, expect, it } from 'vitest';
+import { applySlippage } from './amount';
+import { formatTokenAmount, minReceivedText } from './trade-amount-format';
+
+describe('formatTokenAmount', () => {
+  it('formats millions compactly with up to 4 fraction digits', () => {
+    expect(formatTokenAmount(27_006_300_000_000_000_000_000_000n, 18)).toBe('27.0063M');
+  });
+  it('formats thousands and plain numbers', () => {
+    expect(formatTokenAmount(1_500n * 10n ** 18n, 18)).toBe('1.5K');
+    expect(formatTokenAmount(12_340_000_000_000_000_000n, 18)).toBe('12.34');
+  });
+  it('never shows a real non-zero amount as 0', () => {
+    expect(formatTokenAmount(1n, 18)).toBe('<0.0001');
+    expect(formatTokenAmount(0n, 18)).toBe('0');
+  });
+});
+
+describe('minReceivedText', () => {
+  it('is null (row hidden) when there is no quote', () => {
+    expect(minReceivedText(null, 100, 'curve', 18, 'TOK')).toBeNull();
+  });
+  it('applies the same slippage math the submit path uses', () => {
+    const out = 27_283_000_000_000_000_000_000_000n;
+    const expected = formatTokenAmount(applySlippage(out, 100, 'curve'), 18);
+    expect(minReceivedText(out, 100, 'curve', 18, 'PROMETHEUS')).toBe(`${expected} PROMETHEUS`);
+    expect(minReceivedText(out, 100, 'curve', 18, 'PROMETHEUS')).toBe('27.0102M PROMETHEUS');
+  });
+  it('resolves Auto slippage per venue (curve 12%, pool 0.5%)', () => {
+    const out = 1_000n * 10n ** 18n;
+    expect(minReceivedText(out, 'auto', 'curve', 18, 'T')).toBe('880 T');
+    expect(minReceivedText(out, 'auto', 'pool', 18, 'T')).toBe('995 T');
+  });
+  it('omits the symbol gracefully when unknown', () => {
+    expect(minReceivedText(10n ** 18n, 0, 'pool', 18, null)).toBe('1');
   });
 });
 ```
@@ -942,6 +994,36 @@ export function usdText(amount: bigint | null, decimals: number, priceUsd: strin
 }
 ```
 
+```ts
+// fe/src/trading/trade-amount-format.ts
+import { formatUnits } from 'viem';
+import { applySlippage } from './amount';
+
+const compact = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 4 });
+
+// Display-only. A real non-zero amount is never shown as 0 — it shows "<0.0001".
+export function formatTokenAmount(amount: bigint, decimals: number): string {
+  if (amount === 0n) return '0';
+  const value = Number(formatUnits(amount, decimals));
+  if (value < 0.0001) return '<0.0001';
+  return compact.format(value);
+}
+
+// The row under the cards: the least the user accepts after slippage. Uses the very same
+// applySlippage() the submit path feeds into minTokensOut / minQuoteOut / amountOutMinimum, so
+// the number shown is the number sent. null (row hidden) when there is no quote.
+export function minReceivedText(
+  outputAmount: bigint | null,
+  slippageBps: number | 'auto',
+  venueKind: 'curve' | 'pool',
+  decimals: number,
+  symbol: string | null,
+): string | null {
+  if (outputAmount === null) return null;
+  return `${formatTokenAmount(applySlippage(outputAmount, slippageBps, venueKind), decimals)} ${symbol ?? ''}`.trim();
+}
+```
+
 ```tsx
 // fe/src/trading/trade-card.tsx
 import type { ReactNode } from 'react';
@@ -963,12 +1045,14 @@ export interface TradeCardProps {
   sell: TradeCardSide;
   buy: TradeCardSide;
   onFlip: () => void;
+  // Pre-formatted "least you receive after slippage" text; null/omitted hides the row.
+  minReceived?: string | null;
   footer?: ReactNode;
 }
 
 // Presentational only: two stacked cards (Sell on top, Buy below) with the flip arrow overlapping
 // the seam, as on Uniswap. No trade logic lives here — panels own state, quotes and submission.
-export function TradeCard({ sell, buy, onFlip, footer }: TradeCardProps) {
+export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: TradeCardProps) {
   return (
     <div className="flex flex-col gap-2">
       <div className="relative flex flex-col gap-1">
@@ -980,6 +1064,12 @@ export function TradeCard({ sell, buy, onFlip, footer }: TradeCardProps) {
           <span aria-hidden="true">↓</span>
         </Button>
       </div>
+      {minReceived !== null && (
+        <div className="flex items-center justify-between px-1 text-sm text-muted-foreground">
+          <span>Min received</span>
+          <span>{minReceived}</span>
+        </div>
+      )}
       {footer}
     </div>
   );
@@ -1047,13 +1137,13 @@ Verify `Badge` accepts `variant="outline"` in `fe/src/components/ui/badge.tsx`; 
 
 - [ ] **Step 4: Run to verify pass, typecheck**
 
-Run: `npx vitest run src/trading/trade-card.test.tsx src/trading/swap-shell.test.tsx src/trading/trade-usd.test.ts && npx tsc --noEmit`
+Run: `npx vitest run src/trading/trade-card.test.tsx src/trading/swap-shell.test.tsx src/trading/trade-usd.test.ts src/trading/trade-amount-format.test.ts && npx tsc --noEmit`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/trading/trade-card.tsx src/trading/trade-card.test.tsx src/trading/swap-shell.tsx src/trading/swap-shell.test.tsx src/trading/trade-usd.ts src/trading/trade-usd.test.ts
+git add src/trading/trade-card.tsx src/trading/trade-card.test.tsx src/trading/swap-shell.tsx src/trading/swap-shell.test.tsx src/trading/trade-usd.ts src/trading/trade-usd.test.ts src/trading/trade-amount-format.ts src/trading/trade-amount-format.test.ts
 git commit -m "feat: add TradeCard and SwapShell presentational components
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
@@ -1109,6 +1199,20 @@ it('flip keeps the typed number on the same token', () => {
   expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
 });
 
+it('shows Min received from the quote with the user slippage, and hides it with no quote', () => {
+  localStorage.setItem('trade-settings', JSON.stringify({ slippageBps: 100, deadlineMinutes: 30, oneClickTradeOptIn: false }));
+  hooks.simulateData = { result: [1_000_000_000_000_000_000_000n, 0n, 1, 1n] }; // quote: 1000 tokens out
+  const { unmount } = render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+  fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+  expect(screen.getByText('Min received')).toBeInTheDocument();
+  expect(screen.getByText(/^990 /)).toBeInTheDocument(); // 1000 minus 1% slippage
+  unmount();
+  hooks.simulateData = undefined;
+  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+  fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+  expect(screen.queryByText('Min received')).not.toBeInTheDocument();
+});
+
 it('shows a USD line only on the side whose token has a price', () => {
   render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} usdPrice={{ tokenAddress: tokenA.address, priceUsd: '2' }} />);
   fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
@@ -1144,7 +1248,7 @@ const amounts = useSwapAmounts({
 });
 const amountIn = amounts.amountIn;
 ```
-`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`.
+`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`, `minReceivedText` (from `./trade-amount-format`). The Min received row uses the same `settings.slippageBps` and `'pool'` venue kind that `submitSwap`'s `applySlippage` uses — never recompute slippage a second way.
 
 2. Every `setAmount('')` (the `onSuccess` callbacks) becomes `amounts.reset()`. Flip handler: `() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }` (keeps the typed number; no more clearing).
 
@@ -1176,6 +1280,7 @@ return (
         usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
       }}
       onFlip={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }}
+      minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, displaySymbol(tokenOut, nativeOut))}
       footer={<>
         {permit2.signError && (<p role="alert" className="text-sm text-destructive">{permit2.signError}</p>)}
         <ApproveOrActionButton … /* unchanged props, EXCEPT: outputAmount={reverseUnavailable ? null : (erc20Allowance.isAllowanceLoading ? null : quote.outputAmount)} */ />
@@ -1215,7 +1320,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 - [ ] **Step 1: Update mocks and add failing tests**
 
-Same wagmi-mock additions as Task 5 (`usePublicClient`, `hooks.publicClient`), selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add tests mirroring Task 5's four (Buy-derives-Sell, unavailable disables, flip keeps typed number, USD line), adapted for V4: the reverse test mocks `publicClient.simulateContract` with an implementation that returns `{ result: [args.args[0].exactAmount * 2n, 0n] }` (a linear 2× exact-in quote) and asserts the Sell box ends up holding a value whose doubled amount covers the typed Buy target, and that `simulateContract` was called with `functionName: 'quoteExactInputSingleV4'`. Use fake timers + `advanceTimersByTimeAsync(400)` then run enough ticks for the search (each solver call is a resolved promise: `await act(async () => { await vi.advanceTimersByTimeAsync(400); })` once is enough because promise chains flush within it; if not, loop the advance a few times).
+Same wagmi-mock additions as Task 5 (`usePublicClient`, `hooks.publicClient`), selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add tests mirroring Task 5's five (Buy-derives-Sell, unavailable disables, flip keeps typed number, Min received row, USD line), adapted for V4: the reverse test mocks `publicClient.simulateContract` with an implementation that returns `{ result: [args.args[0].exactAmount * 2n, 0n] }` (a linear 2× exact-in quote) and asserts the Sell box ends up holding a value whose doubled amount covers the typed Buy target, and that `simulateContract` was called with `functionName: 'quoteExactInputSingleV4'`. Use fake timers + `advanceTimersByTimeAsync(400)` then run enough ticks for the search (each solver call is a resolved promise: `await act(async () => { await vi.advanceTimersByTimeAsync(400); })` once is enough because promise chains flush within it; if not, loop the advance a few times).
 
 - [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/v4-swap-panel.test.tsx` → FAIL.
 
@@ -1224,6 +1329,7 @@ Same wagmi-mock additions as Task 5 (`usePublicClient`, `hooks.publicClient`), s
 - `solve = useMemo(() => client ? makeV4ReverseSolve(client, { poolKey, zeroForOne }) : null, [client, poolKey, zeroForOne])` with `solveKey: \`v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}\``. `poolKey` is a prop object — its identity can change each parent render, so key the memo on `JSON`-free primitives: `[client, poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, zeroForOne]`.
 - Token selectors: V4 has no ETH/WETH toggle today; render `TokenSelector` with a single fixed option per side: `{ key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null }`, `onSelect={() => {}}`, `chainId={robinhoodChain.id}`. Native ETH (`zeroAddress`) shows symbol `ETH` as today (the caller already passes the symbol).
 - Venue label `"Uniswap V4 pool"`; `venueKind="pool"`.
+- Pass `minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, tokenOut.symbol)}` to `TradeCard` (same `applySlippage` inputs as `submitSwap`).
 - Flip: `setDirection(...)` + `amounts.flip()`; every `setAmount('')` → `amounts.reset()`.
 - Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 5. Keep `submitSwap`, permit2, allowance, batching unchanged.
 
@@ -1325,6 +1431,18 @@ describe('two-way amounts', () => {
     expect(screen.getByText('Bonding curve')).toBeInTheDocument();
   });
 
+  it('shows Min received using curve slippage: the same minTokensOut that is submitted', () => {
+    localStorage.setItem('trade-settings', JSON.stringify({ slippageBps: 100, deadlineMinutes: 30, oneClickTradeOptIn: false }));
+    hooks.simulateData = { result: 1_000_000_000_000_000_000_000n }; // forward quote: 1000 tokens
+    render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '0.001' } });
+    expect(screen.getByText('Min received')).toBeInTheDocument();
+    expect(screen.getByText(/^990/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    // 990e18 raw must equal the minTokensOut argument actually sent to buy()
+    expect(hooks.writeContract.mock.calls[0][0].args[1]).toBe(990_000_000_000_000_000_000n);
+  });
+
   it('has no Buy/Sell/Limit tabs', () => {
     render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
@@ -1352,6 +1470,7 @@ import { SwapShell } from './swap-shell';
 import { TradeCard } from './trade-card';
 import { TokenSelector } from './token-selector';
 import { usdText } from './trade-usd';
+import { minReceivedText } from './trade-amount-format';
 
 export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymbol, tokenLogoUri, quoteAsset, explorerBase, usdPrice }: CurveSwapPanelProps) {
   // 'buy' = quote asset -> launched token (curve.buy); 'sell' = launched token -> quote (curve.sell).
@@ -1446,6 +1565,7 @@ export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, toke
         buy={{ value: buyText, onChange: amounts.onBuyChange, ariaLabel: 'Buy amount', selector: pill(tokenOut),
                usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut.address)), hint: buyHint }}
         onFlip={() => { setDirection(direction === 'buy' ? 'sell' : 'buy'); amounts.flip(); }}
+        minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'curve', tokenOut.decimals, tokenOut.symbol)}
         footer={<>
           <ApproveOrActionButton
             needsApproval={needsApproval}

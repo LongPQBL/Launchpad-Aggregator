@@ -22,6 +22,7 @@ Renders the two-card layout from the screenshot:
 - Bottom card: label "Buy", large amount input (editable), optional `$` line, token pill. Slightly different background than the top card.
 - Both inputs are editable. The card the user last typed in is the "source"; the other card shows the derived amount (see Two-way quoting).
 - Flip button overlapping the seam between the cards (existing "Flip swap direction" behavior and aria-label retained).
+- A "Min received" row between the cards and the footer (see "Min received line"); hidden when there is no quote.
 - A `footer` slot below the cards for the action button and status.
 
 It owns no trade logic: it receives value/onChange, selector configs, `usdValue` (nullable) and callbacks as props.
@@ -66,6 +67,16 @@ Today every venue is quoted exact-input only (type in Sell → quote Buy). Typin
 
 **Display:** the derived side is shown with `≈`-free plain numbers (it is a real simulated quote) but labeled in the helper line as an estimate, same as today's "You receive ≈". When typing in Buy, the Sell card shows the derived input and the "insufficient balance" check runs against it.
 
+## Min received line
+
+Below the cards (above the action button) the panel shows `Min received  <amount> <symbol>` — the least the user will accept after slippage, as on Pons ("min 27.0063M PROMETHEUS").
+
+- The value is `applySlippage(quote.outputAmount, settings.slippageBps, venueKind)` — the **same function and the same inputs** that compute the on-chain `minTokensOut` / `minQuoteOut` / `amountOutMinimum`, so the number shown is exactly the number submitted.
+- Shown only when a quote exists (`outputAmount !== null`); otherwise the row is hidden — never a placeholder `0`.
+- Formatted compactly (e.g. `27.0063M`, up to 4 fraction digits; a real non-zero amount below `0.0001` shows `<0.0001`, never `0`).
+- When the user typed in the Buy box, the row is computed from the forward quote at the derived input `X`, same as submission.
+- **Slippage itself stays in the settings popover** (`TradeSettingsPopover`: Auto or custom %, deadline), as on Uniswap — no slippage chips or inputs on the panel face. The row does not repeat the slippage percentage.
+
 ## USD line
 
 `$` is shown only when the frontend already has a real USD price — never a placeholder `$0` (null means unavailable, per project rules):
@@ -92,7 +103,8 @@ Follows the app's current theme tokens (dark default, light supported). The prim
 
 ## Testing
 
-- `trade-card.test.tsx`: renders both cards; `$` line hidden when `usdValue` is null and shown when set; flip button calls back; both inputs editable and typing in one reports which side is the source.
+- `trade-amount-format.test.ts`: compact formatting (`27_006_300…` → `27.0063M`, thousands, small, `<0.0001`, zero).
+- `trade-card.test.tsx`: renders the Min received row only when provided; renders both cards; `$` line hidden when `usdValue` is null and shown when set; flip button calls back; both inputs editable and typing in one reports which side is the source.
 - `solve-input-for-output.test.ts`: against fake monotonic quote functions (linear, convex curve-like, flat-then-steep, quote returning null mid-search, target unreachable) — result satisfies `quoteFn(X) >= target`, is minimal within tolerance, respects the call cap, returns null when unsolvable.
 - Panel tests per venue: typing in Buy derives Sell and submits the normal exact-in call with the derived amount; typing in Sell still derives Buy; flip keeps the typed token as source; a changing target cancels the previous search; unsolvable target shows "Quote unavailable" and disables the button.
 - `swap-shell.test.tsx`: title, venue badge text per venue, settings gear present.
