@@ -1,10 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { type Address, formatUnits, maxUint256, zeroAddress } from 'viem';
-import { useAccount, useBalance, useReadContract } from 'wagmi';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { useAccount, useBalance, usePublicClient, useReadContract } from 'wagmi';
 import { robinhoodChain } from '@/wallet/config';
 import { erc20Abi } from './erc20Abi';
 import { universalRouterAbi, UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
@@ -13,7 +11,6 @@ import { useV4SwapQuote } from './use-v4-swap-quote';
 import { usePermit2Permit } from './use-permit2-permit';
 import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings } from './use-trade-settings';
-import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
 import { openWalletDialog } from '@/wallet/open-wallet-dialog';
@@ -21,13 +18,23 @@ import { TradeStatus } from './trade-status';
 import { useCanBatchCalls } from './use-can-batch-calls';
 import { usePaymasterCapability } from './use-paymaster-capability';
 import { PAYMASTER_SERVICE_URL } from './paymasterConfig';
-import { applySlippage, parseAmountSafe } from './amount';
+import { TokenSelector } from './token-selector';
+import { applySlippage } from './amount';
+import { makeV4ReverseSolve } from './reverse-quote';
+import { useSwapAmounts } from './use-swap-amounts';
+import { TradeCard } from './trade-card';
+import { SwapShell } from './swap-shell';
+import { usdText, usdPriceFor, type UsdPrices } from './trade-usd';
+import { minReceivedText } from './trade-amount-format';
+import { deriveQuoteState } from './trade-button-state';
 import { encodeExecuteCommands, encodePermit2PermitInput, encodeV4SwapInput, type V4PoolKey } from './v4SwapEncoding';
 
 export interface V4SwapToken {
   address: Address;
   symbol: string | null;
   decimals: number;
+  // Optional so callers without a known logo pass nothing; the selector falls back to a letter avatar.
+  logoUri?: string | null;
 }
 
 export interface V4SwapPanelProps {
@@ -35,12 +42,12 @@ export interface V4SwapPanelProps {
   tokenA: V4SwapToken;
   tokenB: V4SwapToken;
   explorerBase: string | null;
+  usdPrices?: UsdPrices;
 }
 
-export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPanelProps) {
+export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }: V4SwapPanelProps) {
   const [direction, setDirection] = useState<'aToB' | 'bToA'>('aToB');
-  const [amount, setAmount] = useState('');
-  const { address: account, chainId } = useAccount();
+  const { address: account, chainId, isConnected } = useAccount();
   const { settings, update } = useTradeSettings();
   const isWrongChain = chainId !== robinhoodChain.id;
 
@@ -48,7 +55,20 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
   const tokenOut = direction === 'aToB' ? tokenB : tokenA;
   const zeroForOne = tokenIn.address.toLowerCase() === poolKey.currency0.toLowerCase();
   const isNativeIn = tokenIn.address === zeroAddress;
-  const amountIn = parseAmountSafe(amount, tokenIn.decimals);
+  const client = usePublicClient({ chainId: robinhoodChain.id });
+  const solve = useMemo(
+    () => (client ? makeV4ReverseSolve(client, { poolKey, zeroForOne }) : null),
+    // poolKey is a prop object whose identity can change every parent render — key on primitives.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [client, poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, zeroForOne],
+  );
+  const amounts = useSwapAmounts({
+    tokenInDecimals: tokenIn.decimals,
+    tokenOutDecimals: tokenOut.decimals,
+    solve,
+    solveKey: `v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}`,
+  });
+  const amountIn = amounts.amountIn;
 
   const { data: tokenInBalance } = useReadContract({
     address: tokenIn.address,
@@ -129,59 +149,71 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
       const approveCall = { address: tokenIn.address, abi: erc20Abi, functionName: 'approve', args: [PERMIT2_ADDRESS, maxUint256] };
       // Unset in every real environment today (paymasterConfig.ts) — see use-paymaster-capability.ts.
       const capabilities = PAYMASTER_SERVICE_URL && paymasterCapable ? { paymasterService: { url: PAYMASTER_SERVICE_URL } } : undefined;
-      submission.submitBatch([approveCall, executeCall], { onSuccess: () => setAmount('') }, capabilities);
+      submission.submitBatch([approveCall, executeCall], { onSuccess: () => amounts.reset() }, capabilities);
     } else {
-      submission.submit(executeCall, { onSuccess: () => setAmount('') });
+      submission.submit(executeCall, { onSuccess: () => amounts.reset() });
     }
   }
 
+  const buyText = amounts.source === 'buy'
+    ? amounts.buyTypedText
+    : (quote.outputAmount !== null ? formatUnits(quote.outputAmount, tokenOut.decimals) : '');
+  const reverseUnavailable = amounts.source === 'buy' && amounts.reverseStatus === 'unavailable';
+  const sellHint = reverseUnavailable ? 'Quote unavailable'
+    : amounts.source === 'buy' && amounts.reverseStatus === 'loading' ? 'Estimating…' : null;
+  const buyHint = amounts.source === 'sell' && amountIn > 0n && quote.outputAmount === null && quote.errorMessage
+    ? `Quote unavailable: ${quote.errorMessage}` : null;
+  const priceFor = (token: V4SwapToken) => usdPriceFor(usdPrices, token.address);
+  const quoteState = deriveQuoteState({ source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn, outputAmount: quote.outputAmount, errorMessage: quote.errorMessage });
+  const fixedSelector = (token: V4SwapToken) => {
+    const option = { key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null };
+    return <TokenSelector options={[option]} selected={option} onSelect={() => {}} chainId={robinhoodChain.id} />;
+  };
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex justify-end">
-        <TradeSettingsPopover settings={settings} onChange={update} venueKind="pool" />
-      </div>
-      <div className="relative flex flex-col gap-1">
-        <label className="flex-1 text-sm">
-          Sell {tokenIn.symbol ?? '—'}
-          <Input aria-label="Amount" type="number" value={amount} onChange={(event) => setAmount(event.target.value)} />
-        </label>
-        {quote.outputAmount !== null ? (
-          <p className="text-sm text-muted-foreground">You receive ≈ {formatUnits(quote.outputAmount, tokenOut.decimals)} {tokenOut.symbol ?? ''}</p>
-        ) : amountIn > 0n && quote.errorMessage ? (
-          <p className="text-sm text-muted-foreground">Quote unavailable: {quote.errorMessage}</p>
-        ) : null}
-        <Button type="button" variant="outline" size="sm" aria-label="Flip swap direction"
-          className="absolute top-1/2 left-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-background p-0 shadow-sm"
-          onClick={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); setAmount(''); }}>
-          ⇅
-        </Button>
-      </div>
-      {permit2.signError && (
-        <p role="alert" className="text-sm text-destructive">
-          {permit2.signError}
-        </p>
-      )}
-      <ApproveOrActionButton
-        needsApproval={needsErc20Approval}
-        amountIn={amountIn}
-        approveAmount={maxUint256}
-        isWrongChain={isWrongChain}
-        hasInsufficientBalance={hasInsufficientBalance}
-        tokenInSymbol={tokenIn.symbol ?? undefined}
-        canBatchApprove={canBatch}
-        // While the ERC20->Permit2 allowance read is still loading, it reads back as 0n (not yet
-        // known) — disabling via a null outputAmount (already-existing semantics: "not ready to
-        // submit yet") avoids a batching wallet submitting with a guess either way.
-        quoteState={quote.outputAmount === null || erc20Allowance.isAllowanceLoading ? (amountIn === 0n ? 'idle' : 'loading') : 'ready'}
-        isConnected={true}
-        balanceKnown={true}
-        onConnect={openWalletDialog}
-        isSubmitting={isSubmitting || permit2.isSigning}
-        allowance={erc20Allowance}
-        actionLabel="Swap"
-        onAction={() => { void submitSwap(); }}
+    <SwapShell venueLabel="Uniswap V4 pool" venueKind="pool" settings={settings} onSettingsChange={update}>
+      <TradeCard
+        sell={{
+          value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
+          selector: fixedSelector(tokenIn),
+          usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
+        }}
+        buy={{
+          value: buyText, onChange: amounts.onBuyChange, ariaLabel: 'Buy amount',
+          selector: fixedSelector(tokenOut),
+          usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
+        }}
+        onFlip={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }}
+        minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, tokenOut.symbol)}
+        footer={<>
+          {permit2.signError && (
+            <p role="alert" className="text-sm text-destructive">
+              {permit2.signError}
+            </p>
+          )}
+          <ApproveOrActionButton
+            needsApproval={needsErc20Approval}
+            amountIn={amountIn}
+            approveAmount={maxUint256}
+            isWrongChain={isWrongChain}
+            hasInsufficientBalance={hasInsufficientBalance}
+            tokenInSymbol={tokenIn.symbol ?? undefined}
+            canBatchApprove={canBatch}
+            // While the ERC20->Permit2 allowance read is loading it reads back as 0n (unknown), so
+            // hold the button in 'loading' — but only once an amount is typed, so an empty panel
+            // still reads "Enter an amount".
+            quoteState={amountIn > 0n && erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}
+            isConnected={isConnected}
+            balanceKnown={isNativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
+            onConnect={openWalletDialog}
+            isSubmitting={isSubmitting || permit2.isSigning}
+            allowance={erc20Allowance}
+            actionLabel="Swap"
+            onAction={() => { void submitSwap(); }}
+          />
+          <TradeStatus status={submission.status} txHash={submission.txHash} errorMessage={submission.errorMessage} explorerBase={explorerBase} />
+        </>}
       />
-      <TradeStatus status={submission.status} txHash={submission.txHash} errorMessage={submission.errorMessage} explorerBase={explorerBase} />
-    </div>
+    </SwapShell>
   );
 }

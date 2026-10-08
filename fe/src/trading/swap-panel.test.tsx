@@ -519,6 +519,12 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
+  it('reads "Enter an amount", not "Getting quote…", with nothing typed while the allowance read is still loading', () => {
+    hooks.erc20AllowanceLoading = true;
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  });
+
   it('typing in Buy derives the Sell amount via the V3 reverse solver and submits exact-input with it', async () => {
     vi.useFakeTimers();
     reverse.solve.mockResolvedValue(2_000_000_000_000_000_000n);

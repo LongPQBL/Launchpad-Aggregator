@@ -1,10 +1,19 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, maxUint256, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { V4SwapPanel } from './v4-swap-panel';
 import { PERMIT2_ADDRESS } from './permit2Abi';
 import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
 import type { V4PoolKey } from './v4SwapEncoding';
+import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
+
+const reverse = vi.hoisted(() => ({
+  solve: vi.fn<(target: bigint, signal: AbortSignal) => Promise<bigint | null>>(),
+  makeV4: vi.fn(),
+}));
+vi.mock('./reverse-quote', () => ({
+  makeV4ReverseSolve: (...args: unknown[]) => { reverse.makeV4(...args); return reverse.solve; },
+}));
 
 // Mirrors v4SwapEncoding.test.ts's own decode pattern: actions string, then each params[]
 // element decoded by position (params[0] is the swap struct itself).
@@ -19,7 +28,7 @@ function decodeZeroForOne(swapInput: `0x${string}`): boolean {
 }
 
 const hooks = vi.hoisted(() => ({
-  account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
+  account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   erc20Allowance: 0n,
   permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
   // Mirrors permit2Allowance at call time by default (same convention as
@@ -48,6 +57,7 @@ const hooks = vi.hoisted(() => ({
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
+  usePublicClient: () => ({}),
   useBalance: () => ({ data: { value: hooks.nativeBalance }, isLoading: false }),
   useReadContract: (args: { functionName: string; address: string }) => {
     if (args.functionName === 'allowance' && args.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
@@ -85,6 +95,10 @@ beforeEach(() => {
   hooks.paymasterServiceUrl = undefined;
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
+  hooks.account.isConnected = true;
+  reverse.solve.mockReset();
+  reverse.solve.mockImplementation(async (target) => target * 2n);
+  reverse.makeV4.mockClear();
   hooks.erc20Allowance = 2_000_000_000_000_000_000n;
   hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
   hooks.permit2Refetch.mockReset();
@@ -109,13 +123,15 @@ beforeEach(() => {
 describe('V4SwapPanel', () => {
   it('defaults to swapping tokenA for tokenB, deriving zeroForOne from the real pool key', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(screen.getByText(new RegExp(`Sell.*${tokenA.symbol}`, 'i'))).toBeInTheDocument();
+    expect(screen.getByText('Sell')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
   });
 
   it('encodes the real zeroForOne bit matching the UI direction, not just the displayed label', async () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
     const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
@@ -127,7 +143,7 @@ describe('V4SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
     const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
@@ -138,14 +154,16 @@ describe('V4SwapPanel', () => {
   it('flips direction when the toggle is clicked', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    expect(screen.getByText(new RegExp(`Sell.*${tokenB.symbol}`, 'i'))).toBeInTheDocument();
+    // Both pills remain; the sell input now sits on the ROBIN side (same symbols, swapped roles).
+    expect(screen.getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
   });
 
   it('shows Approve (targeting Permit2, not the router) when the ERC20->Permit2 allowance is insufficient', () => {
     hooks.erc20Allowance = 0n;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
   });
@@ -154,7 +172,7 @@ describe('V4SwapPanel', () => {
     hooks.erc20Allowance = 0n;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     // useTokenAllowance.approve() calls writeContract with a single argument (no onSuccess
     // options), same as the existing use-token-allowance.test.ts convention — unlike the
@@ -168,7 +186,7 @@ describe('V4SwapPanel', () => {
     hooks.permit2Allowance = [0n, 0, 2];
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
@@ -184,7 +202,7 @@ describe('V4SwapPanel', () => {
     hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
       // Same third-element note as above: args is [commands, inputs, deadline], not just two.
@@ -196,7 +214,7 @@ describe('V4SwapPanel', () => {
 
   it('keeps Swap disabled until the quote resolves, never submitting with zero slippage protection', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
@@ -204,7 +222,7 @@ describe('V4SwapPanel', () => {
     hooks.account.chainId = 1;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
   });
 
@@ -212,7 +230,7 @@ describe('V4SwapPanel', () => {
     hooks.balanceA = 0n;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Not enough LAUNCH' })).toBeDisabled();
   });
 
@@ -224,13 +242,13 @@ describe('V4SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Not enough ROBIN' })).toBeDisabled();
   });
 
   it('does not crash and shows an "Enter an amount" label when the amount contains scientific notation', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1e5' } });
     expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 
@@ -239,7 +257,7 @@ describe('V4SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     hooks.signTypedDataAsync.mockRejectedValueOnce(new Error('User rejected the request'));
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
     // Give a would-be unhandled rejection a turn to surface before asserting the flow stopped
@@ -254,7 +272,7 @@ describe('V4SwapPanel', () => {
     const nativeTokenA = { address: '0x0000000000000000000000000000000000000000' as const, symbol: 'ETH', decimals: 18 };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={nativePoolKey} tokenA={nativeTokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
       expect.objectContaining({ functionName: 'execute', value: 1_000_000_000_000_000_000n }),
@@ -271,7 +289,7 @@ describe('V4SwapPanel', () => {
     hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
@@ -282,7 +300,7 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Swap' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
@@ -297,7 +315,7 @@ describe('V4SwapPanel', () => {
     hooks.erc20Allowance = 0n;
     hooks.capabilities = { 4663: { atomic: { status: 'unsupported' } } };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
     expect(hooks.sendCalls).not.toHaveBeenCalled();
@@ -308,7 +326,7 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     const { rerender } = render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(hooks.erc20AllowanceRefetch).not.toHaveBeenCalled();
 
@@ -324,7 +342,7 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'ready' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(); // not opted in yet
 
     fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
@@ -341,7 +359,7 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: { paymasterService: { url: string } } }];
     expect(capabilities).toEqual({ paymasterService: { url: 'https://example.com/paymaster' } });
@@ -352,7 +370,7 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: unknown }];
     expect(capabilities).toBeUndefined();
@@ -364,7 +382,126 @@ describe('V4SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+  });
+
+  it('reads "Enter an amount", not "Getting quote…", with nothing typed while the allowance read is still loading', () => {
+    hooks.erc20AllowanceLoading = true;
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  });
+
+  it('typing in Buy derives the Sell amount via the V4 reverse solver and submits exact-input with it', async () => {
+    vi.useFakeTimers();
+    reverse.solve.mockResolvedValue(2_000_000_000_000_000_000n);
+    hooks.simulateData = { result: [3_000_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.makeV4).toHaveBeenCalledWith({}, { poolKey, zeroForOne: true });
+    expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.writeContract).toHaveBeenCalledTimes(1);
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    const swapInput = args[1][args[1].length - 1];
+    const [, params] = decodeAbiParameters(parseAbiParameters('bytes actions, bytes[] params'), swapInput);
+    const [swapParams] = decodeAbiParameters(SWAP_PARAMS_ABI, params[0]);
+    expect(swapParams.amountIn).toBe(2_000_000_000_000_000_000n);
+  });
+
+  it('shows "Quote unavailable" and disables Swap when the reverse quote has no answer', async () => {
+    vi.useFakeTimers();
+    reverse.solve.mockResolvedValue(null);
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '999999999' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getAllByText('Quote unavailable').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
+    vi.useRealTimers();
+  });
+
+  it('never calls the reverse solver when the user typed in Sell, or typed garbage in Buy', async () => {
+    vi.useFakeTimers();
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '.' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.solve).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('flip keeps the typed number on the same token', () => {
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
+  });
+
+  it('Connect asks the header to open the wallet dialog', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    const handler = vi.fn();
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  });
+
+  it('walks the button through Connect → Getting quote… → Not enough LAUNCH → Swap', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    const props = { poolKey, tokenA, tokenB, explorerBase: null };
+    const { rerender } = render(<V4SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+
+    hooks.account.isConnected = true;
+    hooks.account.address = '0x1111111111111111111111111111111111111111';
+    hooks.simulateData = undefined;
+    rerender(<V4SwapPanel {...props} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+
+    hooks.simulateData = { result: [1_000_000_000_000_000_000n, 100_000n] };
+    hooks.balanceA = 0n;
+    rerender(<V4SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Not enough LAUNCH' })).toBeDisabled();
+
+    hooks.balanceA = 10_000_000_000_000_000_000n;
+    rerender(<V4SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeEnabled();
+  });
+
+  it('shows Min received from the quote with the user slippage, and hides it with no quote', () => {
+    localStorage.setItem('trade-settings', JSON.stringify({ slippageBps: 100, deadlineMinutes: 30, oneClickTradeOptIn: false }));
+    hooks.simulateData = { result: [1_000_000_000_000_000_000_000n, 100_000n] };
+    const { unmount } = render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.getByText('Min received')).toBeInTheDocument();
+    expect(screen.getByText(/^990 /)).toBeInTheDocument();
+    unmount();
+    hooks.simulateData = undefined;
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.queryByText('Min received')).not.toBeInTheDocument();
+  });
+
+  it('shows a USD line on each side that has a price, and hides the side that does not', () => {
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} usdPrices={{ [tokenA.address.toLowerCase()]: '2' }} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByText('$6.00')).toBeInTheDocument();
+    expect(screen.queryByText(/^\$3000/)).not.toBeInTheDocument();
+  });
+
+  it('shows both USD lines when both tokens have a price', () => {
+    hooks.simulateData = { result: [1_000_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null}
+      usdPrices={{ [tokenA.address.toLowerCase()]: '2', [tokenB.address.toLowerCase()]: '3000' }} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByText('$6.00')).toBeInTheDocument();
+    expect(screen.getByText('$3000.00')).toBeInTheDocument();
   });
 });

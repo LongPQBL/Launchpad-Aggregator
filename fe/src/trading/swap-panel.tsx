@@ -251,7 +251,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
             hasInsufficientBalance={hasInsufficientBalance}
             tokenInSymbol={displaySymbol(tokenIn, nativeIn)}
             canBatchApprove={canBatch}
-            quoteState={erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}
+            quoteState={amountIn > 0n && erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}
             isConnected={isConnected}
             balanceKnown={nativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
             onConnect={openWalletDialog}
