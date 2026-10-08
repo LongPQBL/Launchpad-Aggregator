@@ -330,6 +330,13 @@
       "when": 1791235683347,
       "tag": "0046_groovy_multiple_man",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1791478886755,
+      "tag": "0047_nosy_spirit",
+      "breakpoints": true
     }
   ]
 }

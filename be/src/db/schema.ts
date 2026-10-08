@@ -391,6 +391,23 @@ export const poolMembers = pgTable('pool_members', {
   index('pool_members_token_idx').on(table.chainId, table.tokenAddress),
 ]);
 
+export const poolTvlSnapshots = pgTable('pool_tvl_snapshots', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  capturedAt: timestamp('captured_at', { withTimezone: true }).notNull(),
+  coreAmount0Raw: numeric('core_amount0_raw', { precision: 78, scale: 0 }).notNull(),
+  coreAmount1Raw: numeric('core_amount1_raw', { precision: 78, scale: 0 }).notNull(),
+  sqrtPriceX96: numeric('sqrt_price_x96', { precision: 78, scale: 0 }).notNull(),
+  quoteAddress: text('quote_address').notNull(),
+  tvlUsd: numeric('tvl_usd', { precision: 78, scale: 30 }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.blockNumber] }),
+  check('pool_tvl_snapshots_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+  index('pool_tvl_snapshots_captured_at_idx').on(table.capturedAt),
+]);
+
 export const poolTrades = pgTable('pool_trades', {
   chainId: integer('chain_id').notNull(),
   txHash: text('tx_hash').notNull(),
