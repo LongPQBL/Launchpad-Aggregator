@@ -9,6 +9,7 @@ Builds on `2026-10-06-launch-trading-design.md`, `2026-10-07-v3-pool-swap-permit
 The user shared a screenshot of Uniswap's swap panel and asked for the same look. Decisions made in conversation:
 
 - A curve buy/sell is economically a swap (quote asset ⇄ launched token); only the contract call differs (direct `buy`/`sell` on the curve, no router, no Permit2). So the curve gets the same single swap panel; the flip direction selects `buy` vs `sell`.
+- **Both inputs are editable (two-way):** typing in Sell computes Buy, typing in Buy computes Sell, as on Uniswap.
 - **No `Limit` tab** — nothing in the repo or on this chain supports limit orders; not faked, not shown disabled.
 - **No `Buy | Sell` tab bar** in this work. Uniswap's tab row is deferred; this panel is a single "Swap" panel with no tabs.
 - The venue stays visible to the user (curve vs. which pool), consistent with the project rule of always labeling the source.
@@ -18,7 +19,8 @@ The user shared a screenshot of Uniswap's swap panel and asked for the same look
 ### `TradeCard` (new, presentational only — `fe/src/trading/trade-card.tsx`)
 Renders the two-card layout from the screenshot:
 - Top card: label "Sell", large amount input, optional `$` line below, token pill (logo + symbol + chevron via the existing `TokenSelector`).
-- Bottom card: label "Buy", read-only output value (large), optional `$` line, token pill. Slightly different background than the top card.
+- Bottom card: label "Buy", large amount input (editable), optional `$` line, token pill. Slightly different background than the top card.
+- Both inputs are editable. The card the user last typed in is the "source"; the other card shows the derived amount (see Two-way quoting).
 - Flip button overlapping the seam between the cards (existing "Flip swap direction" behavior and aria-label retained).
 - A `footer` slot below the cards for the action button and status.
 
@@ -43,6 +45,21 @@ Replace their hand-rolled Sell/Buy markup with `SwapShell` + `TradeCard`. Permit
 
 ### `SwapPanelPreview`
 Reuses `TradeCard` with the same fake data and the same "Preview only" disabled button/label, shown under the same condition as today.
+
+## Two-way quoting
+
+Today every venue is quoted exact-input only (type in Sell → quote Buy). Typing in Buy needs the reverse.
+
+**State:** `lastEdited: 'sell' | 'buy'` plus the typed string for that side. The other side's displayed value is derived, never stored as typed text. Flipping direction swaps the cards, keeps `lastEdited` pointing at the same token (the token the user typed in stays the source), and keeps the typed amount.
+
+**Execution never changes.** Every venue still executes exact-input, using the call shapes already verified (curve `buy`/`sell`, Universal Router V3/V4 exact-in). When the user typed in Buy, the panel first derives the input amount `X` that yields at least the typed target, then runs the normal exact-in flow with `X` — slippage (`minOut`), balance check, approval and batching all use `X` exactly as if the user had typed `X` in Sell. No exact-output on-chain commands, no new approval math.
+
+**Deriving `X` (reverse quote):** a non-hook helper `solveInputForOutput(quoteFn, targetOut)` in `fe/src/trading/` inverts a monotonic exact-in quote function (`quoteFn(amountIn) → amountOut | null`) with a bounded search: exponential bracket from an initial guess, then bisection until `quoteFn(X) >= targetOut` and the bracket width is within one raw unit or a small relative tolerance (≤0.01% of `X`), hard-capped at a fixed iteration count. It returns the smallest `X` found with `quoteFn(X) >= targetOut`, so the user receives at least the typed amount before slippage. If the cap is hit, the quote function returns null/throws, or no `X` is found (e.g. target exceeds what the pool/curve can deliver), the Sell card shows "Quote unavailable" and the button is disabled — it does not guess.
+- `quoteFn` is built per venue from the same simulations the exact-in hooks already use (`simulateContract` against the curve, the V3 quoter, the V4 quoter) via the wagmi public client, so the reverse path cannot drift from what execution will actually do.
+- Calls are debounced (reuse the panel's amount debounce, ~300 ms) and a stale search is cancelled when the typed value changes, so a fast typist does not pile up RPC requests.
+- The iteration cap and tolerance are tunable constants; the plan's first task measures actual call count and latency per venue against the live RPC before fixing them, and records the numbers. If the V3/V4 quoters expose an exact-output function that verifies cleanly on chain 4663, the plan may use it for those two venues as a single-call shortcut — but only for deriving `X`; execution stays exact-in either way.
+
+**Display:** the derived side is shown with `≈`-free plain numbers (it is a real simulated quote) but labeled in the helper line as an estimate, same as today's "You receive ≈". When typing in Buy, the Sell card shows the derived input and the "insufficient balance" check runs against it.
 
 ## USD line
 
@@ -70,7 +87,9 @@ Follows the app's current theme tokens (dark default, light supported). The prim
 
 ## Testing
 
-- `trade-card.test.tsx`: renders both cards; `$` line hidden when `usdValue` is null and shown when set; flip button calls back; output card is read-only.
+- `trade-card.test.tsx`: renders both cards; `$` line hidden when `usdValue` is null and shown when set; flip button calls back; both inputs editable and typing in one reports which side is the source.
+- `solve-input-for-output.test.ts`: against fake monotonic quote functions (linear, convex curve-like, flat-then-steep, quote returning null mid-search, target unreachable) — result satisfies `quoteFn(X) >= target`, is minimal within tolerance, respects the call cap, returns null when unsolvable.
+- Panel tests per venue: typing in Buy derives Sell and submits the normal exact-in call with the derived amount; typing in Sell still derives Buy; flip keeps the typed token as source; a changing target cancels the previous search; unsolvable target shows "Quote unavailable" and disables the button.
 - `swap-shell.test.tsx`: title, venue badge text per venue, settings gear present.
 - `curve-swap-panel.test.tsx`: port every assertion from `buy-panel.test.tsx` and `sell-panel.test.tsx` — native-ETH buy sends `value` and skips approval; ERC20 buy and sell require exact-amount approval; batch path when `canBatch`; insufficient-balance disables the button; quote-unavailable message; direction flip clears amount and swaps tokens; query/allowance state does not leak between directions. This is the regression guard for the merge.
 - V3/V4 panel tests: update selectors only; behavior assertions must stay and pass.
@@ -80,6 +99,6 @@ Follows the app's current theme tokens (dark default, light supported). The prim
 ## Out of scope
 
 - `Limit` tab (no support), `Buy | Sell` tabs (deferred by the user), the chart shortcut icon in Uniswap's header.
-- Any change to quoting, routing, fees, approvals, or the backend.
+- Exact-output on-chain execution (the reverse path only derives an exact-input amount), routing, fees, approval semantics, or the backend.
 - USD values for the quote side / pool pages.
 - Real trading changes of any kind (platform fee, etc.).
