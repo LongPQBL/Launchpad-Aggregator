@@ -30,14 +30,26 @@ test('renders the official chart without crashing on the BE\'s real (newest-firs
 test('the header offers wallet connection while the read-only detail content has no trade-execution controls', async ({ page }) => {
   // <header> is a direct child of the page's top-level wrapper (not nested in <main>), so it has
   // the implicit 'banner' landmark role — this is where AppShell renders WalletControl.
-  await expect(page.getByRole('banner').getByRole('button', { name: /connect wallet/i })).toBeVisible();
+  await expect(page.getByRole('banner').getByRole('button', { name: /^connect( wallet)?$/i })).toBeVisible();
 
   // <main> is the read-only detail content. About's own copy-address/show-more/show-less buttons
-  // are legitimate utility controls and must stay allowed; only buy/sell/swap execution verbs are
-  // forbidden here — unlike a broader "trade" substring, which would wrongly flag a future
+  // are legitimate utility controls and must stay allowed, as does the swap panel's "Flip swap
+  // direction" button and its disconnected "Connect" action; only buttons whose name starts with
+  // the buy/sell/swap execution verbs are forbidden here — unlike a broader "trade" substring, which would wrongly flag a future
   // non-executing label like a "View trade" link in the trade-history table.
   const appContent = page.getByRole('main');
-  await expect(appContent.getByRole('button', { name: /buy|sell|swap/i })).toHaveCount(0);
+  await expect(appContent.getByRole('button', { name: /^(buy|sell|swap)\b/i })).toHaveCount(0);
+});
+
+test('the trade panel never offers Limit or Buy/Sell tabs', async ({ page }) => {
+  await expect(page.getByRole('tab', { name: /^limit$/i })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: /^(buy|sell)$/i })).toHaveCount(0);
+});
+
+test('renders the unified swap panel with its venue badge and both amount inputs', async ({ page }) => {
+  await expect(page.getByText('Bonding curve').first()).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Sell amount' })).toBeVisible();
+  await expect(page.getByRole('spinbutton', { name: 'Buy amount' })).toBeVisible();
 });
 
 test('shows and expands Show more for a long description at both mobile and desktop widths', async ({ page }) => {
