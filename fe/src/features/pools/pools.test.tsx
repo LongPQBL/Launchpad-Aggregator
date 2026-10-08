@@ -7,6 +7,7 @@ import { PoolDetail } from './pool-detail';
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: undefined }),
+  usePublicClient: () => ({}),
   useBalance: () => ({ data: undefined, isLoading: false }),
   useReadContract: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
   useSimulateContract: () => ({ data: undefined, isLoading: false, error: null, refetch: vi.fn() }),

@@ -475,7 +475,7 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(); // not opted in yet
 
     fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
-    fireEvent.click(screen.getByRole('button', { name: /1-click trade/i }));
+    fireEvent.click(screen.getByRole('button', { name: '1-click trade' }));
     expect(screen.getByRole('button', { name: 'Swap' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));

@@ -790,7 +790,11 @@ describe('LaunchDetail', () => {
         }}
       />,
     );
-    expect(screen.getByText(/Sell.*MYTOK/i)).toBeInTheDocument();
+    // Scope to the Sell card's own token pill, so this fails if the default direction regresses
+    // (the quote asset ROBIN would then sit in the Sell card instead).
+    const sellCard = within(screen.getByText('Sell').parentElement as HTMLElement);
+    expect(sellCard.getByRole('button', { name: /MYTOK/ })).toBeInTheDocument();
+    expect(sellCard.queryByRole('button', { name: /ROBIN/ })).not.toBeInTheDocument();
   });
 
   it('hides the V4 swap panel when the venue is active but its pool data did not resolve', () => {
