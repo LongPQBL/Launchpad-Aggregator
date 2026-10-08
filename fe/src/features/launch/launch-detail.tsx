@@ -12,7 +12,8 @@ import { DEFAULT_CHART_INTERVAL } from './official-chart';
 import { OfficialPriceChart } from './official-price-chart';
 import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
-import { CurveTradePanel } from '@/trading/curve-trade-panel';
+import { CurveSwapPanel } from '@/trading/curve-swap-panel';
+import type { UsdPrices } from '@/trading/trade-usd';
 import { SwapPanel } from '@/trading/swap-panel';
 import { V4SwapPanel } from '@/trading/v4-swap-panel';
 import { SwapPanelPreview } from '@/trading/swap-panel-preview';
@@ -67,6 +68,10 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
   // regardless of prop order. Always put the launch's own token on tokenA, like the V3 SwapPanel
   // wiring above already does, instead of letting it depend on which currency happens to sort
   // first in poolKey's real, unmodified order.
+  const usdPrices: UsdPrices = {
+    [detail.tokenAddress.toLowerCase()]: detail.priceUsd ?? null,
+    [detail.quoteAsset.address.toLowerCase()]: detail.quotePriceUsd ?? null,
+  };
   const v4LaunchTokenIsCurrency0 = v4Pool ? v4Pool.currency0.toLowerCase() === detail.tokenAddress.toLowerCase() : true;
 
   return (
@@ -179,13 +184,15 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             {activeCurveVenue && detail.tokenDecimals !== null && detail.quoteAsset.decimals !== null && (
               <Card className="border-0 bg-transparent">
                 <CardContent className="pt-4">
-                  <CurveTradePanel
+                  <CurveSwapPanel
                     curveAddress={activeCurveVenue.ref as `0x${string}`}
                     tokenAddress={detail.tokenAddress as `0x${string}`}
                     tokenDecimals={detail.tokenDecimals}
                     tokenSymbol={detail.symbol}
+                    tokenLogoUri={detail.logoUri}
                     quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
                     explorerBase={explorerBase ?? null}
+                    usdPrices={usdPrices}
                   />
                 </CardContent>
               </Card>
@@ -198,6 +205,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                     tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals, logoUri: detail.logoUri }}
                     tokenB={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals, logoUri: null }}
                     explorerBase={explorerBase ?? null}
+                    usdPrices={usdPrices}
                   />
                 </CardContent>
               </Card>
@@ -209,12 +217,13 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                     poolKey={{ currency0: v4Pool.currency0 as `0x${string}`, currency1: v4Pool.currency1 as `0x${string}`,
                       fee: v4Pool.fee, tickSpacing: v4Pool.tickSpacing, hooks: v4Pool.hooks as `0x${string}` }}
                     tokenA={v4LaunchTokenIsCurrency0
-                      ? { address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }
-                      : { address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }}
+                      ? { address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals, logoUri: detail.logoUri }
+                      : { address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals, logoUri: detail.logoUri }}
                     tokenB={v4LaunchTokenIsCurrency0
                       ? { address: v4Pool.currency1 as `0x${string}`, symbol: v4Pool.currency1Symbol, decimals: v4Pool.currency1Decimals }
                       : { address: v4Pool.currency0 as `0x${string}`, symbol: v4Pool.currency0Symbol, decimals: v4Pool.currency0Decimals }}
                     explorerBase={explorerBase ?? null}
+                    usdPrices={usdPrices}
                   />
                 </CardContent>
               </Card>

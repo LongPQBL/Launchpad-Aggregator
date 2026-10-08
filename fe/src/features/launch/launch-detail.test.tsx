@@ -35,6 +35,7 @@ vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: undefined }),
   useBalance: () => ({ data: undefined, isLoading: false }),
+  usePublicClient: () => ({}),
   useReadContract: (args: { functionName?: string; address?: string }) => {
     if (args?.functionName === 'allowance' && args?.address?.toLowerCase() === '0x000000000022d473030f116ddee9f6b43ac78ba3') {
       return { data: undefined, isLoading: false };
@@ -615,7 +616,8 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.getByRole('tab', { name: 'Buy' })).toBeInTheDocument();
+    expect(screen.getAllByText('Bonding curve').length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Sell amount')).toBeInTheDocument();
 
     rerender(
       <LaunchDetail
@@ -624,7 +626,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('tab', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sell amount')).not.toBeInTheDocument();
   });
 
   it('hides the curve trade panel once the curve is swept, even though it is still the latest venue row', () => {
@@ -635,7 +637,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('tab', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sell amount')).not.toBeInTheDocument();
   });
 
   it('hides the curve trade panel when tokenDecimals has not resolved yet, rather than guessing it', () => {
@@ -646,7 +648,7 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sell amount')).not.toBeInTheDocument();
   });
 
   it('hides the curve trade panel when the quote asset decimals has not resolved yet, rather than guessing it', () => {
@@ -657,7 +659,42 @@ describe('LaunchDetail', () => {
         candles={{ items: [], complete: true }}
       />,
     );
-    expect(screen.queryByRole('button', { name: 'Buy' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Sell amount')).not.toBeInTheDocument();
+  });
+
+  describe('curve swap panel USD lines', () => {
+    const curveDetail = (quotePriceUsd: string | null) => detail({
+      tokenAddress: '0x1111111111111111111111111111111111111111',
+      quoteAsset: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', decimals: 18 },
+      officialVenues: [venue({ kind: 'curve', effectiveToBlock: null, ref: '0x2222222222222222222222222222222222222222' })],
+      lifecycleStatus: 'trading', priceUsd: '2', quotePriceUsd,
+    });
+    const renderCurve = (quotePriceUsd: string | null) => render(
+      <LaunchDetail detail={curveDetail(quotePriceUsd)} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
+    );
+
+    it('shows the quote-side USD value from quotePriceUsd', () => {
+      renderCurve('3000');
+      fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '0.001' } });
+      expect(screen.getByText('$3.00')).toBeInTheDocument();
+    });
+
+    it('shows the launched-token USD value from priceUsd after flipping', () => {
+      renderCurve('3000');
+      fireEvent.click(screen.getByLabelText('Flip swap direction'));
+      fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+      expect(screen.getByText('$6.00')).toBeInTheDocument();
+    });
+
+    it('hides the quote-side USD line when quotePriceUsd is null but keeps the launched-token one', () => {
+      renderCurve(null);
+      fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '0.001' } });
+      expect(screen.queryByText('$3.00')).not.toBeInTheDocument();
+      expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByLabelText('Flip swap direction'));
+      fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+      expect(screen.getByText('$6.00')).toBeInTheDocument();
+    });
   });
 
   it('shows the V3 swap panel for a V1 launch whose V3 pool venue is currently active', () => {
