@@ -4,7 +4,7 @@
 
 **Goal:** One Uniswap-style swap panel (Sell/Buy cards, flip arrow, both inputs editable and two-way quoted) used by the bonding curve, V3 and V4 trading venues.
 
-**Architecture:** A presentational `TradeCard` + `SwapShell` replace the hand-rolled markup of the three panels. A shared `useSwapAmounts` hook holds "which side the user typed in" and, when that is the Buy side, derives the exact-input amount `X` via a reverse quote (`solveInputForOutput` over simulations; V3 uses its exact-out quoter in one call). Execution on every venue stays exact-input using `X`, so Permit2/approval/batching/slippage code is untouched. `BuyPanel`+`SellPanel`+`CurveTradePanel` merge into `CurveSwapPanel`.
+**Architecture:** A presentational `TradeCard` + `SwapShell` replace the hand-rolled markup of the three panels. A shared `useSwapAmounts` hook holds "which side the user typed in" and, when that is the Buy side, derives the exact-input amount `X` via a reverse quote: V3 uses its exact-out quoter in one call; V4 and the curve use a parallel search (`solveInputForOutput`) over `eth_call` simulations. Curve simulations run as a synthetic account given the needed balance/allowance by state override (ERC20 storage slots discovered per token), and start from an exact closed-form model of the curve as a guess. Execution on every venue stays exact-input using `X`, so Permit2/approval/batching/slippage code is untouched. `BuyPanel`+`SellPanel`+`CurveTradePanel` merge into `CurveSwapPanel`.
 
 **Tech Stack:** Next.js (see `fe/AGENTS.md` — this Next has breaking changes; none of this plan touches routing/config), React, wagmi + viem, Tailwind, Vitest + Testing Library, Playwright.
 
@@ -26,16 +26,18 @@
 
 Inputs/conditions the spec implies that a user will plausibly hit; each has a pinned test in the owning task:
 
-1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button disabled, no crash (Task 1, Task 3, Task 7).
-2. Typing fast in the Buy box → earlier searches are aborted, only the last value's result is applied (Task 3).
-3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Task 5, Task 6).
-4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Task 3, Task 5).
-5. Wallet disconnected → reverse quote unavailable (not an error), forward behavior unchanged (Task 3, Task 8).
-6. ERC20-quoted curve buy / any curve sell reverts in simulation until the curve is approved (existing forward-quote behavior) → reverse search returns unavailable rather than hanging (Task 1, Task 3; verified live in Task 10).
+1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button disabled, no crash (Tasks 1, 4, 7, 8, 9).
+2. Typing fast in the Buy box → earlier searches are aborted, only the last value's result is applied (Task 5).
+3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Tasks 5, 7, 8, 9).
+4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Tasks 5, 7).
+5. Wallet disconnected → the reverse quote still works (it simulates as a synthetic account); forward quote and "Min received" stay hidden as today (Tasks 4, 9).
+6. A token whose balance/allowance storage layout cannot be discovered (e.g. a proxy like WETH) → reverse quote unavailable, and no trade simulation is attempted (Tasks 2, 4).
+7. A tiny input that the curve reverts as dust must not be read as "too large" (Task 1).
+8. A launch inside its snipe-tax window or with a creator tax: the closed-form guess is too low, the simulation still finds the right input (Tasks 1, 3).
 
 ---
 
-### Task 1: `solveInputForOutput` (pure reverse-quote search)
+### Task 1: `solveInputForOutput` (pure, parallel reverse-quote search)
 
 **Files:**
 - Create: `fe/src/trading/solve-input-for-output.ts`
@@ -43,63 +45,80 @@ Inputs/conditions the spec implies that a user will plausibly hit; each has a pi
 
 **Interfaces:**
 - Produces:
-  - `type QuoteFn = (amountIn: bigint, signal: AbortSignal) => Promise<bigint | null>` — exact-input quote; `null` = the simulation failed/reverted (treated as "too large").
-  - `solveInputForOutput(quoteFn: QuoteFn, targetOut: bigint, options?: { signal?: AbortSignal; maxCalls?: number; initialGuess?: bigint }): Promise<bigint | null>` — smallest-found `X` with `quoteFn(X) >= targetOut`, within 0.01% (or 1 raw unit); `null` if none found, the call cap is hit, `targetOut <= 0n`, or `signal` aborts.
-  - `SOLVER_MAX_CALLS = 40` (exported constant).
+  - `type QuoteFn = (amountIn: bigint, signal: AbortSignal) => Promise<bigint | null>` — exact-input quote; `null` = the simulation reverted / failed.
+  - `solveInputForOutput(quoteFn: QuoteFn, targetOut: bigint, options?: { signal?: AbortSignal; maxRounds?: number; initialGuess?: bigint }): Promise<bigint | null>` — the smallest-found `X` with `quoteFn(X) >= targetOut`, within 0.01% of the true minimum (or 1 raw unit); `null` if none is found, rounds run out, `targetOut <= 0n`, or `signal` aborts.
+  - Constants: `SOLVER_MAX_ROUNDS = 12`, `SOLVER_WIDE_POINTS = 16`, `SOLVER_REFINE_POINTS = 8`.
+
+**Algorithm (the contract the tests pin):** each *round* probes a set of inputs **in parallel** (one network round-trip, ~380 ms on the public RPC), then narrows the bracket:
+- A probe result is **ENOUGH** (`q >= target`), **SMALL** (`q < target`), or `null`. A `null` is **DUST** (too small — e.g. a curve reverts tiny trades with a zero-output error) unless a smaller input already returned non-null, in which case it is **TOO_LARGE** (over capacity / over balance). Nulls are classified by comparing against the smallest known non-null input, never by round order.
+- Round 0 grid: with `initialGuess` — `guess × [0.25, 0.5, 0.9, 0.99, 1, 1.01, 1.1, 2, 4]`; without — a wide grid `1e6 × 16^k`, `k = 0..15` (16 points, covering 1e6…1e24 in one round).
+- `lo` = largest input known too small (SMALL or DUST), `best` = smallest ENOUGH input, `tooLarge` = smallest TOO_LARGE input, `hi = min(best, tooLarge)`.
+- If no `hi` yet: probe the next wide grid starting at `lo × 16`. Two rounds in which every probe returned `null` → give up (`null`); `lo × 16 > 2^128` → give up.
+- Otherwise refine: probe 8 evenly spaced interior points of `(lo, hi)` (the bracket shrinks ~9× per round). Stop when `hi − lo <= max(1, lo / 10_000)`; return `best` (`null` if the bracket closed on TOO_LARGE with no ENOUGH).
 
 - [ ] **Step 1: Write the failing tests**
 
 ```ts
 // fe/src/trading/solve-input-for-output.test.ts
 import { describe, expect, it, vi } from 'vitest';
-import { SOLVER_MAX_CALLS, solveInputForOutput, type QuoteFn } from './solve-input-for-output';
+import { SOLVER_MAX_ROUNDS, SOLVER_WIDE_POINTS, solveInputForOutput, type QuoteFn } from './solve-input-for-output';
 
 const never = new AbortController().signal;
+const within = (x: bigint, trueMin: bigint) => x >= trueMin && x <= trueMin + trueMin / 10_000n + 1n;
 
-// out = in * 3 (linear, like a flat-price pool)
 const linear: QuoteFn = async (x) => x * 3n;
-// out = x^2 / 1e18, convex like a curve (a given input buys proportionally more as size grows)
 const convex: QuoteFn = async (x) => (x * x) / 10n ** 18n;
-// reverts above a capacity, like a pool/curve that cannot deliver more
 const capped = (capacity: bigint): QuoteFn => async (x) => (x > capacity ? null : x * 3n);
+// reverts for dust (below a minimum trade size), like the real curve's zero-output revert
+const dust = (min: bigint): QuoteFn => async (x) => (x < min ? null : x / 2n);
 
 describe('solveInputForOutput', () => {
-  it('finds an input whose quote covers the target on a linear quote, with <=0.01% overshoot', async () => {
-    const target = 3_000_000_000_000_000_000n; // needs ~1e18 in
-    const x = await solveInputForOutput(linear, target);
+  it('solves a linear quote within 0.01%', async () => {
+    const x = await solveInputForOutput(linear, 3n * 10n ** 18n);
     expect(x).not.toBeNull();
-    expect(await linear(x!, never)).toBeGreaterThanOrEqual(target);
-    expect(x!).toBeLessThanOrEqual((10n ** 18n * 10_001n) / 10_000n);
+    expect(await linear(x!, never)).toBeGreaterThanOrEqual(3n * 10n ** 18n);
+    expect(within(x!, 10n ** 18n)).toBe(true);
   });
 
-  it('works on a convex (curve-like) quote', async () => {
-    const target = 4n * 10n ** 18n; // x^2/1e18 = 4e18 -> x = 2e18
-    const x = await solveInputForOutput(convex, target);
-    expect(await convex(x!, never)).toBeGreaterThanOrEqual(target);
-    expect(x!).toBeLessThanOrEqual((2n * 10n ** 18n * 10_001n) / 10_000n);
+  it('solves a convex (curve-like) quote', async () => {
+    const x = await solveInputForOutput(convex, 4n * 10n ** 18n); // x^2/1e18 = 4e18 -> x = 2e18
+    expect(await convex(x!, never)).toBeGreaterThanOrEqual(4n * 10n ** 18n);
+    expect(within(x!, 2n * 10n ** 18n)).toBe(true);
   });
 
-  it('works for a tiny target (1 raw unit)', async () => {
+  it('solves a tiny target down to the exact raw unit', async () => {
     const x = await solveInputForOutput(linear, 1n);
-    expect(await linear(x!, never)).toBeGreaterThanOrEqual(1n);
-    expect(x!).toBeLessThanOrEqual(1n);
+    expect(x).toBe(1n);
   });
 
-  it('treats a null quote above capacity as "too large" and still solves a reachable target', async () => {
-    const quote = capped(5n * 10n ** 18n);
-    const target = 3n * 4n * 10n ** 18n; // needs 4e18, under the 5e18 capacity
-    const x = await solveInputForOutput(quote, target);
+  it('does not mistake a dust revert for "too large"', async () => {
+    const quote = dust(1_000_000_000n);
+    const x = await solveInputForOutput(quote, 500_000_000n); // true minimum input = 1e9
     expect(x).not.toBeNull();
-    expect(await quote(x!, never)).toBeGreaterThanOrEqual(target);
+    expect(await quote(x!, never)).toBeGreaterThanOrEqual(500_000_000n);
+    expect(within(x!, 1_000_000_000n)).toBe(true);
+  });
+
+  it('treats a null above capacity as TOO_LARGE and still solves a reachable target', async () => {
+    const quote = capped(5n * 10n ** 18n);
+    const x = await solveInputForOutput(quote, 12n * 10n ** 18n); // needs 4e18
+    expect(x).not.toBeNull();
+    expect(await quote(x!, never)).toBeGreaterThanOrEqual(12n * 10n ** 18n);
+    expect(within(x!, 4n * 10n ** 18n)).toBe(true);
   });
 
   it('returns null when the target exceeds capacity', async () => {
-    const quote = capped(5n * 10n ** 18n);
-    expect(await solveInputForOutput(quote, 3n * 6n * 10n ** 18n)).toBeNull();
+    expect(await solveInputForOutput(capped(5n * 10n ** 18n), 18n * 10n ** 18n)).toBeNull();
   });
 
-  it('returns null when the quote function always fails', async () => {
-    expect(await solveInputForOutput(async () => null, 1000n)).toBeNull();
+  it('gives up quickly (<= 2 wide rounds) when every probe fails', async () => {
+    const fn = vi.fn<QuoteFn>(async () => null);
+    expect(await solveInputForOutput(fn, 1000n)).toBeNull();
+    expect(fn.mock.calls.length).toBeLessThanOrEqual(2 * SOLVER_WIDE_POINTS);
+  });
+
+  it('treats a throwing quote function as a failed probe', async () => {
+    expect(await solveInputForOutput(async () => { throw new Error('rpc down'); }, 1000n)).toBeNull();
   });
 
   it('returns null for a zero or negative target without calling the quote function', async () => {
@@ -109,32 +128,44 @@ describe('solveInputForOutput', () => {
     expect(fn).not.toHaveBeenCalled();
   });
 
-  it('never exceeds the call cap', async () => {
-    const fn = vi.fn<QuoteFn>(async (x) => x * 3n);
-    await solveInputForOutput(fn, 10n ** 30n);
-    expect(fn.mock.calls.length).toBeLessThanOrEqual(SOLVER_MAX_CALLS);
+  it('stops after maxRounds', async () => {
+    const fn = vi.fn<QuoteFn>(async () => 1n); // always just under the target
+    expect(await solveInputForOutput(fn, 2n, { maxRounds: 3 })).toBeNull();
+    expect(fn.mock.calls.length).toBeLessThanOrEqual(3 * SOLVER_WIDE_POINTS);
+    expect(SOLVER_MAX_ROUNDS).toBe(12);
   });
 
-  it('returns null when the cap is hit before converging', async () => {
-    // A quote that is always just under the target never converges.
-    const x = await solveInputForOutput(async () => 1n, 2n, { maxCalls: 5 });
-    expect(x).toBeNull();
-  });
-
-  it('stops and returns null when the signal aborts', async () => {
+  it('returns null when the signal aborts, after at most one round of calls', async () => {
     const controller = new AbortController();
-    const fn = vi.fn<QuoteFn>(async (x) => {
-      controller.abort();
-      return x * 3n;
-    });
-    const x = await solveInputForOutput(fn, 3n * 10n ** 18n, { signal: controller.signal });
-    expect(x).toBeNull();
-    expect(fn.mock.calls.length).toBeLessThanOrEqual(2);
+    const fn = vi.fn<QuoteFn>(async (x) => { controller.abort(); return x * 3n; });
+    expect(await solveInputForOutput(fn, 3n * 10n ** 18n, { signal: controller.signal })).toBeNull();
+    expect(fn.mock.calls.length).toBeLessThanOrEqual(SOLVER_WIDE_POINTS);
   });
 
-  it('treats a quote function that throws as unavailable', async () => {
-    const x = await solveInputForOutput(async () => { throw new Error('rpc down'); }, 1000n);
-    expect(x).toBeNull();
+  it('probes in parallel: a round has several quotes in flight at once, never more than the grid size', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const quote: QuoteFn = async (x) => {
+      inFlight += 1; peak = Math.max(peak, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return x * 3n;
+    };
+    await solveInputForOutput(quote, 3n * 10n ** 18n);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(SOLVER_WIDE_POINTS);
+  });
+
+  it('an accurate initialGuess solves in few calls', async () => {
+    const fn = vi.fn<QuoteFn>(linear);
+    const x = await solveInputForOutput(fn, 3n * 10n ** 18n, { initialGuess: 10n ** 18n });
+    expect(within(x!, 10n ** 18n)).toBe(true);
+    expect(fn.mock.calls.length).toBeLessThanOrEqual(9 + 8 * 4); // guess round + <= 4 refine rounds
+  });
+
+  it('a badly wrong initialGuess (100x too small, e.g. a snipe-tax window) still solves', async () => {
+    const x = await solveInputForOutput(linear, 3n * 10n ** 18n, { initialGuess: 10n ** 16n });
+    expect(within(x!, 10n ** 18n)).toBe(true);
   });
 });
 ```
@@ -149,91 +180,603 @@ Expected: FAIL — cannot resolve `./solve-input-for-output`.
 ```ts
 // fe/src/trading/solve-input-for-output.ts
 
-// Exact-input quote: how much comes out for `amountIn` going in. `null` means the simulation
-// failed (revert / over capacity / RPC error) — the solver reads that as "this input is too large".
+// Exact-input quote: how much comes out for `amountIn` going in. `null` = the simulation reverted.
 export type QuoteFn = (amountIn: bigint, signal: AbortSignal) => Promise<bigint | null>;
 
-export const SOLVER_MAX_CALLS = 40;
-const GROWTH_FACTOR = 4n;
-// 2^128: far above any real token amount; stops an unreachable target from growing forever.
-const MAX_INPUT = 1n << 128n;
-const DEFAULT_GUESS = 1_000_000n;
+export const SOLVER_MAX_ROUNDS = 12;
+export const SOLVER_WIDE_POINTS = 16;
+export const SOLVER_REFINE_POINTS = 8;
+const WIDE_FACTOR = 16n;
+const MAX_INPUT = 1n << 128n; // far above any real token amount
+const DEFAULT_START = 1_000_000n;
+const GUESS_MULTIPLIERS_BPS = [2500n, 5000n, 9000n, 9900n, 10000n, 10100n, 11000n, 20000n, 40000n];
 
 export interface SolveOptions {
   signal?: AbortSignal;
-  maxCalls?: number;
+  maxRounds?: number;
   initialGuess?: bigint;
 }
 
-// Inverts a monotonic exact-input quote: finds (approximately) the smallest `X` for which
+function wideGrid(start: bigint): bigint[] {
+  const points: bigint[] = [];
+  let x = start;
+  for (let i = 0; i < SOLVER_WIDE_POINTS; i += 1) { points.push(x); x *= WIDE_FACTOR; }
+  return points;
+}
+
+// Inverts a monotonic exact-input quote: finds (approximately) the smallest X with
 // quoteFn(X) >= targetOut, so a swap executed as exact-input with X yields at least targetOut
-// before slippage. Execution never changes — this only derives X for the Sell card when the
-// user typed in the Buy card. Returns null (never a guess) when no X is found.
+// before slippage. Execution never changes — this only derives X for the Sell card when the user
+// typed in the Buy card. Returns null (never a guess) when no X is found.
 export async function solveInputForOutput(
   quoteFn: QuoteFn,
   targetOut: bigint,
   options: SolveOptions = {},
 ): Promise<bigint | null> {
   if (targetOut <= 0n) return null;
-  const maxCalls = options.maxCalls ?? SOLVER_MAX_CALLS;
-  const outer = options.signal ?? new AbortController().signal;
-  let calls = 0;
+  const maxRounds = options.maxRounds ?? SOLVER_MAX_ROUNDS;
+  const signal = options.signal ?? new AbortController().signal;
 
-  async function quote(x: bigint): Promise<bigint | null | 'stop'> {
-    if (outer.aborted || calls >= maxCalls) return 'stop';
-    calls += 1;
-    try {
-      return await quoteFn(x, outer);
-    } catch {
-      return null;
+  let lo = 0n; // largest input known too small (SMALL or DUST)
+  let best: bigint | null = null; // smallest input known ENOUGH
+  let tooLarge: bigint | null = null; // smallest input that reverted although a smaller one succeeded
+  let lowestNonNull: bigint | null = null;
+  let allNullRounds = 0;
+
+  let points: bigint[] = options.initialGuess && options.initialGuess > 0n
+    ? GUESS_MULTIPLIERS_BPS.map((m) => (options.initialGuess as bigint * m) / 10_000n)
+    : wideGrid(DEFAULT_START);
+
+  for (let round = 0; round < maxRounds; round += 1) {
+    if (signal.aborted) return null;
+    const unique = [...new Set(points)].filter((p) => p > 0n).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    if (unique.length === 0) return null;
+    const results = await Promise.all(unique.map(async (x) => {
+      try { return await quoteFn(x, signal); } catch { return null; }
+    }));
+    if (signal.aborted) return null;
+
+    // Classify ascending: a null is TOO_LARGE only if a smaller input is known to succeed.
+    for (let i = 0; i < unique.length; i += 1) {
+      const x = unique[i];
+      const q = results[i];
+      if (q === null) {
+        if (lowestNonNull !== null && lowestNonNull < x) {
+          if (tooLarge === null || x < tooLarge) tooLarge = x;
+        } else if (x > lo) {
+          lo = x; // DUST: too small
+        }
+        continue;
+      }
+      if (lowestNonNull === null || x < lowestNonNull) lowestNonNull = x;
+      if (q >= targetOut) {
+        if (best === null || x < best) best = x;
+      } else if (x > lo) {
+        lo = x;
+      }
     }
-  }
 
-  // Phase 1: bracket. lo = largest input known too small, hi = smallest input known enough/too large.
-  let lo = 0n;
-  let hi = options.initialGuess && options.initialGuess > 0n ? options.initialGuess : DEFAULT_GUESS;
-  let best: bigint | null = null;
-  for (;;) {
-    const q = await quote(hi);
-    if (q === 'stop') return null;
-    if (q === null) break; // too large (or failed): answer, if any, lies in (lo, hi)
-    if (q >= targetOut) { best = hi; break; }
-    lo = hi;
-    hi *= GROWTH_FACTOR;
-    if (hi > MAX_INPUT) return null;
-  }
+    if (lowestNonNull === null) {
+      allNullRounds += 1;
+      if (allNullRounds >= 2) return null;
+    }
 
-  // Phase 2: bisect until the bracket is within 0.01% of hi (or 1 raw unit).
-  for (;;) {
+    const candidates = [best, tooLarge].filter((v): v is bigint => v !== null);
+    const hi = candidates.length === 0 ? null : candidates.reduce((a, b) => (a < b ? a : b));
+
+    if (hi === null) {
+      const next = lo === 0n ? DEFAULT_START : lo * WIDE_FACTOR;
+      if (next > MAX_INPUT) return null;
+      points = wideGrid(next);
+      continue;
+    }
+
     const width = hi - lo;
-    const tolerance = hi / 10_000n > 1n ? hi / 10_000n : 1n;
-    if (width <= tolerance) break;
-    const mid = lo + width / 2n;
-    const q = await quote(mid);
-    if (q === 'stop') return null;
-    if (q !== null && q >= targetOut) { best = mid; hi = mid; } else if (q === null) { hi = mid; } else { lo = mid; }
+    const tolerance = lo / 10_000n > 1n ? lo / 10_000n : 1n;
+    if (width <= tolerance) return best;
+
+    const divisor = BigInt(SOLVER_REFINE_POINTS + 1);
+    points = Array.from({ length: SOLVER_REFINE_POINTS }, (_, j) => lo + (width * BigInt(j + 1)) / divisor);
   }
-  return best;
+  return null;
 }
 ```
 
 - [ ] **Step 4: Run to verify pass**
 
 Run: `npx vitest run src/trading/solve-input-for-output.test.ts`
-Expected: PASS (10 tests). If the "tiny target" test fails because `DEFAULT_GUESS` (1e6) is far above the answer, that is a real bug: phase 2 must still bisect down from `hi`, which it does (`lo = 0`); debug rather than weakening the test.
+Expected: PASS (14 tests). If "tiny target" ends at a value above 1, the refine loop stopped on the relative tolerance too early — it must keep refining while `lo === 0` (tolerance is 1 raw unit then); fix the loop, not the test. If the "capacity" tests fail, re-check that a `null` below the smallest known non-null is classified DUST and one above it TOO_LARGE.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/trading/solve-input-for-output.ts src/trading/solve-input-for-output.test.ts
-git commit -m "feat: add reverse-quote solver for the two-way swap panel
+git commit -m "feat: add parallel reverse-quote solver for the two-way swap panel
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 2: Per-venue reverse quote builders
+### Task 2: ERC20 storage-slot discovery and simulation state overrides
+
+Why: `curve.buy` (ERC20-quoted) and `curve.sell` revert in `eth_call` with `InsufficientAllowance()` / `ERC20InsufficientBalance` until the account has balance and has approved the curve. `eth_call` accepts a *state override* — "pretend this storage slot holds this value for this run only" — so the reverse search can run as a synthetic account that holds and has approved plenty, independent of the user's wallet. That needs the token's balance/allowance storage slots, which differ per token; they are discovered by writing a probe value into a candidate slot and reading it back through the token's own `balanceOf`/`allowance`. Verified live on chain 4663 (2026-10-09): USDG balance@1/allowance@3; Pons launch tokens balance@0/allowance@1; stock tokens (NVDA, TSLA, SPCX, GME, SPY) use OpenZeppelin-5 namespaced storage (`0x52c63247…ace00`, allowance at `+1`). WETH (an EIP-1967 proxy) could not be discovered — it is never a curve quote asset (all WETH-quoted launches are V1 pools).
+
+**Files:**
+- Create: `fe/src/trading/erc20-state-override.ts`
+- Create: `fe/src/trading/test-support/fake-call-client.ts` (shared test helper)
+- Test: `fe/src/trading/erc20-state-override.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `SIMULATION_ACCOUNT: Address = '0x00000000000000000000000000000000000a11ce'`
+  - `MAX_UINT256: bigint`
+  - `interface CallClient { call(args: { to: Address; data: Hex; account?: Address; value?: bigint; stateOverride?: StateOverride }): Promise<{ data?: Hex }> }` (structural; wagmi's `usePublicClient()` result satisfies it)
+  - `type BalanceSlot = (owner: Address) => Hex`, `type AllowanceSlot = (owner: Address, spender: Address) => Hex`
+  - `balanceSlotAt(base: bigint): BalanceSlot`, `allowanceSlotAt(base: bigint): AllowanceSlot` (mapping layouts; exported for tests)
+  - `interface Erc20Layouts { balanceSlot: BalanceSlot | null; allowanceSlot: AllowanceSlot | null }`
+  - `discoverErc20Layouts(client: CallClient, token: Address): Promise<Erc20Layouts>` — cached per token address; `clearErc20LayoutCache(): void` (tests)
+  - `spendStateOverride({ layouts, token, owner, spender }): StateOverride | null` — balance and allowance(owner → spender) set to `MAX_UINT256`; `null` if either slot is unknown
+  - `nativeBalanceOverride(owner: Address): StateOverride` — gives `owner` 10^30 wei
+- Test-support produces: `fake-call-client.ts` exports `encodeResult(abi, functionName, value): { data: Hex }` and `makeFakeClient(handler): CallClient & { call: Mock }` where `handler(req: { to: Address; data: Hex; value?: bigint; account?: Address; stateOverride?: StateOverride }): { data?: Hex } | Promise<{ data?: Hex }>` (a handler that throws simulates a revert).
+
+- [ ] **Step 1: Create the shared test helper**
+
+```ts
+// fe/src/trading/test-support/fake-call-client.ts
+import { vi } from 'vitest';
+import { encodeFunctionResult, type Abi, type Address, type Hex, type StateOverride } from 'viem';
+import type { CallClient } from '../erc20-state-override';
+
+export interface FakeCallRequest {
+  to: Address;
+  data: Hex;
+  value?: bigint;
+  account?: Address;
+  stateOverride?: StateOverride;
+}
+
+export function encodeResult(abi: Abi, functionName: string, value: any): { data: Hex } {
+  return { data: encodeFunctionResult({ abi, functionName, result: value } as any) };
+}
+
+export function makeFakeClient(handler: (request: FakeCallRequest) => { data?: Hex } | Promise<{ data?: Hex }>) {
+  const call = vi.fn(async (request: FakeCallRequest) => handler(request));
+  return { call } as unknown as CallClient & { call: typeof call };
+}
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+```ts
+// fe/src/trading/erc20-state-override.test.ts
+import { beforeEach, describe, expect, it } from 'vitest';
+import { decodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
+import {
+  MAX_UINT256, SIMULATION_ACCOUNT, allowanceSlotAt, balanceSlotAt, clearErc20LayoutCache,
+  discoverErc20Layouts, nativeBalanceOverride, spendStateOverride,
+} from './erc20-state-override';
+import { encodeResult, makeFakeClient, type FakeCallRequest } from './test-support/fake-call-client';
+
+const erc20 = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  'function allowance(address,address) view returns (uint256)',
+]);
+const token = '0x5fc5360d0400a0fd4f2af552add042d716f1d168' as Address;
+
+// A fake token whose storage lives at the given mapping bases (balance@b, allowance@a).
+function fakeToken(balanceBase: bigint, allowanceBase: bigint) {
+  return makeFakeClient((req: FakeCallRequest) => {
+    const { functionName, args } = decodeFunctionData({ abi: erc20, data: req.data });
+    const diff = req.stateOverride?.find((o) => o.address.toLowerCase() === token)?.stateDiff ?? [];
+    const read = (slot: Hex): bigint => {
+      const hit = diff.find((d) => d.slot.toLowerCase() === slot.toLowerCase());
+      return hit ? BigInt(hit.value) : 0n;
+    };
+    if (functionName === 'balanceOf') return encodeResult(erc20, 'balanceOf', read(balanceSlotAt(balanceBase)(args![0] as Address)));
+    return encodeResult(erc20, 'allowance', read(allowanceSlotAt(allowanceBase)(args![0] as Address, args![1] as Address)));
+  });
+}
+
+beforeEach(() => clearErc20LayoutCache());
+
+describe('discoverErc20Layouts', () => {
+  it('finds a USDG-style layout (balance@1, allowance@3)', async () => {
+    const layouts = await discoverErc20Layouts(fakeToken(1n, 3n), token);
+    expect(layouts.balanceSlot).not.toBeNull();
+    expect(layouts.allowanceSlot).not.toBeNull();
+    const owner = SIMULATION_ACCOUNT;
+    expect(layouts.balanceSlot!(owner)).toBe(balanceSlotAt(1n)(owner));
+    expect(layouts.allowanceSlot!(owner, token)).toBe(allowanceSlotAt(3n)(owner, token));
+  });
+
+  it('finds a Solmate-style layout (balance@0, allowance@1)', async () => {
+    const layouts = await discoverErc20Layouts(fakeToken(0n, 1n), token);
+    expect(layouts.balanceSlot!(SIMULATION_ACCOUNT)).toBe(balanceSlotAt(0n)(SIMULATION_ACCOUNT));
+    expect(layouts.allowanceSlot!(SIMULATION_ACCOUNT, token)).toBe(allowanceSlotAt(1n)(SIMULATION_ACCOUNT, token));
+  });
+
+  it('finds an OpenZeppelin-5 namespaced layout', async () => {
+    const ns = BigInt('0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00');
+    const layouts = await discoverErc20Layouts(fakeToken(ns, ns + 1n), token);
+    expect(layouts.balanceSlot!(SIMULATION_ACCOUNT)).toBe(balanceSlotAt(ns)(SIMULATION_ACCOUNT));
+    expect(layouts.allowanceSlot!(SIMULATION_ACCOUNT, token)).toBe(allowanceSlotAt(ns + 1n)(SIMULATION_ACCOUNT, token));
+  });
+
+  it('finds a layout that only the second probing stage covers (base 7)', async () => {
+    const layouts = await discoverErc20Layouts(fakeToken(7n, 8n), token);
+    expect(layouts.balanceSlot!(SIMULATION_ACCOUNT)).toBe(balanceSlotAt(7n)(SIMULATION_ACCOUNT));
+  });
+
+  it('reports null slots for an unsupported layout instead of guessing', async () => {
+    const layouts = await discoverErc20Layouts(fakeToken(500n, 501n), token);
+    expect(layouts).toEqual({ balanceSlot: null, allowanceSlot: null });
+  });
+
+  it('treats a failing node as "not found"', async () => {
+    const client = makeFakeClient(() => { throw new Error('rpc down'); });
+    expect(await discoverErc20Layouts(client, token)).toEqual({ balanceSlot: null, allowanceSlot: null });
+  });
+
+  it('caches per token: a second call makes no more RPC calls', async () => {
+    const client = fakeToken(1n, 3n);
+    await discoverErc20Layouts(client, token);
+    const calls = client.call.mock.calls.length;
+    await discoverErc20Layouts(client, token.toUpperCase().replace('0X', '0x') as Address);
+    expect(client.call.mock.calls.length).toBe(calls);
+  });
+});
+
+describe('spendStateOverride', () => {
+  it('sets the owner balance and the owner→spender allowance to max on the token', async () => {
+    const layouts = await discoverErc20Layouts(fakeToken(1n, 3n), token);
+    const spender = '0x4444444444444444444444444444444444444444' as Address;
+    const override = spendStateOverride({ layouts, token, owner: SIMULATION_ACCOUNT, spender });
+    expect(override).toHaveLength(1);
+    expect(override![0].address).toBe(token);
+    const slots = override![0].stateDiff!.map((d) => d.slot);
+    expect(slots).toContain(balanceSlotAt(1n)(SIMULATION_ACCOUNT));
+    expect(slots).toContain(allowanceSlotAt(3n)(SIMULATION_ACCOUNT, spender));
+    for (const d of override![0].stateDiff!) expect(BigInt(d.value)).toBe(MAX_UINT256);
+  });
+
+  it('returns null when either slot is unknown', () => {
+    expect(spendStateOverride({ layouts: { balanceSlot: null, allowanceSlot: null }, token, owner: SIMULATION_ACCOUNT, spender: token })).toBeNull();
+    expect(spendStateOverride({ layouts: { balanceSlot: balanceSlotAt(1n), allowanceSlot: null }, token, owner: SIMULATION_ACCOUNT, spender: token })).toBeNull();
+  });
+});
+
+describe('nativeBalanceOverride', () => {
+  it('gives the owner a large native balance', () => {
+    const override = nativeBalanceOverride(SIMULATION_ACCOUNT);
+    expect(override).toEqual([{ address: SIMULATION_ACCOUNT, balance: 10n ** 30n }]);
+  });
+});
+```
+
+- [ ] **Step 3: Run to verify failure** — `npx vitest run src/trading/erc20-state-override.test.ts` → FAIL (module missing).
+
+- [ ] **Step 4: Implement**
+
+```ts
+// fe/src/trading/erc20-state-override.ts
+import {
+  decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, numberToHex, pad, parseAbi,
+  type Address, type Hex, type StateOverride,
+} from 'viem';
+
+// A fixed address used only inside eth_call simulations: it is given a balance and an allowance
+// by state override, so the reverse quote never depends on the connected wallet's own state.
+export const SIMULATION_ACCOUNT: Address = '0x00000000000000000000000000000000000a11ce';
+export const MAX_UINT256 = (1n << 256n) - 1n;
+
+export interface CallClient {
+  call: (args: { to: Address; data: Hex; account?: Address; value?: bigint; stateOverride?: StateOverride }) => Promise<{ data?: Hex }>;
+}
+
+const erc20ProbeAbi = parseAbi([
+  'function balanceOf(address) view returns (uint256)',
+  'function allowance(address,address) view returns (uint256)',
+]);
+
+const PROBE_SPENDER: Address = '0x00000000000000000000000000000000000b0b00';
+const PROBE_VALUE = 4_294_967_295n;
+// OpenZeppelin 5 keeps ERC20 state at a fixed ERC-7201 namespaced slot: _balances at +0, _allowances at +1.
+const OZ5_ERC20_STORAGE = BigInt('0x52c63247e1f47db19d5ce0460030c497f067ca4cebf71ba98eeadabe20bace00');
+const STAGE_ONE = [OZ5_ERC20_STORAGE, 0n, 1n, 2n, 3n];
+const STAGE_TWO = [4n, 5n, 6n, 7n, 8n, 9n];
+
+export type BalanceSlot = (owner: Address) => Hex;
+export type AllowanceSlot = (owner: Address, spender: Address) => Hex;
+export interface Erc20Layouts {
+  balanceSlot: BalanceSlot | null;
+  allowanceSlot: AllowanceSlot | null;
+}
+
+const mappingSlot = (key: Address, base: bigint): Hex =>
+  keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [key, base]));
+
+// mapping(address => uint256) _balances at `base`
+export const balanceSlotAt = (base: bigint): BalanceSlot => (owner) => mappingSlot(owner, base);
+// mapping(address => mapping(address => uint256)) _allowances at `base`
+export const allowanceSlotAt = (base: bigint): AllowanceSlot => (owner, spender) =>
+  keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'uint256' }], [spender, BigInt(mappingSlot(owner, base))]));
+
+const word = (value: bigint): Hex => pad(numberToHex(value), { size: 32 });
+
+// Write a probe value into a candidate slot and read it back through the token's OWN view
+// function: if the view returns the probe, that slot is where the token keeps this value.
+async function probe(
+  client: CallClient,
+  token: Address,
+  functionName: 'balanceOf' | 'allowance',
+  slot: Hex,
+): Promise<boolean> {
+  try {
+    const data = functionName === 'balanceOf'
+      ? encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT] })
+      : encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT, PROBE_SPENDER] });
+    const { data: out } = await client.call({
+      to: token,
+      data,
+      stateOverride: [{ address: token, stateDiff: [{ slot, value: word(PROBE_VALUE) }] }],
+    });
+    if (!out) return false;
+    return decodeFunctionResult({ abi: erc20ProbeAbi, functionName, data: out }) === PROBE_VALUE;
+  } catch {
+    return false;
+  }
+}
+
+async function discover(client: CallClient, token: Address): Promise<Erc20Layouts> {
+  let balanceSlot: BalanceSlot | null = null;
+  let allowanceSlot: AllowanceSlot | null = null;
+  for (const stage of [STAGE_ONE, STAGE_TWO]) {
+    const [balanceHits, allowanceHits] = await Promise.all([
+      balanceSlot
+        ? Promise.resolve<boolean[]>([])
+        : Promise.all(stage.map((base) => probe(client, token, 'balanceOf', balanceSlotAt(base)(SIMULATION_ACCOUNT)))),
+      allowanceSlot
+        ? Promise.resolve<boolean[]>([])
+        : Promise.all(stage.map((base) => probe(client, token, 'allowance', allowanceSlotAt(base === OZ5_ERC20_STORAGE ? base + 1n : base)(SIMULATION_ACCOUNT, PROBE_SPENDER)))),
+    ]);
+    const balanceIndex = balanceHits.indexOf(true);
+    if (balanceIndex !== -1) balanceSlot = balanceSlotAt(stage[balanceIndex]);
+    const allowanceIndex = allowanceHits.indexOf(true);
+    if (allowanceIndex !== -1) {
+      const base = stage[allowanceIndex];
+      allowanceSlot = allowanceSlotAt(base === OZ5_ERC20_STORAGE ? base + 1n : base);
+    }
+    if (balanceSlot && allowanceSlot) break;
+  }
+  return { balanceSlot, allowanceSlot };
+}
+
+// One chain only (Robinhood Chain, 4663), so the token address alone is a sufficient cache key.
+const cache = new Map<string, Promise<Erc20Layouts>>();
+export function discoverErc20Layouts(client: CallClient, token: Address): Promise<Erc20Layouts> {
+  const key = token.toLowerCase();
+  let hit = cache.get(key);
+  if (!hit) {
+    hit = discover(client, token);
+    cache.set(key, hit);
+  }
+  return hit;
+}
+export function clearErc20LayoutCache(): void { cache.clear(); }
+
+export function spendStateOverride(
+  { layouts, token, owner, spender }: { layouts: Erc20Layouts; token: Address; owner: Address; spender: Address },
+): StateOverride | null {
+  if (!layouts.balanceSlot || !layouts.allowanceSlot) return null;
+  return [{
+    address: token,
+    stateDiff: [
+      { slot: layouts.balanceSlot(owner), value: word(MAX_UINT256) },
+      { slot: layouts.allowanceSlot(owner, spender), value: word(MAX_UINT256) },
+    ],
+  }];
+}
+
+export function nativeBalanceOverride(owner: Address): StateOverride {
+  return [{ address: owner, balance: 10n ** 30n }];
+}
+```
+
+Note: the cache key lowercases the address, so the "second call" test (upper-cased input) must hit the cache. A failed discovery is also cached for the session (a node outage at that moment means "unavailable" until reload) — acceptable; do not add retry logic.
+
+- [ ] **Step 5: Run to verify pass, typecheck, lint** — `npx vitest run src/trading/erc20-state-override.test.ts && npx tsc --noEmit && npx eslint src/trading/erc20-state-override.ts src/trading/test-support/fake-call-client.ts`. Expected: PASS. If `tsc` complains that wagmi's client does not satisfy `CallClient` it will show up in Task 4/7+; the `StateOverride` type must come from `viem` — confirm the import resolves in the installed viem version.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/trading/erc20-state-override.ts src/trading/erc20-state-override.test.ts src/trading/test-support/fake-call-client.ts
+git commit -m "feat: discover ERC20 storage slots and build simulation state overrides
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 3: Curve closed-form model (initial guess for the search)
+
+Why: the curve is a constant-product curve with virtual reserves and a fee; the formula below reproduces the real `buy`/`sell` simulations **exactly** (verified on chain 4663, 2026-10-09, curve `0x4075be45…f948`, reserves read at the same block: `buy` 1e15 / 5e15 / 1e17 wei → 588905085539402016855496 / 2937605347464235929523175 / 55646155927117960995515549 tokens; `sell` 1e18 / 1e21 / 1e15 tokens → 1663294851 / 1663293189632 / 1663295 wei). It is used **only** as the search's `initialGuess`: during a launch's snipe-tax window or with a creator tax the real output is lower, so the guess is off — the simulation-based search still finds the right answer (see Task 1's "badly wrong initialGuess" test). The guess never replaces the simulation.
+
+**Files:**
+- Modify: `fe/src/trading/curveAbi.ts` (add `curveStateAbi`)
+- Create: `fe/src/trading/curve-guess.ts`
+- Test: `fe/src/trading/curve-guess.test.ts`
+
+**Interfaces:**
+- Consumes: `CallClient` (Task 2).
+- Produces:
+  - `interface CurveState { quoteReserve: bigint; tokenReserve: bigint; feeBps: bigint }`
+  - `curveBuyOutput(state, amountIn): bigint`, `curveSellOutput(state, tokensIn): bigint`
+  - `guessBuyInput(state, targetTokensOut): bigint | null`, `guessSellInput(state, targetQuoteOut): bigint | null`
+  - `readCurveState(client: CallClient, curveAddress: Address): Promise<CurveState | null>`
+
+- [ ] **Step 1: Add the ABI**
+
+In `fe/src/trading/curveAbi.ts` append:
+
+```ts
+// Read-only curve state used to compute a starting guess for the reverse quote. quoteReserve()
+// and tokenReserve() are the virtual reserves (they equal getReserves()'s two values on chain 4663).
+export const curveStateAbi = parseAbi([
+  'function quoteReserve() view returns (uint256)',
+  'function tokenReserve() view returns (uint256)',
+  'function feeBps() view returns (uint256)',
+]);
+```
+
+- [ ] **Step 2: Write the failing tests**
+
+```ts
+// fe/src/trading/curve-guess.test.ts
+import { describe, expect, it } from 'vitest';
+import type { Address } from 'viem';
+import { curveStateAbi } from './curveAbi';
+import {
+  curveBuyOutput, curveSellOutput, guessBuyInput, guessSellInput, readCurveState, type CurveState,
+} from './curve-guess';
+import { decodeFunctionData } from 'viem';
+import { encodeResult, makeFakeClient } from './test-support/fake-call-client';
+
+// Reserves and fee read from the live OBUL curve on chain 4663; the expected outputs below are the
+// real eth_call simulation results at that same state (see the task intro).
+const live: CurveState = { quoteReserve: 1680047904858931814n, tokenReserve: 999971486016087261842747212n, feeBps: 100n };
+
+describe('curve closed-form model matches the live simulations exactly', () => {
+  it.each([
+    [10n ** 15n, 588905085539402016855496n],
+    [5n * 10n ** 15n, 2937605347464235929523175n],
+    [10n ** 17n, 55646155927117960995515549n],
+  ])('buy %s -> %s', (amountIn, expected) => {
+    expect(curveBuyOutput(live, amountIn)).toBe(expected);
+  });
+
+  it.each([
+    [10n ** 18n, 1663294851n],
+    [10n ** 21n, 1663293189632n],
+    [10n ** 15n, 1663295n],
+  ])('sell %s -> %s', (tokensIn, expected) => {
+    expect(curveSellOutput(live, tokensIn)).toBe(expected);
+  });
+});
+
+describe('guesses invert the model closely', () => {
+  it('guessBuyInput lands within 0.01% of the real input', () => {
+    const g = guessBuyInput(live, 588905085539402016855496n)!;
+    expect(Number(g - 10n ** 15n) / 1e15).toBeLessThan(1e-4);
+    expect(Number(10n ** 15n - g) / 1e15).toBeLessThan(1e-4);
+  });
+  it('guessSellInput lands within 0.01% of the real input', () => {
+    const g = guessSellInput(live, 1663294851n)!;
+    expect(Math.abs(Number(g - 10n ** 18n)) / 1e18).toBeLessThan(1e-4);
+  });
+  it('returns null (no guess) for impossible targets', () => {
+    expect(guessBuyInput(live, 0n)).toBeNull();
+    expect(guessBuyInput(live, live.tokenReserve)).toBeNull(); // cannot buy the whole reserve
+    expect(guessBuyInput({ ...live, feeBps: 10_000n }, 1n)).toBeNull();
+    expect(guessSellInput(live, 0n)).toBeNull();
+    expect(guessSellInput(live, live.quoteReserve)).toBeNull(); // cannot drain the quote reserve
+  });
+});
+
+describe('readCurveState', () => {
+  const curve = '0x4444444444444444444444444444444444444444' as Address;
+  it('reads the reserves and the fee', async () => {
+    const client = makeFakeClient(({ data }) => {
+      const { functionName } = decodeFunctionData({ abi: curveStateAbi, data });
+      const value = functionName === 'quoteReserve' ? live.quoteReserve : functionName === 'tokenReserve' ? live.tokenReserve : live.feeBps;
+      return encodeResult(curveStateAbi, functionName, value);
+    });
+    expect(await readCurveState(client, curve)).toEqual(live);
+  });
+  it('returns null when any read fails', async () => {
+    const client = makeFakeClient(() => { throw new Error('revert'); });
+    expect(await readCurveState(client, curve)).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 3: Run to verify failure** — `npx vitest run src/trading/curve-guess.test.ts` → FAIL (module missing).
+
+- [ ] **Step 4: Implement**
+
+```ts
+// fe/src/trading/curve-guess.ts
+import { decodeFunctionResult, encodeFunctionData, type Address } from 'viem';
+import { curveStateAbi } from './curveAbi';
+import type { CallClient } from './erc20-state-override';
+
+// Constant-product curve with virtual reserves and a fee. Buy: the fee comes off the quote input;
+// sell: the fee comes off the quote output, floored. Reproduces the real simulations exactly when
+// no snipe tax / creator tax applies — which is why it is only ever a starting GUESS: the
+// simulation is always the source of truth.
+export interface CurveState {
+  quoteReserve: bigint;
+  tokenReserve: bigint;
+  feeBps: bigint;
+}
+
+const BPS = 10_000n;
+const ceilDiv = (a: bigint, b: bigint) => (a + b - 1n) / b;
+
+export function curveBuyOutput(state: CurveState, amountIn: bigint): bigint {
+  const net = (amountIn * (BPS - state.feeBps)) / BPS;
+  return (state.tokenReserve * net) / (state.quoteReserve + net);
+}
+
+export function curveSellOutput(state: CurveState, tokensIn: bigint): bigint {
+  const gross = (state.quoteReserve * tokensIn) / (state.tokenReserve + tokensIn);
+  return gross - (gross * state.feeBps) / BPS;
+}
+
+// Quote-asset input that should buy `targetTokensOut` tokens.
+export function guessBuyInput(state: CurveState, targetTokensOut: bigint): bigint | null {
+  if (targetTokensOut <= 0n || targetTokensOut >= state.tokenReserve || state.feeBps >= BPS) return null;
+  const net = ceilDiv(state.quoteReserve * targetTokensOut, state.tokenReserve - targetTokensOut);
+  return ceilDiv(net * BPS, BPS - state.feeBps);
+}
+
+// Token input that should sell for `targetQuoteOut` of the quote asset (after the fee).
+export function guessSellInput(state: CurveState, targetQuoteOut: bigint): bigint | null {
+  if (targetQuoteOut <= 0n || state.feeBps >= BPS) return null;
+  const gross = ceilDiv(targetQuoteOut * BPS, BPS - state.feeBps);
+  if (gross >= state.quoteReserve) return null;
+  return ceilDiv(state.tokenReserve * gross, state.quoteReserve - gross);
+}
+
+export async function readCurveState(client: CallClient, curveAddress: Address): Promise<CurveState | null> {
+  const read = async (functionName: 'quoteReserve' | 'tokenReserve' | 'feeBps'): Promise<bigint> => {
+    const { data } = await client.call({ to: curveAddress, data: encodeFunctionData({ abi: curveStateAbi, functionName }) });
+    if (!data) throw new Error('empty result');
+    return decodeFunctionResult({ abi: curveStateAbi, functionName, data });
+  };
+  try {
+    const [quoteReserve, tokenReserve, feeBps] = await Promise.all([read('quoteReserve'), read('tokenReserve'), read('feeBps')]);
+    return { quoteReserve, tokenReserve, feeBps };
+  } catch {
+    return null;
+  }
+}
+```
+
+- [ ] **Step 5: Run to verify pass** — `npx vitest run src/trading/curve-guess.test.ts && npx tsc --noEmit`. Expected: PASS. If an exact-output assertion fails, do NOT adjust the expected numbers — they are real chain results; fix the rounding (buy: `net = floor(in·(10000−fee)/10000)`; sell: `fee = floor(gross·fee/10000)`).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/trading/curveAbi.ts src/trading/curve-guess.ts src/trading/curve-guess.test.ts
+git commit -m "feat: add curve closed-form model used as the reverse-quote starting guess
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 4: Per-venue reverse quote builders
 
 **Files:**
 - Create: `fe/src/trading/reverse-quote.ts`
@@ -241,17 +784,16 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Modify: `fe/src/trading/v3QuoterAbi.ts` (add `quoteExactOutputSingle`)
 
 **Interfaces:**
-- Consumes: `QuoteFn`, `solveInputForOutput` (Task 1); `curveTradeAbi` (`./curveAbi`); `v3QuoterAbi`, `V3_QUOTER_ADDRESS`; `v4QuoterAbi`, `V4_QUOTER_ADDRESS`; `V4PoolKey` from `./v4SwapEncoding`.
+- Consumes: `solveInputForOutput`, `QuoteFn` (Task 1); `CallClient`, `SIMULATION_ACCOUNT`, `discoverErc20Layouts`, `spendStateOverride`, `nativeBalanceOverride` (Task 2); `readCurveState`, `guessBuyInput`, `guessSellInput` (Task 3); `curveTradeAbi`; `v3QuoterAbi`, `V3_QUOTER_ADDRESS`; `v4QuoterAbi`, `V4_QUOTER_ADDRESS`; `V4PoolKey` from `./v4SwapEncoding`.
 - Produces:
   - `type ReverseSolve = (targetOut: bigint, signal: AbortSignal) => Promise<bigint | null>`
-  - `type SimulateClient = { simulateContract: (args: any) => Promise<{ result: unknown }> }` (structural; wagmi's `usePublicClient()` result satisfies it)
-  - `makeCurveReverseSolve(client, { curveAddress, direction: 'buy' | 'sell', account, isNativeQuote }): ReverseSolve`
-  - `makeV3ReverseSolve(client, { tokenIn, tokenOut, fee }): ReverseSolve` — single `quoteExactOutputSingle` call
-  - `makeV4ReverseSolve(client, { poolKey, zeroForOne }): ReverseSolve` — search over `quoteExactInputSingleV4`
+  - `makeV3ReverseSolve(client: CallClient, { tokenIn, tokenOut, fee }): ReverseSolve` — a single `quoteExactOutputSingle` call
+  - `makeV4ReverseSolve(client: CallClient, { poolKey, zeroForOne }): ReverseSolve` — parallel search over `quoteExactInputSingleV4`
+  - `makeCurveReverseSolve(client: CallClient, { curveAddress, direction: 'buy' | 'sell', tokenAddress, quoteAssetAddress, isNativeQuote }): ReverseSolve` — parallel search over `buy()`/`sell()` simulated as `SIMULATION_ACCOUNT` with state overrides, started from the closed-form guess. `null` immediately (no curve calls) when the spent token's slots cannot be discovered.
 
 - [ ] **Step 1: Add the V3 exact-out ABI entry**
 
-In `fe/src/trading/v3QuoterAbi.ts`, extend `parseAbi` (verified live on chain 4663 on 2026-10-09 — see the spec's "Two-way quoting"):
+In `fe/src/trading/v3QuoterAbi.ts` (verified live on chain 4663 on 2026-10-09: exact-in 1e18 token0 → 6.9668e21 token1; exact-out for 1e12 token1 → 143,432,958 token0, matching the exact-in rate):
 
 ```ts
 export const v3QuoterAbi = parseAbi([
@@ -264,104 +806,189 @@ export const v3QuoterAbi = parseAbi([
 
 ```ts
 // fe/src/trading/reverse-quote.test.ts
-import { describe, expect, it, vi } from 'vitest';
-import { curveTradeAbi } from './curveAbi';
-import { V3_QUOTER_ADDRESS } from './v3QuoterAbi';
-import { V4_QUOTER_ADDRESS } from './v4QuoterAbi';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { decodeFunctionData, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
+import { curveStateAbi, curveTradeAbi } from './curveAbi';
+import { curveBuyOutput, curveSellOutput, type CurveState } from './curve-guess';
+import {
+  SIMULATION_ACCOUNT, allowanceSlotAt, balanceSlotAt, clearErc20LayoutCache,
+} from './erc20-state-override';
 import { makeCurveReverseSolve, makeV3ReverseSolve, makeV4ReverseSolve } from './reverse-quote';
+import { V3_QUOTER_ADDRESS, v3QuoterAbi } from './v3QuoterAbi';
+import { V4_QUOTER_ADDRESS, v4QuoterAbi } from './v4QuoterAbi';
+import { encodeResult, makeFakeClient, type FakeCallRequest } from './test-support/fake-call-client';
 
 const signal = new AbortController().signal;
-const account = '0x1111111111111111111111111111111111111111' as const;
-const curve = '0x4444444444444444444444444444444444444444' as const;
-const tokenIn = '0x2222222222222222222222222222222222222222' as const;
-const tokenOut = '0x3333333333333333333333333333333333333333' as const;
-const poolKey = { currency0: tokenIn, currency1: tokenOut, fee: 3000, tickSpacing: 60, hooks: '0x0000000000000000000000000000000000000000' as const };
+const curve = '0x4444444444444444444444444444444444444444' as Address;
+const launched = '0x2222222222222222222222222222222222222222' as Address;
+const quoteToken = '0x5fc5360d0400a0fd4f2af552add042d716f1d168' as Address;
+const tokenOut = '0x3333333333333333333333333333333333333333' as Address;
+const poolKey = { currency0: launched, currency1: tokenOut, fee: 3000, tickSpacing: 60, hooks: '0x0000000000000000000000000000000000000000' as const };
+const erc20 = parseAbi(['function balanceOf(address) view returns (uint256)', 'function allowance(address,address) view returns (uint256)']);
+// Live OBUL-curve state (chain 4663, 2026-10-09).
+const state: CurveState = { quoteReserve: 1680047904858931814n, tokenReserve: 999971486016087261842747212n, feeBps: 100n };
+
+beforeEach(() => clearErc20LayoutCache());
 
 describe('makeV3ReverseSolve', () => {
   it('derives the input with ONE quoteExactOutputSingle call', async () => {
-    const simulateContract = vi.fn(async () => ({ result: [143_432_958n, 0n, 1, 86_825n] }));
-    const solve = makeV3ReverseSolve({ simulateContract }, { tokenIn, tokenOut, fee: 10000 });
+    const client = makeFakeClient((req) => {
+      const { functionName, args } = decodeFunctionData({ abi: v3QuoterAbi, data: req.data });
+      expect(req.to).toBe(V3_QUOTER_ADDRESS);
+      expect(functionName).toBe('quoteExactOutputSingle');
+      expect(args![0]).toMatchObject({ amount: 1_000_000_000_000n, fee: 10000, sqrtPriceLimitX96: 0n });
+      return encodeResult(v3QuoterAbi, 'quoteExactOutputSingle', [143_432_958n, 0n, 1, 86_825n]);
+    });
+    const solve = makeV3ReverseSolve(client, { tokenIn: launched, tokenOut, fee: 10000 });
     expect(await solve(1_000_000_000_000n, signal)).toBe(143_432_958n);
-    expect(simulateContract).toHaveBeenCalledTimes(1);
-    expect(simulateContract).toHaveBeenCalledWith(expect.objectContaining({
-      address: V3_QUOTER_ADDRESS,
-      functionName: 'quoteExactOutputSingle',
-      args: [{ tokenIn, tokenOut, amount: 1_000_000_000_000n, fee: 10000, sqrtPriceLimitX96: 0n }],
-    }));
+    expect(client.call).toHaveBeenCalledTimes(1);
   });
 
   it('returns null when the quoter reverts', async () => {
-    const solve = makeV3ReverseSolve({ simulateContract: vi.fn(async () => { throw new Error('revert'); }) }, { tokenIn, tokenOut, fee: 10000 });
+    const solve = makeV3ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { tokenIn: launched, tokenOut, fee: 10000 });
     expect(await solve(1n, signal)).toBeNull();
   });
 });
 
 describe('makeV4ReverseSolve', () => {
   it('searches over quoteExactInputSingleV4 and returns an input that covers the target', async () => {
-    // linear 2x quote
-    const simulateContract = vi.fn(async (args: { args: [{ exactAmount: bigint }] }) => ({ result: [args.args[0].exactAmount * 2n, 0n] }));
-    const solve = makeV4ReverseSolve({ simulateContract }, { poolKey, zeroForOne: true });
-    const x = await solve(2_000_000n, signal);
+    const client = makeFakeClient((req) => {
+      expect(req.to).toBe(V4_QUOTER_ADDRESS);
+      const { args } = decodeFunctionData({ abi: v4QuoterAbi, data: req.data });
+      const exact = (args![0] as { exactAmount: bigint }).exactAmount;
+      return encodeResult(v4QuoterAbi, 'quoteExactInputSingleV4', [exact * 2n, 0n]); // linear 2x
+    });
+    const solve = makeV4ReverseSolve(client, { poolKey, zeroForOne: true });
+    const x = await solve(2_000_000_000_000_000n, signal);
     expect(x).not.toBeNull();
-    expect(x! * 2n).toBeGreaterThanOrEqual(2_000_000n);
-    expect(simulateContract).toHaveBeenCalledWith(expect.objectContaining({
-      address: V4_QUOTER_ADDRESS,
-      functionName: 'quoteExactInputSingleV4',
-    }));
+    expect(x! * 2n).toBeGreaterThanOrEqual(2_000_000_000_000_000n);
+    expect(x!).toBeLessThanOrEqual((10n ** 15n * 10_001n) / 10_000n + 1n);
   });
 
   it('returns null when every simulation reverts', async () => {
-    const solve = makeV4ReverseSolve({ simulateContract: vi.fn(async () => { throw new Error('revert'); }) }, { poolKey, zeroForOne: true });
+    const solve = makeV4ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { poolKey, zeroForOne: true });
     expect(await solve(1000n, signal)).toBeNull();
   });
 });
 
+// A fake chain with: the curve (state above), and a USDG-style token (balance@1, allowance@3).
+function curveWorld(options: { quoteBalanceBase?: bigint; native?: boolean; stateReadFails?: boolean } = {}) {
+  const balanceBase = options.quoteBalanceBase ?? 1n;
+  const trades: FakeCallRequest[] = [];
+  const client = makeFakeClient((req) => {
+    if (req.to.toLowerCase() === curve) {
+      const stateCall = (() => { try { return decodeFunctionData({ abi: curveStateAbi, data: req.data }); } catch { return null; } })();
+      if (stateCall) {
+        if (options.stateReadFails) throw new Error('state read failed');
+        const v = stateCall.functionName === 'quoteReserve' ? state.quoteReserve : stateCall.functionName === 'tokenReserve' ? state.tokenReserve : state.feeBps;
+        return encodeResult(curveStateAbi, stateCall.functionName, v);
+      }
+      trades.push(req);
+      const { functionName, args } = decodeFunctionData({ abi: curveTradeAbi, data: req.data });
+      const amount = args![0] as bigint;
+      const diff = req.stateOverride?.flatMap((o) => o.stateDiff ?? []) ?? [];
+      const has = (slot: Hex) => diff.some((d) => d.slot.toLowerCase() === slot.toLowerCase() && BigInt(d.value) >= amount);
+      if (functionName === 'buy') {
+        if (options.native) { if (!(req.value === amount && (req.stateOverride?.[0]?.balance ?? 0n) >= amount)) throw new Error('insufficient ETH'); }
+        else if (!has(balanceSlotAt(1n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(3n)(SIMULATION_ACCOUNT, curve))) throw new Error('InsufficientAllowance');
+        if (curveBuyOutput(state, amount) === 0n) throw new Error('ZeroOutput');
+        return encodeResult(curveTradeAbi, 'buy', curveBuyOutput(state, amount));
+      }
+      if (!has(balanceSlotAt(0n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(1n)(SIMULATION_ACCOUNT, curve))) throw new Error('InsufficientAllowance');
+      if (amount > 5n * 10n ** 22n) throw new Error('underflow'); // cannot sell more than has been sold
+      const out = curveSellOutput(state, amount);
+      if (out === 0n) throw new Error('ZeroOutput'); // dust sells revert
+      return encodeResult(curveTradeAbi, 'sell', out);
+    }
+    // token contracts: only the discovery probes reach here
+    const { functionName, args } = decodeFunctionData({ abi: erc20, data: req.data });
+    const isQuote = req.to.toLowerCase() === quoteToken;
+    const [bBase, aBase] = isQuote ? [balanceBase, 3n] : [0n, 1n];
+    const diff = req.stateOverride?.find((o) => o.address.toLowerCase() === req.to.toLowerCase())?.stateDiff ?? [];
+    const read = (slot: Hex) => { const hit = diff.find((d) => d.slot.toLowerCase() === slot.toLowerCase()); return hit ? BigInt(hit.value) : 0n; };
+    return functionName === 'balanceOf'
+      ? encodeResult(erc20, 'balanceOf', read(balanceSlotAt(bBase)(args![0] as Address)))
+      : encodeResult(erc20, 'allowance', read(allowanceSlotAt(aBase)(args![0] as Address, args![1] as Address)));
+  });
+  return { client, trades };
+}
+
 describe('makeCurveReverseSolve', () => {
-  it('buy on a native-ETH curve simulates buy() with value = the candidate input', async () => {
-    const simulateContract = vi.fn(async (args: { args: [bigint, bigint, string] }) => ({ result: args.args[0] * 10n }));
-    const solve = makeCurveReverseSolve({ simulateContract }, { curveAddress: curve, direction: 'buy', account, isNativeQuote: true });
-    const x = await solve(10_000n, signal);
-    expect(x! * 10n).toBeGreaterThanOrEqual(10_000n);
-    const call = simulateContract.mock.calls[0][0] as { address: string; abi: unknown; functionName: string; account: string; value: bigint; args: [bigint, bigint, string] };
-    expect(call).toMatchObject({ address: curve, abi: curveTradeAbi, functionName: 'buy', account });
-    expect(call.value).toBe(call.args[0]);
-    expect(call.args[1]).toBe(0n);
-    expect(call.args[2]).toBe(account);
+  it('native-ETH buy: simulates as the synthetic account with value + ETH balance override, no wallet needed', async () => {
+    const { client, trades } = curveWorld({ native: true });
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: '0x0000000000000000000000000000000000000000', isNativeQuote: true });
+    const target = 588905085539402016855496n; // what 1e15 wei buys
+    const x = await solve(target, signal);
+    expect(x).not.toBeNull();
+    expect(curveBuyOutput(state, x!)).toBeGreaterThanOrEqual(target);
+    expect(Number(x! - 10n ** 15n) / 1e15).toBeLessThan(2e-4);
+    expect(trades[0].account).toBe(SIMULATION_ACCOUNT);
   });
 
-  it('buy on an ERC20-quoted curve sends no value', async () => {
-    const simulateContract = vi.fn(async (args: { args: [bigint] }) => ({ result: args.args[0] * 10n }));
-    const solve = makeCurveReverseSolve({ simulateContract }, { curveAddress: curve, direction: 'buy', account, isNativeQuote: false });
-    await solve(10_000n, signal);
-    expect((simulateContract.mock.calls[0][0] as { value?: bigint }).value).toBeUndefined();
+  it('ERC20-quoted buy: overrides the quote token balance and allowance (USDG layout) so it works pre-approval', async () => {
+    const { client } = curveWorld();
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    const target = 588905085539402016855496n;
+    const x = await solve(target, signal);
+    expect(x).not.toBeNull();
+    expect(curveBuyOutput(state, x!)).toBeGreaterThanOrEqual(target);
   });
 
-  it('sell simulates sell()', async () => {
-    const simulateContract = vi.fn(async (args: { args: [bigint] }) => ({ result: args.args[0] / 2n }));
-    const solve = makeCurveReverseSolve({ simulateContract }, { curveAddress: curve, direction: 'sell', account, isNativeQuote: true });
-    const x = await solve(1_000n, signal);
-    expect(x! / 2n).toBeGreaterThanOrEqual(1_000n);
-    expect(simulateContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'sell' }));
+  it('sell: overrides the launched token balance and allowance (Solmate layout)', async () => {
+    const { client } = curveWorld();
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'sell', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    const target = 1663294851n; // what 1e18 tokens sell for
+    const x = await solve(target, signal);
+    expect(x).not.toBeNull();
+    expect(curveSellOutput(state, x!)).toBeGreaterThanOrEqual(target);
+    expect(Number(x! - 10n ** 18n) / 1e18).toBeLessThan(2e-4);
   });
 
-  it('returns null (unavailable) when the simulation reverts, e.g. missing approval', async () => {
-    const solve = makeCurveReverseSolve({ simulateContract: vi.fn(async () => { throw new Error('insufficient allowance'); }) }, { curveAddress: curve, direction: 'sell', account, isNativeQuote: false });
-    expect(await solve(1000n, signal)).toBeNull();
+  it('a good closed-form guess keeps the number of simulated trades small', async () => {
+    const { client, trades } = curveWorld();
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    await solve(588905085539402016855496n, signal);
+    expect(trades.length).toBeLessThanOrEqual(9 + 8 * 4);
+  });
+
+  it('returns null without simulating any trade when the spent token\'s slots cannot be discovered', async () => {
+    const { client, trades } = curveWorld({ quoteBalanceBase: 500n });
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    expect(await solve(588905085539402016855496n, signal)).toBeNull();
+    expect(trades).toHaveLength(0);
+  });
+
+  it('returns null when the target is more than has been sold (sell over capacity)', async () => {
+    const { client } = curveWorld();
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'sell', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    expect(await solve(1_000_000_000_000_000_000n, signal)).toBeNull(); // 1 ETH out of a curve holding 0.0000479
+  });
+
+  it('still works when the curve state cannot be read (no guess, wide search)', async () => {
+    const { client } = curveWorld({ native: true, stateReadFails: true });
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: '0x0000000000000000000000000000000000000000', isNativeQuote: true });
+    const target = 588905085539402016855496n;
+    const x = await solve(target, signal);
+    expect(x).not.toBeNull();
+    expect(curveBuyOutput(state, x!)).toBeGreaterThanOrEqual(target);
   });
 });
 ```
 
-- [ ] **Step 3: Run to verify failure**
+(Dust handling is covered at the solver level in Task 1; the fake curve here also reverts zero-output trades so the dust path is exercised end to end.)
 
-Run: `npx vitest run src/trading/reverse-quote.test.ts`
-Expected: FAIL — cannot resolve `./reverse-quote`.
+- [ ] **Step 3: Run to verify failure** — `npx vitest run src/trading/reverse-quote.test.ts` → FAIL (module missing).
 
 - [ ] **Step 4: Implement**
 
 ```ts
 // fe/src/trading/reverse-quote.ts
-import type { Address } from 'viem';
+import { decodeFunctionResult, encodeFunctionData, type Address, type StateOverride } from 'viem';
 import { curveTradeAbi } from './curveAbi';
+import { guessBuyInput, guessSellInput, readCurveState } from './curve-guess';
+import {
+  SIMULATION_ACCOUNT, discoverErc20Layouts, nativeBalanceOverride, spendStateOverride, type CallClient,
+} from './erc20-state-override';
 import { solveInputForOutput, type QuoteFn } from './solve-input-for-output';
 import { V3_QUOTER_ADDRESS, v3QuoterAbi } from './v3QuoterAbi';
 import { V4_QUOTER_ADDRESS, v4QuoterAbi } from './v4QuoterAbi';
@@ -372,27 +999,24 @@ import type { V4PoolKey } from './v4SwapEncoding';
 // "Two-way quoting". null = no answer (revert / over capacity / RPC error) — never a guess.
 export type ReverseSolve = (targetOut: bigint, signal: AbortSignal) => Promise<bigint | null>;
 
-// Structural so tests can pass a plain fake; wagmi's usePublicClient() result satisfies it.
-export interface SimulateClient {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- viem's generic simulateContract typing is not worth reproducing for a structural test seam
-  simulateContract: (args: any) => Promise<{ result: unknown }>;
-}
-
 // V3: the deployed QuoterV2 has a real exact-output quote (verified live on chain 4663), so this
 // is a single call and no search.
 export function makeV3ReverseSolve(
-  client: SimulateClient,
+  client: CallClient,
   { tokenIn, tokenOut, fee }: { tokenIn: Address; tokenOut: Address; fee: number },
 ): ReverseSolve {
   return async (targetOut) => {
     try {
-      const { result } = await client.simulateContract({
-        address: V3_QUOTER_ADDRESS,
-        abi: v3QuoterAbi,
-        functionName: 'quoteExactOutputSingle',
-        args: [{ tokenIn, tokenOut, amount: targetOut, fee, sqrtPriceLimitX96: 0n }],
+      const { data } = await client.call({
+        to: V3_QUOTER_ADDRESS,
+        data: encodeFunctionData({
+          abi: v3QuoterAbi,
+          functionName: 'quoteExactOutputSingle',
+          args: [{ tokenIn, tokenOut, amount: targetOut, fee, sqrtPriceLimitX96: 0n }],
+        }),
       });
-      return (result as readonly [bigint, ...unknown[]])[0];
+      if (!data) return null;
+      return decodeFunctionResult({ abi: v3QuoterAbi, functionName: 'quoteExactOutputSingle', data })[0];
     } catch {
       return null;
     }
@@ -401,76 +1025,99 @@ export function makeV3ReverseSolve(
 
 // V4: the deployed quoter exposes only exact-input (quoteExactInputSingleV4), so invert it.
 export function makeV4ReverseSolve(
-  client: SimulateClient,
+  client: CallClient,
   { poolKey, zeroForOne }: { poolKey: V4PoolKey; zeroForOne: boolean },
 ): ReverseSolve {
   const quote: QuoteFn = async (amountIn) => {
     try {
-      const { result } = await client.simulateContract({
-        address: V4_QUOTER_ADDRESS,
-        abi: v4QuoterAbi,
-        functionName: 'quoteExactInputSingleV4',
-        args: [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }],
+      const { data } = await client.call({
+        to: V4_QUOTER_ADDRESS,
+        data: encodeFunctionData({
+          abi: v4QuoterAbi,
+          functionName: 'quoteExactInputSingleV4',
+          args: [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }],
+        }),
       });
-      return (result as readonly [bigint, bigint])[0];
+      if (!data) return null;
+      return decodeFunctionResult({ abi: v4QuoterAbi, functionName: 'quoteExactInputSingleV4', data })[0];
     } catch {
       return null;
     }
   };
   return (targetOut, signal) => solveInputForOutput(quote, targetOut, { signal });
+}
+
+export interface CurveReverseParams {
+  curveAddress: Address;
+  direction: 'buy' | 'sell';
+  tokenAddress: Address; // the launched token
+  quoteAssetAddress: Address; // ignored when isNativeQuote
+  isNativeQuote: boolean;
 }
 
 // Curve: no quote or exact-output view exists, so invert the real buy()/sell() simulation — it
-// already includes every fee and the time/address-dependent snipe tax. The simulation runs as the
-// connected account, so an ERC20-quoted buy (and any sell) can revert until the curve is
-// approved — that surfaces here as null ("Quote unavailable"), same as the forward quote today.
-export function makeCurveReverseSolve(
-  client: SimulateClient,
-  { curveAddress, direction, account, isNativeQuote }: { curveAddress: Address; direction: 'buy' | 'sell'; account: Address; isNativeQuote: boolean },
-): ReverseSolve {
-  const quote: QuoteFn = async (amountIn) => {
-    try {
-      const { result } = await client.simulateContract({
-        address: curveAddress,
-        abi: curveTradeAbi,
-        functionName: direction,
-        args: [amountIn, 0n, account],
-        account,
-        value: direction === 'buy' && isNativeQuote ? amountIn : undefined,
-      });
-      return result as bigint;
-    } catch {
-      return null;
+// already includes every fee and the time/address-dependent snipe tax. The simulation runs as a
+// synthetic account that is GIVEN (state override) the balance and the curve allowance it needs,
+// so it works before the user approves and without a connected wallet. If the spent token's
+// storage slots cannot be discovered, there is no answer (null) and no trade is simulated.
+// The search starts from the exact constant-product model as a guess (see curve-guess.ts).
+export function makeCurveReverseSolve(client: CallClient, params: CurveReverseParams): ReverseSolve {
+  const { curveAddress, direction, tokenAddress, quoteAssetAddress, isNativeQuote } = params;
+  return async (targetOut, signal) => {
+    let stateOverride: StateOverride | null;
+    if (direction === 'buy' && isNativeQuote) {
+      stateOverride = nativeBalanceOverride(SIMULATION_ACCOUNT);
+    } else {
+      const spentToken = direction === 'buy' ? quoteAssetAddress : tokenAddress;
+      const layouts = await discoverErc20Layouts(client, spentToken);
+      stateOverride = spendStateOverride({ layouts, token: spentToken, owner: SIMULATION_ACCOUNT, spender: curveAddress });
     }
+    if (!stateOverride || signal.aborted) return null;
+
+    const quote: QuoteFn = async (amountIn) => {
+      try {
+        const { data } = await client.call({
+          to: curveAddress,
+          data: encodeFunctionData({ abi: curveTradeAbi, functionName: direction, args: [amountIn, 0n, SIMULATION_ACCOUNT] }),
+          account: SIMULATION_ACCOUNT,
+          value: direction === 'buy' && isNativeQuote ? amountIn : undefined,
+          stateOverride,
+        });
+        if (!data) return null;
+        return decodeFunctionResult({ abi: curveTradeAbi, functionName: direction, data });
+      } catch {
+        return null;
+      }
+    };
+
+    const state = await readCurveState(client, curveAddress);
+    const guess = state ? (direction === 'buy' ? guessBuyInput(state, targetOut) : guessSellInput(state, targetOut)) : null;
+    return solveInputForOutput(quote, targetOut, { signal, initialGuess: guess ?? undefined });
   };
-  return (targetOut, signal) => solveInputForOutput(quote, targetOut, { signal });
 }
 ```
 
-- [ ] **Step 5: Run to verify pass, typecheck**
-
-Run: `npx vitest run src/trading/reverse-quote.test.ts && npx tsc --noEmit`
-Expected: PASS; no type errors.
+- [ ] **Step 5: Run to verify pass, typecheck** — `npx vitest run src/trading/reverse-quote.test.ts && npx tsc --noEmit`. Expected: PASS. Note `usePublicClient()`'s return type must be assignable to `CallClient` (its `call` takes `{ to, data, account, value, stateOverride, … }`); if `tsc` rejects the structural match, widen `CallClient.call`'s parameter type to what viem's `PublicClient['call']` accepts rather than casting at call sites.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add src/trading/reverse-quote.ts src/trading/reverse-quote.test.ts src/trading/v3QuoterAbi.ts
-git commit -m "feat: add per-venue reverse quote builders (V3 exact-out, V4/curve search)
+git commit -m "feat: add per-venue reverse quote builders with simulation state overrides
 
 Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 3: `useReverseQuote` (debounced, abortable) and `useSwapAmounts`
+### Task 5: `useReverseQuote` (debounced, abortable) and `useSwapAmounts`
 
 **Files:**
 - Create: `fe/src/trading/use-reverse-quote.ts`, `fe/src/trading/use-swap-amounts.ts`
 - Test: `fe/src/trading/use-reverse-quote.test.ts`, `fe/src/trading/use-swap-amounts.test.ts`
 
 **Interfaces:**
-- Consumes: `ReverseSolve` (Task 2); `parseAmountSafe`, from `./amount`.
+- Consumes: `ReverseSolve` (Task 4); `parseAmountSafe`, from `./amount`.
 - Produces:
   - `REVERSE_QUOTE_DEBOUNCE_MS = 300`
   - `useReverseQuote({ targetOut: bigint; solve: ReverseSolve | null; solveKey: string }): { amountIn: bigint | null; status: 'idle' | 'loading' | 'ok' | 'unavailable' }` — `idle` when `targetOut === 0n` or `solve === null`... (`solve === null` with a positive target → `'unavailable'`). Re-runs when `targetOut` or `solveKey` change; aborts the previous search; waits 300 ms after the last change before calling `solve`.
@@ -802,7 +1449,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 4: `TradeCard`, `SwapShell`, USD helper
+### Task 6: `TradeCard`, `SwapShell`, USD helper
 
 **Files:**
 - Create: `fe/src/trading/trade-card.tsx`, `fe/src/trading/swap-shell.tsx`, `fe/src/trading/trade-usd.ts`, `fe/src/trading/trade-amount-format.ts`
@@ -1151,44 +1798,71 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
+### Task 7: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel.tsx`
 - Modify (test): `fe/src/trading/swap-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `useSwapAmounts` (Task 3), `makeV3ReverseSolve` (Task 2), `TradeCard`, `SwapShell`, `usdText` (Task 4); wagmi `usePublicClient`.
+- Consumes: `useSwapAmounts` (Task 5), `makeV3ReverseSolve` (Task 4), `TradeCard`, `SwapShell`, `usdText` (Task 6); wagmi `usePublicClient`.
 - Produces: `SwapPanelProps` gains optional `usdPrice?: { tokenAddress: Address; priceUsd: string | null }` (shows `$` only on the side whose token address matches). All other props unchanged.
 
-- [ ] **Step 1: Update the wagmi mock and add the new failing tests**
+- [ ] **Step 1: Update the mocks and add the new failing tests**
 
-In `swap-panel.test.tsx`: add to the hoisted `hooks`: `publicClient: { simulateContract: vi.fn() } as { simulateContract: ReturnType<typeof vi.fn> } | undefined`, and to the `vi.mock('wagmi', …)` object: `usePublicClient: () => hooks.publicClient`. Reset `hooks.publicClient = { simulateContract: vi.fn() }` in `beforeEach`. Replace every `screen.getByLabelText(/amount/i)` with `screen.getByLabelText('Sell amount')`, and `getByText('Sell')` stays valid. Existing behavioral assertions (Approve/Swap/permit/batch/slippage) must stay and keep passing. Then add:
+In `swap-panel.test.tsx` the reverse builder is mocked at its module boundary (Task 4 already tests the builder itself; here we test the panel's wiring). Add:
 
 ```tsx
-it('typing in Buy derives the Sell amount via the V3 exact-out quoter and submits exact-input with it', async () => {
+const reverse = vi.hoisted(() => ({
+  solve: vi.fn<(target: bigint, signal: AbortSignal) => Promise<bigint | null>>(),
+  makeV3: vi.fn(),
+}));
+vi.mock('./reverse-quote', () => ({
+  makeV3ReverseSolve: (...args: unknown[]) => { reverse.makeV3(...args); return reverse.solve; },
+}));
+```
+add `usePublicClient: () => ({})` to the `vi.mock('wagmi', …)` object (a truthy client), and in `beforeEach`: `reverse.solve.mockReset(); reverse.solve.mockImplementation(async (target) => target * 2n); reverse.makeV3.mockClear();`. Replace every `screen.getByLabelText(/amount/i)` with `screen.getByLabelText('Sell amount')`; `getByText('Sell')` stays valid. Existing behavioral assertions (Approve/Swap/permit/batch/slippage) must stay and keep passing. Then add (import `act` from `@testing-library/react`, and `decodeAbiParameters, parseAbiParameters` from `viem`):
+
+```tsx
+it('typing in Buy derives the Sell amount via the V3 reverse solver and submits exact-input with it', async () => {
   vi.useFakeTimers();
-  hooks.publicClient!.simulateContract.mockResolvedValue({ result: [2_000_000_000_000_000_000n, 0n, 1, 1n] });
-  hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] }; // forward quote at X
+  reverse.solve.mockResolvedValue(2_000_000_000_000_000_000n);
+  hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] }; // forward quote at the derived input
   render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
   fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-  expect(hooks.publicClient!.simulateContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'quoteExactOutputSingle' }));
+  expect(reverse.makeV3).toHaveBeenCalledWith({}, { tokenIn: tokenA.address, tokenOut: tokenB.address, fee: 10000 });
+  expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
   expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
   vi.useRealTimers();
   fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
-  // the executed call carries the derived 2e18 as exact input (value: 0 for an ERC20 input; assert on args[1] encoding via the existing submit assertion helper in this file)
-  expect(hooks.writeContract).toHaveBeenCalled();
+  expect(hooks.writeContract).toHaveBeenCalledTimes(1);
+  // The submitted V3 swap input carries the DERIVED 2e18 as its exact amountIn. Read the call the
+  // same way this file's existing 'Swap' tests do; with sufficient allowances no permit/wrap input
+  // is prepended, so the swap input is inputs[0] (mirror v3SwapEncoding.test.ts if the layout differs).
+  const [, inputs] = hooks.writeContract.mock.calls[0][0].args;
+  const [, amountIn] = decodeAbiParameters(parseAbiParameters('address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser'), inputs[0]);
+  expect(amountIn).toBe(2_000_000_000_000_000_000n);
 });
 
-it('shows "Quote unavailable" and disables Swap when the reverse quote fails', async () => {
+it('shows "Quote unavailable" and disables Swap when the reverse quote has no answer', async () => {
   vi.useFakeTimers();
-  hooks.publicClient!.simulateContract.mockRejectedValue(new Error('revert'));
+  reverse.solve.mockResolvedValue(null);
   render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
   fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '999999999' } });
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
   expect(screen.getByText('Quote unavailable')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  vi.useRealTimers();
+});
+
+it('never calls the reverse solver when the user typed in Sell, or typed garbage in Buy', async () => {
+  vi.useFakeTimers();
+  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+  fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+  fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '.' } });
+  await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+  expect(reverse.solve).not.toHaveBeenCalled();
   vi.useRealTimers();
 });
 
@@ -1219,7 +1893,6 @@ it('shows a USD line only on the side whose token has a price', () => {
   expect(screen.getByText('$6.00')).toBeInTheDocument();
 });
 ```
-(Import `act` from `@testing-library/react`. Where the existing file asserts the exact submit args for a swap, reuse that same assertion shape for the derived-amount test instead of the loose `toHaveBeenCalled()` above — the point is that the encoded `amountIn` equals the derived `2e18`.)
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -1308,30 +1981,30 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
+### Task 8: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/v4-swap-panel.tsx`
 - Modify (test): `fe/src/trading/v4-swap-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: as Task 5, with `makeV4ReverseSolve`.
+- Consumes: as Task 7, with `makeV4ReverseSolve`.
 - Produces: `V4SwapPanelProps` gains `usdPrice?: { tokenAddress: Address; priceUsd: string | null }`; `V4SwapToken` gains optional `logoUri?: string | null` (default `null`) so the token pills can show logos (callers that don't have one pass nothing).
 
 - [ ] **Step 1: Update mocks and add failing tests**
 
-Same wagmi-mock additions as Task 5 (`usePublicClient`, `hooks.publicClient`), selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add tests mirroring Task 5's five (Buy-derives-Sell, unavailable disables, flip keeps typed number, Min received row, USD line), adapted for V4: the reverse test mocks `publicClient.simulateContract` with an implementation that returns `{ result: [args.args[0].exactAmount * 2n, 0n] }` (a linear 2× exact-in quote) and asserts the Sell box ends up holding a value whose doubled amount covers the typed Buy target, and that `simulateContract` was called with `functionName: 'quoteExactInputSingleV4'`. Use fake timers + `advanceTimersByTimeAsync(400)` then run enough ticks for the search (each solver call is a resolved promise: `await act(async () => { await vi.advanceTimersByTimeAsync(400); })` once is enough because promise chains flush within it; if not, loop the advance a few times).
+Same approach as Task 7: mock `./reverse-quote` (`makeV4ReverseSolve: (...a) => { reverse.makeV4(...a); return reverse.solve; }`), add `usePublicClient: () => ({})` to the wagmi mock, reset `reverse.solve` (default `async (t) => t * 2n`) in `beforeEach`, and change selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add the same six tests as Task 7 (Buy-derives-Sell and submits exact-input with the derived amount, unavailable disables, no solver call for Sell typing/garbage, flip keeps the typed number, Min received row, USD line), adapted for V4: assert `reverse.makeV4` was called with `({}, { poolKey, zeroForOne: true })` and read the submitted swap input the way this file's existing tests do (V4's `encodeV4SwapInput` — mirror `v4SwapEncoding.test.ts` to decode its `amountIn`).
 
 - [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/v4-swap-panel.test.tsx` → FAIL.
 
-- [ ] **Step 3: Apply the same transformation as Task 5**
+- [ ] **Step 3: Apply the same transformation as Task 7**
 
 - `solve = useMemo(() => client ? makeV4ReverseSolve(client, { poolKey, zeroForOne }) : null, [client, poolKey, zeroForOne])` with `solveKey: \`v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}\``. `poolKey` is a prop object — its identity can change each parent render, so key the memo on `JSON`-free primitives: `[client, poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, zeroForOne]`.
 - Token selectors: V4 has no ETH/WETH toggle today; render `TokenSelector` with a single fixed option per side: `{ key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null }`, `onSelect={() => {}}`, `chainId={robinhoodChain.id}`. Native ETH (`zeroAddress`) shows symbol `ETH` as today (the caller already passes the symbol).
 - Venue label `"Uniswap V4 pool"`; `venueKind="pool"`.
 - Pass `minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, tokenOut.symbol)}` to `TradeCard` (same `applySlippage` inputs as `submitSwap`).
 - Flip: `setDirection(...)` + `amounts.flip()`; every `setAmount('')` → `amounts.reset()`.
-- Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 5. Keep `submitSwap`, permit2, allowance, batching unchanged.
+- Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 7. Keep `submitSwap`, permit2, allowance, batching unchanged.
 
 - [ ] **Step 4: Run to verify pass** — `npx vitest run src/trading/v4-swap-panel.test.tsx && npx tsc --noEmit && npx eslint src/trading/v4-swap-panel.tsx` → PASS.
 
@@ -1346,7 +2019,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
+### Task 9: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
 
 **Files:**
 - Create: `fe/src/trading/curve-swap-panel.tsx`
@@ -1354,7 +2027,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Delete (end of task, after the new tests pass): `fe/src/trading/buy-panel.tsx`, `buy-panel.test.tsx`, `sell-panel.tsx`, `sell-panel.test.tsx`, `curve-trade-panel.tsx`, `curve-trade-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: everything `BuyPanel`/`SellPanel` use today (`useCurveQuote`, `useTokenAllowance`, `useTradeSubmission`, `useCanBatchCalls`, `usePaymasterCapability`, `useRefetchQuoteAfterApproval`, `ApproveOrActionButton`, `TradeStatus`, `applySlippage`, `curveTradeAbi`, `erc20Abi`) plus Tasks 2–4.
+- Consumes: everything `BuyPanel`/`SellPanel` use today (`useCurveQuote`, `useTokenAllowance`, `useTradeSubmission`, `useCanBatchCalls`, `usePaymasterCapability`, `useRefetchQuoteAfterApproval`, `ApproveOrActionButton`, `TradeStatus`, `applySlippage`, `curveTradeAbi`, `erc20Abi`) plus Tasks 4–6.
 - Produces: `CurveSwapPanel(props: CurveSwapPanelProps)`:
 
 ```ts
@@ -1372,38 +2045,44 @@ export interface CurveSwapPanelProps {
 
 - [ ] **Step 1: Port the behavior tests, then add the new ones**
 
-Open `buy-panel.test.tsx` and `sell-panel.test.tsx`. Create `curve-swap-panel.test.tsx` with the same hoisted-`hooks` + `vi.mock('wagmi', …)` scaffolding (plus `usePublicClient`), and port EVERY test from both files into one `describe` each — "buy direction (default)" and "sell direction (after flip)" — adapting only: the component under test, the input selector (`getByLabelText('Sell amount')` — in the default buy direction the Sell card is the quote asset; after clicking "Flip swap direction" the Sell card is the launched token), and the button label (`Swap` instead of `Buy`/`Sell`; the "Not enough X"/"Approve"/"Enter an amount"/"Switch network" labels are unchanged). Keep each test's assertions on `writeContract`/`sendCalls` args identical (`buy`/`sell` function names, `value`, exact-amount approve, `minTokensOut`/`minQuoteOut` from `applySlippage(…,'curve')`). Add:
+Open `buy-panel.test.tsx` and `sell-panel.test.tsx`. Create `curve-swap-panel.test.tsx` with the same hoisted-`hooks` + `vi.mock('wagmi', …)` scaffolding (plus `usePublicClient: () => ({})` and the `./reverse-quote` module mock below), and port EVERY test from both files into one `describe` each — "buy direction (default)" and "sell direction (after flip)" — adapting only: the component under test, the input selector (`getByLabelText('Sell amount')` — in the default buy direction the Sell card is the quote asset; after clicking "Flip swap direction" the Sell card is the launched token), and the button label (`Swap` instead of `Buy`/`Sell`; the "Not enough X"/"Approve"/"Enter an amount"/"Switch network" labels are unchanged). Keep each test's assertions on `writeContract`/`sendCalls` args identical (`buy`/`sell` function names, `value`, exact-amount approve, `minTokensOut`/`minQuoteOut` from `applySlippage(…,'curve')`). Add:
 
 ```tsx
+// Mock the reverse builder at its module boundary (Task 4 tests the builder; here we test wiring).
+const reverse = vi.hoisted(() => ({
+  solve: vi.fn<(target: bigint, signal: AbortSignal) => Promise<bigint | null>>(),
+  makeCurve: vi.fn(),
+}));
+vi.mock('./reverse-quote', () => ({
+  makeCurveReverseSolve: (...args: unknown[]) => { reverse.makeCurve(...args); return reverse.solve; },
+}));
+// beforeEach: reverse.solve.mockReset(); reverse.solve.mockResolvedValue(1_000_000_000_000_000_000n); reverse.makeCurve.mockClear();
+
 describe('two-way amounts', () => {
-  it('buy direction: typing in Buy derives the quote-asset amount by inverting the buy() simulation', async () => {
+  it('buy direction: typing in Buy derives the quote-asset amount from the curve reverse solver', async () => {
     vi.useFakeTimers();
-    // linear 10 tokens per quote unit
-    hooks.publicClient!.simulateContract.mockImplementation(async (a: { args: [bigint] }) => ({ result: a.args[0] * 10n }));
     render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '10' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    const derived = Number((screen.getByLabelText('Sell amount') as HTMLInputElement).value);
-    expect(derived).toBeGreaterThanOrEqual(1);          // 10 tokens out needs >= 1 unit in
-    expect(derived).toBeLessThan(1.001);                // within 0.01%-ish tolerance
-    expect(hooks.publicClient!.simulateContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'buy', account: hooks.account.address }));
+    expect(reverse.makeCurve).toHaveBeenCalledWith({}, { curveAddress: curve, direction: 'buy', tokenAddress: token, quoteAssetAddress: nativeQuote.address, isNativeQuote: true });
+    expect(reverse.solve).toHaveBeenCalledWith(10_000_000_000_000_000_000n, expect.anything());
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(1);
     vi.useRealTimers();
   });
 
-  it('sell direction: typing in Buy simulates sell(), not buy()', async () => {
+  it('sell direction (after flip): the solver is built for sell', async () => {
     vi.useFakeTimers();
-    hooks.publicClient!.simulateContract.mockImplementation(async (a: { args: [bigint] }) => ({ result: a.args[0] / 2n }));
-    render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    expect(hooks.publicClient!.simulateContract).toHaveBeenCalledWith(expect.objectContaining({ functionName: 'sell' }));
+    expect(reverse.makeCurve).toHaveBeenLastCalledWith({}, { curveAddress: curve, direction: 'sell', tokenAddress: token, quoteAssetAddress: erc20Quote.address, isNativeQuote: false });
     vi.useRealTimers();
   });
 
-  it('shows "Quote unavailable" and disables the button when the reverse simulation reverts (e.g. not yet approved)', async () => {
+  it('shows "Quote unavailable" and disables the button when the reverse solver has no answer', async () => {
     vi.useFakeTimers();
-    hooks.publicClient!.simulateContract.mockRejectedValue(new Error('revert'));
+    reverse.solve.mockResolvedValue(null);
     render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '5' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
@@ -1412,13 +2091,14 @@ describe('two-way amounts', () => {
     vi.useRealTimers();
   });
 
-  it('disconnected wallet: typing in Buy shows unavailable without calling the RPC', async () => {
+  it('works without a connected wallet: the reverse solver does not depend on the account', async () => {
     vi.useFakeTimers();
     hooks.account.address = undefined;
     render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '5' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
-    expect(hooks.publicClient!.simulateContract).not.toHaveBeenCalled();
+    expect(reverse.solve).toHaveBeenCalledTimes(1);
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(1);
     vi.useRealTimers();
   });
 
@@ -1486,17 +2166,19 @@ export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, toke
   const tokenOut = direction === 'buy' ? launched : quoteTok;
 
   const client = usePublicClient({ chainId: robinhoodChain.id });
+  // No dependence on the connected account: the reverse quote simulates as a synthetic account that
+  // is given (state override) the balance and curve allowance it needs — see Task 4.
   const solve = useMemo(
-    () => (client && account
-      ? makeCurveReverseSolve(client, { curveAddress, direction, account, isNativeQuote })
+    () => (client
+      ? makeCurveReverseSolve(client, { curveAddress, direction, tokenAddress, quoteAssetAddress: quoteAsset.address, isNativeQuote })
       : null),
-    [client, account, curveAddress, direction, isNativeQuote],
+    [client, curveAddress, direction, tokenAddress, quoteAsset.address, isNativeQuote],
   );
   const amounts = useSwapAmounts({
     tokenInDecimals: tokenIn.decimals,
     tokenOutDecimals: tokenOut.decimals,
     solve,
-    solveKey: `curve:${curveAddress}:${direction}:${account ?? ''}`,
+    solveKey: `curve:${curveAddress}:${direction}`,
   });
   const amountIn = amounts.amountIn;
 
@@ -1594,7 +2276,7 @@ Note the quote-asset pill's logo is `null` (the letter avatar) — the launch de
 
 - [ ] **Step 5: Delete the superseded panels**
 
-`launch-detail.tsx` still imports `CurveTradePanel` until Task 8 — to keep this commit green, do the deletion in Task 8's commit instead. In this task only create the new files.
+`launch-detail.tsx` still imports `CurveTradePanel` until Task 10 — to keep this commit green, do the deletion in Task 10's commit instead. In this task only create the new files.
 
 - [ ] **Step 6: Commit**
 
@@ -1607,7 +2289,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Wire everything in, update the preview, remove old panels
+### Task 10: Wire everything in, update the preview, remove old panels
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel-preview.tsx`, `fe/src/features/launch/launch-detail.tsx`, `fe/src/features/pools/swap-trigger.tsx`
@@ -1615,7 +2297,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Delete: `fe/src/trading/buy-panel.tsx`, `buy-panel.test.tsx`, `sell-panel.tsx`, `sell-panel.test.tsx`, `curve-trade-panel.tsx`, `curve-trade-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 5–7), `TradeCard`, `SwapShell`.
+- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 7–9), `TradeCard`, `SwapShell`.
 - Produces: `SwapPanelPreview({ sellSymbol, buySymbol })` — same props as today.
 
 - [ ] **Step 1: Write failing tests**
@@ -1712,7 +2394,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Playwright smoke
+### Task 11: Playwright smoke
 
 **Files:**
 - Modify: `fe/e2e/launch-detail.spec.ts`
@@ -1746,21 +2428,22 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Live verification (report, no code unless a bug is found)
+### Task 12: Live verification (report, no code unless a bug is found)
 
 **Files:** none unless a defect is found (then fix it with a test in the owning task's file).
 
 - [ ] **Step 1:** Run `npm run dev` in `fe/` with the BE running (`be/`), open a launch whose official venue is the **active bonding curve**, connect a funded test wallet (Robinhood Chain 4663).
-- [ ] **Step 2:** Record, for the three paths — native-ETH-quoted curve buy, ERC20-quoted curve buy, curve sell — whether typing in the **Buy** box fills the Sell box. For ERC20-quoted buy and sell, record whether it only works after the curve is approved (expected per spec; a revert in simulation shows "Quote unavailable"). Record the number of RPC calls and the wall-clock time from the last keystroke to the derived amount (browser devtools → Network, filter `eth_call`).
-- [ ] **Step 3:** Repeat on a graduated V3 launch (expect one `quoteExactOutputSingle` call) and a graduated V4 launch / a Pools-page V4 pool (expect a short `quoteExactInputSingleV4` sequence).
-- [ ] **Step 4:** Append the measured numbers and the approval finding to the spec under "Two-way quoting" (a short "Measured" paragraph), commit that doc only. If derived-input latency on the curve exceeds ~5 s, lower `SOLVER_MAX_CALLS`/widen the tolerance in `solve-input-for-output.ts` with a test, or pass an `initialGuess` from the last forward quote — report the measured numbers to the user before changing the constants.
+- [ ] **Step 2:** Use the curves verified on 2026-10-09 (all `graduated() == false` on chain 4663): **PROMETHEUS** (SPCX-quoted, token `0xeac1200c…e467`, curve `0x5bdcddef…36b4`, real depth), **OBUL** (ETH-quoted, token `0xcc71199b…bd8`, curve `0x4075be45…f948`), **GB** (USDG-quoted, token `0xdb348877…19e1`, curve `0xc23b1d11…9c9c`, almost no activity — `sell` there reverts by design). Compare against Pons's own trade page (`https://www.ponsfamily.com/launchpad/<token>`): e.g. Pons shows 27.28M PROMETHEUS for 1 SPCX; so must this app's forward quote.
+  For each of native-ETH buy, ERC20-quoted buy, and sell, record: does typing in **Buy** fill **Sell** *before* the curve is approved and *without* a connected wallet; how many `eth_call` requests per search (DevTools → Network, filter `eth_call`) and the time from the last keystroke to the derived amount; how many requests the one-time slot discovery for each token costs.
+- [ ] **Step 3:** Repeat on a graduated V3 launch (expect one `quoteExactOutputSingle` call) and a graduated V4 launch / a Pools-page V4 pool (expect a short parallel `quoteExactInputSingleV4` search). Check that the public RPC does not throttle the parallel requests (no 429s); if it does, report the numbers before changing `SOLVER_WIDE_POINTS` / `SOLVER_REFINE_POINTS`.
+- [ ] **Step 4:** Append the measured numbers to the spec under "Two-way quoting" (a short "Measured" paragraph), commit that doc only. If curve latency exceeds ~3 s, tune the constants in `solve-input-for-output.ts` (with a test) or report the numbers to the user before changing them.
 - [ ] **Step 5:** Final check: `npx vitest run && npx tsc --noEmit && npx eslint .` in `fe/`; report any test or lint failure verbatim.
 
 ---
 
 ## Self-Review (done)
 
-- **Spec coverage:** TradeCard/SwapShell (Task 4); two-way state, flip semantics, solver, per-venue builders, debounce/abort (Tasks 1–3); V3 single-call exact-out (Task 2, 5); V4/curve search (Task 2, 6, 7); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 7, 8); preview (Task 8); USD line launch-token-only/hidden on pools (Tasks 4, 5–8); venue badge (Tasks 4–7); no tabs (Task 4/7/9); no backend change; e2e + full suites (Tasks 8–9); measurement and the approval-gating caveat (Task 10).
-- **Placeholders:** none — the two places that say "copy verbatim from buy-panel.tsx" (submission/batch hook boilerplate) point to an existing file the engineer reads, and name exactly which parts.
-- **Type consistency:** `QuoteFn`, `ReverseSolve`, `ReverseStatus`, `useSwapAmounts` field names (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`), `TradeCardSide` fields, and `usdPrice` prop shape are identical across Tasks 1–8.
-- **Known risk called out, not hidden:** curve reverse quotes on ERC20-quoted buy and on sell may revert in simulation until approved (same as today's forward quote); the plan surfaces this as "Quote unavailable" and verifies it live in Task 10.
+- **Spec coverage:** TradeCard/SwapShell + Min received + USD line (Task 6); two-way state, flip semantics, debounce/abort (Task 5); parallel solver incl. dust handling and guess (Task 1); state-override slot discovery (Task 2); closed-form guess (Task 3); per-venue reverse builders — V3 single call, V4/curve search, synthetic account (Task 4); V3/V4 migration (Tasks 7–8); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 9); wiring, preview, deletions (Task 10); e2e (Task 11); live verification and measurement (Task 12); no backend change.
+- **Placeholders:** none — the places that say "copy verbatim from buy-panel.tsx" (submission/batch hook boilerplate) and "read the submitted call the way the existing tests do" point to existing files the engineer reads, and name exactly which parts.
+- **Type consistency:** `QuoteFn` (Task 1), `CallClient`/`SIMULATION_ACCOUNT`/`Erc20Layouts` (Task 2), `CurveState` (Task 3), `ReverseSolve` and the three `make…ReverseSolve` signatures (Task 4), `ReverseStatus`/`useSwapAmounts` fields (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`) (Task 5), `TradeCardSide`/`minReceived`/`usdPrice` (Task 6) are used with identical names and shapes in Tasks 7–10.
+- **Known risks called out, not hidden:** (1) a token whose storage layout is not discovered (e.g. a proxy) simply has no reverse quote on the curve — verified layouts: USDG, Pons launch tokens, stock tokens; (2) during a launch's first seconds (snipe tax) the synthetic account may be quoted differently than the user's real account, so the forward quote at the derived input (real account) remains the authority for "Min received" and submission; (3) forward quotes for ERC20-quoted buy/sell still need approval first (existing behavior) — extending the same state-override trick to the forward quote is a natural follow-up, not part of this plan; (4) parallel probing sends up to 16 `eth_call`s per round to the RPC — Task 12 checks for throttling.
