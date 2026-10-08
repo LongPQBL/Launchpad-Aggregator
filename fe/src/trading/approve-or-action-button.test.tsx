@@ -21,7 +21,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={allowance}
         actionLabel="Buy"
@@ -41,7 +44,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance({ isApproving: true })}
         actionLabel="Buy"
@@ -58,7 +64,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance({ isConfirmingApproval: true })}
         actionLabel="Buy"
@@ -76,7 +85,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Sell"
@@ -89,21 +101,24 @@ describe('ApproveOrActionButton', () => {
     expect(onAction).toHaveBeenCalledTimes(1);
   });
 
-  it('disables the action button when there is no quote output yet', () => {
+  it('shows a disabled "Getting quote…" instead of the action label when there is no quote output yet', () => {
     render(
       <ApproveOrActionButton
         needsApproval={false}
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={null}
+        quoteState="loading"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
   it('disables the action button while a submission is already in flight', () => {
@@ -113,7 +128,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -130,7 +148,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -147,7 +168,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={0n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={null}
+        quoteState="idle"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -165,7 +189,10 @@ describe('ApproveOrActionButton', () => {
         tokenInSymbol="ETH"
         isWrongChain={false}
         hasInsufficientBalance
-        outputAmount={null}
+        quoteState="loading"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -182,7 +209,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance
-        outputAmount={null}
+        quoteState="loading"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -199,7 +229,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={0n}
         isWrongChain
         hasInsufficientBalance
-        outputAmount={null}
+        quoteState="loading"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance()}
         actionLabel="Swap"
@@ -218,7 +251,10 @@ describe('ApproveOrActionButton', () => {
         approveAmount={2n ** 256n - 1n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={allowance}
         actionLabel="Buy"
@@ -237,7 +273,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={allowance}
         actionLabel="Buy"
@@ -258,7 +297,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={allowance}
         actionLabel="Swap"
@@ -280,7 +322,10 @@ describe('ApproveOrActionButton', () => {
         amountIn={1_000n}
         isWrongChain={false}
         hasInsufficientBalance={false}
-        outputAmount={500n}
+        quoteState="ready"
+        isConnected
+        balanceKnown
+        onConnect={vi.fn()}
         isSubmitting={false}
         allowance={baseAllowance({ approveError: 'Approval reverted' })}
         actionLabel="Buy"
@@ -288,5 +333,42 @@ describe('ApproveOrActionButton', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Approval reverted');
+  });
+});
+
+describe('ApproveOrActionButton states', () => {
+  const baseProps = {
+    isConnected: true, balanceKnown: true, quoteState: 'ready' as const, amountIn: 10n ** 18n, needsApproval: false,
+    isWrongChain: false, hasInsufficientBalance: false, isSubmitting: false, allowance: baseAllowance(),
+    actionLabel: 'Swap', onAction: vi.fn(), onConnect: vi.fn(),
+  };
+  it('shows Connect when disconnected, and clicking it calls onConnect', () => {
+    const onConnect = vi.fn();
+    render(<ApproveOrActionButton {...baseProps} isConnected={false} amountIn={0n} onConnect={onConnect} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(onConnect).toHaveBeenCalledTimes(1);
+  });
+  it('does not call that a wrong network when no wallet is connected', () => {
+    render(<ApproveOrActionButton {...baseProps} isConnected={false} isWrongChain />);
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+    expect(screen.queryByText('Switch network')).not.toBeInTheDocument();
+  });
+  it('shows Getting quote… (disabled) while the quote is being simulated', () => {
+    render(<ApproveOrActionButton {...baseProps} quoteState="loading" />);
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+  });
+  it('shows Not enough {symbol} (disabled) when the wallet cannot cover the amount', () => {
+    render(<ApproveOrActionButton {...baseProps} hasInsufficientBalance tokenInSymbol="ETH" />);
+    expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
+  });
+  it('shows Swap (enabled) when everything is ready, and calls onAction', () => {
+    const onAction = vi.fn();
+    render(<ApproveOrActionButton {...baseProps} onAction={onAction} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
+  it('shows Quote unavailable (disabled) when no quote can be produced', () => {
+    render(<ApproveOrActionButton {...baseProps} quoteState="unavailable" />);
+    expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
   });
 });

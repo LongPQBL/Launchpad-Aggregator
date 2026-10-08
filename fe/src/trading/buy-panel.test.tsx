@@ -128,6 +128,7 @@ describe('BuyPanel', () => {
 
   it('shows Buy once allowance covers the amount for an ERC20-quoted launch', () => {
     hooks.allowance = 2000000000000000000n;
+    hooks.simulateData = { result: 1000000000000000000n };
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={erc20Quote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Buy' })).toBeInTheDocument();
@@ -144,7 +145,7 @@ describe('BuyPanel', () => {
   it('keeps Buy disabled until the quote resolves, never submitting with zero slippage protection', () => {
     render(<BuyPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '0.001' } });
-    expect(screen.getByRole('button', { name: 'Buy' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
   it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {

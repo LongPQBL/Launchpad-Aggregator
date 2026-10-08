@@ -17,6 +17,7 @@ import { usePaymasterCapability } from './use-paymaster-capability';
 import { PAYMASTER_SERVICE_URL } from './paymasterConfig';
 import { useRefetchQuoteAfterApproval } from './use-refetch-quote-after-approval';
 import { ApproveOrActionButton } from './approve-or-action-button';
+import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 import { TradeStatus } from './trade-status';
 import { applySlippage, parseAmountSafe } from './amount';
 
@@ -120,7 +121,10 @@ export function BuyPanel({ curveAddress, tokenAddress, tokenDecimals, quoteAsset
         hasInsufficientBalance={hasInsufficientBalance}
         tokenInSymbol={quoteAsset.symbol ?? undefined}
         canBatchApprove={canBatch}
-        outputAmount={quote.outputAmount}
+        quoteState={quote.outputAmount === null ? (amountIn === 0n ? 'idle' : 'loading') : 'ready'}
+        isConnected={true}
+        balanceKnown={true}
+        onConnect={openWalletDialog}
         isSubmitting={isSubmitting}
         allowance={allowance}
         actionLabel="Buy"

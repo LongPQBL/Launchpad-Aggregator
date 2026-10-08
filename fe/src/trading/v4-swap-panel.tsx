@@ -16,6 +16,7 @@ import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
+import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 import { TradeStatus } from './trade-status';
 import { useCanBatchCalls } from './use-can-batch-calls';
 import { usePaymasterCapability } from './use-paymaster-capability';
@@ -171,7 +172,10 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase }: V4SwapPan
         // While the ERC20->Permit2 allowance read is still loading, it reads back as 0n (not yet
         // known) — disabling via a null outputAmount (already-existing semantics: "not ready to
         // submit yet") avoids a batching wallet submitting with a guess either way.
-        outputAmount={erc20Allowance.isAllowanceLoading ? null : quote.outputAmount}
+        quoteState={quote.outputAmount === null || erc20Allowance.isAllowanceLoading ? (amountIn === 0n ? 'idle' : 'loading') : 'ready'}
+        isConnected={true}
+        balanceKnown={true}
+        onConnect={openWalletDialog}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
         actionLabel="Swap"

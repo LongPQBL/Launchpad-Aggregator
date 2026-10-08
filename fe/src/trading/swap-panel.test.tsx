@@ -265,7 +265,7 @@ describe('SwapPanel', () => {
   it('keeps Swap disabled until the quote resolves, never submitting with zero slippage protection', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
   it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
@@ -502,6 +502,6 @@ describe('SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 });

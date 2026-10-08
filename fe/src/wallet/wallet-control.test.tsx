@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WalletControl } from './wallet-control';
+import { openWalletDialog } from './open-wallet-dialog';
 
 const hooks = vi.hoisted(() => ({
   account: { address: undefined as string | undefined, chainId: undefined as number | undefined, isConnected: false, status: 'disconnected' },
@@ -32,6 +33,20 @@ beforeEach(() => {
 });
 
 describe('WalletControl', () => {
+  it('opens the connect dialog when a trade panel asks for it', () => {
+    render(<WalletControl />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    act(() => openWalletDialog());
+    expect(screen.getByRole('dialog', { name: 'Connect a wallet' })).toBeInTheDocument();
+  });
+
+  it('ignores that request while a wallet is already connected', () => {
+    hooks.account = { address: '0x1111111111111111111111111111111111111111', chainId: 4663, isConnected: true, status: 'connected' };
+    render(<WalletControl />);
+    act(() => openWalletDialog());
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('explains when no browser wallet is detected', async () => {
     render(<WalletControl />);
     fireEvent.click(screen.getByRole('button', { name: 'Connect wallet' }));

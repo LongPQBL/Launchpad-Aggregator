@@ -17,6 +17,7 @@ import { useTradeSettings } from './use-trade-settings';
 import { TradeSettingsPopover } from './trade-settings-popover';
 import { useTradeSubmission } from './use-trade-submission';
 import { ApproveOrActionButton } from './approve-or-action-button';
+import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 import { TradeStatus } from './trade-status';
 import { TokenSelector, type TokenSelectorOption } from './token-selector';
 import { useCanBatchCalls } from './use-can-batch-calls';
@@ -245,7 +246,10 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase }: SwapPan
         // known), which could otherwise read as either "approval needed" or "not needed" before
         // the real value is in — disabling via a null outputAmount (already-existing semantics:
         // "not ready to submit yet") avoids a batching wallet submitting with a guess.
-        outputAmount={erc20Allowance.isAllowanceLoading ? null : quote.outputAmount}
+        quoteState={quote.outputAmount === null || erc20Allowance.isAllowanceLoading ? (amountIn === 0n ? 'idle' : 'loading') : 'ready'}
+        isConnected={true}
+        balanceKnown={true}
+        onConnect={openWalletDialog}
         isSubmitting={isSubmitting || permit2.isSigning}
         allowance={erc20Allowance}
         actionLabel="Swap"

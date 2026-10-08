@@ -147,7 +147,7 @@ describe('SellPanel', () => {
     hooks.allowance = 2000000000000000000n;
     render(<SellPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={quoteAsset} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Sell' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
   it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {

@@ -6,6 +6,7 @@ import { useAccount, useConnect, useConnectors, useDisconnect, useSwitchChain } 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { robinhoodChain } from './config';
+import { OPEN_WALLET_DIALOG_EVENT } from './open-wallet-dialog';
 
 const walletOptions = [
   { name: 'MetaMask', key: 'metamask' },
@@ -40,6 +41,15 @@ export function WalletControl() {
     });
     return () => { active = false; };
   }, [connectors]);
+
+  // A trade panel's Connect button asks for this dialog. Ignored while connected, so a request can
+  // never leave `open` stuck true and pop the dialog up after a later disconnect.
+  useEffect(() => {
+    if (isConnected) return;
+    const handler = () => setOpen(true);
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    return () => window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  }, [isConnected]);
 
   if (status === 'reconnecting') return <Button type="button" variant="outline" disabled>Restoring wallet…</Button>;
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { resolveTradeButton, type QuoteState } from './trade-button-state';
 
 export interface ApproveOrActionAllowance {
   isApproving: boolean;
@@ -25,7 +26,11 @@ export interface ApproveOrActionButtonProps {
   // and goes straight to the action button — onAction is responsible for bundling the approve
   // call into the batch itself. Defaults falsy, so omitting it preserves today's behavior exactly.
   canBatchApprove?: boolean;
-  outputAmount: bigint | null;
+  quoteState: QuoteState;
+  isConnected: boolean;
+  // False while the sold token's balance is still loading.
+  balanceKnown: boolean;
+  onConnect: () => void;
   isSubmitting: boolean;
   allowance: ApproveOrActionAllowance;
   actionLabel: string;
@@ -39,56 +44,36 @@ export interface ApproveOrActionButtonProps {
 // The label itself communicates the blocking reason (wrong chain / no amount / insufficient
 // balance), matching Uniswap's own convention, so callers no longer render a separate red warning
 // paragraph for those same three conditions above this button.
-export function ApproveOrActionButton({
-  needsApproval,
-  amountIn,
-  approveAmount,
-  isWrongChain,
-  hasInsufficientBalance,
-  tokenInSymbol,
-  canBatchApprove,
-  outputAmount,
-  isSubmitting,
-  allowance,
-  actionLabel,
-  onAction,
-}: ApproveOrActionButtonProps) {
+export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
+  const { needsApproval, amountIn, approveAmount, isWrongChain, hasInsufficientBalance, tokenInSymbol, canBatchApprove,
+    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, onAction } = props;
+  const state = resolveTradeButton({ isConnected, isWrongChain, amountIn, quoteState, balanceKnown, hasInsufficientBalance,
+    needsApproval, canBatchApprove: Boolean(canBatchApprove), tokenInSymbol });
   const approveError = allowance.approveError && (
-    <p role="alert" className="text-sm text-destructive">
-      {allowance.approveError}
-    </p>
+    <p role="alert" className="text-sm text-destructive">{allowance.approveError}</p>
   );
 
-  if (isWrongChain || amountIn === 0n || hasInsufficientBalance) {
-    const label = isWrongChain ? 'Switch network' : amountIn === 0n ? 'Enter an amount' : `Not enough ${tokenInSymbol ?? 'token'}`;
-    return (
-      <>
-        {approveError}
-        <Button type="button" disabled>{label}</Button>
-      </>
-    );
+  if (state.kind === 'connect') {
+    return <Button type="button" className="cursor-pointer" onClick={onConnect}>{state.label}</Button>;
   }
-
-  if (needsApproval && !canBatchApprove) {
+  if (state.kind === 'approve') {
     return (
       <>
         {approveError}
-        <Button
-          type="button"
+        <Button type="button" className="cursor-pointer"
           disabled={allowance.isApproving || allowance.isConfirmingApproval}
-          onClick={() => allowance.approve(approveAmount ?? amountIn)}
-        >
-          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : 'Approve'}
+          onClick={() => allowance.approve(approveAmount ?? amountIn)}>
+          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : state.label}
         </Button>
       </>
     );
   }
-
   return (
     <>
       {approveError}
-      <Button type="button" className="cursor-pointer" disabled={outputAmount === null || isSubmitting} onClick={onAction}>
-        {actionLabel}
+      <Button type="button" className="cursor-pointer" disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
+        onClick={state.kind === 'swap' ? onAction : undefined}>
+        {state.kind === 'swap' ? actionLabel : state.label}
       </Button>
     </>
   );
