@@ -928,7 +928,12 @@
                               "priceInQuote": {
                                 "type": "string"
                               }
-                            }
+                            },
+                            "required": [
+                              "displayedAmountRaw",
+                              "otherAmountRaw",
+                              "priceInQuote"
+                            ]
                           },
                           "launchTokenAddress": {
                             "type": "string",
@@ -1105,7 +1110,12 @@
                               "priceInQuote": {
                                 "type": "string"
                               }
-                            }
+                            },
+                            "required": [
+                              "displayedAmountRaw",
+                              "otherAmountRaw",
+                              "priceInQuote"
+                            ]
                           },
                           "launchTokenAddress": {
                             "type": "string",
@@ -1285,7 +1295,12 @@
                         "priceInQuote": {
                           "type": "string"
                         }
-                      }
+                      },
+                      "required": [
+                        "displayedAmountRaw",
+                        "otherAmountRaw",
+                        "priceInQuote"
+                      ]
                     },
                     "launchTokenAddress": {
                       "type": "string",

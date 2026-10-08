@@ -490,9 +490,9 @@ export interface paths {
                                 createdTimestamp?: number | null;
                                 ponsDesignated?: boolean;
                                 poolBalances?: {
-                                    displayedAmountRaw?: string;
-                                    otherAmountRaw?: string;
-                                    priceInQuote?: string;
+                                    displayedAmountRaw: string;
+                                    otherAmountRaw: string;
+                                    priceInQuote: string;
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
@@ -568,9 +568,9 @@ export interface paths {
                                 createdTimestamp?: number | null;
                                 ponsDesignated?: boolean;
                                 poolBalances?: {
-                                    displayedAmountRaw?: string;
-                                    otherAmountRaw?: string;
-                                    priceInQuote?: string;
+                                    displayedAmountRaw: string;
+                                    otherAmountRaw: string;
+                                    priceInQuote: string;
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
@@ -646,9 +646,9 @@ export interface paths {
                             createdTimestamp?: number | null;
                             ponsDesignated?: boolean;
                             poolBalances?: {
-                                displayedAmountRaw?: string;
-                                otherAmountRaw?: string;
-                                priceInQuote?: string;
+                                displayedAmountRaw: string;
+                                otherAmountRaw: string;
+                                priceInQuote: string;
                             } | null;
                             launchTokenAddress?: string | null;
                             volume24hUsd?: string | null;

@@ -102,7 +102,7 @@ export function pageSchema(item: object) {
 const nullableMetric = { type: 'string', nullable: true } as const;
 const poolBalances = { type: 'object', nullable: true, properties: {
   displayedAmountRaw: { type: 'string' }, otherAmountRaw: { type: 'string' }, priceInQuote: { type: 'string' },
-} } as const;
+}, required: ['displayedAmountRaw', 'otherAmountRaw', 'priceInQuote'] } as const;
 export const poolSummary = { type: 'object', properties: {
   chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' },
   currency0: { type: 'string' }, currency1: { type: 'string' }, displayedToken: { type: 'string' },
