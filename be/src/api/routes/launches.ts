@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
+import { InvalidMetricCursorError, type LaunchSort, type SortDirection } from '../metricCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
 import { candle, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
@@ -27,24 +28,28 @@ function listQuery(value: Record<string, string | undefined>): { limit: number; 
 function launchListQuery(value: Record<string, string | undefined>): LaunchListQuery | null {
   const requested = value.limit === undefined ? 50 : Number(value.limit);
   if (!Number.isSafeInteger(requested) || requested < 1) return null;
-  const id = value.chainId === undefined ? undefined : chainId(value.chainId);
-  if (id === null) return null;
+  const ids = value.chainId?.split(',').map(chainId);
+  if (ids?.some((id) => id === null) || ids?.length === 0) return null;
+  const id = ids?.length === 1 ? ids[0]! : ids as number[] | undefined;
   const search = value.search?.trim();
   if (value.status !== undefined && !LIFECYCLE_STATUSES.has(value.status)) return null;
-  const platform = value.platform?.trim();
-  if (value.sort !== undefined && value.sort !== 'volume24hUsd' && value.sort !== 'recent') return null;
-  const sort = value.sort as 'volume24hUsd' | 'recent' | undefined;
-  // The signed volume24hUsd cursor has a completely different shape (HMAC-signed payload, not the
-  // 3-field block/tx/log cursor every other list endpoint uses) and is validated by the store layer
-  // (decodeVolumeCursor) against VOLUME_CURSOR_SECRET, not here — this route-level check only
-  // applies to the plain recency cursor format.
-  if (value.cursor && sort !== 'volume24hUsd') {
+  const platforms = value.platform?.split(',').map((item) => item.trim());
+  if (platforms?.some((item) => !item)) return null;
+  const platform = platforms?.length === 1 ? platforms[0] : platforms;
+  const allowedSorts = new Set<LaunchSort>(['volume24hUsd', 'recent', 'fdvUsd', 'tvlUsd', 'change1h', 'change1d']);
+  if (value.sort !== undefined && !allowedSorts.has(value.sort as LaunchSort)) return null;
+  if (value.direction !== undefined && value.direction !== 'asc' && value.direction !== 'desc') return null;
+  const sort = value.sort as LaunchSort | undefined;
+  const direction = value.direction as SortDirection | undefined;
+  // Only default recency uses the plain block/tx/log cursor. Volume uses a signed
+  // cursor; the other metric sorts use an offset cursor, both validated in the store.
+  if (value.cursor && (sort === undefined || sort === 'recent') && (direction === undefined || direction === 'asc')) {
     try { decodeCursor(value.cursor); } catch { return null; }
   }
   return {
     limit: Math.min(requested, 100), ...(value.cursor ? { cursor: value.cursor } : {}), ...(id ? { chainId: id } : {}),
     ...(search ? { search } : {}), ...(value.status ? { status: value.status } : {}), ...(platform ? { platform } : {}),
-    ...(sort ? { sort } : {}),
+    ...(sort ? { sort } : {}), ...(direction ? { direction } : {}),
   };
 }
 
@@ -66,7 +71,7 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       // (decodeVolumeCursor needs VOLUME_CURSOR_SECRET, not available to this route-level parser) —
       // either throws InvalidVolumeCursorError, which is the client's fault, never a 500
       // (final review, Important 2).
-      if (error instanceof InvalidVolumeCursorError) return reply.code(400).send({ error: 'Invalid cursor' });
+      if (error instanceof InvalidVolumeCursorError || error instanceof InvalidMetricCursorError) return reply.code(400).send({ error: 'Invalid cursor' });
       if (error instanceof VolumeRankingUnavailableError) {
         return reply.code(503).header('Retry-After', '30').send({ error: 'Launch volume ranking is temporarily unavailable' });
       }

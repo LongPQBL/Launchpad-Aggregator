@@ -496,10 +496,12 @@ export interface paths {
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
+                                volume24hChange?: string | null;
                                 priceInQuote?: string | null;
                                 priceUsd?: string | null;
                                 fdvUsd?: string | null;
                                 tvlUsd?: string | null;
+                                tvlChange?: string | null;
                                 change1h?: string | null;
                                 change1d?: string | null;
                                 coverageStatus?: string;
@@ -574,10 +576,12 @@ export interface paths {
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
+                                volume24hChange?: string | null;
                                 priceInQuote?: string | null;
                                 priceUsd?: string | null;
                                 fdvUsd?: string | null;
                                 tvlUsd?: string | null;
+                                tvlChange?: string | null;
                                 change1h?: string | null;
                                 change1d?: string | null;
                                 coverageStatus?: string;
@@ -652,10 +656,12 @@ export interface paths {
                             } | null;
                             launchTokenAddress?: string | null;
                             volume24hUsd?: string | null;
+                            volume24hChange?: string | null;
                             priceInQuote?: string | null;
                             priceUsd?: string | null;
                             fdvUsd?: string | null;
                             tvlUsd?: string | null;
+                            tvlChange?: string | null;
                             change1h?: string | null;
                             change1d?: string | null;
                             coverageStatus?: string;

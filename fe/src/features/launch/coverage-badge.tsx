@@ -12,6 +12,8 @@ const VARIANT_BY_STATUS: Record<string, 'default' | 'secondary' | 'destructive'>
 };
 
 export function CoverageBadge({ status }: CoverageBadgeProps) {
+  if (status === 'backfilling') return null;
+
   return (
     <Badge data-testid="coverage-badge" data-status={status} variant={VARIANT_BY_STATUS[status] ?? 'secondary'}>
       {formatCoverageStatus(status)}

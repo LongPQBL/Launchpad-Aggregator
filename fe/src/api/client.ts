@@ -13,12 +13,13 @@ export interface LaunchPage {
 
 export interface LaunchQuery {
   cursor?: string;
-  chainId?: number;
+  chainId?: number | readonly number[];
   limit?: number;
   search?: string;
   status?: string;
-  platform?: string;
-  sort?: 'volume24hUsd' | 'recent';
+  platform?: string | readonly string[];
+  sort?: 'volume24hUsd' | 'recent' | 'fdvUsd' | 'tvlUsd' | 'change1h' | 'change1d';
+  direction?: 'asc' | 'desc';
 }
 
 // be/src/api/routes/sources.ts registers no Fastify response schema, so this shape is absent
@@ -41,11 +42,16 @@ export class ApiError extends Error {
   }
 }
 
-const BE_API_URL = process.env.BE_API_URL ?? 'http://127.0.0.1:3001';
+function apiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    return process.env.NEXT_PUBLIC_BE_API_URL ?? 'http://127.0.0.1:3001';
+  }
+  return process.env.BE_API_URL ?? 'http://127.0.0.1:3001';
+}
 const REQUEST_TIMEOUT_MS = 8_000;
 
-async function rawFetch(path: string, searchParams?: Record<string, string | number | undefined>): Promise<Response> {
-  const url = new URL(path, BE_API_URL);
+async function rawFetch(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>): Promise<Response> {
+  const url = new URL(path, apiBaseUrl());
   for (const [key, value] of Object.entries(searchParams ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
@@ -57,7 +63,7 @@ async function rawFetch(path: string, searchParams?: Record<string, string | num
   }
 }
 
-async function request<T>(path: string, searchParams?: Record<string, string | number | undefined>): Promise<T> {
+async function request<T>(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>): Promise<T> {
   const response = await rawFetch(path, searchParams);
   if (!response.ok) {
     throw new ApiError(`${path} returned error ${response.status}`, undefined, response.status);
@@ -74,6 +80,7 @@ export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
     status: query.status,
     platform: query.platform,
     sort: query.sort,
+    direction: query.direction,
   });
 }
 
@@ -194,7 +201,7 @@ export async function getPoolTrades(pool: PoolSummary, cursor?: string): Promise
   return request<PoolTradePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/trades`,
     { displayedToken: pool.displayedToken, cursor });
 }
-export async function getPoolCandles(pool: PoolSummary, intervalSeconds = 3600): Promise<PoolCandlePage> {
+export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>, intervalSeconds = 3600): Promise<PoolCandlePage> {
   return request<PoolCandlePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/candles`,
     { displayedToken: pool.displayedToken, intervalSeconds });
 }

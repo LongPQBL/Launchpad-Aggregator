@@ -9,7 +9,7 @@ export function TradeStatus({ status, txHash, errorMessage, explorerBase }: Trad
   if (status === 'idle') return null;
 
   const explorerLink = explorerBase && txHash ? (
-    <a href={`${explorerBase}/tx/${txHash}`} target="_blank" rel="noreferrer noopener" className="underline hover:text-primary">
+    <a href={`${explorerBase}/tx/${txHash}`} target="_blank" rel="noreferrer noopener">
       View transaction
     </a>
   ) : null;

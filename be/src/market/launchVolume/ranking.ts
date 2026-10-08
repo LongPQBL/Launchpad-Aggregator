@@ -13,8 +13,8 @@ export interface VolumeRankCursor {
 }
 
 export interface VolumeRankPageInput {
-  chainId?: number;
-  platform?: string;
+  chainId?: number | number[];
+  platform?: string | string[];
   status?: string;
   search?: string;
   cursor: VolumeRankCursor | null;
@@ -55,7 +55,7 @@ export async function readVolumeRankingPage(pool: Pool, input: VolumeRankPageInp
       ${launchCoverageSql(12)} AS launch_coverage_complete
     FROM launch_volume24h_usd s
     JOIN launches l ON l.chain_id = s.chain_id AND l.token_address = s.token_address
-    WHERE ($1::integer IS NULL OR l.chain_id = $1) AND ($2::text IS NULL OR l.platform = $2)
+    WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1)) AND ($2::text[] IS NULL OR l.platform = ANY($2))
       AND ($3::text IS NULL OR l.lifecycle_status = $3)
       AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')
       AND ($5::boolean = false OR (
@@ -67,7 +67,7 @@ export async function readVolumeRankingPage(pool: Pool, input: VolumeRankPageInp
           END))))
     ORDER BY s.rank_order, s.volume_usd DESC NULLS LAST, s.launch_block DESC, s.launch_tx_hash DESC, s.launch_log_index DESC
     LIMIT $11`,
-  [input.chainId ?? null, input.platform ?? null, input.status ?? null, input.search ?? null,
+  [input.chainId === undefined ? null : [input.chainId].flat(), input.platform === undefined ? null : [input.platform].flat(), input.status ?? null, input.search ?? null,
     cursor !== null, cursor?.rankOrder ?? 0, cursor?.volumeUsd ?? null, cursor?.launchBlock ?? null,
     cursor?.launchTxHash ?? null, cursor?.launchLogIndex ?? null, input.limit + 1, input.headBlock?.toString() ?? null]);
 

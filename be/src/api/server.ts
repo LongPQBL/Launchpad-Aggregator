@@ -9,6 +9,7 @@ import { registerPoolRoutes } from './routes/pools.js';
 import type { PoolApiStore } from './poolStore.js';
 import { ApiEventBus } from './events.js';
 import type { LaunchParityCoverage } from '../coverage/repairRanges.js';
+import type { LaunchSort, SortDirection } from './metricCursor.js';
 
 export interface Page<T> { items: readonly T[]; nextCursor: string | null }
 export interface LaunchSummary {
@@ -60,7 +61,7 @@ export interface UsdCandleResponse {
   volumeUsd: string; tradeCount: number; computedAt: string;
 }
 export interface ListQuery { limit: number; cursor?: string; chainId?: number }
-export interface LaunchListQuery extends ListQuery { search?: string; status?: string; platform?: string; sort?: 'volume24hUsd' | 'recent' }
+export interface LaunchListQuery extends Omit<ListQuery, 'chainId'> { chainId?: number | number[]; search?: string; status?: string; platform?: string | string[]; sort?: LaunchSort; direction?: SortDirection }
 
 // Observability for the near-realtime incremental sync path (be/src/envioSync/incrementalSync.ts),
 // separate from the sources-table-based coverage above (which only the old full-table sync writes).
@@ -98,7 +99,20 @@ export interface ApiDeps {
 
 export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
   const app = Fastify();
-  await app.register(cors, { origin: (origin, callback) => callback(null, origin === deps.feOrigin), credentials: false });
+  const configuredOrigin = new URL(deps.feOrigin);
+  const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+  await app.register(cors, { origin: (origin, callback) => {
+    if (origin === deps.feOrigin) return callback(null, true);
+    if (!origin || !loopbackHosts.has(configuredOrigin.hostname)) return callback(null, false);
+    try {
+      const requestedOrigin = new URL(origin);
+      return callback(null, loopbackHosts.has(requestedOrigin.hostname)
+        && requestedOrigin.protocol === configuredOrigin.protocol
+        && requestedOrigin.port === configuredOrigin.port);
+    } catch {
+      return callback(null, false);
+    }
+  }, credentials: false });
   await app.register(swagger, { openapi: { info: { title: 'Launchpad Aggregator API', version: '0.1.0' } } });
   registerSourcesRoutes(app, deps);
   registerCoverageRoutes(app, deps);

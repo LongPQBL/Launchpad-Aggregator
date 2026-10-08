@@ -48,7 +48,7 @@ describe('read-only API', () => {
   });
 
   it('routes launches by chain and address, and bounds pagination', async () => {
-    const calls: Array<{ limit: number; cursor?: string; chainId?: number }> = [];
+    const calls: Array<{ limit: number; cursor?: string; chainId?: number | number[] }> = [];
     const source = data();
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
       ...source, listLaunches: async (query) => { calls.push(query); return { items: [launchSummary], nextCursor: null }; },
@@ -91,6 +91,33 @@ describe('read-only API', () => {
     expect(calls).toEqual([{ limit: 50, search: 'demo' }, { limit: 50, status: 'swept' }]);
     const withUnknownStatus = await app.inject({ method: 'GET', url: '/v1/launches?status=not-a-status' });
     expect(withUnknownStatus.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('passes multiple chain and launchpad selections to the launch list', async () => {
+    const calls: unknown[] = [];
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async (query) => { calls.push(query); return { items: [], nextCursor: null }; },
+    } });
+    const response = await app.inject({ method: 'GET', url: '/v1/launches?chainId=4663,1&platform=pons,other' });
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual([{ limit: 50, chainId: [4663, 1], platform: ['pons', 'other'] }]);
+    expect((await app.inject({ method: 'GET', url: '/v1/launches?chainId=4663,nope' })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('passes numeric column sorting and direction to the launch list', async () => {
+    const calls: unknown[] = [];
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async (query) => { calls.push(query); return { items: [], nextCursor: null }; },
+    } });
+    const response = await app.inject({ method: 'GET', url: '/v1/launches?sort=tvlUsd&direction=asc' });
+    expect(response.statusCode).toBe(200);
+    expect(calls).toEqual([{ limit: 50, sort: 'tvlUsd', direction: 'asc' }]);
+    expect((await app.inject({ method: 'GET', url: '/v1/launches?sort=unknown' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/launches?sort=tvlUsd&direction=sideways' })).statusCode).toBe(400);
     await app.close();
   });
 
@@ -170,11 +197,15 @@ describe('read-only API', () => {
     await app.close();
   });
 
-  it('allows only the configured frontend origin in browser CORS', async () => {
+  it('allows the configured frontend origin and its loopback alias in browser CORS', async () => {
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
     const allowed = await app.inject({ method: 'GET', url: '/v1/sources', headers: { origin: 'http://localhost:3000' } });
+    const loopback = await app.inject({ method: 'GET', url: '/v1/sources', headers: { origin: 'http://127.0.0.1:3000' } });
+    const wrongPort = await app.inject({ method: 'GET', url: '/v1/sources', headers: { origin: 'http://127.0.0.1:3002' } });
     const rejected = await app.inject({ method: 'GET', url: '/v1/sources', headers: { origin: 'https://other.example' } });
     expect(allowed.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+    expect(loopback.headers['access-control-allow-origin']).toBe('http://127.0.0.1:3000');
+    expect(wrongPort.headers['access-control-allow-origin']).toBeUndefined();
     expect(rejected.headers['access-control-allow-origin']).toBeUndefined();
     await app.close();
   });

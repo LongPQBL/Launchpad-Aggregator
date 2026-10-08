@@ -14,8 +14,8 @@ describe('TokenCell', () => {
   });
 
   it('shows the symbol and the truncated address stacked under the name, both always in the DOM', () => {
-    render(<TokenCell chainId={4663} tokenAddress={tokenAddress} name="Artificial Inu" symbol="AI" logoUri={null} lifecycleStatus="trading" />);
-    expect(screen.getByRole('link', { name: 'Artificial Inu' })).toBeInTheDocument();
+    render(<TokenCell chainId={4663} tokenAddress={tokenAddress} name="Artificial Inu" symbol="AI" logoUri={null} />);
+    expect(screen.getByText('Artificial Inu')).toBeInTheDocument();
     expect(screen.getByTestId('token-symbol')).toHaveTextContent('AI');
     expect(screen.getByRole('button', { name: 'Copy token address' })).toHaveTextContent('0x2E8c…1e18');
   });
@@ -23,13 +23,15 @@ describe('TokenCell', () => {
   it('copies the full token address to the clipboard and shows transient confirmation', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });
-    render(<TokenCell chainId={4663} tokenAddress={tokenAddress} name="Artificial Inu" symbol="AI" logoUri={null} lifecycleStatus="trading" />);
+    render(<TokenCell chainId={4663} tokenAddress={tokenAddress} name="Artificial Inu" symbol="AI" logoUri={null} />);
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Copy token address' }));
     });
 
     expect(writeText).toHaveBeenCalledWith(tokenAddress);
-    expect(screen.getByRole('button', { name: 'Copied' })).toHaveTextContent('Copied');
+    const copiedButton = screen.getByRole('button', { name: 'Copied' });
+    expect(copiedButton).toHaveClass('h-6', 'w-6', 'rounded-full', 'bg-green-600', 'text-white');
+    expect(copiedButton).not.toHaveTextContent('Copied');
   });
 });

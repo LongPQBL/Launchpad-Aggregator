@@ -4,12 +4,16 @@ import {
   CandlestickSeries,
   createChart,
   createSeriesMarkers,
+  type CandlestickData,
   type ISeriesApi,
+  type IPriceLine,
   type ISeriesMarkersPluginApi,
+  type MouseEventParams,
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CoverageBadge } from './coverage-badge';
 
@@ -24,6 +28,26 @@ export const CHART_INTERVALS = [
 ] as const;
 export const DEFAULT_CHART_INTERVAL = 3600;
 
+// The resource this chart's interval tabs refetch from — a Client Component can't take a server-
+// passed closure (Server Components may only pass serializable props), so this identifies the
+// launch/pool by plain data and getLaunchCandles/getPoolCandles are called from inside this
+// client module instead of being injected. Provide at most one; omitting both still renders the
+// initial `candles` prop, just without a working interval switcher.
+export interface OfficialChartSource {
+  launch?: { chainId: number; tokenAddress: string };
+  pool?: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>;
+}
+
+// The point the user is currently pointing at, in whichever currency the chart is actively
+// showing — a caller rendering its own headline price (launch-detail.tsx, pool-chart.tsx) uses
+// this to swap its static "current price" for the hovered point's close, matching how Uniswap's
+// own chart header tracks the cursor. `null` means "not hovering," i.e. show the default price.
+export interface OfficialChartHoverPoint { time: number; close: number; currency: 'quote' | 'usd' }
+
+// First and latest close of the candles currently on the chart (after an interval/currency
+// switch), so a caller can show the change across the visible range. `null` = no candles.
+export interface OfficialChartRange { startClose: number; latestClose: number }
+
 export interface OfficialChartProps {
   candles: readonly OfficialChartCandle[];
   graduationTime: number | null;
@@ -31,12 +55,103 @@ export interface OfficialChartProps {
   coverageStatus: string;
   currency?: 'quote' | 'usd';
   intervalSeconds?: number;
+  tokenSymbol?: string | null;
+  source?: OfficialChartSource;
+  // Pools have no USD candle series (getPoolCandles takes no currency param), so their chart
+  // never offers a quote/USD toggle — showing one would silently fall back to quote prices under
+  // a button labeled USD, which reads as real USD data.
+  showCurrencyToggle?: boolean;
+  onHoverPoint?: (point: OfficialChartHoverPoint | null) => void;
+  onRangeChange?: (range: OfficialChartRange | null) => void;
 }
 
-export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', intervalSeconds = DEFAULT_CHART_INTERVAL }: OfficialChartProps) {
+export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', intervalSeconds = DEFAULT_CHART_INTERVAL, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const priceLineRef = useRef<IPriceLine | null>(null);
+  const requestIdRef = useRef(0);
+  const [activeCurrency, setActiveCurrency] = useState(currency);
+  const [activeInterval, setActiveInterval] = useState(intervalSeconds);
+  const [chartCandles, setChartCandles] = useState(candles);
+
+  // The crosshair-move subscription below is set up once on mount (recreating the chart on every
+  // render would reset the user's zoom/pan) — a ref keeps it calling the latest onHoverPoint/
+  // activeCurrency instead of whatever closure existed at mount time.
+  const onHoverPointRef = useRef(onHoverPoint);
+  useEffect(() => { onHoverPointRef.current = onHoverPoint; }, [onHoverPoint]);
+  const onRangeChangeRef = useRef(onRangeChange);
+  useEffect(() => { onRangeChangeRef.current = onRangeChange; }, [onRangeChange]);
+  const activeCurrencyRef = useRef(activeCurrency);
+  useEffect(() => { activeCurrencyRef.current = activeCurrency; }, [activeCurrency]);
+
+  // be/src/api/store.ts's listCandles returns candles newest-first (it reverses an ascending
+  // query); Lightweight Charts requires strictly ascending time and throws otherwise.
+  const ascendingCandles = useMemo(
+    () => [...chartCandles].sort((a, b) => a.bucketStart - b.bucketStart),
+    [chartCandles],
+  );
+  const priceFormat = useMemo(() => computeChartPrecision(chartCandles.map((candle) => candle.close)), [chartCandles]);
+  const formatAxisValue = useCallback(
+    (value: number) => `${activeCurrency === 'usd' ? '$' : ''}${value.toFixed(priceFormat.precision)}`,
+    [activeCurrency, priceFormat],
+  );
+  const latestCandle = ascendingCandles.at(-1);
+
+  useEffect(() => {
+    const first = ascendingCandles[0];
+    onRangeChangeRef.current?.(first && latestCandle ? { startClose: Number(first.close), latestClose: Number(latestCandle.close) } : null);
+  }, [ascendingCandles, latestCandle]);
+
+  const selectChart = useCallback((nextCurrency: 'quote' | 'usd', nextInterval: number, updateHistory = true) => {
+    setActiveCurrency(nextCurrency);
+    setActiveInterval(nextInterval);
+    onHoverPointRef.current?.(null);
+
+    if (updateHistory && typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('currency', nextCurrency);
+      url.searchParams.set('interval', String(nextInterval));
+      window.history.pushState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    }
+
+    const fetchPage = source?.launch
+      ? getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: nextCurrency, intervalSeconds: nextInterval })
+      : source?.pool
+        ? getPoolCandles(source.pool, nextInterval)
+        : undefined;
+    if (!fetchPage) return;
+
+    const requestId = ++requestIdRef.current;
+    void fetchPage
+      .then((page) => {
+        if (requestId === requestIdRef.current) setChartCandles(page.items);
+      })
+      .catch(() => {
+        if (requestId === requestIdRef.current) setChartCandles([]);
+      });
+  }, [source]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const params = new URLSearchParams(window.location.search);
+      const nextCurrency = params.get('currency') === 'usd' ? 'usd' : 'quote';
+      const requestedInterval = Number(params.get('interval'));
+      const nextInterval = CHART_INTERVALS.some((item) => item.seconds === requestedInterval)
+        ? requestedInterval
+        : DEFAULT_CHART_INTERVAL;
+      selectChart(nextCurrency, nextInterval, false);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectChart]);
+
+  useEffect(() => {
+    setActiveCurrency(currency);
+    setActiveInterval(intervalSeconds);
+    setChartCandles(candles);
+    onHoverPointRef.current?.(null);
+  }, [candles, currency, intervalSeconds]);
 
   // Creates the chart once. Re-creating it on every data update (candles is a fresh array
   // reference each live-refresh) would reset the user's zoom/pan every time.
@@ -59,10 +174,20 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     seriesRef.current = series;
     markersRef.current = createSeriesMarkers(series, []);
 
+    // Reports the point the user is pointing at (param.time is undefined outside the chart's
+    // data range, e.g. on mouse leave) so a caller's own headline price can track the cursor.
+    const handleCrosshairMove = (param: MouseEventParams<Time>) => {
+      const data = param.time !== undefined ? (param.seriesData.get(series) as CandlestickData<Time> | undefined) : undefined;
+      onHoverPointRef.current?.(data ? { time: Number(data.time), close: data.close, currency: activeCurrencyRef.current } : null);
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+
     return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
       seriesRef.current = null;
       markersRef.current = null;
+      priceLineRef.current = null;
     };
   }, []);
 
@@ -72,12 +197,14 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     const markers = markersRef.current;
     if (!series || !markers) return;
 
-    const priceFormat = computeChartPrecision(candles.map((candle) => candle.close));
-    series.applyOptions({ priceFormat: { type: 'price', ...priceFormat } });
+    series.applyOptions({
+      priceFormat: {
+        type: 'custom',
+        minMove: priceFormat.minMove,
+        formatter: formatAxisValue,
+      },
+    });
 
-    // be/src/api/store.ts's listCandles returns candles newest-first (it reverses an ascending
-    // query); Lightweight Charts requires strictly ascending time and throws otherwise.
-    const ascendingCandles = [...candles].sort((a, b) => a.bucketStart - b.bucketStart);
     series.setData(
       ascendingCandles.map((candle) => ({
         time: candle.bucketStart as UTCTimestamp,
@@ -87,6 +214,17 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
         close: toChartValue(candle.close),
       })),
     );
+
+    if (priceLineRef.current) series.removePriceLine(priceLineRef.current);
+    priceLineRef.current = latestCandle
+      ? series.createPriceLine({
+          price: toChartValue(latestCandle.close),
+          color: '#22c55e',
+          lineWidth: 1,
+          axisLabelVisible: true,
+          title: tokenSymbol ? displaySymbol(tokenSymbol) : 'Price',
+        })
+      : null;
 
     markers.setMarkers(
       graduationTime !== null
@@ -101,27 +239,35 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           ]
         : [],
     );
-  }, [candles, graduationTime]);
+  }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle]);
+
+  const currencyTabClass = (active: boolean) => active
+    ? 'rounded px-2.5 py-1.5 font-medium text-foreground bg-background shadow-sm'
+    : 'rounded px-2.5 py-1.5 text-muted-foreground hover:bg-background/70 hover:text-foreground';
 
   return (
     <div>
-      <div className="mb-2 flex items-center gap-2">
-        <CoverageBadge status={coverageStatus} />
-        <nav aria-label="Chart currency" className="flex gap-1 text-xs">
-          <a href={`?currency=quote&interval=${intervalSeconds}`} aria-current={currency === 'quote' ? 'page' : undefined}>{displaySymbol(quoteSymbol)}</a>
-          <a href={`?currency=usd&interval=${intervalSeconds}`} aria-current={currency === 'usd' ? 'page' : undefined}>USD</a>
-        </nav>
-        <nav aria-label="Chart interval" className="flex gap-1 text-xs">
-          {CHART_INTERVALS.map((interval) => (
-            <a key={interval.seconds} href={`?currency=${currency}&interval=${interval.seconds}`}
-              aria-current={interval.seconds === intervalSeconds ? 'page' : undefined}>{interval.label}</a>
-          ))}
-        </nav>
-        <p className="text-xs text-muted-foreground">
-          {currency === 'usd' ? 'Chart prices (USD) are approximate for plotting; see the trade table for exact figures.' : `Chart prices (${displaySymbol(quoteSymbol)}) are approximate for plotting; see the trade table for exact figures.`}
-        </p>
+      <div className="mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CoverageBadge status={coverageStatus} />
+          {showCurrencyToggle && (
+          <nav aria-label="Chart currency" className="ml-auto inline-flex flex-wrap gap-1 rounded-md border border-border bg-muted p-1 text-xs">
+            <a className={currencyTabClass(activeCurrency === 'quote')} href={`?currency=quote&interval=${activeInterval}`} aria-current={activeCurrency === 'quote' ? 'page' : undefined}
+              onClick={(event) => { event.preventDefault(); selectChart('quote', activeInterval); }}>{displaySymbol(quoteSymbol)}</a>
+            <a className={currencyTabClass(activeCurrency === 'usd')} href={`?currency=usd&interval=${activeInterval}`} aria-current={activeCurrency === 'usd' ? 'page' : undefined}
+              onClick={(event) => { event.preventDefault(); selectChart('usd', activeInterval); }}>USD</a>
+          </nav>
+          )}
+        </div>
       </div>
       <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />
+      <nav aria-label="Chart interval" className="chart-interval-tabs mt-2 inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+        {CHART_INTERVALS.map((interval) => (
+          <a key={interval.seconds} className="chart-interval-tab rounded px-2.5 py-1.5 font-medium" href={`?currency=${activeCurrency}&interval=${interval.seconds}`}
+            aria-current={interval.seconds === activeInterval ? 'page' : undefined}
+            onClick={(event) => { event.preventDefault(); selectChart(activeCurrency, interval.seconds); }}>{interval.label}</a>
+        ))}
+      </nav>
     </div>
   );
 }

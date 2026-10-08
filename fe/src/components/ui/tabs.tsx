@@ -22,7 +22,7 @@ export function Tabs({ tabs, defaultValue }: { tabs: readonly TabItem[]; default
             role="tab"
             aria-selected={tab.value === active}
             className={cn(
-              'border-b-2 px-1 pb-2 text-sm font-medium',
+              'cursor-pointer border-b-2 px-1 pb-2 text-2xl font-semibold',
               tab.value === active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground',
             )}
             onClick={() => setActive(tab.value)}

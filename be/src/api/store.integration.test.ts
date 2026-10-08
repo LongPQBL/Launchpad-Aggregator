@@ -51,6 +51,32 @@ afterAll(async () => {
 });
 
 describe('listLaunches without raw log provenance', () => {
+  it('sorts all matching launches by cached TVL in either direction, with pagination and nulls last', async () => {
+    try {
+      for (const [index, token] of tokens.entries()) {
+        await pool.query('UPDATE launches SET name = $1 WHERE token_address = $2', [`MetricSort ${index}`, token]);
+      }
+      for (const [token, tvl] of [[tokens[0], '100'], [tokens[1], '300']] as const) {
+        await pool.query(`INSERT INTO launch_stats (chain_id, token_address, stats, computed_at)
+          VALUES (4663, $1, $2, now()) ON CONFLICT (chain_id, token_address)
+          DO UPDATE SET stats = EXCLUDED.stats, computed_at = EXCLUDED.computed_at`, [token, JSON.stringify({ tvlUsd: tvl })]);
+      }
+
+      const first = await store.listLaunches({ limit: 1, search: 'MetricSort', sort: 'tvlUsd', direction: 'asc' });
+      const second = await store.listLaunches({ limit: 1, search: 'MetricSort', sort: 'tvlUsd', direction: 'asc', cursor: first.nextCursor! });
+      const third = await store.listLaunches({ limit: 1, search: 'MetricSort', sort: 'tvlUsd', direction: 'asc', cursor: second.nextCursor! });
+      expect([first.items[0].tokenAddress, second.items[0].tokenAddress, third.items[0].tokenAddress]).toEqual([tokens[0], tokens[1], tokens[2]]);
+      expect(third.nextCursor).toBeNull();
+
+      const descending = await store.listLaunches({ limit: 3, search: 'MetricSort', sort: 'tvlUsd', direction: 'desc' });
+      expect(descending.items.map((item) => item.tokenAddress)).toEqual([tokens[1], tokens[0], tokens[2]]);
+    } finally {
+      for (const [index, token] of tokens.entries()) {
+        await pool.query('UPDATE launches SET name = $1 WHERE token_address = $2', [`Token${index}`, token]);
+      }
+    }
+  });
+
   it('includes null-source rows and preserves block/tx/log pagination across old and new rows', async () => {
     const first = await store.listLaunches({ limit: 1, chainId: 4663 });
     expect(first.items[0].tokenAddress).toBe(tokens[0]);
@@ -70,6 +96,9 @@ describe('listLaunches without raw log provenance', () => {
 
       const otherOnly = await store.listLaunches({ limit: 10, chainId: 4663, platform: 'other-launchpad' });
       expect(otherOnly.items.map((item) => item.tokenAddress)).toEqual([tokens[1]]);
+
+      const combined = await store.listLaunches({ limit: 10, chainId: [4663, 1], platform: ['pons', 'other-launchpad'] });
+      expect(combined.items.map((item) => item.tokenAddress)).toEqual(expect.arrayContaining([tokens[0], tokens[1]]));
     } finally {
       await pool.query('UPDATE launches SET platform = $1 WHERE token_address = $2', ['pons', tokens[1]]);
     }

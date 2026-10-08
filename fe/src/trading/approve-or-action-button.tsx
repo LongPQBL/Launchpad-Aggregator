@@ -87,7 +87,7 @@ export function ApproveOrActionButton({
   return (
     <>
       {approveError}
-      <Button type="button" disabled={outputAmount === null || isSubmitting} onClick={onAction}>
+      <Button type="button" className="cursor-pointer" disabled={outputAmount === null || isSubmitting} onClick={onAction}>
         {actionLabel}
       </Button>
     </>

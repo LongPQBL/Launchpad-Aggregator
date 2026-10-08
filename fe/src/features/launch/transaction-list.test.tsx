@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { act } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficialVenue, Transaction } from '@/api/client';
 import { TransactionList } from './transaction-list';
 
@@ -35,7 +36,14 @@ describe('TransactionList', () => {
       usdValue: '0.009', usdValueStatus: 'priced', usdValueApprox: true })]} venues={noVenues}
       tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
     expect(screen.getByText('523.13')).toBeInTheDocument();
-    expect(screen.getAllByText('<0.01').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('<0.01')).toBeInTheDocument();
+    expect(screen.getByText('$<0.01')).toBeInTheDocument();
+  });
+
+  it('prefixes a priced USD value with $, without affecting the quote-amount column', () => {
+    render(<TransactionList transactions={[transaction({ usdValue: '5.25', usdValueStatus: 'priced' })]} venues={noVenues}
+      tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getByText('$5.25')).toBeInTheDocument();
   });
 
   it('labels a pool-sourced row distinctly from an official trade, without implying an official partnership', () => {
@@ -83,10 +91,49 @@ describe('TransactionList', () => {
     expect(link).toHaveAttribute('href', 'https://explorer.example/address/0x1234567890123456789012345678901234567890');
   });
 
-  it('still links to the transaction on the explorer', () => {
-    render(<TransactionList transactions={[transaction({ txHash: '0xabc' })]} venues={noVenues}
+  it('shows the truncated transaction hash and links it to the explorer', () => {
+    const txHash = '0x1234567890123456789012345678901234567890123456789012345678907890';
+    render(<TransactionList transactions={[transaction({ txHash, traderAddress: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd' })]} venues={noVenues}
       tokenSymbol="DELTA" quoteAsset={quoteAsset} explorerBase="https://explorer.example" />);
-    const link = screen.getByRole('link', { name: 'Tx' });
-    expect(link).toHaveAttribute('href', 'https://explorer.example/tx/0xabc');
+    const link = screen.getByRole('link', { name: '0x1234…7890' });
+    expect(link).toHaveAttribute('href', `https://explorer.example/tx/${txHash}`);
+  });
+
+  describe('Time column', () => {
+    const txTimestamp = 1_700_000_000;
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime((txTimestamp + 10) * 1000);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows a seconds-level relative time, not an absolute date/time', () => {
+      render(<TransactionList transactions={[transaction({ timestamp: txTimestamp })]} venues={noVenues}
+        tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+      expect(screen.getByText('10s')).toBeInTheDocument();
+    });
+
+    it('ticks the relative time forward live as time passes, without a new render call', () => {
+      render(<TransactionList transactions={[transaction({ timestamp: txTimestamp })]} venues={noVenues}
+        tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+      expect(screen.getByText('10s')).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+
+      expect(screen.getByText('15s')).toBeInTheDocument();
+      expect(screen.queryByText('10s')).not.toBeInTheDocument();
+    });
+
+    it('keeps the exact absolute timestamp available as a tooltip', () => {
+      render(<TransactionList transactions={[transaction({ timestamp: txTimestamp })]} venues={noVenues}
+        tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+      expect(screen.getByTitle(new Date(txTimestamp * 1000).toLocaleString('en-US'))).toBeInTheDocument();
+    });
   });
 });

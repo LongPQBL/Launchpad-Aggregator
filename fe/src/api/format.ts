@@ -22,7 +22,11 @@ export function formatPrice(value: string | null, symbol: string | null): string
   const decimals = Number.isFinite(numeric) && numeric > 0 && numeric < 1
     ? -Math.floor(Math.log10(numeric)) + 2
     : 2;
-  return `${numeric.toFixed(decimals)} ${symbol ?? '—'}`;
+  const formatted = numeric.toFixed(decimals);
+  const concise = numeric > 0 && numeric < 1
+    ? formatted.replace(/(\.\d*?[1-9])0+$/, '$1')
+    : formatted;
+  return `${concise} ${symbol ?? '—'}`;
 }
 
 // Transaction-row amounts (token/quote/USD columns): 2 decimals, but never silently round a real
@@ -34,7 +38,7 @@ export function formatAmount(value: string | null, decimals = 2): string {
   const numeric = Number(value);
   if (numeric === 0) return (0).toFixed(0);
   if (Math.abs(numeric) < 0.01) return '<0.01';
-  return numeric.toFixed(decimals);
+  return numeric.toFixed(decimals).replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1');
 }
 
 // decimals is required, not defaulted: callers state their own context explicitly (1 for list/detail

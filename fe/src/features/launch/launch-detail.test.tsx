@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Candle, LaunchDetail as LaunchDetailData, OfficialVenue, Transaction } from '@/api/client';
 import { LaunchDetail } from './launch-detail';
@@ -7,9 +7,23 @@ const setDataMock = vi.fn();
 const applyOptionsMock = vi.fn();
 const removeMock = vi.fn();
 const setMarkersMock = vi.fn();
-const addSeriesMock = vi.fn((..._args: unknown[]) => ({ setData: setDataMock, applyOptions: applyOptionsMock }));
+const createPriceLineMock = vi.fn();
+const removePriceLineMock = vi.fn();
+const subscribeCrosshairMoveMock = vi.fn();
+const unsubscribeCrosshairMoveMock = vi.fn();
+const addSeriesMock = vi.fn((..._args: unknown[]) => ({
+  setData: setDataMock,
+  applyOptions: applyOptionsMock,
+  createPriceLine: createPriceLineMock,
+  removePriceLine: removePriceLineMock,
+}));
 const createSeriesMarkersMock = vi.fn((..._args: unknown[]) => ({ setMarkers: setMarkersMock }));
-const createChartMock = vi.fn((..._args: unknown[]) => ({ addSeries: addSeriesMock, remove: removeMock }));
+const createChartMock = vi.fn((..._args: unknown[]) => ({
+  addSeries: addSeriesMock,
+  remove: removeMock,
+  subscribeCrosshairMove: subscribeCrosshairMoveMock,
+  unsubscribeCrosshairMove: unsubscribeCrosshairMoveMock,
+}));
 
 vi.mock('lightweight-charts', () => ({
   createChart: (...args: unknown[]) => createChartMock(...args),
@@ -41,9 +55,13 @@ beforeEach(() => {
   applyOptionsMock.mockClear();
   removeMock.mockClear();
   setMarkersMock.mockClear();
+  createPriceLineMock.mockClear();
+  removePriceLineMock.mockClear();
   addSeriesMock.mockClear();
   createSeriesMarkersMock.mockClear();
   createChartMock.mockClear();
+  subscribeCrosshairMoveMock.mockClear();
+  unsubscribeCrosshairMoveMock.mockClear();
 });
 
 function venue(overrides: Partial<OfficialVenue> = {}): OfficialVenue {
@@ -141,7 +159,8 @@ describe('LaunchDetail', () => {
       currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
       currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
       hooks: '0x0000000000000000000000000000000000000000', createdBlock: '123', createdTimestamp: null,
-      ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, priceInQuote: null,
+      ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null,
+      poolBalances: null,
       priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
       coverageStatus: 'backfilling', lastTradeTimestamp: null };
     const view = render(<LaunchDetail detail={detail()} transactions={null} candles={null}
@@ -163,6 +182,17 @@ describe('LaunchDetail', () => {
     view.rerender(<LaunchDetail detail={detail({ chainId: 4663, tokenAddress: '0xabc' })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);
     expect(view.container.querySelector('a[href*="cursor="]')).toBeNull();
+  });
+
+  it('shows an X icon link in the header when twitterUrl is set, and a Share button always', () => {
+    render(<LaunchDetail detail={detail({ twitterUrl: 'https://x.com/example' })} transactions={null} candles={null} />);
+    expect(screen.getByRole('link', { name: 'X' })).toHaveAttribute('href', 'https://x.com/example');
+    expect(screen.getByRole('button', { name: 'Share' })).toBeInTheDocument();
+  });
+
+  it('hides the header X icon link when twitterUrl is null', () => {
+    render(<LaunchDetail detail={detail({ twitterUrl: null })} transactions={null} candles={null} />);
+    expect(screen.queryByRole('link', { name: 'X' })).not.toBeInTheDocument();
   });
 
   it('shows a Launches > Symbol breadcrumb', () => {
@@ -187,6 +217,20 @@ describe('LaunchDetail', () => {
     expect(screen.getByTestId('header-token-address')).toHaveTextContent('0xabc0…1e18');
   });
 
+  it('copies the full token address from the header and keeps the address visible', async () => {
+    const tokenAddress = '0xabc0000000000000000000000000000000001e18';
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(window.navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<LaunchDetail detail={detail({ tokenAddress })} transactions={null} candles={null} />);
+
+    const address = screen.getByRole('group', { name: 'Token address' });
+    fireEvent.click(within(address).getByTestId('header-token-address'));
+
+    expect(writeText).toHaveBeenCalledWith(tokenAddress);
+    expect(await within(address).findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    expect(screen.getByTestId('header-token-address')).toHaveTextContent('0xabc0…1e18');
+  });
+
   it('does not show Robinhood or Pons branding for another source', () => {
     render(<LaunchDetail detail={detail({ chainId: 1, platform: 'other' })} transactions={null} candles={null} />);
 
@@ -204,7 +248,7 @@ describe('LaunchDetail', () => {
       />,
     );
     expect(screen.getByRole('heading', { name: /0xabc/ })).toBeInTheDocument();
-    expect(screen.getByText('Quote asset: —')).toBeInTheDocument();
+    expect(screen.queryByText(/Quote asset:/)).not.toBeInTheDocument();
   });
 
   it('hides the Description section explorer pill for a chain with no registered explorer', () => {
@@ -212,18 +256,15 @@ describe('LaunchDetail', () => {
     expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();
   });
 
-  it('shows source, protocol version, chain, quote asset, and 24h volume', () => {
+  it('shows launchpad, protocol version, chain, and quote asset without a header volume line', () => {
     render(<LaunchDetail detail={detail()} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
 
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
-    // Scoped to the source line, not a bare substring match — the Description section's explorer pill
-    // also renders "Robinhood Chain" (as part of "Robinhood Chain Explorer") and would otherwise
-    // make this an ambiguous "found multiple elements" match.
-    const sourceLine = screen.getByText(/Source:/).closest('p')!;
-    expect(within(sourceLine).getByText(/Robinhood Chain/)).toBeInTheDocument();
+    const launchpadLine = screen.getByRole('link', { name: /pons/i }).closest('p')!;
+    expect(within(launchpadLine).getByText(/Robinhood Chain/)).toBeInTheDocument();
     expect(screen.getByText(/Quote asset/)).toHaveTextContent('ROBIN');
-    expect(screen.getByText(/12\.5 ROBIN/)).toBeInTheDocument();
+    expect(screen.queryByText(/12\.5 ROBIN/)).not.toBeInTheDocument();
   });
 
   it('shows a Stats heading with TVL, market cap, FDV, 1 day volume (USD), and 52-week high/low, in that order', () => {
@@ -237,37 +278,37 @@ describe('LaunchDetail', () => {
     );
     const stats = screen.getByRole('region', { name: 'Stats' });
     expect(within(stats).getByRole('heading', { name: 'Stats' })).toBeInTheDocument();
-    expect(within(stats).getByText(/TVL/)).toHaveTextContent('1200.5');
-    expect(within(stats).getByText(/Market cap/)).toHaveTextContent('269.2');
-    expect(within(stats).getByText(/FDV/)).toHaveTextContent('269.2');
-    expect(within(stats).getByText(/1 day volume/)).toHaveTextContent('10.4');
-    expect(within(stats).getByText(/52W High/)).toHaveTextContent('0.08');
-    expect(within(stats).getByText(/52W Low/)).toHaveTextContent('0.001');
-    const statLabels = within(stats).getAllByText(/TVL|Market cap|FDV|1 day volume|52W High|52W Low/)
-      .map((el) => el.textContent?.split(':')[0]);
+    const terms = within(stats).getAllByRole('term');
+    const definitions = within(stats).getAllByRole('definition');
+    expect(terms.map((term) => term.textContent)).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
+    expect(terms[0]).toHaveClass('text-sm');
+    expect(definitions[0]).toHaveClass('text-lg', 'font-semibold');
+    expect(definitions.map((definition) => definition.textContent)).toEqual(['$1200.5', '$269.2', '$269.2', '$10.4', '0.0800 ROBIN', '0.00100 ROBIN']);
+    const statLabels = terms.map((el) => el.textContent);
     expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
   });
 
   it('explains the phase-specific TVL basis and missing quote prices', () => {
     const view = render(<LaunchDetail detail={detail({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);
-    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('real quote'));
+    expect(screen.getByText('TVL').closest('div')).toHaveAttribute('title', expect.stringContaining('real quote'));
 
     view.rerender(<LaunchDetail detail={detail({ tvlUsd: '42', tvlBasis: 'pool_principal', tvlUnavailableReason: null })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);
-    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('both tokens'));
+    expect(screen.getByText('TVL').closest('div')).toHaveAttribute('title', expect.stringContaining('both tokens'));
 
     view.rerender(<LaunchDetail detail={detail({ tvlUsd: null, tvlUnavailableReason: 'quote_price_unavailable' })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);
-    expect(screen.getByText(/TVL/)).toHaveTextContent('—');
-    expect(screen.getByText(/TVL/)).toHaveAttribute('title', expect.stringContaining('USD price'));
+    const tvlRow = screen.getByText('TVL').closest('div')!;
+    expect(tvlRow).toHaveTextContent('—');
+    expect(tvlRow).toHaveAttribute('title', expect.stringContaining('USD price'));
   });
 
   it('shows "—" for FDV instead of a fabricated number when fdvUsd is null', () => {
     render(
       <LaunchDetail detail={detail({ fdvUsd: null })} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />,
     );
-    expect(screen.getByText(/FDV/)).toHaveTextContent('—');
+    expect(screen.getByText('FDV').closest('div')).toHaveTextContent('—');
   });
 
   it('shows the swept phase label', () => {
@@ -373,12 +414,14 @@ describe('LaunchDetail', () => {
     );
 
     const [lastOptions] = applyOptionsMock.mock.calls.at(-1)!;
-    const priceFormat = (lastOptions as { priceFormat: { precision: number; minMove: number } }).priceFormat;
-    expect(priceFormat.precision).toBeGreaterThanOrEqual(8);
+    const priceFormat = (lastOptions as { priceFormat: { minMove: number; formatter: (value: number) => string } }).priceFormat;
     expect(priceFormat.minMove).toBeLessThanOrEqual(1e-8);
+    // The 'custom' price format type has no separate precision field — the formatter itself must
+    // keep sub-cent pons-scale prices readable instead of rounding them away to "0.000000000".
+    expect(priceFormat.formatter(0.000000152)).toBe('0.000000152');
   });
 
-  it('shows a coverage badge when the launch data is still backfilling', () => {
+  it('hides the coverage badge when the launch data is backfilling', () => {
     render(
       <LaunchDetail
         detail={detail({ coverageStatus: 'backfilling' })}
@@ -387,8 +430,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    const badges = screen.getAllByTestId('coverage-badge');
-    expect(badges.every((badge) => badge.textContent === 'Backfilling')).toBe(true);
+    expect(screen.queryByText('Backfilling')).not.toBeInTheDocument();
   });
 
   it('marks the chart as incomplete when the candle window still has unpriced trades, even if the launch is caught up', () => {
@@ -400,8 +442,7 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    const badges = screen.getAllByTestId('coverage-badge');
-    expect(badges.some((badge) => badge.textContent === 'Backfilling')).toBe(true);
+    expect(screen.queryByText('Backfilling')).not.toBeInTheDocument();
   });
 
   it('places the curve-to-V4 marker at the earliest V4 trade, not the newest, even though the API returns transactions newest-first', () => {
@@ -437,6 +478,27 @@ describe('LaunchDetail', () => {
       />,
     );
 
+    expect(screen.getByTestId('official-price')).toHaveTextContent('$0.11');
+    expect(screen.getByTestId('official-price')).toHaveClass('text-2xl');
+  });
+
+  it('swaps the headline price for the hovered chart point, then reverts to the default price on mouse leave', () => {
+    render(
+      <LaunchDetail
+        detail={detail({ priceUsd: '0.113', priceQuote: '0.000000152480063034', priceStale: false })}
+        transactions={{ items: [], nextCursor: null }}
+        candles={{ items: [candle({ close: '0.000000155' })], complete: true }}
+      />,
+    );
+    const series = addSeriesMock.mock.results.at(-1)!.value as { applyOptions: unknown };
+    const handler = subscribeCrosshairMoveMock.mock.calls.at(-1)![0] as (param: { time?: number; seriesData: Map<unknown, unknown> }) => void;
+
+    act(() => {
+      handler({ time: 1_700_000_300, seriesData: new Map([[series, { time: 1_700_000_300, close: 0.000000160 }]]) });
+    });
+    expect(screen.getByTestId('official-price')).toHaveTextContent('0.00000016 ROBIN');
+
+    act(() => { handler({ seriesData: new Map() }); });
     expect(screen.getByTestId('official-price')).toHaveTextContent('$0.11');
   });
 
@@ -655,7 +717,8 @@ describe('LaunchDetail', () => {
           currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
-          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}
       />,
@@ -683,7 +746,8 @@ describe('LaunchDetail', () => {
           currency1Symbol: 'MYTOK', currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: tokenAddress,
-          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}
       />,
@@ -717,7 +781,8 @@ describe('LaunchDetail', () => {
           currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
-          volume24hUsd: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}
       />,

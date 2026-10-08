@@ -21,6 +21,7 @@ import { readLaunchStats } from './launchStatsStore.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
+import { readMetricRankingPage } from './metricRanking.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
 import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
@@ -322,6 +323,28 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     };
   }
 
+  async function listLaunchesByMetric(query: LaunchListQuery): Promise<Page<LaunchSummary>> {
+    const sort = query.sort ?? 'recent';
+    const direction = query.direction ?? (sort === 'recent' ? 'asc' : 'desc');
+    if (sort === 'volume24hUsd') await assertVolumeRankingAvailable(pool, new Date());
+    const result = await readMetricRankingPage(pool, {
+      sort, direction, chainId: query.chainId, platform: query.platform, status: query.status, search: query.search,
+      cursor: query.cursor, limit: query.limit, headBlock: await safeHead(), since: Math.floor(Date.now() / 1000) - 86_400,
+    });
+    const statsByToken = await readLaunchStats(pool, result.rows.map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
+    return {
+      items: result.rows.map((row) => {
+        const complete = Boolean(row.launch_coverage_complete);
+        const item = summary(row, complete, statsForCoverage(statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`), complete));
+        if (sort !== 'volume24hUsd') return item;
+        const volume = row.rank_category === 'null' || row.volume_usd === null ? null : nullableString(row.volume_usd);
+        return { ...item, officialVolume24hUsd: volume, officialVolume24hUsdApprox: row.rank_category === 'positive',
+          officialVolume24hUsdAsOf: volume === null || row.window_end === null ? null : new Date(number(row.window_end) * 1000).toISOString() };
+      }),
+      nextCursor: result.nextCursor,
+    };
+  }
+
   return {
     async listSources() {
       const result = await pool.query('SELECT id, chain_id, version FROM sources ORDER BY id');
@@ -330,7 +353,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     getCoverage: coverage,
     async listLaunches(query: LaunchListQuery) {
-      if (query.sort === 'volume24hUsd') return listLaunchesByVolume(query);
+      if (query.sort === 'volume24hUsd' && (query.direction === undefined || query.direction === 'desc')) return listLaunchesByVolume(query);
+      if ((query.sort ?? 'recent') !== 'recent' || query.direction === 'desc') return listLaunchesByMetric(query);
       const head = await safeHead();
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       const since = Math.floor(Date.now() / 1000) - 86_400;
@@ -345,14 +369,14 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
              AND t.timestamp >= $6) AS official_volume_raw,
           ${launchCoverageSql(9)} AS launch_coverage_complete
         FROM launches l JOIN sources s ON s.id = l.source_id
-        WHERE ($1::integer IS NULL OR l.chain_id = $1)
+        WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
           AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
           AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
           AND ($8::text IS NULL OR l.lifecycle_status = $8)
-          AND ($10::text IS NULL OR l.platform = $10)
+          AND ($10::text[] IS NULL OR l.platform = ANY($10))
         ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5`,
-      [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
-        query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform ?? null]);
+      [query.chainId === undefined ? null : [query.chainId].flat(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
+        query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform === undefined ? null : [query.platform].flat()]);
       const rows = result.rows as Row[];
       const statsByToken = await readLaunchStats(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
       return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),

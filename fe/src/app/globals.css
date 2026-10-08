@@ -29,11 +29,11 @@
   --color-card-foreground: #e6e8ee;
   --color-primary: #6b8bff;
   --color-primary-foreground: #0b0d12;
-  --color-secondary: #1a1e28;
+  --color-secondary: #242a38;
   --color-secondary-foreground: #e6e8ee;
   --color-muted: #161920;
   --color-muted-foreground: #9aa1b2;
-  --color-accent: #1b2440;
+  --color-accent: #232e54;
   --color-accent-foreground: #6b8bff;
   --color-destructive: #f87171;
   --color-destructive-foreground: #0b0d12;
@@ -47,4 +47,39 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
+}
+
+a,
+a:hover,
+a:focus,
+a:active {
+  color: inherit;
+  text-decoration: none;
+}
+
+.chart-interval-tabs {
+  background-color: #0a0a0b;
+}
+
+a.chart-interval-tab {
+  color: #71717a;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+a.chart-interval-tab:hover,
+a.chart-interval-tab:focus-visible,
+a.chart-interval-tab[aria-current='page'] {
+  background-color: rgb(255 255 255 / 0.14);
+  color: #ffffff;
+}
+
+/* Rolling digits for PercentChange: the stack holds [old, new] (up) or [new, old] (down), and the
+   keyframes slide it by one glyph. The base transform is the END state, so with reduced motion
+   (animation: none) the new digit is simply shown. */
+@keyframes digit-roll-up { from { transform: translateY(0); } to { transform: translateY(-50%); } }
+@keyframes digit-roll-down { from { transform: translateY(-50%); } to { transform: translateY(0); } }
+.digit-roll-up { transform: translateY(-50%); animation: digit-roll-up 300ms ease-out; }
+.digit-roll-down { transform: translateY(0); animation: digit-roll-down 300ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .digit-roll-up, .digit-roll-down { animation: none; }
 }

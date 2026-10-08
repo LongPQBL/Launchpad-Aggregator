@@ -48,12 +48,16 @@ export interface TokenLogoProps {
   logoUri: string | null;
   symbol: string;
   chainId?: number;
+  size?: 'default' | 'large';
 }
 
-export function TokenLogo({ logoUri, symbol, chainId }: TokenLogoProps) {
+export function TokenLogo({ logoUri, symbol, chainId, size = 'default' }: TokenLogoProps) {
+  const logoSize = size === 'large' ? 'h-14 w-14' : 'h-8 w-8';
+  const badgeSize = size === 'large' ? 'h-5 w-5' : 'h-4 w-4';
+
   return (
-    <span className="relative inline-flex h-8 w-8 shrink-0">
-      <TokenImage logoUri={logoUri} symbol={symbol} className="h-8 w-8 rounded-full" />
+    <span className={`relative inline-flex ${logoSize} shrink-0`}>
+      <TokenImage logoUri={logoUri} symbol={symbol} className={`${logoSize} rounded-full`} />
       {chainId === 4663 && (
         <Image
           src="/images/chains/robinhood-chain.png"
@@ -62,7 +66,7 @@ export function TokenLogo({ logoUri, symbol, chainId }: TokenLogoProps) {
           width={16}
           height={16}
           unoptimized
-          className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card bg-card"
+          className={`absolute -bottom-0.5 -right-0.5 ${badgeSize} rounded-full border-2 border-card bg-card`}
         />
       )}
     </span>

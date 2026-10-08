@@ -1,7 +1,14 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import type { LaunchSummary, Source } from '@/api/client';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getLaunches, type LaunchSummary, type Source } from '@/api/client';
 import { LaunchList } from './launch-list';
+
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/api/client')>(),
+  getLaunches: vi.fn(),
+}));
+
+afterEach(() => vi.unstubAllGlobals());
 
 function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
   return {
@@ -51,6 +58,30 @@ const twoChainsTwoPlatforms: readonly Source[] = [
 ];
 
 describe('LaunchList', () => {
+  it('appends the next launch batch when the list end enters view and keeps the active filters', async () => {
+    let onIntersect: IntersectionObserverCallback | undefined;
+    class ObserverMock {
+      constructor(callback: IntersectionObserverCallback) { onIntersect = callback; }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords(): IntersectionObserverEntry[] { return []; }
+      root = null;
+      rootMargin = '';
+      thresholds = [];
+    }
+    vi.stubGlobal('IntersectionObserver', ObserverMock);
+    vi.mocked(getLaunches).mockResolvedValueOnce({ items: [launch({ tokenAddress: '0xnext', name: 'Token B' })], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: 'cursor-2' }} sources={oneChainOneSource} error={false}
+      chainId={4663} search="demo" status="swept" platform="pons" tab="recent" />);
+    await act(async () => {
+      onIntersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    });
+
+    expect(getLaunches).toHaveBeenCalledWith({ cursor: 'cursor-2', chainId: [4663], search: 'demo', status: 'swept', platform: ['pons'], sort: 'recent' });
+    expect(screen.getByRole('link', { name: /view token b details/i })).toBeInTheDocument();
+  });
+
   it('shows the Pons icon only for Pons launch rows', () => {
     render(
       <LaunchList
@@ -272,56 +303,70 @@ describe('LaunchList', () => {
     expect(screen.getByRole('navigation', { name: /filter by chain/i })).toBeInTheDocument();
   });
 
-  it('renders a real Launchpad filter populated from distinct platforms in sources, even with a single option', () => {
+  it('renders roadmap launchpads alongside the connected source', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
 
     const nav = screen.getByRole('navigation', { name: /filter by launchpad/i });
-    expect(within(nav).getByRole('link', { name: /pons/i })).toBeInTheDocument();
+    expect(within(nav).getByRole('button', { name: /pons/i })).toBeInTheDocument();
+    for (const name of ['full.fun', 'Bow', 'NOXA', 'Bankr', 'pools.xyz', 'letscash.fun', 'Long', 'Varo']) {
+      expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
+    }
+  });
+
+  it('shows each roadmap launchpad logo in the filter', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const nav = screen.getByRole('navigation', { name: /filter by launchpad/i });
+    const logos = [
+      ['Pons', 'pons.webp'], ['full.fun', 'full-fun.svg'], ['Bow', 'bow.png'],
+      ['NOXA', 'noxa.jpeg'], ['Bankr', 'bankr.jpeg'], ['pools.xyz', 'pools-xyz.svg'],
+      ['letscash.fun', 'letscash-fun.png'], ['Long', 'long.webp'], ['Varo', 'varo.jpg'],
+    ] as const;
+    for (const [name, filename] of logos) {
+      expect(within(nav).getByRole('button', { name: new RegExp(name.replace('.', '\\.'), 'i') }).querySelector('img')).toHaveAttribute(
+        'src', expect.stringContaining(`/images/launchpads/${filename}`),
+      );
+    }
+  });
+
+  it('shows each roadmap chain logo in the filter', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const nav = screen.getByRole('navigation', { name: /filter by chain/i });
+    const logos = [
+      ['Robinhood Chain', 'robinhood-chain.png'], ['Base', 'base.png'],
+      ['Arbitrum', 'arbitrum.png'], ['Arc', 'arc.jpeg'], ['MegaETH', 'megaeth.webp'],
+      ['Monad', 'monad.png'], ['Intuition', 'intuition.jpg'], ['Stable', 'stable.png'],
+      ['Merlin', 'merlin.webp'], ['BNB Smart Chain', 'bnb-smart-chain.png'],
+    ] as const;
+    for (const [name, filename] of logos) {
+      expect(within(nav).getByRole('button', { name: new RegExp(name, 'i') }).querySelector('img')).toHaveAttribute(
+        'src', `/images/chains/${filename}`,
+      );
+    }
   });
 
   it('lists every distinct platform from sources in the Launchpad filter, deduped', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={twoChainsTwoPlatforms} error={false} />);
 
     const nav = screen.getByRole('navigation', { name: /filter by launchpad/i });
-    expect(within(nav).getAllByRole('link')).toHaveLength(3); // "All launchpads" + pons + other
-    expect(within(nav).getByRole('link', { name: /other/i })).toBeInTheDocument();
+    expect(within(nav).getAllByRole('button')).toHaveLength(11); // "All launchpads" + nine roadmap entries + other
+    expect(within(nav).getByRole('button', { name: /other/i })).toBeInTheDocument();
   });
 
-  it('keeps the selected Launchpad filter on the next-page link', () => {
-    render(
-      <LaunchList
-        page={{ items: [launch()], nextCursor: 'cursor-2' }}
-        sources={oneChainOneSource}
-        error={false}
-        platform="pons"
-      />,
-    );
-
-    const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('platform=pons'));
+  it('lists roadmap chains and explains an empty result for a future chain and launchpad', async () => {
+    vi.mocked(getLaunches).mockResolvedValue({ items: [], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const chainFilter = screen.getByRole('navigation', { name: /filter by chain/i });
+    for (const name of ['Base', 'Arbitrum', 'Arc', 'MegaETH', 'Monad', 'Intuition', 'Stable', 'Merlin', 'BNB Smart Chain']) {
+      expect(within(chainFilter).getByRole('button', { name: new RegExp(name, 'i') })).toBeInTheDocument();
+    }
+    fireEvent.click(within(chainFilter).getByRole('button', { name: 'Arc' }));
+    expect(getLaunches).toHaveBeenCalledWith(expect.objectContaining({ chainId: [5042] }));
+    expect(await screen.findByText(/no launches match/i)).toBeInTheDocument();
   });
 
-  it('shows a next-page link built from nextCursor when more launches are available', () => {
+  it('does not show a next-page link when more launches are available for automatic loading', () => {
     render(<LaunchList page={{ items: [launch()], nextCursor: 'cursor-2' }} sources={oneChainOneSource} error={false} />);
-
-    const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('cursor=cursor-2'));
-  });
-
-  it('keeps the current search and status filters on the next-page link', () => {
-    render(
-      <LaunchList
-        page={{ items: [launch()], nextCursor: 'cursor-2' }}
-        sources={oneChainOneSource}
-        error={false}
-        search="demo"
-        status="swept"
-      />,
-    );
-
-    const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('search=demo'));
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('status=swept'));
+    expect(screen.queryByRole('link', { name: /next page/i })).not.toBeInTheDocument();
   });
 
   it('shows exactly two tabs: All and Recently launched', () => {
@@ -346,6 +391,55 @@ describe('LaunchList', () => {
     expect(within(tabs).getByRole('link', { name: 'All' })).not.toHaveAttribute('aria-current');
   });
 
+  it('highlights the column that determines the active tab order', () => {
+    const page = { items: [launch()], nextCursor: null };
+    const { rerender } = render(<LaunchList page={page} sources={oneChainOneSource} error={false} />);
+    const table = screen.getByRole('table', { name: /launch list/i });
+    const volume = within(table).getByRole('columnheader', { name: /24H volume/i });
+    const age = within(table).getByRole('columnheader', { name: /Age/i });
+    expect(volume).toHaveAttribute('aria-sort', 'descending');
+    expect(volume).toHaveTextContent('↓');
+    expect(age).not.toHaveAttribute('aria-sort');
+
+    rerender(<LaunchList page={page} sources={oneChainOneSource} error={false} tab="recent" />);
+    expect(age).toHaveAttribute('aria-sort', 'ascending');
+    expect(age).toHaveTextContent('↑');
+    expect(volume).not.toHaveAttribute('aria-sort');
+  });
+
+  it('sorts a metric column in both directions without navigation and marks the active header', () => {
+    vi.mocked(getLaunches).mockResolvedValue({ items: [launch()], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const table = screen.getByRole('table', { name: /launch list/i });
+    const header = within(table).getByRole('columnheader', { name: /FDV/i });
+    fireEvent.click(within(header).getByRole('button', { name: /FDV/i }));
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'fdvUsd', direction: 'desc' }));
+    expect(header).toHaveAttribute('aria-sort', 'descending');
+    expect(header).toHaveTextContent('↓');
+    expect(window.location.search).toContain('sort=fdvUsd');
+
+    fireEvent.click(within(header).getByRole('button', { name: /FDV/i }));
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'fdvUsd', direction: 'asc' }));
+    expect(header).toHaveAttribute('aria-sort', 'ascending');
+    expect(header).toHaveTextContent('↑');
+  });
+
+  it.each([
+    ['24H volume', 'volume24hUsd', 'asc'],
+    ['Liquidity', 'tvlUsd', 'desc'],
+    ['1H', 'change1h', 'desc'],
+    ['1D', 'change1d', 'desc'],
+    ['Age', 'recent', 'asc'],
+  ])('requests sorting when %s is clicked', (label, sort, direction) => {
+    vi.mocked(getLaunches).mockResolvedValue({ items: [launch()], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    const table = screen.getByRole('table', { name: /launch list/i });
+    const header = within(table).getByRole('columnheader', { name: new RegExp(label, 'i') });
+    fireEvent.click(within(header).getByRole('button', { name: new RegExp(label, 'i') }));
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ sort }));
+    expect(header).toHaveAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
+  });
+
   it('shows the approximate USD 24H volume when available, with the quote amount still accessible', () => {
     render(
       <LaunchList
@@ -361,7 +455,7 @@ describe('LaunchList', () => {
   it('explains that the volume ranking is updating on 503, and points to the recent tab instead of a generic error', () => {
     render(<LaunchList page={null} sources={oneChainOneSource} error rankingUnavailable />);
     expect(screen.getByRole('status')).toHaveTextContent('Official volume ranking is updating');
-    expect(screen.getByRole('link', { name: 'Browse recent launches' })).toHaveAttribute('href', '/?tab=recent');
+    expect(screen.getByRole('link', { name: 'Browse recent launches' })).toHaveAttribute('href', '/launches?tab=recent');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
@@ -385,7 +479,7 @@ describe('LaunchList', () => {
     expect(within(tabs).getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('keeps the active non-default tab on the next-page link and when submitting the search form', () => {
+  it('keeps the active non-default tab when submitting the search form', () => {
     render(
       <LaunchList
         page={{ items: [launch()], nextCursor: 'cursor-2' }}
@@ -395,17 +489,143 @@ describe('LaunchList', () => {
       />,
     );
 
-    const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.stringContaining('tab=recent'));
     const form = screen.getByRole('search', { name: /search and filter launches/i });
     expect(within(form).getByDisplayValue('recent')).toHaveAttribute('type', 'hidden');
   });
 
-  it('does not add a tab param to links for the default "all" tab', () => {
-    render(<LaunchList page={{ items: [launch()], nextCursor: 'cursor-2' }} sources={oneChainOneSource} error={false} />);
+  it('switches tabs and submits search and lifecycle filters without navigating', async () => {
+    vi.mocked(getLaunches).mockResolvedValue({ items: [launch({ name: 'Filtered token' })], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false}
+      chainId={[4663]} platform={['pons']} />);
 
-    const nextLink = screen.getByRole('link', { name: /next page/i });
-    expect(nextLink).toHaveAttribute('href', expect.not.stringContaining('tab='));
+    fireEvent.click(screen.getByRole('link', { name: 'Recently launched' }));
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ chainId: [4663], platform: ['pons'], sort: 'recent' }));
+    expect(screen.getByRole('link', { name: 'Recently launched' })).toHaveAttribute('aria-current', 'page');
+    expect(window.location.search).toContain('tab=recent');
+
+    const form = screen.getByRole('search', { name: /search and filter launches/i });
+    fireEvent.change(within(form).getByRole('combobox', { name: /filter by lifecycle/i }), { target: { value: 'trading' } });
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'trading', sort: 'recent' }));
+    fireEvent.change(within(form).getByRole('searchbox'), { target: { value: 'demo' } });
+    fireEvent.submit(form);
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'demo', status: 'trading', sort: 'recent' }));
+    expect(window.location.search).toContain('search=demo');
+    expect(window.location.search).toContain('status=trading');
+    await screen.findByText('Filtered token');
+  });
+
+  it('restores the selected tab and results when browser history moves back', async () => {
+    vi.mocked(getLaunches).mockResolvedValue({ items: [launch()], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    fireEvent.click(screen.getByRole('link', { name: 'Recently launched' }));
+    expect(screen.getByRole('link', { name: 'Recently launched' })).toHaveAttribute('aria-current', 'page');
+
+    window.history.pushState(null, '', '/launches');
+    fireEvent(window, new PopStateEvent('popstate'));
+    expect(screen.getByRole('link', { name: /^All$/ })).toHaveAttribute('aria-current', 'page');
+    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'volume24hUsd' }));
+  });
+
+  it('filters without navigation, keeps the menu open, and marks selected options', async () => {
+    const sources: Source[] = [
+      ...twoChainsTwoPlatforms,
+      { id: 'third', chainId: 10, platform: 'third', protocolVersion: 'v1' },
+      { id: 'fourth', chainId: 20, platform: 'fourth', protocolVersion: 'v1' },
+    ];
+    vi.mocked(getLaunches).mockResolvedValue({ items: [launch({ name: 'Filtered token' })], nextCursor: null });
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={sources} error={false}
+      chainId={[4663, 1]} platform={['pons', 'other']} />);
+
+    const launchpadFilter = screen.getByRole('navigation', { name: /filter by launchpad/i });
+    const chainFilter = screen.getByRole('navigation', { name: /filter by chain/i });
+    const menu = launchpadFilter.querySelector('details')!;
+    fireEvent.click(menu.querySelector('summary')!);
+    expect(menu).toHaveAttribute('open');
+    fireEvent.click(within(launchpadFilter).getByRole('button', { name: /third/i }));
+    expect(menu).toHaveAttribute('open');
+    expect(within(launchpadFilter).getByRole('button', { name: /third/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(launchpadFilter).getByRole('button', { name: /third/i }).querySelector('[data-selected-check]')).toBeInTheDocument();
+    expect(launchpadFilter.querySelector('[data-filter-menu]')).toHaveClass('bg-card');
+    expect(getLaunches).toHaveBeenCalledWith({ cursor: undefined, chainId: [4663, 1], platform: ['pons', 'other', 'third'], search: undefined, status: undefined, sort: 'volume24hUsd' });
+    await screen.findByText('Filtered token');
+    const chainMenu = chainFilter.querySelector('details')!;
+    fireEvent.click(chainMenu.querySelector('summary')!);
+    fireEvent.click(within(chainFilter).getByRole('button', { name: /chain 10/i }));
+    expect(chainMenu).toHaveAttribute('open');
+    expect(within(chainFilter).getByRole('button', { name: /chain 10/i })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(chainFilter).getByRole('button', { name: /chain 10/i }).querySelector('[data-selected-check]')).toBeInTheDocument();
+    expect(chainFilter.querySelector('[data-filter-menu]')).toHaveClass('bg-card');
+    expect(getLaunches).toHaveBeenLastCalledWith({ cursor: undefined, chainId: [4663, 1, 10], platform: ['pons', 'other', 'third'], search: undefined, status: undefined, sort: 'volume24hUsd' });
+    expect(window.location.search).toContain('chainId=4663%2C1%2C10');
+    const form = screen.getByRole('search', { name: /search and filter launches/i });
+    expect(within(form).getByDisplayValue('4663,1,10')).toHaveAttribute('name', 'chainId');
+    expect(within(form).getByDisplayValue('pons,other,third')).toHaveAttribute('name', 'platform');
+  });
+
+  it('shows skeleton rows while a filter request is pending and replaces them with results', async () => {
+    let resolvePage!: (page: { items: LaunchSummary[]; nextCursor: null }) => void;
+    vi.mocked(getLaunches).mockReturnValueOnce(new Promise((resolve) => { resolvePage = resolve; }));
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+
+    const filter = screen.getByRole('navigation', { name: /filter by launchpad/i });
+    fireEvent.click(within(filter).getByRole('button', { name: 'NOXA' }));
+    expect(screen.getByRole('table', { name: /launch list/i })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getAllByTestId('launch-skeleton-row').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /view token a details/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no launches match/i)).not.toBeInTheDocument();
+
+    await act(async () => resolvePage({ items: [launch({ name: 'Filtered token' })], nextCursor: null }));
+    expect(screen.queryByTestId('launch-skeleton-row')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view filtered token details/i })).toBeInTheDocument();
+  });
+
+  it('closes the other filter menu when opening a filter', async () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={twoChainsTwoPlatforms} error={false} />);
+    const launchpad = screen.getByRole('navigation', { name: /filter by launchpad/i }).querySelector('details')!;
+    const chain = screen.getByRole('navigation', { name: /filter by chain/i }).querySelector('details')!;
+    fireEvent.click(launchpad.querySelector('summary')!);
+    expect(launchpad).toHaveAttribute('open');
+    fireEvent.click(chain.querySelector('summary')!);
+    await waitFor(() => expect(launchpad).not.toHaveAttribute('open'));
+    expect(chain).toHaveAttribute('open');
+    fireEvent.click(launchpad.querySelector('summary')!);
+    await waitFor(() => expect(chain).not.toHaveAttribute('open'));
+    expect(launchpad).toHaveAttribute('open');
+  });
+
+  it('shows three overlapping logos and the remaining count for four selections', () => {
+    const sources: Source[] = [
+      ...twoChainsTwoPlatforms,
+      { id: 'third', chainId: 10, platform: 'third', protocolVersion: 'v1' },
+      { id: 'fourth', chainId: 20, platform: 'fourth', protocolVersion: 'v1' },
+    ];
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={sources} error={false}
+      chainId={[4663, 1, 10, 20]} platform={['pons', 'other', 'third', 'fourth']} />);
+    expect(within(screen.getByRole('navigation', { name: /filter by launchpad/i })).getByText('+1')).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: /filter by chain/i })).getByText('+1')).toBeInTheDocument();
+  });
+
+  it('shows a launchpad name for one selection and only logos for multiple selections', () => {
+    const sources: Source[] = [
+      ...twoChainsTwoPlatforms,
+      { id: 'third', chainId: 10, platform: 'third', protocolVersion: 'v1' },
+    ];
+    const page = { items: [launch()], nextCursor: null };
+    const { rerender } = render(<LaunchList page={page} sources={sources} error={false} chainId={[4663]} platform={['pons']} />);
+    const launchpadSummary = screen.getByRole('navigation', { name: /filter by launchpad/i }).querySelector('summary')!;
+    const chainSummary = screen.getByRole('navigation', { name: /filter by chain/i }).querySelector('summary')!;
+    expect(launchpadSummary).toHaveTextContent('Pons');
+    expect(chainSummary).not.toHaveTextContent('Robinhood Chain');
+
+    rerender(<LaunchList page={page} sources={sources} error={false} chainId={[4663, 1, 10]} platform={['pons', 'other', 'third']} />);
+    expect(launchpadSummary).not.toHaveTextContent('Pons');
+    expect(launchpadSummary.querySelectorAll('span[aria-hidden="true"] > span')).toHaveLength(3);
+    expect(chainSummary.querySelectorAll('span[aria-hidden="true"] > span')).toHaveLength(3);
+  });
+
+  it('does not show a next-page link for the default "all" tab', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: 'cursor-2' }} sources={oneChainOneSource} error={false} />);
+    expect(screen.queryByRole('link', { name: /next page/i })).not.toBeInTheDocument();
   });
 
   it('shows a search box and status filter that submit as a GET form, preserving the current values', () => {

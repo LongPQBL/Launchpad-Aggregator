@@ -47,7 +47,10 @@ describe('AboutSection copy-address control', () => {
       fireEvent.click(screen.getByRole('button', { name: /copy token address/i }));
     });
     expect(writeText).toHaveBeenCalledWith(baseProps.tokenAddress);
-    expect(screen.getByRole('button', { name: 'Copied' })).toBeInTheDocument();
+    const copiedButton = screen.getByRole('button', { name: 'Copied' });
+    expect(copiedButton).toHaveClass('bg-black', 'text-white');
+    expect(copiedButton).toHaveTextContent('0x1111…1111');
+    expect(copiedButton.querySelector('span.bg-green-600')).toHaveClass('h-[14px]', 'w-[14px]');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     setClipboard({ writeText: () => Promise.reject(new Error('denied')) });
@@ -78,6 +81,30 @@ describe('AboutSection copy-address control', () => {
 });
 
 describe('AboutSection website/Twitter link validation', () => {
+  it('shows the address and Explorer controls with dark styling and leading icons', () => {
+    render(<AboutSection {...baseProps} />);
+
+    const copy = screen.getByRole('button', { name: 'Copy token address' });
+    const explorer = screen.getByRole('link', { name: 'Explorer' });
+    for (const control of [copy, explorer]) {
+      expect(control).toHaveClass('bg-black', 'text-white');
+      expect(control.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+  });
+
+  it('shows Website and Twitter links with dark styling and leading icons', () => {
+    render(<AboutSection {...baseProps} websiteUrl="https://example.com" twitterUrl="https://x.com/example" />);
+
+    for (const name of ['Website', 'Twitter']) {
+      const link = screen.getByRole('link', { name });
+      expect(link).toHaveClass('bg-black', 'text-white');
+      expect(link.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    }
+    expect(screen.getByRole('link', { name: 'Website' }).parentElement)
+      .toBe(screen.getByRole('link', { name: 'Twitter' }).parentElement);
+    expect(screen.getByRole('link', { name: 'Website' }).parentElement).toHaveClass('flex-nowrap');
+  });
+
   it('hides the website pill for an invalid URL and shows it for a valid one', () => {
     const { rerender } = render(<AboutSection {...baseProps} websiteUrl="javascript:alert(1)" />);
     expect(screen.queryByRole('link', { name: 'Website' })).not.toBeInTheDocument();

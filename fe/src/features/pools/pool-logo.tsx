@@ -12,17 +12,18 @@ export interface PoolLogoProps {
   chainId?: number;
 }
 
-// Each half renders the full 8x8 image/placeholder, then a clip-path cuts away the other side —
-// not two overlapping circles — so the two halves tile into one clean split circle (matches
-// Uniswap's pool-icon convention). Chain badge overlay matches TokenLogo's own placement/sizing.
+// token0 renders in front (caller passes whichever side is currently "displayed" first, so
+// flipping the pair swaps which logo sits on top), token1 behind and offset right — two full
+// circles stacked like a coin pile (Uniswap's pair-icon convention), not a split circle. The ring
+// around token0 is page-background colored so its edge reads cleanly against token1 behind it.
 export function PoolLogo({ token0, token1, chainId }: PoolLogoProps) {
   return (
-    <span className="relative inline-flex h-8 w-8 shrink-0 overflow-hidden rounded-full">
-      <span className="absolute inset-0 overflow-hidden" style={{ clipPath: 'inset(0 50% 0 0)' }}>
-        <TokenImage logoUri={token0.logoUri} symbol={token0.symbol} className="h-8 w-8" />
+    <span className="relative inline-flex h-12 w-[72px] shrink-0">
+      <span className="absolute left-6 top-0 h-12 w-12 overflow-hidden rounded-full">
+        <TokenImage logoUri={token1.logoUri} symbol={token1.symbol} className="h-12 w-12" />
       </span>
-      <span className="absolute inset-0 overflow-hidden" style={{ clipPath: 'inset(0 0 0 50%)' }}>
-        <TokenImage logoUri={token1.logoUri} symbol={token1.symbol} className="h-8 w-8" />
+      <span className="absolute left-0 top-0 h-12 w-12 overflow-hidden rounded-full ring-2 ring-card">
+        <TokenImage logoUri={token0.logoUri} symbol={token0.symbol} className="h-12 w-12" />
       </span>
       {chainId === 4663 && (
         <Image
@@ -31,7 +32,7 @@ export function PoolLogo({ token0, token1, chainId }: PoolLogoProps) {
           width={16}
           height={16}
           unoptimized
-          className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card bg-card"
+          className="absolute -bottom-0.5 -right-0.5 z-10 h-4 w-4 rounded-full border-2 border-card bg-card"
         />
       )}
     </span>

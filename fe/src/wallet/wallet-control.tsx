@@ -1,9 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { useAccount, useConnect, useConnectors, useDisconnect, useSwitchChain } from 'wagmi';
 import { Button } from '@/components/ui/button';
+import { Dialog } from '@/components/ui/dialog';
 import { robinhoodChain } from './config';
+
+const walletOptions = [
+  { name: 'MetaMask', key: 'metamask' },
+  { name: 'Phantom', key: 'phantom' },
+] as const;
+
+function WalletLogo({ wallet }: { wallet: (typeof walletOptions)[number]['key'] }) {
+  const src = wallet === 'metamask' ? '/images/wallets/metamask.png' : '/images/wallets/phantom.png';
+  return <Image aria-hidden="true" src={src} alt="" width={32} height={32} className="size-8 shrink-0 rounded object-contain" />;
+}
 
 function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -34,7 +46,7 @@ export function WalletControl() {
   if (isConnected && address) {
     return (
       <div className="flex flex-wrap items-center justify-end gap-2 text-sm">
-        <span className="font-mono" title={address}>{shortAddress(address)}</span>
+        <span title={address}>{shortAddress(address)}</span>
         {chainId !== robinhoodChain.id && (
           <Button type="button" variant="outline" size="sm" disabled={switchPending}
             onClick={() => switchChain({ chainId: robinhoodChain.id })}>
@@ -48,27 +60,32 @@ export function WalletControl() {
   }
 
   const available = connectors.filter((connector) => readyUids?.has(connector.uid));
+  const connectorForWallet = (wallet: (typeof walletOptions)[number]) =>
+    available.find((connector) => connector.name.toLowerCase().includes(wallet.key));
   return (
     <div className="relative text-sm">
-      <Button type="button" aria-expanded={open} onClick={() => setOpen(!open)} disabled={connectPending}>
-        {connectPending ? 'Connecting…' : 'Connect wallet'}
+      <Button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} disabled={connectPending}
+        className="cursor-pointer bg-[#ccff00] text-[#151515] hover:bg-[#bff000]">
+        {connectPending ? 'Connecting…' : 'Connect'}
       </Button>
-      {open && (
-        <div role="group" aria-label="Browser wallets"
-          className="absolute right-0 z-20 mt-2 min-w-52 rounded-md border border-border bg-card p-2 shadow-lg">
-          {readyUids === null
-            ? <p className="px-2 py-1 text-muted-foreground">Looking for browser wallets…</p>
-            : available.length === 0
-              ? <p className="px-2 py-1 text-muted-foreground">No browser wallet detected. Install a browser wallet to connect.</p>
-              : available.map((connector) => (
-                <Button key={connector.uid} type="button" variant="ghost" className="w-full justify-start"
-                  disabled={connectPending} onClick={() => connect({ connector }, { onSuccess: () => setOpen(false) })}>
-                  {connector.name}
-                </Button>
-              ))}
-          {connectError && <p role="alert" className="px-2 py-1 text-destructive">{connectError.message}</p>}
+      <Dialog open={open} onClose={() => setOpen(false)} title="Connect a wallet">
+        <div className="grid gap-2">
+          {walletOptions.map((wallet) => {
+            const connector = connectorForWallet(wallet);
+            return (
+              <Button key={wallet.key} type="button" variant="outline" className="h-14 w-full cursor-pointer justify-start gap-3 px-3"
+                disabled={!connector || connectPending || readyUids === null}
+                onClick={() => connector && connect({ connector }, { onSuccess: () => setOpen(false) })}>
+                <WalletLogo wallet={wallet.key} />
+                <span>{wallet.name}</span>
+                {!connector && readyUids !== null && <span className="ml-auto text-xs text-muted-foreground">Not detected</span>}
+              </Button>
+            );
+          })}
         </div>
-      )}
+        {readyUids === null && <p className="mt-2 text-xs text-muted-foreground">Looking for wallets…</p>}
+        {connectError && <p role="alert" className="mt-3 text-sm text-destructive">{connectError.message}</p>}
+      </Dialog>
     </div>
   );
 }

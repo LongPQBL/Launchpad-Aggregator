@@ -18,6 +18,8 @@ export function LiveRefreshIndicator({ resourceKeys, retryWhilePending }: LiveRe
   const router = useRouter();
   const status = useLiveRefresh(resourceKeys, () => router.refresh(), { retryWhilePending });
 
+  if (status === 'live') return null;
+
   return (
     <p role="status" className="text-xs text-muted-foreground">
       {STATUS_LABELS[status]}

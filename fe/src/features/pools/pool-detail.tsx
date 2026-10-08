@@ -1,90 +1,124 @@
-import { launchHref, poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
-import { chainExplorerBase, chainName } from '@/api/chains';
-import { formatPercent, formatPrice, formatUsd } from '@/api/format';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
+import { chainExplorerBase, chainIcon, chainName } from '@/api/chains';
+import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
+import Image from 'next/image';
 import Link from 'next/link';
-import { SwapPanel } from '@/trading/swap-panel';
-import { V4SwapPanel } from '@/trading/v4-swap-panel';
+import { CopyableTokenAddress } from '@/features/launch/copyable-token-address';
 import { PoolChart } from './pool-chart';
 import { PoolLogo } from './pool-logo';
-import { poolAge, short as symbol } from './pool-list';
+import { PoolStats } from './pool-stats';
+import { PoolLinks } from './pool-links';
+import { PoolTransactionList } from './pool-transaction-list';
+import { SwapTrigger } from './swap-trigger';
+import { short as symbol } from './pool-format';
 
 export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null }) {
-  const other = pool.displayedToken === pool.currency0 ? pool.currency1 : pool.currency0;
-  const otherSymbol = pool.displayedToken === pool.currency0 ? pool.currency1Symbol : pool.currency0Symbol;
+  const displayedIsCurrency0 = pool.displayedToken === pool.currency0;
+  const other = displayedIsCurrency0 ? pool.currency1 : pool.currency0;
+  const otherSymbol = displayedIsCurrency0 ? pool.currency1Symbol : pool.currency0Symbol;
+  const otherLogoUri = displayedIsCurrency0 ? pool.currency1LogoUri : pool.currency0LogoUri;
+  const displayedSymbol = displayedIsCurrency0 ? pool.currency0Symbol : pool.currency1Symbol;
+  const displayedLogoUri = displayedIsCurrency0 ? pool.currency0LogoUri : pool.currency1LogoUri;
+  const displayedDecimals = displayedIsCurrency0 ? pool.currency0Decimals : pool.currency1Decimals;
+  const otherDecimals = displayedIsCurrency0 ? pool.currency1Decimals : pool.currency0Decimals;
   const quote = otherSymbol ?? symbol(other);
   const explorerBase = chainExplorerBase(pool.chainId);
+  // Both the title and the logo stack follow displayedToken's order (not always currency0/
+  // currency1) so the Flip link swaps which token reads first and which logo sits in front,
+  // together — never one without the other.
+  const pairLabel = `${displayedSymbol ?? symbol(pool.displayedToken)} / ${quote}`;
+  const icon = chainIcon(pool.chainId);
   return <article className="space-y-4">
-    <Link href="/pools" className="text-sm underline">← Pools</Link>
-    <Card><CardHeader className="flex-row items-center gap-3">
+    <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-base text-muted-foreground">
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
+          component router-context-free for unit tests, matching launch-detail.tsx's own breadcrumb. */}
+      <a href="/pools">Pools</a>
+      <span aria-hidden="true">›</span>
+      <span className="font-medium text-foreground">{pairLabel}</span>
+    </nav>
+    <Card className="border-0 bg-transparent"><CardHeader className="flex-row items-center gap-3">
       <PoolLogo
-        token0={{ symbol: pool.currency0Symbol ?? symbol(pool.currency0), logoUri: pool.currency0LogoUri }}
-        token1={{ symbol: pool.currency1Symbol ?? symbol(pool.currency1), logoUri: pool.currency1LogoUri }}
+        token0={{ symbol: displayedSymbol ?? symbol(pool.displayedToken), logoUri: displayedLogoUri }}
+        token1={{ symbol: otherSymbol ?? symbol(other), logoUri: otherLogoUri }}
         chainId={pool.chainId}
       />
       <div>
-        <h1 className="text-2xl font-semibold">{pool.currency0Symbol ?? symbol(pool.currency0)} / {pool.currency1Symbol ?? symbol(pool.currency1)}</h1>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-sm text-muted-foreground">{chainName(pool.chainId)}</span>
-          <Badge variant="secondary">{`${pool.protocol.replace('uniswap_', '')} · ${pool.fee / 10_000}%`}</Badge>
-          {pool.ponsDesignated && <span className="text-sm">Pons designated pool</span>}
+        <h1 className="flex items-center gap-2 text-2xl font-semibold">
+          {pairLabel}
+          <Link href={poolHref(pool, other)} aria-label="Flip token order" className="text-muted-foreground hover:text-foreground">
+            <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" className="shrink-0">
+              <path d="M4 3v8.5M4 11.5 1.5 9M4 11.5 6.5 9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M12 13V4.5M12 4.5 9.5 7M12 4.5 14.5 7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </Link>
+        </h1>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+          {icon && <Image src={icon} alt="" width={14} height={14} unoptimized className="h-3.5 w-3.5 rounded-full" />}
+          <span>{chainName(pool.chainId)}</span>
+          <Badge variant="secondary">{pool.protocol.replace('uniswap_', '')}</Badge>
+          <Badge variant="secondary">{pool.fee / 10_000}%</Badge>
+          <CopyableTokenAddress address={pool.poolId} />
+          {pool.ponsDesignated && <span>Pons designated pool</span>}
         </div>
       </div>
-    </CardHeader>
-      <CardContent className="space-y-4"><div className="flex flex-wrap gap-2">
-        <a className="rounded border px-3 py-1" aria-current={pool.displayedToken === pool.currency0 ? 'page' : undefined}
-          href={poolHref(pool, pool.currency0)}>View {pool.currency0Symbol ?? symbol(pool.currency0)}</a>
-        <a className="rounded border px-3 py-1" aria-current={pool.displayedToken === pool.currency1 ? 'page' : undefined}
-          href={poolHref(pool, pool.currency1)}>View {pool.currency1Symbol ?? symbol(pool.currency1)}</a></div>
-      <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
-        <div><dt>Price in {quote}</dt><dd>{formatPrice(pool.priceInQuote, quote)}</dd></div>
-        <div><dt>Price USD</dt><dd>{formatUsd(pool.priceUsd, 1)}</dd></div>
-        <div><dt>24h volume USD</dt><dd>{formatUsd(pool.volume24hUsd, 1)}</dd></div>
-        <div><dt>Liquidity USD</dt><dd>{formatUsd(pool.tvlUsd, 1)}</dd></div>
-        <div><dt>FDV (pool price)</dt><dd>{formatUsd(pool.fdvUsd, 1)}</dd></div>
-        <div><dt>1h change</dt><dd className={cn(formatPercent(pool.change1h).className)}>{formatPercent(pool.change1h).text}</dd></div>
-        <div><dt>1d change</dt><dd className={cn(formatPercent(pool.change1d).className)}>{formatPercent(pool.change1d).text}</dd></div>
-        <div><dt>Coverage</dt><dd>{pool.coverageStatus.replace('_', ' ')}</dd></div>
-        <div><dt>Fee</dt><dd>{pool.fee / 10_000}%</dd></div>
-        {pool.protocol !== 'uniswap_v2' && <div><dt>Tick spacing</dt><dd>{pool.tickSpacing}</dd></div>}
-        {pool.protocol === 'uniswap_v4' && <div><dt>Hook</dt><dd className="break-all font-mono">{pool.hooks}</dd></div>}
-        <div><dt>Created block</dt><dd>{pool.createdBlock}</dd></div>
-        <div><dt>Age</dt><dd>{poolAge(pool.createdTimestamp)}</dd></div>
-        <div><dt>Last trade</dt><dd>{pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</dd></div>
-      </dl>{pool.launchTokenAddress && <a className="underline" href={launchHref(pool.chainId, pool.launchTokenAddress)}>View Pons launch</a>}
-      </CardContent></Card>
-    {/* Swap execution uses Universal Router + Permit2 for both: V3_SWAP_EXACT_IN/PERMIT2_PERMIT
-        commands for V3 pools, V4_SWAP/PERMIT2_PERMIT commands for V4 pools (its shared
-        PoolManager has no per-pool router). Hidden, never guessed, when either currency's
-        decimals is unknown (same convention as launch-detail.tsx's own SwapPanel gate). */}
-    {pool.protocol === 'uniswap_v3' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
-      <Card><CardContent className="pt-6">
-        <SwapPanel
+    </CardHeader></Card>
+
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+      <div className="flex flex-col gap-4">
+        {candles && <PoolChart pool={pool} candles={candles} coverageStatus={pool.coverageStatus} quoteSymbol={quote} tokenSymbol={displayedSymbol} />}
+        <section aria-labelledby="pool-transactions-heading" className="space-y-3">
+          <h2 id="pool-transactions-heading" className="text-2xl font-semibold">Transactions</h2>
+          {trades ? <>
+            <PoolTransactionList
+              trades={trades.items}
+              displayedSymbol={displayedSymbol}
+              otherSymbol={otherSymbol}
+              displayedDecimals={displayedDecimals}
+              otherDecimals={otherDecimals}
+              displayedIsCurrency0={displayedIsCurrency0}
+              explorerBase={explorerBase ?? null}
+            />
+            {trades.nextCursor && <a className="mt-3 block" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</a>}
+          </>
+            : <p role="status">Could not load pool trades.</p>}
+        </section>
+      </div>
+
+      <div className="flex flex-col gap-4">
+        {/* Swap execution uses Universal Router + Permit2 for both: V3_SWAP_EXACT_IN/PERMIT2_PERMIT
+            commands for V3 pools, V4_SWAP/PERMIT2_PERMIT commands for V4 pools (its shared
+            PoolManager has no per-pool router). Hidden, never guessed, when either currency's
+            decimals is unknown (same convention as launch-detail.tsx's own SwapPanel gate). */}
+        {pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
+          <SwapTrigger
+            protocol={pool.protocol as 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'}
+            poolId={pool.poolId as `0x${string}`}
+            tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals, logoUri: pool.currency0LogoUri }}
+            tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals, logoUri: pool.currency1LogoUri }}
+            fee={pool.fee}
+            tickSpacing={pool.tickSpacing}
+            hooks={pool.hooks as `0x${string}`}
+            explorerBase={explorerBase ?? null}
+          />
+        )}
+        <PoolStats
+          protocol={pool.protocol}
           poolAddress={pool.poolId as `0x${string}`}
-          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals, logoUri: pool.currency0LogoUri }}
-          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals, logoUri: pool.currency1LogoUri }}
-          explorerBase={explorerBase ?? null}
+          fee={pool.fee}
+          tvlUsd={pool.tvlUsd}
+          fdvUsd={pool.fdvUsd}
+          volume24hUsd={pool.volume24hUsd}
+          volume24hChange={pool.volume24hChange}
+          tvlChange={pool.tvlChange}
+          createdTimestamp={pool.createdTimestamp}
+          priceInQuote={pool.priceInQuote}
+          poolBalances={pool.poolBalances}
+          displayed={{ address: pool.displayedToken as `0x${string}`, symbol: displayedSymbol, decimals: displayedDecimals }}
+          other={{ address: other as `0x${string}`, symbol: otherSymbol, decimals: otherDecimals }}
         />
-      </CardContent></Card>
-    )}
-    {pool.protocol === 'uniswap_v4' && pool.currency0Decimals !== null && pool.currency1Decimals !== null && (
-      <Card><CardContent className="pt-6">
-        <V4SwapPanel
-          poolKey={{ currency0: pool.currency0 as `0x${string}`, currency1: pool.currency1 as `0x${string}`,
-            fee: pool.fee, tickSpacing: pool.tickSpacing, hooks: pool.hooks as `0x${string}` }}
-          tokenA={{ address: pool.currency0 as `0x${string}`, symbol: pool.currency0Symbol, decimals: pool.currency0Decimals }}
-          tokenB={{ address: pool.currency1 as `0x${string}`, symbol: pool.currency1Symbol, decimals: pool.currency1Decimals }}
-          explorerBase={explorerBase ?? null}
-        />
-      </CardContent></Card>
-    )}
-    {candles && <PoolChart candles={candles} coverageStatus={pool.coverageStatus} quoteSymbol={quote} />}
-    <Card><CardHeader><h2 className="font-semibold">Pool trades</h2></CardHeader><CardContent>
-      {trades ? <><div className="space-y-2 text-sm">{trades.items.map((trade) => <p key={`${trade.txHash}:${trade.logIndex}`}>
-        {new Date(trade.timestamp * 1000).toLocaleString('en-US')} · {trade.side} · {formatUsd(trade.usdValue, 2)} · {trade.usdValueStatus}
-      </p>)}</div>{trades.nextCursor && <a className="mt-3 block underline" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</a>}</>
-        : <p role="status">Could not load pool trades.</p>}</CardContent></Card>
+        <PoolLinks pool={pool} />
+      </div>
+    </div>
   </article>;
 }

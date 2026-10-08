@@ -31,6 +31,26 @@ describe('client', () => {
     expect(requested.searchParams.get('chainId')).toBe('4663');
   });
 
+  it('serializes multiple chain and launchpad choices for the API', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
+    await getLaunches({ chainId: [4663, 1], platform: ['pons', 'other'] });
+    const requested = new URL(String(fetchMock.mock.calls[0]![0]));
+    expect(requested.searchParams.get('chainId')).toBe('4663,1');
+    expect(requested.searchParams.get('platform')).toBe('pons,other');
+  });
+
+  it('uses the public API URL for browser requests', async () => {
+    vi.stubEnv('NEXT_PUBLIC_BE_API_URL', 'http://127.0.0.1:3101');
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
+
+    await getLaunches({ cursor: 'abc' });
+
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(new URL(String(url)).origin).toBe('http://127.0.0.1:3101');
+  });
+
   it('requests launches with search and status query params when provided', async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
@@ -41,6 +61,14 @@ describe('client', () => {
     const requested = new URL(String(url));
     expect(requested.searchParams.get('search')).toBe('demo');
     expect(requested.searchParams.get('status')).toBe('swept');
+  });
+
+  it('sends the numeric sort column and direction to the API', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
+    await getLaunches({ sort: 'change1d', direction: 'asc' });
+    const requested = new URL(String(vi.mocked(fetch).mock.calls[0]![0]));
+    expect(requested.searchParams.get('sort')).toBe('change1d');
+    expect(requested.searchParams.get('direction')).toBe('asc');
   });
 
   it('requests launches without cursor/chainId params when omitted, relying on BE default newest-first order', async () => {
