@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { decodeFunctionData, encodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
+import {
+  CallExecutionError, HttpRequestError, InvalidAddressError, TimeoutError, decodeFunctionData, encodeFunctionData, parseAbi,
+  type Address, type Hex,
+} from 'viem';
 import { curveStateAbi, curveTradeAbi } from './curveAbi';
 import { curveBuyOutput, curveSellOutput, type CurveState } from './curve-guess';
 import {
@@ -11,6 +14,7 @@ import { V4_QUOTER_ADDRESS, v4QuoterAbi } from './v4QuoterAbi';
 import { encodeResult, makeFakeClient, type FakeCallRequest } from './test-support/fake-call-client';
 
 const signal = new AbortController().signal;
+const transport = () => new CallExecutionError(new TimeoutError({ body: {}, url: 'https://rpc.example' }), {});
 const curve = '0x4444444444444444444444444444444444444444' as Address;
 const launched = '0x2222222222222222222222222222222222222222' as Address;
 const quoteToken = '0x5fc5360d0400a0fd4f2af552add042d716f1d168' as Address;
@@ -40,6 +44,17 @@ describe('makeV3ReverseSolve', () => {
     const solve = makeV3ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { tokenIn: launched, tokenOut, fee: 10000 });
     expect(await solve(1n, signal)).toBeNull();
   });
+
+  it('propagates a transport error instead of reading it as "no answer"', async () => {
+    const solve = makeV3ReverseSolve(makeFakeClient(() => { throw transport(); }), { tokenIn: launched, tokenOut, fee: 10000 });
+    await expect(solve(1n, signal)).rejects.toBeInstanceOf(CallExecutionError);
+  });
+
+  it('surfaces an invalid address (a programming error) instead of returning null', async () => {
+    const client = makeFakeClient(() => encodeResult(v3QuoterAbi, 'quoteExactOutputSingle', [1n, 0n, 1, 1n]));
+    const solve = makeV3ReverseSolve(client, { tokenIn: '0xnope' as Address, tokenOut, fee: 10000 });
+    await expect(solve(1n, signal)).rejects.toBeInstanceOf(InvalidAddressError);
+  });
 });
 
 describe('makeV4ReverseSolve', () => {
@@ -60,6 +75,11 @@ describe('makeV4ReverseSolve', () => {
   it('returns null when every simulation reverts', async () => {
     const solve = makeV4ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { poolKey, zeroForOne: true });
     expect(await solve(1000n, signal)).toBeNull();
+  });
+
+  it('propagates a transport error from any probe', async () => {
+    const solve = makeV4ReverseSolve(makeFakeClient(() => { throw transport(); }), { poolKey, zeroForOne: true });
+    await expect(solve(1000n, signal)).rejects.toBeInstanceOf(CallExecutionError);
   });
 });
 
@@ -154,6 +174,21 @@ describe('makeCurveReverseSolve', () => {
     const { client } = curveWorld();
     const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'sell', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
     expect(await solve(1_000_000_000_000_000_000n, signal)).toBeNull(); // 1 ETH out of a curve holding 0.0000479
+  });
+
+  it('propagates a transport error from a simulated trade instead of reading it as a revert', async () => {
+    const { client: world } = curveWorld({ native: true });
+    const client = makeFakeClient((req) => {
+      if (req.to === curve && req.account === SIMULATION_ACCOUNT) throw new HttpRequestError({ url: 'https://rpc.example', status: 503 });
+      return world.call(req);
+    });
+    const solve = makeCurveReverseSolve(client, { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: '0x0000000000000000000000000000000000000000', isNativeQuote: true });
+    await expect(solve(588905085539402016855496n, signal)).rejects.toBeInstanceOf(HttpRequestError);
+  });
+
+  it('propagates a transport error from slot discovery (ERC20-quoted buy)', async () => {
+    const solve = makeCurveReverseSolve(makeFakeClient(() => { throw transport(); }), { curveAddress: curve, direction: 'buy', tokenAddress: launched, quoteAssetAddress: quoteToken, isNativeQuote: false });
+    await expect(solve(1000n, signal)).rejects.toBeInstanceOf(CallExecutionError);
   });
 
   it('still works when the curve state cannot be read (no guess, wide search)', async () => {

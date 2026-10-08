@@ -1,4 +1,7 @@
+import { isNoAnswerError } from './rpc-errors';
+
 // Exact-input quote: how much comes out for `amountIn` going in. `null` = the simulation reverted.
+// A thrown transport/programming error is NOT a revert: it rejects the whole solve (see below).
 export type QuoteFn = (amountIn: bigint, signal: AbortSignal) => Promise<bigint | null>;
 
 export const SOLVER_MAX_ROUNDS = 12;
@@ -25,7 +28,8 @@ function wideGrid(start: bigint): bigint[] {
 // Inverts a monotonic exact-input quote: finds (approximately) the smallest X with
 // quoteFn(X) >= targetOut, so a swap executed as exact-input with X yields at least targetOut
 // before slippage. Execution never changes — this only derives X for the Sell card when the user
-// typed in the Buy card. Returns null (never a guess) when no X is found.
+// typed in the Buy card. Returns null (never a guess) when no X is found; rejects when a probe
+// fails for a reason other than a revert (transport or programming error).
 export async function solveInputForOutput(
   quoteFn: QuoteFn,
   targetOut: bigint,
@@ -49,8 +53,16 @@ export async function solveInputForOutput(
     if (signal.aborted) return null;
     const unique = [...new Set(points)].filter((p) => p > 0n).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     if (unique.length === 0) return null;
+    // A thrown revert-like error counts as null. A transport error (timeout, HTTP) or a programming
+    // error rejects the whole solve: classifying it as "too large" could collapse the bracket below
+    // the real answer and return an oversized input from an earlier round.
     const results = await Promise.all(unique.map(async (x) => {
-      try { return await quoteFn(x, signal); } catch { return null; }
+      try {
+        return await quoteFn(x, signal);
+      } catch (error) {
+        if (isNoAnswerError(error)) return null;
+        throw error;
+      }
     }));
     if (signal.aborted) return null;
 
@@ -91,7 +103,11 @@ export async function solveInputForOutput(
 
     const width = hi - lo;
     const tolerance = lo / 10_000n > 1n ? lo / 10_000n : 1n;
-    if (width <= tolerance) return best;
+    if (width <= tolerance) {
+      // A revert below an input already known to be enough contradicts monotonicity: no answer.
+      if (tooLarge !== null && best !== null && tooLarge < best) return null;
+      return best;
+    }
 
     const divisor = BigInt(SOLVER_REFINE_POINTS + 1);
     points = Array.from({ length: SOLVER_REFINE_POINTS }, (_, j) => lo + (width * BigInt(j + 1)) / divisor);

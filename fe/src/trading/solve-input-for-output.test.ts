@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { HttpRequestError } from 'viem';
 import { SOLVER_MAX_ROUNDS, SOLVER_WIDE_POINTS, solveInputForOutput, type QuoteFn } from './solve-input-for-output';
 
 const never = new AbortController().signal;
@@ -55,8 +56,36 @@ describe('solveInputForOutput', () => {
     expect(fn.mock.calls.length).toBeLessThanOrEqual(2 * SOLVER_WIDE_POINTS);
   });
 
-  it('treats a throwing quote function as a failed probe', async () => {
-    expect(await solveInputForOutput(async () => { throw new Error('rpc down'); }, 1000n)).toBeNull();
+  it('treats a throwing quote function (a plain Error, i.e. a revert) as a failed probe', async () => {
+    expect(await solveInputForOutput(async () => { throw new Error('revert'); }, 1000n)).toBeNull();
+  });
+
+  // Target 3e18 on a linear quote: X* = 1e18. The first wide round brackets it as (6.9e16, 1.1e18];
+  // a refine probe just below X* then times out. If that were read as "too large", the bracket
+  // would collapse below X* and the solver would return the ~10% oversized 1.1e18 from round one.
+  it('rejects (never returns an oversized input) when a probe hits a transport error', async () => {
+    let failed = false;
+    const quote: QuoteFn = async (x) => {
+      if (!failed && x > 5n * 10n ** 17n && x < 10n ** 18n) {
+        failed = true;
+        throw new HttpRequestError({ url: 'https://rpc.example', status: 504 });
+      }
+      return x * 3n;
+    };
+    await expect(solveInputForOutput(quote, 3n * 10n ** 18n)).rejects.toBeInstanceOf(HttpRequestError);
+    expect(failed).toBe(true);
+  });
+
+  it('rejects on a programming error instead of reading it as "no answer"', async () => {
+    await expect(solveInputForOutput(async () => { throw new TypeError('bad'); }, 1000n)).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it('returns null (not an oversized input) when observations are non-monotone', async () => {
+    // Same bracket as above, but the quote REVERTS between 5e17 and 9e17 although smaller inputs
+    // succeed: a revert below the known-enough input contradicts monotonicity, so there is no
+    // trustworthy answer.
+    const quote: QuoteFn = async (x) => (x > 5n * 10n ** 17n && x < 9n * 10n ** 17n ? null : x * 3n);
+    expect(await solveInputForOutput(quote, 3n * 10n ** 18n)).toBeNull();
   });
 
   it('returns null for a zero or negative target without calling the quote function', async () => {
