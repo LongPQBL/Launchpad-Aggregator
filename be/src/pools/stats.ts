@@ -21,6 +21,7 @@ const MAX_RECENT_TRADES = 10_000;
 
 export interface PoolKey { chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string }
 export interface PoolStats {
+  poolBalances: PoolBalanceSnapshot | null;
   volume24hUsd: string | null;
   priceInQuote: string | null;
   priceUsd: string | null;
@@ -30,6 +31,11 @@ export interface PoolStats {
   change1d: string | null;
   coverageStatus: string;
   lastTradeTimestamp: number | null;
+}
+export interface PoolBalanceSnapshot {
+  displayedAmountRaw: string;
+  otherAmountRaw: string;
+  priceInQuote: string;
 }
 export interface PoolTradeResponse {
   txHash: string; logIndex: number; blockNumber: string; timestamp: number; traderAddress: string;
@@ -119,9 +125,13 @@ export async function assetDecimals(client: UsdPriceClient | undefined, address:
   } catch { return null; }
 }
 
-async function poolTvlUsd(client: UsdPriceClient | undefined, catalog: PoolRow, displayedIsCurrency0: boolean,
-  displayedDecimals: number | null, quoteDecimals: number | null, quoteUsd: number | null): Promise<string | null> {
-  if (!client?.getBlockNumber || displayedDecimals === null || quoteDecimals === null || quoteUsd === null) return null;
+async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: PoolRow, displayedIsCurrency0: boolean,
+  displayedDecimals: number | null, quoteDecimals: number | null, quoteUsd: number | null): Promise<{
+    poolBalances: PoolBalanceSnapshot | null; tvlUsd: string | null;
+  }> {
+  if (!client?.getBlockNumber || displayedDecimals === null || quoteDecimals === null) {
+    return { poolBalances: null, tvlUsd: null };
+  }
   try {
     const blockNumber = await client.getBlockNumber();
     const result = await client.readContract({ address: RESERVES_LENS, abi: lensAbi, functionName: 'getPoolTVL',
@@ -132,12 +142,21 @@ async function poolTvlUsd(client: UsdPriceClient | undefined, catalog: PoolRow, 
       || !('sqrtPriceX96' in result) || !('hasCustomAccounting' in result)
       || typeof result.coreAmount0 !== 'bigint' || typeof result.coreAmount1 !== 'bigint'
       || typeof result.sqrtPriceX96 !== 'bigint' || result.coreAmount0 < 0n || result.coreAmount1 < 0n
-      || result.sqrtPriceX96 <= 0n || result.hasCustomAccounting !== false) return null;
-    return calculateTvlUsd({ tokenRaw: displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1,
+      || result.sqrtPriceX96 <= 0n || result.hasCustomAccounting !== false) return { poolBalances: null, tvlUsd: null };
+    const priceInQuote = poolPriceInQuote(result.sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0);
+    const poolBalances = priceInQuote === null ? null : {
+      displayedAmountRaw: (displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1).toString(),
+      otherAmountRaw: (displayedIsCurrency0 ? result.coreAmount1 : result.coreAmount0).toString(),
+      priceInQuote,
+    };
+    const tvlUsd = quoteUsd === null ? null : calculateTvlUsd({
+      tokenRaw: displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1,
       quoteRaw: displayedIsCurrency0 ? result.coreAmount1 : result.coreAmount0,
       blockNumber, basis: 'pool_principal', sqrtPriceX96: result.sqrtPriceX96,
-      tokenIsCurrency0: displayedIsCurrency0 }, quoteDecimals, displayedDecimals, quoteUsd);
-  } catch { return null; }
+      tokenIsCurrency0: displayedIsCurrency0,
+    }, quoteDecimals, displayedDecimals, quoteUsd);
+    return { poolBalances, tvlUsd };
+  } catch { return { poolBalances: null, tvlUsd: null }; }
 }
 
 /** Read only this pool's swaps. An unpriced positive trade makes 24h USD volume unavailable. */
@@ -179,8 +198,10 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const fdvUsd = supply !== null && displayedDecimals !== null
     ? computeFdvUsd(supply, displayedDecimals, priceRational?.numerator ?? null, priceRational?.denominator ?? null,
       currentQuoteUsd?.priceUsd ?? null) : null;
-  const tvlUsd = key.protocol === 'uniswap_v4' ? await poolTvlUsd(options.rpcClient, catalog,
-    displayedIsCurrency0, displayedDecimals, quoteDecimals, currentQuoteUsd?.priceUsd ?? null) : null;
+  const poolSnapshot = key.protocol === 'uniswap_v4'
+    ? await readPoolSnapshot(options.rpcClient, catalog, displayedIsCurrency0, displayedDecimals, quoteDecimals,
+      currentQuoteUsd?.priceUsd ?? null)
+    : { poolBalances: null, tvlUsd: null };
 
   let volume24hUsd: string | null = complete ? '0' : null;
   if (complete && rows.length > 0) {
@@ -216,8 +237,9 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
       BigInt(row.sqrt_price_x96), displayedDecimals, quoteDecimals, displayedIsCurrency0),
     })).filter((row): row is { timestamp: number; price: string } => row.price !== null) : [];
   return {
+    poolBalances: poolSnapshot.poolBalances,
     volume24hUsd, priceInQuote: complete ? priceInQuote : null, priceUsd: complete ? priceUsd : null,
-    fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? tvlUsd : null,
+    fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? poolSnapshot.tvlUsd : null,
     change1h: complete ? computePriceChange(pricePoints, asOf, 3600) : null,
     change1d: complete ? computePriceChange(pricePoints, asOf, 86400) : null,
     coverageStatus: catalog.coverage_status, lastTradeTimestamp: last ? Number(last.timestamp) : null,

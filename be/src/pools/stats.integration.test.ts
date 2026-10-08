@@ -24,7 +24,7 @@ const rpcClient = {
     if (functionName === 'totalSupply') return 1000n * 10n ** 18n;
     if (functionName === 'latestRoundData') return [1n, 400_000_000n, 0n, 4000n, 1n];
     if (functionName === 'getPoolTVL') return {
-      coreAmount0: 10n ** 18n, coreAmount1: 10n ** 18n, sqrtPriceX96: 2n ** 96n,
+      coreAmount0: 3n * 10n ** 18n, coreAmount1: 2n * 10n ** 18n, sqrtPriceX96: 2n ** 96n,
       hasCustomAccounting: false,
     };
     throw new Error(`Unexpected ${functionName}`);
@@ -66,9 +66,42 @@ describe('readPoolStats', () => {
     expect(statsA.priceInQuote).toBe('1');
     expect(statsA.priceUsd).toBe('4');
     expect(statsA.fdvUsd).toBe('4000');
-    expect(statsA.tvlUsd).toBe('8');
+    expect(statsA.tvlUsd).toBe('20');
+    expect(statsA.poolBalances).toEqual({ displayedAmountRaw: '3000000000000000000',
+      otherAmountRaw: '2000000000000000000', priceInQuote: '1' });
     const statsB = await readPoolStats(pool, key, b, 4000, { rpcClient });
     expect(statsB.priceInQuote).toBe('1');
+    expect(statsB.poolBalances).toEqual({ displayedAmountRaw: '2000000000000000000',
+      otherAmountRaw: '3000000000000000000', priceInQuote: '1' });
+  });
+
+  it('returns no pool balance snapshot when the Lens reports custom accounting', async () => {
+    const customAccountingClient = {
+      ...rpcClient,
+      async readContract({ functionName, address }: { functionName: string; address: string }) {
+        if (functionName === 'getPoolTVL') return {
+          coreAmount0: 3n * 10n ** 18n, coreAmount1: 2n * 10n ** 18n, sqrtPriceX96: 2n ** 96n,
+          hasCustomAccounting: true,
+        };
+        return rpcClient.readContract({ functionName, address });
+      },
+    };
+    const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: customAccountingClient });
+    expect(stats.poolBalances).toBeNull();
+    expect(stats.tvlUsd).toBeNull();
+  });
+
+  it('returns no pool balance snapshot when the Lens read fails', async () => {
+    const failingLensClient = {
+      ...rpcClient,
+      async readContract({ functionName, address }: { functionName: string; address: string }) {
+        if (functionName === 'getPoolTVL') throw new Error('Lens unavailable');
+        return rpcClient.readContract({ functionName, address });
+      },
+    };
+    const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: failingLensClient });
+    expect(stats.poolBalances).toBeNull();
+    expect(stats.tvlUsd).toBeNull();
   });
 
   it('labels side using the same sign convention as the official V4 decoder (be/src/launchpads/pons/v2/v4Swaps.ts) — token amount negative means the trader gave the token away, a sell', async () => {
