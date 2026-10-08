@@ -15,3 +15,11 @@ export const curveTradeAbi = parseAbi([
   'error CurveGraduated()',
   'error UnexpectedNativeValue()',
 ]);
+
+// Read-only curve state used to compute a starting guess for the reverse quote. quoteReserve()
+// and tokenReserve() are the virtual reserves (they equal getReserves()'s two values on chain 4663).
+export const curveStateAbi = parseAbi([
+  'function quoteReserve() view returns (uint256)',
+  'function tokenReserve() view returns (uint256)',
+  'function feeBps() view returns (uint256)',
+]);
