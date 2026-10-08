@@ -10,9 +10,10 @@ describe('parseSnapshotConfig', () => {
     expect(() => parseSnapshotConfig({ POOL_TVL_SNAPSHOT_RETENTION_HOURS: 'abc' })).toThrow(/>= 26/);
     expect(parseSnapshotConfig({ POOL_TVL_SNAPSHOT_RETENTION_HOURS: '26' }).retentionHours).toBe(26);
   });
-  it('refuses an interval outside 60-14400s so a snapshot always falls inside the +-2h window', () => {
+  it('refuses an interval outside 60-10800s so a snapshot always falls inside the +-2h window', () => {
     expect(() => parseSnapshotConfig({ POOL_TVL_SNAPSHOT_INTERVAL_SECONDS: '30' })).toThrow(/60/);
-    expect(() => parseSnapshotConfig({ POOL_TVL_SNAPSHOT_INTERVAL_SECONDS: '20000' })).toThrow(/14400/);
+    expect(() => parseSnapshotConfig({ POOL_TVL_SNAPSHOT_INTERVAL_SECONDS: '14400' })).toThrow(/10800/);
+    expect(parseSnapshotConfig({ POOL_TVL_SNAPSHOT_INTERVAL_SECONDS: '10800' }).intervalSeconds).toBe(10800);
     expect(() => parseSnapshotConfig({ POOL_TVL_SNAPSHOT_INTERVAL_SECONDS: '1.5' })).toThrow();
   });
 });

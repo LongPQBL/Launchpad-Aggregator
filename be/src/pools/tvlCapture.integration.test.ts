@@ -20,13 +20,14 @@ const poolId = keccak256(encodeAbiParameters(
 const tx = (digit: string) => `0x${digit.repeat(64)}`;
 const now = 4000;
 
+const lensCalls: number[] = [];
 function clientWith(lens: unknown) {
   return {
     async getBlockNumber() { return 300n; },
-    async readContract({ functionName, address }: { functionName: string; address: string }) {
+    async readContract({ functionName, address, args }: { functionName: string; address: string; args?: readonly unknown[] }) {
       if (functionName === 'decimals') return address.toLowerCase() === feed ? 8 : 18;
       if (functionName === 'latestRoundData') return [1n, 400_000_000n, 0n, 4000n, 1n];
-      if (functionName === 'getPoolTVL') { if (lens instanceof Error) throw lens; return lens; }
+      if (functionName === 'getPoolTVL') { lensCalls.push((args?.[1] as { fee: number }).fee); if (lens instanceof Error) throw lens; return lens; }
       throw new Error(`Unexpected ${functionName}`);
     },
   };
@@ -47,7 +48,7 @@ beforeAll(async () => {
     VALUES ($1,$2,$3,'test','verified',now()) ON CONFLICT (chain_id,quote_asset_address) DO UPDATE SET
       feed_address=EXCLUDED.feed_address,verification_status='verified'`, [chainId, b, feed]);
 });
-beforeEach(() => { __resetUsdPriceCacheForTests(); });
+beforeEach(() => { __resetUsdPriceCacheForTests(); lensCalls.length = 0; });
 afterEach(async () => { await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]); });
 afterAll(async () => {
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, poolId]);
@@ -69,6 +70,25 @@ describe('captureTvlSnapshots', () => {
     await captureTvlSnapshots(pool, clientWith({ ...goodLens, hasCustomAccounting: true }), now);
     await captureTvlSnapshots(pool, clientWith({ ...goodLens, sqrtPriceX96: 0n }), now);
     expect((await rows()).rows).toHaveLength(0);
+  });
+});
+
+describe('captureTvlSnapshots chain scope', () => {
+  it('only reads pools on the chain the worker\'s RPC client serves', async () => {
+    const otherChainPoolId = tx('9');
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (1,'uniswap_v4',$1,$2,$3,500,10,$4,99,$5,$6,0,true,'caught_up') ON CONFLICT DO NOTHING`, [otherChainPoolId, a, b, hook, tx('1'), tx('2')]);
+    await pool.query(`INSERT INTO quote_usd_feeds (chain_id,quote_asset_address,feed_address,discovery_source,verification_status,last_checked_at)
+      VALUES (1,$1,$2,'test','verified',now()) ON CONFLICT (chain_id,quote_asset_address) DO NOTHING`, [b, feed]);
+    try {
+      await captureTvlSnapshots(pool, clientWith(goodLens), now);
+      expect(lensCalls).toContain(3000);
+      expect(lensCalls).not.toContain(500);
+    } finally {
+      await pool.query('DELETE FROM pool_catalog WHERE chain_id=1 AND pool_id=$1', [otherChainPoolId]);
+      await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id=1 AND quote_asset_address=$1', [b]);
+    }
   });
 });
 

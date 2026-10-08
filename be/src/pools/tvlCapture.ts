@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { robinhood } from '../chains/robinhood.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
@@ -8,7 +9,9 @@ import { insertTvlSnapshot, pruneTvlSnapshots } from './tvlSnapshots.js';
 
 export const MIN_RETENTION_HOURS = 26;
 const MIN_INTERVAL_SECONDS = 60;
-const MAX_INTERVAL_SECONDS = 14_400;
+// Spacing is the interval plus the cycle's own duration, so it must stay well under the 4h-wide (+-2h)
+// comparison window or a read can find no snapshot.
+const MAX_INTERVAL_SECONDS = 10_800;
 
 export interface SnapshotConfig { intervalSeconds: number; retentionHours: number }
 
@@ -52,12 +55,12 @@ async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, n
   return true;
 }
 
-/** One pass over every verified V4 pool. A pool that cannot be read or priced is skipped, never stored as a guess. */
+/** One pass over every verified V4 pool on the chain this worker's RPC client serves (Robinhood). A pool that cannot be read or priced is skipped, never stored as a guess. */
 export async function captureTvlSnapshots(pool: Pool, client: UsdPriceClient, nowSeconds: number,
   log: (message: string, error: unknown) => void = (message, error) => console.error(message, error),
 ): Promise<{ captured: number; skipped: number }> {
   const pools = (await pool.query(`SELECT chain_id, pool_id, currency0, currency1, fee, tick_spacing, hooks
-    FROM pool_catalog WHERE protocol='uniswap_v4' AND verified=true`)).rows as CatalogRow[];
+    FROM pool_catalog WHERE protocol='uniswap_v4' AND verified=true AND chain_id=$1`, [robinhood.id])).rows as CatalogRow[];
   let captured = 0;
   let skipped = 0;
   for (const row of pools) {

@@ -132,7 +132,7 @@ npm run -w be pools:tvl-snapshots:worker
 ```
 
 Cần `DATABASE_URL` của app DB và `RH_HTTP_RPC_URL`. Tùy chọn: `POOL_TVL_SNAPSHOT_INTERVAL_SECONDS`
-(mặc định 3600, trong khoảng 60–14400) và `POOL_TVL_SNAPSHOT_RETENTION_HOURS` (mặc định 168,
+(mặc định 3600, trong khoảng 60–10800) và `POOL_TVL_SNAPSHOT_RETENTION_HOURS` (mặc định 168,
 tối thiểu 26; snapshot cũ hơn mức này bị xoá sau mỗi lượt chụp). Trong khoảng 24h đầu sau khi
 worker bắt đầu chạy, `%` TVL hiển thị "—" vì chưa có snapshot cũ để so; đó là bình thường.
 
