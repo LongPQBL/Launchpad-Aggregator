@@ -32,6 +32,7 @@
     "mode:test": "bash ../scripts/mode.sh test",
     "mode:prod": "bash ../scripts/mode.sh prod",
     "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts",
+    "pools:tvl-snapshots:worker": "tsx --env-file-if-exists=.env src/cli/runPoolTvlSnapshotWorker.ts",
     "pools:parity": "tsx --env-file-if-exists=.env src/cli/probePoolSources.ts"
   },
   "dependencies": {
