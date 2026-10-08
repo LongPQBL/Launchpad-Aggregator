@@ -2,6 +2,7 @@ import {
   decodeFunctionResult, encodeAbiParameters, encodeFunctionData, keccak256, numberToHex, pad, parseAbi,
   type Address, type Hex, type StateOverride,
 } from 'viem';
+import { isNoAnswerError } from './rpc-errors';
 
 // A fixed address used only inside eth_call simulations: it is given a balance and an allowance
 // by state override, so the reverse quote never depends on the connected wallet's own state.
@@ -44,16 +45,19 @@ const word = (value: bigint): Hex => pad(numberToHex(value), { size: 32 });
 
 // Write a probe value into a candidate slot and read it back through the token's OWN view
 // function: if the view returns the probe, that slot is where the token keeps this value.
+// A revert, an empty or an undecodable result means "not this slot" (false). A transport failure
+// (timeout, HTTP error) or a programming error is NOT an answer: it is rethrown, so discovery
+// rejects and its result is never cached (see discoverErc20Layouts).
 async function probe(
   client: CallClient,
   token: Address,
   functionName: 'balanceOf' | 'allowance',
   slot: Hex,
 ): Promise<boolean> {
+  const data = functionName === 'balanceOf'
+    ? encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT] })
+    : encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT, PROBE_SPENDER] });
   try {
-    const data = functionName === 'balanceOf'
-      ? encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT] })
-      : encodeFunctionData({ abi: erc20ProbeAbi, functionName, args: [SIMULATION_ACCOUNT, PROBE_SPENDER] });
     const { data: out } = await client.call({
       to: token,
       data,
@@ -61,8 +65,9 @@ async function probe(
     });
     if (!out) return false;
     return decodeFunctionResult({ abi: erc20ProbeAbi, functionName, data: out }) === PROBE_VALUE;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isNoAnswerError(error)) return false;
+    throw error;
   }
 }
 
@@ -91,13 +96,18 @@ async function discover(client: CallClient, token: Address): Promise<Erc20Layout
 }
 
 // One chain only (Robinhood Chain, 4663), so the token address alone is a sufficient cache key.
+// Only a completed discovery is cached (including a genuine "unsupported layout" null result). A
+// rejected one (transport/programming error) is evicted so the next call retries; callers treat a
+// rejection as "no answer right now".
 const cache = new Map<string, Promise<Erc20Layouts>>();
 export function discoverErc20Layouts(client: CallClient, token: Address): Promise<Erc20Layouts> {
   const key = token.toLowerCase();
   let hit = cache.get(key);
   if (!hit) {
-    hit = discover(client, token);
-    cache.set(key, hit);
+    const pending = discover(client, token);
+    cache.set(key, pending);
+    pending.catch(() => { if (cache.get(key) === pending) cache.delete(key); });
+    hit = pending;
   }
   return hit;
 }

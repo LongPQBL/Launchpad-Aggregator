@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { decodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
+import { HttpRequestError, InvalidAddressError, decodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
 import {
   MAX_UINT256, SIMULATION_ACCOUNT, allowanceSlotAt, balanceSlotAt, clearErc20LayoutCache,
   discoverErc20Layouts, nativeBalanceOverride, spendStateOverride,
@@ -64,6 +64,32 @@ describe('discoverErc20Layouts', () => {
   it('treats a failing node as "not found"', async () => {
     const client = makeFakeClient(() => { throw new Error('rpc down'); });
     expect(await discoverErc20Layouts(client, token)).toEqual({ balanceSlot: null, allowanceSlot: null });
+  });
+
+  it('does not cache a transport failure: a later call retries and discovers the slots', async () => {
+    const healthy = fakeToken(1n, 3n);
+    let failed = false;
+    const client = makeFakeClient((req: FakeCallRequest) => {
+      if (!failed) { failed = true; throw new HttpRequestError({ url: 'https://rpc.example', status: 503 }); }
+      return healthy.call(req);
+    });
+    await expect(discoverErc20Layouts(client, token)).rejects.toBeInstanceOf(HttpRequestError);
+    const layouts = await discoverErc20Layouts(client, token);
+    expect(layouts.balanceSlot!(SIMULATION_ACCOUNT)).toBe(balanceSlotAt(1n)(SIMULATION_ACCOUNT));
+    expect(layouts.allowanceSlot!(SIMULATION_ACCOUNT, token)).toBe(allowanceSlotAt(3n)(SIMULATION_ACCOUNT, token));
+  });
+
+  it('rethrows a programming error instead of reading it as "slot not found"', async () => {
+    const client = makeFakeClient(() => { throw new InvalidAddressError({ address: '0xnope' }); });
+    await expect(discoverErc20Layouts(client, token)).rejects.toBeInstanceOf(InvalidAddressError);
+  });
+
+  it('still caches a genuinely unsupported layout as null (no second round of calls)', async () => {
+    const client = fakeToken(500n, 501n);
+    expect(await discoverErc20Layouts(client, token)).toEqual({ balanceSlot: null, allowanceSlot: null });
+    const calls = client.call.mock.calls.length;
+    expect(await discoverErc20Layouts(client, token)).toEqual({ balanceSlot: null, allowanceSlot: null });
+    expect(client.call.mock.calls.length).toBe(calls);
   });
 
   it('caches per token: a second call makes no more RPC calls', async () => {
