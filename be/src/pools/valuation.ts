@@ -19,9 +19,9 @@ export function poolPriceRational(sqrtPriceX96: bigint, displayedDecimals: numbe
 
 /** Spot price of the displayed token, denominated in the other token. */
 export function poolPriceInQuote(sqrtPriceX96: bigint, displayedDecimals: number | null,
-  quoteDecimals: number | null, displayedIsCurrency0: boolean): string | null {
+  quoteDecimals: number | null, displayedIsCurrency0: boolean, precision = 18): string | null {
   const rational = poolPriceRational(sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0);
-  return rational ? formatRational(rational.numerator, rational.denominator, 18) : null;
+  return rational ? formatRational(rational.numerator, rational.denominator, precision) : null;
 }
 
 /** Sum already-valued trade amounts exactly as decimal strings, including exponent notation. */

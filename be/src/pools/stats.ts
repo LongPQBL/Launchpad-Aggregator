@@ -143,7 +143,7 @@ async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: Poo
       || typeof result.coreAmount0 !== 'bigint' || typeof result.coreAmount1 !== 'bigint'
       || typeof result.sqrtPriceX96 !== 'bigint' || result.coreAmount0 < 0n || result.coreAmount1 < 0n
       || result.sqrtPriceX96 <= 0n || result.hasCustomAccounting !== false) return { poolBalances: null, tvlUsd: null };
-    const priceInQuote = poolPriceInQuote(result.sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0);
+    const priceInQuote = poolPriceInQuote(result.sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0, 100);
     const poolBalances = priceInQuote === null ? null : {
       displayedAmountRaw: (displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1).toString(),
       otherAmountRaw: (displayedIsCurrency0 ? result.coreAmount1 : result.coreAmount0).toString(),

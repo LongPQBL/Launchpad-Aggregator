@@ -1,5 +1,5 @@
 export function formatRational(numerator: bigint, denominator: bigint, decimals: number): string {
-  if (numerator < 0n || denominator <= 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+  if (numerator < 0n || denominator <= 0n || !Number.isInteger(decimals) || decimals < 0 || decimals > 100) {
     throw new Error('Invalid price rational');
   }
   const whole = numerator / denominator;

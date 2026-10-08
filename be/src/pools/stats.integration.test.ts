@@ -104,6 +104,22 @@ describe('readPoolStats', () => {
     expect(stats.tvlUsd).toBeNull();
   });
 
+  it('preserves positive Lens spot prices below 1e-18 for the composition bar', async () => {
+    const smallPriceClient = {
+      ...rpcClient,
+      async readContract({ functionName, address }: { functionName: string; address: string }) {
+        if (functionName === 'getPoolTVL') return {
+          coreAmount0: 3n * 10n ** 18n, coreAmount1: 2n * 10n ** 18n,
+          sqrtPriceX96: 2n ** 64n, hasCustomAccounting: false,
+        };
+        return rpcClient.readContract({ functionName, address });
+      },
+    };
+    const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: smallPriceClient });
+    expect(stats.priceInQuote).toBe('1'); // Existing statistics keep their established precision/source.
+    expect(Number(stats.poolBalances?.priceInQuote)).toBeGreaterThan(0);
+  });
+
   it('labels side using the same sign convention as the official V4 decoder (be/src/launchpads/pons/v2/v4Swaps.ts) — token amount negative means the trader gave the token away, a sell', async () => {
     // Fixture seeds amount0_raw (token a, the displayed/currency0 side) = -1e18 and
     // amount1_raw (quote b) = +1e18 for both rows — the trader's token balance decreased, so
