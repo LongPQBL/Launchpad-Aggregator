@@ -62,6 +62,12 @@ afterAll(async () => {
 });
 
 describe('readPoolStats', () => {
+  it('measures price change from the first trade for a pool younger than the window', async () => {
+    const withoutAge = await readPoolStats(pool, key, a, 4000, { rpcClient });
+    expect(withoutAge.change1d).toBeNull();
+    const young = await readPoolStats(pool, key, a, 4000, { rpcClient, createdTimestamp: 900 });
+    expect(young.change1d).toBe('0');
+  });
   it('reports the TVL change against the snapshot taken ~24h earlier through the same quote asset', async () => {
     await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 5n, capturedAtSeconds: 1600,
       coreAmount0Raw: 1n, coreAmount1Raw: 1n, sqrtPriceX96: 1n, quoteAddress: b, tvlUsd: '25' });

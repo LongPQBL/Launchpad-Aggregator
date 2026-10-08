@@ -85,9 +85,11 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
+    const createdAtPromise = createdTimestamp(String(row.block_number));
     const [stats, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
-      readPoolStats(pool, key, displayedToken, Math.floor(Date.now() / 1000), { rpcClient }),
-      createdTimestamp(String(row.block_number)),
+      createdAtPromise.then((created) => readPoolStats(pool, key, displayedToken, Math.floor(Date.now() / 1000),
+        { rpcClient, createdTimestamp: created })),
+      createdAtPromise,
       currencyMetadata(row.currency0),
       currencyMetadata(row.currency1),
       assetDecimals(rpcClient, row.currency0),

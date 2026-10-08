@@ -149,7 +149,7 @@ async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: Poo
 
 /** Read only this pool's swaps. An unpriced positive trade makes 24h USD volume unavailable. */
 export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: string, asOf: number,
-  options: { rpcClient?: UsdPriceClient } = {}): Promise<PoolStats> {
+  options: { rpcClient?: UsdPriceClient; createdTimestamp?: number | null } = {}): Promise<PoolStats> {
   if (!Number.isSafeInteger(asOf) || asOf < 0) throw new Error('Invalid pool statistics time');
   const found = await pool.query(`SELECT currency0, currency1, coverage_status, fee, tick_spacing, hooks FROM pool_catalog
     WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND verified=true`, [key.chainId, key.protocol, key.poolId.toLowerCase()]);
@@ -192,7 +192,7 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     : { poolBalances: null, tvlUsd: null };
 
   const tvlChange = complete && key.protocol === 'uniswap_v4'
-    ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf) : null;
+    ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf, { createdTimestamp: options.createdTimestamp }) : null;
 
   const sides = [
     { address: catalog.currency1, decimals: decimals1, amount: 'amount1_raw' as const },
@@ -243,8 +243,8 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     poolBalances: poolSnapshot.poolBalances,
     volume24hUsd, volume24hChange, priceInQuote: complete ? priceInQuote : null, priceUsd: complete ? priceUsd : null,
     fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? poolSnapshot.tvlUsd : null, tvlChange,
-    change1h: complete ? computePriceChange(pricePoints, asOf, 3600) : null,
-    change1d: complete ? computePriceChange(pricePoints, asOf, 86400) : null,
+    change1h: complete ? computePriceChange(pricePoints, asOf, 3600, options.createdTimestamp ?? null) : null,
+    change1d: complete ? computePriceChange(pricePoints, asOf, 86400, options.createdTimestamp ?? null) : null,
     coverageStatus: catalog.coverage_status, lastTradeTimestamp: last ? Number(last.timestamp) : null,
   };
 }

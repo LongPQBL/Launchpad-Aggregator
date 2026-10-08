@@ -74,6 +74,18 @@ describe('compute52WeekHighLow', () => {
   });
 });
 
+describe('computePriceChange since launch', () => {
+  const trades = [{ timestamp: 4000, price: '100' }, { timestamp: 4500, price: '110' }];
+  it('falls back to the first trade price when the venue is younger than the window', () => {
+    expect(computePriceChange(trades, 5000, 86_400)).toBeNull();
+    expect(computePriceChange(trades, 5000, 86_400, 3000)).toBe('10');
+  });
+  it('does not fall back for a venue older than the window, or with an unknown launch time', () => {
+    expect(computePriceChange(trades, 5000, 2000, 1000)).toBeNull();
+    expect(computePriceChange(trades, 5000, 86_400, null)).toBeNull();
+  });
+});
+
 describe('computePriceChange', () => {
   it('computes a positive percent change between the current price and the price one window ago', () => {
     const trades = [

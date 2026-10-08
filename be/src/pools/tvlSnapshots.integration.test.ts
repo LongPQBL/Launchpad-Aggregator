@@ -44,6 +44,30 @@ describe('readTvlChange', () => {
   });
 });
 
+describe('readTvlChange for a pool younger than 24h', () => {
+  const created = asOf - 6 * 3600;
+  const read = (current: string | null = '150', createdTimestamp: number | null = created) =>
+    readTvlChange(pool, key, quote, current, asOf, { createdTimestamp });
+  const at = (seconds: number, tvlUsd: string) => insertTvlSnapshot(pool, {
+    chainId: 4663, protocol: 'uniswap_v4', poolId, blockNumber: BigInt(seconds), capturedAtSeconds: seconds,
+    coreAmount0Raw: 1n, coreAmount1Raw: 2n, sqrtPriceX96: 3n, quoteAddress: quote, tvlUsd,
+  });
+  it('compares with the first snapshot when it was taken within 3h of launch', async () => {
+    await at(created + 1800, '100');
+    await at(created + 3600, '120');
+    expect(Number(await read())).toBeCloseTo(50);
+  });
+  it('is null when the first snapshot was taken more than 3h after launch (worker started late)', async () => {
+    await at(created + 4 * 3600, '100');
+    expect(await read()).toBeNull();
+  });
+  it('is null for a pool older than 24h or with an unknown creation time, even with an early snapshot', async () => {
+    await at(created + 1800, '100');
+    expect(await read('150', asOf - 3 * 86_400)).toBeNull();
+    expect(await read('150', null)).toBeNull();
+  });
+});
+
 describe('pruneTvlSnapshots', () => {
   it('deletes only rows older than the cutoff and reports how many', async () => {
     await snap(-200_000, '1');

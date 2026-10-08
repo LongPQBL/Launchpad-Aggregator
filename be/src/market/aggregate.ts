@@ -69,7 +69,13 @@ export function compute52WeekHighLow(candles: readonly { high: string; low: stri
 // so same-second ties resolve deterministically to the chronologically-latest trade, matching
 // CLAUDE.md's exact (blockNumber, logIndex) ordering rule — see store.ts's highLowResult query
 // (final-review Important 2).
-export function computePriceChange(trades: readonly { timestamp: number; price: string }[], nowSeconds: number, windowSeconds: number): string | null {
+/**
+ * Percent price change over `windowSeconds`. `sinceLaunchSeconds` (optional) is when the venue
+ * started: if the venue is younger than the window and has no trade at or before the window
+ * boundary, the change is measured from its first trade instead of being unavailable.
+ */
+export function computePriceChange(trades: readonly { timestamp: number; price: string }[], nowSeconds: number, windowSeconds: number,
+  sinceLaunchSeconds: number | null = null): string | null {
   const sorted = [...trades].sort((a, b) => a.timestamp - b.timestamp);
   const latestAtOrBefore = (boundary: number): string | null => {
     let result: string | null = null;
@@ -80,7 +86,8 @@ export function computePriceChange(trades: readonly { timestamp: number; price: 
     return result;
   };
   const current = latestAtOrBefore(nowSeconds);
-  const past = latestAtOrBefore(nowSeconds - windowSeconds);
+  const venueIsYoungerThanWindow = sinceLaunchSeconds !== null && nowSeconds - sinceLaunchSeconds < windowSeconds;
+  const past = latestAtOrBefore(nowSeconds - windowSeconds) ?? (venueIsYoungerThanWindow ? sorted[0]?.price ?? null : null);
   if (current === null || past === null) return null;
   const currentNum = Number(current);
   const pastNum = Number(past);
