@@ -525,6 +525,10 @@
                     },
                     "priceStale": {
                       "type": "boolean"
+                    },
+                    "quotePriceUsd": {
+                      "type": "string",
+                      "nullable": true
                     }
                   }
                 }

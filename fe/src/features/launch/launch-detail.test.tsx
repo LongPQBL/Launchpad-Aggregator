@@ -91,6 +91,7 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     officialVenues: [venue()],
     priceQuote: '0.0001',
     priceStale: false,
+    quotePriceUsd: null,
     fdvUsd: null,
     marketCapUsd: null,
     priceUsd: null,

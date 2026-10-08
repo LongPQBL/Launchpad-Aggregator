@@ -72,6 +72,7 @@ const launchDetail = {
   priceUsd: '0.00012',
   priceQuote: '0.0001',
   priceStale: false,
+  quotePriceUsd: '3000',
 };
 
 const shortDescriptionDetail = {

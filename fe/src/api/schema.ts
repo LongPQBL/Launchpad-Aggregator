@@ -259,6 +259,7 @@ export interface paths {
                             }[];
                             priceQuote?: string | null;
                             priceStale?: boolean;
+                            quotePriceUsd?: string | null;
                         };
                     };
                 };

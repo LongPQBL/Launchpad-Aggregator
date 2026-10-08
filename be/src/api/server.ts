@@ -34,6 +34,7 @@ export interface LaunchDetail extends LaunchSummary {
   officialVenues: readonly { id: string; kind: string; ref: string; effectiveFromBlock: string; effectiveToBlock: string | null }[];
   priceQuote: string | null;
   priceStale: boolean;
+  quotePriceUsd: string | null;
 }
 export interface TradeResponse {
   venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;

@@ -73,6 +73,17 @@ function cachedUsdPrice(pool: Pool, client: UsdPriceClient, quoteAssetAddress: s
   if (!memo) { memo = ttlMemo((quote: string) => readUsdPrice(pool, client, quote), CHAIN_READ_TTL_MS); byClient.set(client, memo); }
   return memo(quoteAssetAddress);
 }
+// The quote asset's own USD price for the launch detail. Unlike priceUsd it does not depend on the
+// launch's coverage. A feed or RPC failure must never fail the whole detail request.
+async function readQuotePriceUsd(pool: Pool, client: UsdPriceClient | undefined, quoteAssetAddress: string): Promise<string | null> {
+  if (!client) return null;
+  try {
+    const price = await cachedUsdPrice(pool, client, quoteAssetAddress);
+    return price ? String(price.priceUsd) : null;
+  } catch {
+    return null;
+  }
+}
 const tvlMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, TvlFields, Row>>>>();
 function cachedTvl(pool: Pool, client: UsdPriceClient, row: Row): Promise<TvlFields> {
   let byClient = tvlMemos.get(pool);
@@ -396,6 +407,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const row = result.rows[0] as Row | undefined;
       if (!row) return null;
       const complete = Boolean(row.launch_coverage_complete);
+      const quotePriceUsdPromise = readQuotePriceUsd(pool, rpcClient, string(row.quote_asset_address));
       const venueRows = await pool.query(`SELECT id, kind, ref, effective_from_block, effective_to_block FROM venues
         WHERE chain_id = $1 AND token_address = $2 AND official = true ORDER BY effective_from_block`, [chainId, tokenAddress.toLowerCase()]);
       const lastPrice = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, v.kind AS venue_kind FROM trades t
@@ -412,6 +424,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         effectiveToBlock: venue.effective_to_block === null ? null : string(venue.effective_to_block),
       })), priceQuote: complete && priced
         ? formatRational(BigInt(string(priced.price_numerator_raw)), BigInt(string(priced.price_denominator_raw)), 18) : null,
+      quotePriceUsd: await quotePriceUsdPromise,
       priceStale: row.protocol_version === 'v2' && row.lifecycle_status !== 'trading'
         && (row.lifecycle_status !== 'graduated' || priced?.venue_kind !== 'v4_pool') };
     },

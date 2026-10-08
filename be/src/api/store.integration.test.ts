@@ -362,6 +362,8 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   const brokenToken = '0x1919191919191919191919191919191919191919';
   const statsSource = 'envio-store-stats-test';
   const goodVenueId = `4663:v3_pool:${goodToken}`;
+  const noFeedToken = '0x1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a';
+  const noFeedQuote = '0x' + 'ab'.repeat(20);
   const statsEthFeed = '0x78f3556b67e17df817d51ef5a990cdaf09e8d3a9';
 
   beforeAll(async () => {
@@ -378,6 +380,11 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
         VALUES (4663,$1,$2,NULL,$3,'ST',18,'pons','v1',$1,$1,$4,$5,0,$6,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
       [token, statsSource, `Stats${i}`, (1000 + i).toString(), '0x' + String(i).repeat(64), ETH_ADDRESS]);
     }
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'NoFeed','NF',18,'pons','v1',$1,$1,1002,$3,0,$4,'XYZ',18,'trading') ON CONFLICT DO NOTHING`,
+    [noFeedToken, statsSource, '0x' + '2'.repeat(64), noFeedQuote]);
     // The "good" launch needs a real priced trade so this test can prove it gets a genuine
     // non-null fdvUsd, not just that the broken sibling is null (final-review Important 8).
     await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
@@ -396,7 +403,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
   afterAll(async () => {
     await pool.query('DELETE FROM trades WHERE token_address = $1', [goodToken]);
     await pool.query('DELETE FROM venues WHERE token_address = $1', [goodToken]);
-    await pool.query('DELETE FROM launches WHERE token_address = ANY($1)', [[goodToken, brokenToken]]);
+    await pool.query('DELETE FROM launches WHERE token_address = ANY($1)', [[goodToken, brokenToken, noFeedToken]]);
     await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[statsSource, `${statsSource}-trades`]]);
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
     await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [ETH_ADDRESS]);
@@ -433,6 +440,26 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(good!.marketCapUsd).toBe(good!.fdvUsd);
     expect(good!.week52High).toBe('1');
     expect(good!.week52Low).toBe('1');
+  });
+
+  it('getLaunch returns the quote asset USD price when an rpcClient is configured', async () => {
+    const storeWithRpc = createApiStore(pool, { readContract: rpcClient() } as never);
+    const detail = await storeWithRpc.getLaunch(4663, goodToken);
+    expect(detail).not.toBeNull();
+    expect(detail!.quotePriceUsd).not.toBeNull();
+    expect(Number(detail!.quotePriceUsd)).toBeCloseTo(2691.70223591, 5);
+  });
+
+  it('getLaunch returns quotePriceUsd null (not 0) when no rpcClient is configured', async () => {
+    const detail = await createApiStore(pool).getLaunch(4663, goodToken);
+    expect(detail!.quotePriceUsd).toBeNull();
+    expect(detail!.name).toBe('Stats0');
+  });
+
+  it('getLaunch still loads, with quotePriceUsd null, when the quote asset has no verified feed', async () => {
+    const detail = await createApiStore(pool, { readContract: rpcClient() } as never).getLaunch(4663, noFeedToken);
+    expect(detail).not.toBeNull();
+    expect(detail!.quotePriceUsd).toBeNull();
   });
 
   it('getLaunch also returns real stats for a single launch (final-review Important 8)', async () => {

@@ -24,7 +24,7 @@ function data() {
     listSources: async () => [{ id: 'pons-v2', chainId: 4663, platform: 'pons', protocolVersion: 'v2' }],
     getCoverage: async () => ({ complete: false, pendingSourceIds: ['pons-v2-curve'], missingRanges: [] }),
     listLaunches: async () => ({ items: [launchSummary], nextCursor: null }),
-    getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false }),
+    getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false, quotePriceUsd: null }),
     listTrades: async () => ({ items: [], nextCursor: null }),
     listTransactions: async () => ({ items: [], nextCursor: null }),
     listCandles: async () => ({ items: [], complete: false }),
@@ -59,7 +59,14 @@ describe('read-only API', () => {
     expect(calls).toEqual([{ chainId: 4663, limit: 100 }]);
     const detail = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}` });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json()).toEqual({ ...launch, officialVenues: [], priceQuote: null, priceStale: false });
+    expect(detail.json()).toEqual({ ...launch, officialVenues: [], priceQuote: null, priceStale: false, quotePriceUsd: null });
+    expect(detail.json()).toHaveProperty('quotePriceUsd', null);
+    const priced = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, getLaunch: async () => ({ ...launch, officialVenues: [], priceQuote: null, priceStale: false, quotePriceUsd: '2691.7' }),
+    } });
+    const pricedDetail = await priced.inject({ method: 'GET', url: `/v1/launches/4663/${address}` });
+    expect(pricedDetail.body).toContain('"quotePriceUsd":"2691.7"');
+    await priced.close();
     const invalid = await app.inject({ method: 'GET', url: '/v1/launches/4663/not-an-address' });
     expect(invalid.statusCode).toBe(404);
     const badCursor = await app.inject({ method: 'GET', url: '/v1/launches?cursor=bad' });

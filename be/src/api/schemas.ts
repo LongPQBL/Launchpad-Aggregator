@@ -60,6 +60,9 @@ export const launchDetail = { type: 'object', properties: {
   } } },
   priceQuote: { type: 'string', nullable: true },
   priceStale: { type: 'boolean' },
+  // USD per 1 whole unit of the launch's quote asset (Chainlink feed), or null. Independent of
+  // coverage: unlike priceUsd/FDV it needs no indexed trades.
+  quotePriceUsd: { type: 'string', nullable: true },
 } } as const;
 
 export const trade = { type: 'object', properties: {
