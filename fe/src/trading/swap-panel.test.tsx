@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, maxUint256, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SwapPanel, type SwapToken } from './swap-panel';
@@ -6,6 +6,7 @@ import { applySlippage } from './amount';
 import { PERMIT2_ADDRESS } from './permit2Abi';
 import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
 import { MSG_SENDER, ADDRESS_THIS } from './v3SwapEncoding';
+import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
 
 const SWAP_INPUT_ABI = parseAbiParameters(
   'address recipient, uint256 amount, uint256 amountOutMin, bytes path, bool payerIsUser, uint256[] minHopPriceX36',
@@ -39,8 +40,16 @@ function decodeWrapOrUnwrap(input: `0x${string}`) {
   return { recipient: (recipient as string).toLowerCase(), amountMinimum: amountMinimum as bigint };
 }
 
+const reverse = vi.hoisted(() => ({
+  solve: vi.fn<(target: bigint, signal: AbortSignal) => Promise<bigint | null>>(),
+  makeV3: vi.fn(),
+}));
+vi.mock('./reverse-quote', () => ({
+  makeV3ReverseSolve: (...args: unknown[]) => { reverse.makeV3(...args); return reverse.solve; },
+}));
+
 const hooks = vi.hoisted(() => ({
-  account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663 },
+  account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   poolFee: 10000 as number | undefined,
   erc20Allowance: 0n,
   permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
@@ -68,6 +77,7 @@ const hooks = vi.hoisted(() => ({
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,
+  usePublicClient: () => ({}),
   useBalance: () => ({ data: { value: hooks.nativeBalance }, isLoading: false }),
   useReadContract: (args: { functionName: string; address: string }) => {
     if (args.functionName === 'fee') return { data: hooks.poolFee, isLoading: false };
@@ -107,6 +117,10 @@ beforeEach(() => {
   hooks.paymasterServiceUrl = undefined;
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
+  hooks.account.isConnected = true;
+  reverse.solve.mockReset();
+  reverse.solve.mockImplementation(async (target) => target * 2n);
+  reverse.makeV3.mockClear();
   hooks.poolFee = 10000;
   hooks.erc20Allowance = 2_000_000_000_000_000_000n;
   hooks.permit2Allowance = [2_000_000_000_000_000_000n, Math.floor(Date.now() / 1000) + 10_000, 1];
@@ -161,7 +175,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
   });
@@ -172,7 +186,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
     expect(hooks.writeContract).toHaveBeenCalledWith(
       expect.objectContaining({ functionName: 'approve', args: [expect.any(String), 2n ** 256n - 1n] }),
@@ -185,7 +199,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
@@ -200,7 +214,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
       expect.objectContaining({ functionName: 'execute', args: ['0x00', expect.arrayContaining([expect.any(String)]), expect.anything()] }),
@@ -214,7 +228,7 @@ describe('SwapPanel', () => {
     // tokenB is WETH and the default is native ETH, so just flip direction to make it the input.
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledWith(
       expect.objectContaining({ functionName: 'execute', value: 1_000_000_000_000_000_000n }),
@@ -235,7 +249,7 @@ describe('SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     // tokenB (WETH) stays the default output side; default useNativeEth=true makes this native-ETH-out.
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
     const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
@@ -256,7 +270,7 @@ describe('SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // WETH leg now "in"
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     // Default choice is already native ETH — Swap must be actionable directly, no Approve.
     expect(screen.getByRole('button', { name: 'Swap' })).not.toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
@@ -264,7 +278,7 @@ describe('SwapPanel', () => {
 
   it('keeps Swap disabled until the quote resolves, never submitting with zero slippage protection', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
@@ -272,7 +286,7 @@ describe('SwapPanel', () => {
     hooks.account.chainId = 1;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
   });
 
@@ -281,13 +295,13 @@ describe('SwapPanel', () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // WETH leg now "in"
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
   });
 
   it('does not crash and shows an "Enter an amount" label when the amount contains scientific notation', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1e5' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1e5' } });
     expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
   });
 
@@ -298,7 +312,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.signTypedDataAsync).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -312,7 +326,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenB} tokenB={tokenA} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: /^WETH$/ }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.resetSignTypedData).toHaveBeenCalled());
     expect(hooks.signTypedDataAsync).not.toHaveBeenCalled();
@@ -328,7 +342,7 @@ describe('SwapPanel', () => {
     // The WETH leg is now the input side; its choice must still read WETH, not revert to ETH.
     expect(screen.getByRole('button', { name: /^WETH$/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^ETH$/ })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
     const [{ address, args, value }] = hooks.writeContract.mock.calls[0] as [
@@ -342,7 +356,7 @@ describe('SwapPanel', () => {
   it('produces a byte-identical plain ERC20-ERC20 swap when neither side is WETH — no WRAP/UNWRAP ever injected', async () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
     const [{ address, args, value }] = hooks.writeContract.mock.calls[0] as [
@@ -366,7 +380,7 @@ describe('SwapPanel', () => {
   it('flips tokenIn/tokenOut order in the packed path when direction flips', async () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledTimes(1));
     const firstArgs = (hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }])[0].args;
@@ -375,7 +389,7 @@ describe('SwapPanel', () => {
     expect(firstPath.tokenOut).toBe(tokenNoWeth.address.toLowerCase());
 
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     await waitFor(() => expect(hooks.writeContract).toHaveBeenCalledTimes(2));
     const secondArgs = (hooks.writeContract.mock.calls[1] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }])[0].args;
@@ -388,7 +402,7 @@ describe('SwapPanel', () => {
     hooks.balanceNoWeth = 0n;
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i })); // tokenNoWeth now "in"
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Not enough USDG' })).toBeDisabled();
   });
 
@@ -402,7 +416,7 @@ describe('SwapPanel', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
     fireEvent.change(screen.getByLabelText(/deadline minutes/i), { target: { value: '1.01' } });
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(() => fireEvent.click(screen.getByRole('button', { name: 'Swap' }))).not.toThrow();
     expect(hooks.writeContract).toHaveBeenCalled();
   });
@@ -415,7 +429,7 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Swap' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
@@ -430,7 +444,7 @@ describe('SwapPanel', () => {
     hooks.erc20Allowance = 0n;
     hooks.capabilities = { 4663: { atomic: { status: 'unsupported' } } };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Swap' })).not.toBeInTheDocument();
     expect(hooks.sendCalls).not.toHaveBeenCalled();
@@ -441,7 +455,7 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     const { rerender } = render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(hooks.erc20AllowanceRefetch).not.toHaveBeenCalled();
 
@@ -457,7 +471,7 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'ready' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument(); // not opted in yet
 
     fireEvent.click(screen.getByRole('button', { name: /trade settings/i }));
@@ -474,7 +488,7 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: { paymasterService: { url: string } } }];
     expect(capabilities).toEqual({ paymasterService: { url: 'https://example.com/paymaster' } });
@@ -485,7 +499,7 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' }, paymasterService: { supported: true } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     const [{ capabilities }] = hooks.sendCalls.mock.calls[0] as [{ capabilities?: unknown }];
     expect(capabilities).toBeUndefined();
@@ -501,7 +515,119 @@ describe('SwapPanel', () => {
     hooks.capabilities = { 4663: { atomic: { status: 'supported' } } };
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    fireEvent.change(screen.getByLabelText(/amount/i), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+  });
+
+  it('typing in Buy derives the Sell amount via the V3 reverse solver and submits exact-input with it', async () => {
+    vi.useFakeTimers();
+    reverse.solve.mockResolvedValue(2_000_000_000_000_000_000n);
+    // The forward quote must differ from the typed Buy value (1), or the change event is a no-op.
+    hooks.simulateData = { result: [3_000_000_000_000_000_000n, 0n, 1, 1n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.makeV3).toHaveBeenCalledWith({}, { tokenIn: tokenA.address, tokenOut: tokenB.address, fee: 10000 });
+    expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.writeContract).toHaveBeenCalledTimes(1);
+    const [, inputs] = hooks.writeContract.mock.calls[0][0].args;
+    const [, amountIn] = decodeAbiParameters(parseAbiParameters('address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser'), inputs[0]);
+    expect(amountIn).toBe(2_000_000_000_000_000_000n);
+  });
+
+  it('shows "Quote unavailable" and disables Swap when the reverse quote has no answer', async () => {
+    vi.useFakeTimers();
+    reverse.solve.mockResolvedValue(null);
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '999999999' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(screen.getAllByText('Quote unavailable').length).toBeGreaterThan(0); // card hint and button label
+    expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
+    vi.useRealTimers();
+  });
+
+  it('never calls the reverse solver when the user typed in Sell, or typed garbage in Buy', async () => {
+    vi.useFakeTimers();
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '.' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.solve).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('flip keeps the typed number on the same token', () => {
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
+  });
+
+  it('Connect asks the header to open the wallet dialog', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    const handler = vi.fn();
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  });
+
+  it('walks the button through Connect → Getting quote… → Not enough LAUNCH → Swap', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    const props = { poolAddress, tokenA, tokenB, explorerBase: null };
+    const { rerender } = render(<SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+
+    hooks.account.isConnected = true;
+    hooks.account.address = '0x1111111111111111111111111111111111111111';
+    hooks.simulateData = undefined;
+    rerender(<SwapPanel {...props} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+
+    hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] };
+    hooks.balanceA = 0n;
+    rerender(<SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Not enough LAUNCH' })).toBeDisabled();
+
+    hooks.balanceA = 10_000_000_000_000_000_000n;
+    rerender(<SwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeEnabled();
+  });
+
+  it('shows Min received from the quote with the user slippage, and hides it with no quote', () => {
+    localStorage.setItem('trade-settings', JSON.stringify({ slippageBps: 100, deadlineMinutes: 30, oneClickTradeOptIn: false }));
+    hooks.simulateData = { result: [1_000_000_000_000_000_000_000n, 0n, 1, 1n] };
+    const { unmount } = render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.getByText('Min received')).toBeInTheDocument();
+    expect(screen.getByText(/^990 /)).toBeInTheDocument();
+    unmount();
+    hooks.simulateData = undefined;
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+    expect(screen.queryByText('Min received')).not.toBeInTheDocument();
+  });
+
+  it('shows a USD line on each side that has a price, and hides the side that does not', () => {
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} usdPrices={{ [tokenA.address.toLowerCase()]: '2' }} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByText('$6.00')).toBeInTheDocument();
+    expect(screen.queryByText(/^\$3000/)).not.toBeInTheDocument();
+  });
+
+  it('shows both USD lines when both tokens have a price — their gap is the price impact plus fees', () => {
+    hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null}
+      usdPrices={{ [tokenA.address.toLowerCase()]: '2', [tokenB.address.toLowerCase()]: '3000' }} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByText('$6.00')).toBeInTheDocument();
+    expect(screen.getByText('$3000.00')).toBeInTheDocument();
   });
 });
