@@ -24,25 +24,32 @@ export interface VolumeScore {
 
 const RANK_ORDER: Record<RankCategory, number> = { positive: 0, zero: 1, null: 2 };
 
+// sql.join merges query fragments via recursive calls, so one VALUES list built from more than a
+// few hundred keys can overflow the call stack (observed crash at 957 distinct launches during a
+// full-table reconciliation) — chunk to keep each query's fragment count bounded.
+const INVALIDATE_CHUNK_SIZE = 200;
+
 export async function invalidateLaunchVolume(tx: SqlExecutor, keys: readonly LaunchKey[], dueAt: Date): Promise<void> {
   const distinct = [...new Map(keys.map((key) => [`${key.chainId}:${key.tokenAddress}`, key])).values()];
-  if (distinct.length === 0) return;
-  const values = sql.join(distinct.map((key) => sql`(${key.chainId}::integer, ${key.tokenAddress}::text)`), sql`, `);
-  // A launch deleted by reorg repair has no ranking left to recompute; its score row cascades with it.
-  await tx.execute(sql`
-    INSERT INTO launch_volume24h_jobs (chain_id, token_address, revision, due_at)
-    SELECT k.chain_id, k.token_address, 1, ${dueAt}::timestamptz
-    FROM (VALUES ${values}) AS k(chain_id, token_address)
-    JOIN launches l ON l.chain_id = k.chain_id AND l.token_address = k.token_address
-    ON CONFLICT (chain_id, token_address) DO UPDATE SET
-      revision = launch_volume24h_jobs.revision + 1,
-      due_at = LEAST(launch_volume24h_jobs.due_at, EXCLUDED.due_at),
-      updated_at = now()`);
-  await tx.execute(sql`
-    UPDATE launch_volume24h_usd AS s SET
-      volume_usd = NULL, rank_category = 'null', rank_order = 2, completeness_reason = 'updating'
-    FROM (VALUES ${values}) AS k(chain_id, token_address)
-    WHERE s.chain_id = k.chain_id AND s.token_address = k.token_address`);
+  for (let offset = 0; offset < distinct.length; offset += INVALIDATE_CHUNK_SIZE) {
+    const chunk = distinct.slice(offset, offset + INVALIDATE_CHUNK_SIZE);
+    const values = sql.join(chunk.map((key) => sql`(${key.chainId}::integer, ${key.tokenAddress}::text)`), sql`, `);
+    // A launch deleted by reorg repair has no ranking left to recompute; its score row cascades with it.
+    await tx.execute(sql`
+      INSERT INTO launch_volume24h_jobs (chain_id, token_address, revision, due_at)
+      SELECT k.chain_id, k.token_address, 1, ${dueAt}::timestamptz
+      FROM (VALUES ${values}) AS k(chain_id, token_address)
+      JOIN launches l ON l.chain_id = k.chain_id AND l.token_address = k.token_address
+      ON CONFLICT (chain_id, token_address) DO UPDATE SET
+        revision = launch_volume24h_jobs.revision + 1,
+        due_at = LEAST(launch_volume24h_jobs.due_at, EXCLUDED.due_at),
+        updated_at = now()`);
+    await tx.execute(sql`
+      UPDATE launch_volume24h_usd AS s SET
+        volume_usd = NULL, rank_category = 'null', rank_order = 2, completeness_reason = 'updating'
+      FROM (VALUES ${values}) AS k(chain_id, token_address)
+      WHERE s.chain_id = k.chain_id AND s.token_address = k.token_address`);
+  }
 }
 
 export async function claimVolumeJobs(pool: Pool, now: Date, limit: number): Promise<VolumeClaim[]> {

@@ -129,4 +129,25 @@ describe('launch volume store', () => {
     const [claim] = await claimVolumeJobs(pool, now, 1);
     await expect(publishVolumeScore(pool, claim, scoreFor('0', 'positive'))).rejects.toThrow();
   });
+
+  it('invalidates a batch spanning multiple chunks without overflowing the SQL builder', async () => {
+    const manyTokens = Array.from({ length: 450 }, (_, i) => `0x${(0x6000000000000000000000000000000000000000n + BigInt(i)).toString(16)}`);
+    const manyKeys: LaunchKey[] = manyTokens.map((tokenAddress) => ({ chainId: 4663, tokenAddress }));
+    try {
+      for (const tokenAddress of manyTokens) {
+        await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, name, symbol, token_decimals,
+          platform, protocol_version, factory_address, deployer_address, launch_block, launch_tx_hash, launch_log_index,
+          quote_asset_address, quote_asset_symbol, quote_asset_decimals, lifecycle_status)
+          VALUES (4663,$1,$2,'Chunk test','CHK',18,'pons','v2',$1,$1,100,$3,1,$1,'ETH',18,'trading')
+          ON CONFLICT DO NOTHING`, [tokenAddress, source, `0x${'b'.repeat(64)}`]);
+      }
+      await invalidateLaunchVolume(db, manyKeys, now);
+      const rows = await pool.query('SELECT count(*)::int AS n FROM launch_volume24h_jobs WHERE token_address = ANY($1)', [manyTokens]);
+      expect(rows.rows[0].n).toBe(manyTokens.length);
+    } finally {
+      await pool.query('DELETE FROM launch_volume24h_jobs WHERE token_address = ANY($1)', [manyTokens]);
+      await pool.query('DELETE FROM launch_volume24h_usd WHERE token_address = ANY($1)', [manyTokens]);
+      await pool.query('DELETE FROM launches WHERE chain_id = 4663 AND token_address = ANY($1)', [manyTokens]);
+    }
+  });
 });
