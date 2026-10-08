@@ -10,7 +10,7 @@ const item = { chainId: 4663, protocol: 'uniswap_v4' as const, poolId: id, curre
   currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
   currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: null,
   hooks: '0x0000000000000000000000000000000000000000', createdBlock: '100', createdTimestamp: null,
-  ponsDesignated: false, launchTokenAddress: token, volume24hUsd: null, priceInQuote: null,
+  ponsDesignated: false, launchTokenAddress: token, volume24hUsd: null, volume24hChange: null, priceInQuote: null,
   priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
   poolBalances: { displayedAmountRaw: '3000000000000000000', otherAmountRaw: '2000000000000000000', priceInQuote: '1' },
   coverageStatus: 'backfilling', lastTradeTimestamp: null };

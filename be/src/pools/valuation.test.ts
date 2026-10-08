@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { poolPriceInQuote, poolPriceRational, sumUsdValues } from './valuation.js';
+import { percentChange, poolPriceInQuote, poolPriceRational, sumUsdValues } from './valuation.js';
 
 const q96 = 2n ** 96n;
 describe('poolPriceRational', () => {
@@ -30,5 +30,18 @@ describe('poolPriceInQuote', () => {
 describe('sumUsdValues', () => {
   it('adds trade USD values without floating-point accumulation error', () => {
     expect(sumUsdValues(['0.1', '0.2', '1e-7'])).toBe('0.3000001');
+  });
+});
+
+describe('percentChange', () => {
+  it('is the change from the previous value to the current one', () => {
+    expect(Number(percentChange('323', '858'))).toBeCloseTo(-62.35, 1);
+    expect(Number(percentChange('300', '100'))).toBeCloseTo(200);
+  });
+  it('is null, not 0%, when the previous value is zero or unusable', () => {
+    expect(percentChange('10', '0')).toBeNull();
+    expect(percentChange('10', '-5')).toBeNull();
+    expect(percentChange('10', 'NaN')).toBeNull();
+    expect(percentChange('abc', '5')).toBeNull();
   });
 });

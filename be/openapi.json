@@ -943,6 +943,10 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "volume24hChange": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "priceInQuote": {
                             "type": "string",
                             "nullable": true
@@ -1122,6 +1126,10 @@
                             "nullable": true
                           },
                           "volume24hUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "volume24hChange": {
                             "type": "string",
                             "nullable": true
                           },
@@ -1307,6 +1315,10 @@
                       "nullable": true
                     },
                     "volume24hUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "volume24hChange": {
                       "type": "string",
                       "nullable": true
                     },

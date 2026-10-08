@@ -60,9 +60,15 @@ afterAll(async () => {
 });
 
 describe('readPoolStats', () => {
+  it('compares the current 24h volume with the previous 24h window', async () => {
+    const stats = await readPoolStats(pool, key, a, 88_000, { rpcClient });
+    expect(stats.volume24hUsd).toBe('4');
+    expect(Number(stats.volume24hChange)).toBeCloseTo(100);
+  });
   it('values each trade at its own historical round and derives pool price for either side', async () => {
     const statsA = await readPoolStats(pool, key, a, 4000, { rpcClient });
     expect(statsA.volume24hUsd).toBe('6');
+    expect(statsA.volume24hChange).toBeNull();
     expect(statsA.priceInQuote).toBe('1');
     expect(statsA.priceUsd).toBe('4');
     expect(statsA.fdvUsd).toBe('4000');

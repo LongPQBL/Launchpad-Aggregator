@@ -6,7 +6,7 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
-import { poolPriceInQuote, poolPriceRational, sumUsdValues } from './valuation.js';
+import { poolPriceInQuote, poolPriceRational, sumUsdValues, percentChange } from './valuation.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const erc20DecimalsAbi = parseAbi(['function decimals() view returns (uint8)']);
@@ -23,6 +23,7 @@ export interface PoolKey { chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3
 export interface PoolStats {
   poolBalances: PoolBalanceSnapshot | null;
   volume24hUsd: string | null;
+  volume24hChange: string | null;
   priceInQuote: string | null;
   priceUsd: string | null;
   fdvUsd: string | null;
@@ -203,29 +204,41 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
       currentQuoteUsd?.priceUsd ?? null)
     : { poolBalances: null, tvlUsd: null };
 
-  let volume24hUsd: string | null = complete ? '0' : null;
-  if (complete && rows.length > 0) {
-    const sides = [
-      { address: catalog.currency1, decimals: decimals1, amount: 'amount1_raw' as const },
-      { address: catalog.currency0, decimals: decimals0, amount: 'amount0_raw' as const },
-    ];
-    const verified = await Promise.all(sides.map(async (side) => ({ ...side,
-      feed: await resolveVerifiedFeed(pool, key.chainId, side.address) })));
-    const pricedSide = verified.find((side) => side.feed && side.decimals !== null);
-    if (!pricedSide) volume24hUsd = null;
-    else {
-      const pricedValues: string[] = [];
-      for (const row of rows) {
-        const signed = BigInt(row[pricedSide.amount]);
-        const result = await valueTradeUsd(pool, key.chainId, pricedSide.address, {
-          timestamp: Number(row.timestamp), quoteAmountRaw: signed < 0n ? -signed : signed,
-          quoteAssetDecimals: pricedSide.decimals, blockNumber: BigInt(row.block_number), logIndex: Number(row.log_index),
-        });
-        if (result.status !== 'priced') { volume24hUsd = null; break; }
-        pricedValues.push(result.usdValue);
-      }
-      if (volume24hUsd !== null) volume24hUsd = sumUsdValues(pricedValues);
+  const sides = [
+    { address: catalog.currency1, decimals: decimals1, amount: 'amount1_raw' as const },
+    { address: catalog.currency0, decimals: decimals0, amount: 'amount0_raw' as const },
+  ];
+  const verifiedSides = complete ? await Promise.all(sides.map(async (side) => ({ ...side,
+    feed: await resolveVerifiedFeed(pool, key.chainId, side.address) }))) : [];
+  const pricedSide = verifiedSides.find((side) => side.feed && side.decimals !== null);
+  const sumVolumeUsd = async (windowRows: readonly TradeRow[]): Promise<string | null> => {
+    if (windowRows.length === 0) return '0';
+    if (!pricedSide) return null;
+    const pricedValues: string[] = [];
+    for (const row of windowRows) {
+      const signed = BigInt(row[pricedSide.amount]);
+      const result = await valueTradeUsd(pool, key.chainId, pricedSide.address, {
+        timestamp: Number(row.timestamp), quoteAmountRaw: signed < 0n ? -signed : signed,
+        quoteAssetDecimals: pricedSide.decimals, blockNumber: BigInt(row.block_number), logIndex: Number(row.log_index),
+      });
+      if (result.status !== 'priced') return null;
+      pricedValues.push(result.usdValue);
     }
+    return sumUsdValues(pricedValues);
+  };
+  const volume24hUsd = complete ? await sumVolumeUsd(rows) : null;
+
+  // Previous 24h window ([asOf-48h, asOf-24h)), for the "vs 24h ago" change. Unavailable (null)
+  // if it is too large to value completely or any trade in it is unpriced — never treated as zero.
+  let volume24hChange: string | null = null;
+  if (volume24hUsd !== null) {
+    const previous = await pool.query(`SELECT amount0_raw, amount1_raw, sqrt_price_x96, timestamp, block_number, log_index
+      FROM pool_trades WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND timestamp >= $4 AND timestamp < $5
+      ORDER BY block_number ASC, log_index ASC LIMIT $6`,
+    [key.chainId, key.protocol, key.poolId.toLowerCase(), asOf - 172_800, asOf - 86_400, MAX_RECENT_TRADES + 1]);
+    const previousRows = previous.rows as TradeRow[];
+    const previousVolumeUsd = previousRows.length <= MAX_RECENT_TRADES ? await sumVolumeUsd(previousRows) : null;
+    volume24hChange = previousVolumeUsd === null ? null : percentChange(volume24hUsd, previousVolumeUsd);
   }
 
   const priorTrade = complete ? await pool.query(`SELECT sqrt_price_x96, timestamp FROM pool_trades
@@ -238,7 +251,7 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     })).filter((row): row is { timestamp: number; price: string } => row.price !== null) : [];
   return {
     poolBalances: poolSnapshot.poolBalances,
-    volume24hUsd, priceInQuote: complete ? priceInQuote : null, priceUsd: complete ? priceUsd : null,
+    volume24hUsd, volume24hChange, priceInQuote: complete ? priceInQuote : null, priceUsd: complete ? priceUsd : null,
     fdvUsd: complete ? fdvUsd : null, tvlUsd: complete ? poolSnapshot.tvlUsd : null,
     change1h: complete ? computePriceChange(pricePoints, asOf, 3600) : null,
     change1d: complete ? computePriceChange(pricePoints, asOf, 86400) : null,

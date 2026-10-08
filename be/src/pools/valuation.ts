@@ -42,3 +42,11 @@ export function sumUsdValues(values: readonly string[]): string {
   const fraction = (sum % 10n ** BigInt(scale)).toString().padStart(scale, '0').replace(/0+$/, '');
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
+
+/** Percent change from `previous` to `current`; null when either is unusable or `previous` is not positive (undefined, not 0%). */
+export function percentChange(current: string, previous: string): string | null {
+  const now = Number(current);
+  const before = Number(previous);
+  if (!Number.isFinite(now) || !Number.isFinite(before) || before <= 0) return null;
+  return String(((now - before) / before) * 100);
+}
