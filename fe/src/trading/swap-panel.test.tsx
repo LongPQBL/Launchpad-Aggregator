@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, maxUint256, parseAbiParameters } from 'viem';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SwapPanel, type SwapToken } from './swap-panel';
 import { applySlippage } from './amount';
 import { PERMIT2_ADDRESS } from './permit2Abi';
@@ -111,6 +111,9 @@ const tokenA: SwapToken = { address: '0x1111111111111111111111111111111111111112
 const tokenB: SwapToken = { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', symbol: 'WETH', decimals: 18, logoUri: null };
 // A pair with no WETH leg at all (e.g. a Pools-tab Token/USDG pair) — for the "no native choice" cases.
 const tokenNoWeth: SwapToken = { address: '0x3333333333333333333333333333333333333333', symbol: 'USDG', decimals: 18, logoUri: null };
+
+// A test that fails before its own trailing vi.useRealTimers() must not leak fake timers.
+afterEach(() => { vi.useRealTimers(); });
 
 beforeEach(() => {
   localStorage.clear();

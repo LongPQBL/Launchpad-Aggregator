@@ -1,6 +1,6 @@
 import { act, fireEvent, render, within, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, maxUint256, parseAbiParameters } from 'viem';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { V4SwapPanel } from './v4-swap-panel';
 import { PERMIT2_ADDRESS } from './permit2Abi';
 import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
@@ -89,6 +89,9 @@ const poolKey: V4PoolKey = {
 };
 const tokenA = { address: poolKey.currency0, symbol: 'LAUNCH', decimals: 18 };
 const tokenB = { address: poolKey.currency1, symbol: 'ROBIN', decimals: 18 };
+
+// A test that fails before its own trailing vi.useRealTimers() must not leak fake timers.
+afterEach(() => { vi.useRealTimers(); });
 
 beforeEach(() => {
   localStorage.clear();

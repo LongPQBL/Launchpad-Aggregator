@@ -6,8 +6,7 @@ import { useEffect, useRef } from 'react';
 // ERC20's "STF" on a pool swap) under the same query key, since none of the quote's own inputs
 // change across the approval — so once the approval actually confirms, the stale quote error
 // must be explicitly refetched rather than relying on the hook's own (already-exhausted) retry
-// budget. Shared by buy-panel.tsx, sell-panel.tsx, and swap-panel.tsx, which each pair a
-// useCurveQuote/useV3SwapQuote with a useTokenAllowance.
+// budget. Used by curve-swap-panel.tsx, which pairs a useCurveQuote with a useTokenAllowance.
 export function useRefetchQuoteAfterApproval(isConfirmingApproval: boolean, refetchQuote: () => void): void {
   const wasConfirmingApproval = useRef(false);
   useEffect(() => {

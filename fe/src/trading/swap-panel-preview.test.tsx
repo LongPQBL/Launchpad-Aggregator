@@ -8,6 +8,7 @@ describe('SwapPanelPreview', () => {
     expect(screen.getByText('Sell')).toBeInTheDocument();
     expect(screen.getByText('Buy')).toBeInTheDocument();
     expect(screen.getByText(/preview only/i)).toBeInTheDocument();
+    expect(screen.getByText('Sample data')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /preview only/i })).toBeDisabled();
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });

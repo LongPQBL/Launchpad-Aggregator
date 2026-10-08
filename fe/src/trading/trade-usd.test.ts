@@ -21,6 +21,9 @@ describe('usdText', () => {
     expect(usdText(1_000_000_000_000_000_000n, 18, null)).toBeNull();
     expect(usdText(1_000_000_000_000_000_000n, 18, undefined)).toBeNull();
   });
+  it('renders a tiny non-zero value as a non-zero string, never $0', () => {
+    expect(usdText(1_000_000_000_000_000_000n, 18, '0.0000001')).toBe('$0.00000010');
+  });
   it('is null for a missing or zero amount', () => {
     expect(usdText(null, 18, '1.5')).toBeNull();
     expect(usdText(0n, 18, '1.5')).toBeNull();

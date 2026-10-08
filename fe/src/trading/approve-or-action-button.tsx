@@ -20,7 +20,7 @@ export interface ApproveOrActionButtonProps {
   isWrongChain: boolean;
   hasInsufficientBalance: boolean;
   // Symbol of the token amountIn is denominated in, for the "Not enough {symbol}" label. Falls
-  // back to the generic "token" when not given (e.g. sell-panel.tsx doesn't thread one through yet).
+  // back to the generic "token" when not given (every current panel passes one).
   tokenInSymbol?: string;
   // When true, a wallet that supports EIP-5792 atomic call batching skips the plain Approve step
   // and goes straight to the action button — onAction is responsible for bundling the approve
@@ -37,9 +37,9 @@ export interface ApproveOrActionButtonProps {
   onAction: () => void;
 }
 
-// Shared by buy-panel.tsx, sell-panel.tsx, swap-panel.tsx, and v4-swap-panel.tsx: each pairs a
+// Shared by curve-swap-panel.tsx, swap-panel.tsx, and v4-swap-panel.tsx: each pairs a
 // useTokenAllowance with its own quote/submission hooks, but the approve-vs-act decision and the
-// approval-error alert were identical across all four.
+// approval-error alert are identical across all three.
 //
 // The label itself communicates the blocking reason (wrong chain / no amount / insufficient
 // balance), matching Uniswap's own convention, so callers no longer render a separate red warning

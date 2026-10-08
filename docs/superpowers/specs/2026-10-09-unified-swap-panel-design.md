@@ -39,7 +39,7 @@ Holds a `direction` state (`'buy' | 'sell'`, initial `'buy'` = quote → token).
 | buy, ERC20 quote | same, no `value` | exact-amount `approve(curve, amountIn)` (never `maxUint256`) | batchable with EIP-5792 |
 | sell | `curve.sell(amountIn, minQuoteOut, account)` | exact-amount `approve(curve, amountIn)` | batchable |
 
-Switching direction clears the amount (as V3/V4 panels already do on flip). Because hooks cannot be called conditionally per direction, the plan will split the per-direction state/hooks so both directions' hooks are called unconditionally with `enabled`/`undefined` args gating them (the existing hooks already accept `undefined` addresses and `enabled` flags — e.g. `useTokenAllowance(undefined, …)` and the `query.enabled` pattern in `BuyPanel`).
+Switching direction keeps the typed amount, and the typed token stays the source (see "Two-way quoting"). Because hooks cannot be called conditionally per direction, the plan will split the per-direction state/hooks so both directions' hooks are called unconditionally with `enabled`/`undefined` args gating them (the existing hooks already accept `undefined` addresses and `enabled` flags — e.g. `useTokenAllowance(undefined, …)` and the `query.enabled` pattern in `BuyPanel`).
 
 ### `SwapPanel` (V3) and `V4SwapPanel` — JSX only
 Replace their hand-rolled Sell/Buy markup with `SwapShell` + `TradeCard`. Permit2 signing, batching, quote hooks, ETH/WETH toggle (`TokenSelector` options), slippage, deadline — untouched.

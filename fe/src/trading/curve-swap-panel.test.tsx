@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CurveSwapPanel } from './curve-swap-panel';
 import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
 
@@ -72,6 +72,9 @@ vi.mock('wagmi', async (importOriginal) => ({
 vi.mock('./paymasterConfig', () => ({
   get PAYMASTER_SERVICE_URL() { return hooks.paymasterServiceUrl; },
 }));
+
+// A test that fails before its own trailing vi.useRealTimers() must not leak fake timers.
+afterEach(() => { vi.useRealTimers(); });
 
 beforeEach(() => {
   localStorage.clear();
@@ -259,6 +262,8 @@ describe('CurveSwapPanel - buy direction (default)', () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]).toEqual(expect.objectContaining({ to: erc20Quote.address, functionName: 'approve', args: [curve, 1000000000000000000n] }));
     expect(calls[1]).toEqual(expect.objectContaining({ to: curve, functionName: 'buy' }));
+    // ERC20-quoted: the quote asset moves by transferFrom, so the buy carries no native value.
+    expect((calls[1] as { value?: bigint }).value).toBeUndefined();
   });
 
   it('keeps the plain two-step Approve-then-Swap flow when the wallet cannot batch calls', () => {
