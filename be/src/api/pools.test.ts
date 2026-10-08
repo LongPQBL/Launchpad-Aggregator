@@ -12,6 +12,7 @@ const item = { chainId: 4663, protocol: 'uniswap_v4' as const, poolId: id, curre
   hooks: '0x0000000000000000000000000000000000000000', createdBlock: '100', createdTimestamp: null,
   ponsDesignated: false, launchTokenAddress: token, volume24hUsd: null, priceInQuote: null,
   priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
+  poolBalances: { displayedAmountRaw: '3000000000000000000', otherAmountRaw: '2000000000000000000', priceInQuote: '1' },
   coverageStatus: 'backfilling', lastTradeTimestamp: null };
 function setup() {
   const calls: unknown[] = [];
@@ -43,6 +44,7 @@ describe('pool API', () => {
     expect(calls).toEqual([{ chainId: 4663, limit: 1 }, { chainId: 4663, limit: 50, tokenAddress: token }]);
     const detail = await app.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v4/${id}?displayedToken=${other}` });
     expect(detail.json().displayedToken).toBe(other);
+    expect(detail.json().poolBalances).toEqual(item.poolBalances);
     await app.close();
   });
   it('rejects malformed identities, unsupported sources, and invalid query', async () => {

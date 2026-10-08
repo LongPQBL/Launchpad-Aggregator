@@ -489,6 +489,11 @@ export interface paths {
                                 createdBlock?: string;
                                 createdTimestamp?: number | null;
                                 ponsDesignated?: boolean;
+                                poolBalances?: {
+                                    displayedAmountRaw?: string;
+                                    otherAmountRaw?: string;
+                                    priceInQuote?: string;
+                                } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
                                 priceInQuote?: string | null;
@@ -562,6 +567,11 @@ export interface paths {
                                 createdBlock?: string;
                                 createdTimestamp?: number | null;
                                 ponsDesignated?: boolean;
+                                poolBalances?: {
+                                    displayedAmountRaw?: string;
+                                    otherAmountRaw?: string;
+                                    priceInQuote?: string;
+                                } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
                                 priceInQuote?: string | null;
@@ -635,6 +645,11 @@ export interface paths {
                             createdBlock?: string;
                             createdTimestamp?: number | null;
                             ponsDesignated?: boolean;
+                            poolBalances?: {
+                                displayedAmountRaw?: string;
+                                otherAmountRaw?: string;
+                                priceInQuote?: string;
+                            } | null;
                             launchTokenAddress?: string | null;
                             volume24hUsd?: string | null;
                             priceInQuote?: string | null;

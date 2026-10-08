@@ -100,6 +100,9 @@ export function pageSchema(item: object) {
 }
 
 const nullableMetric = { type: 'string', nullable: true } as const;
+const poolBalances = { type: 'object', nullable: true, properties: {
+  displayedAmountRaw: { type: 'string' }, otherAmountRaw: { type: 'string' }, priceInQuote: { type: 'string' },
+} } as const;
 export const poolSummary = { type: 'object', properties: {
   chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' },
   currency0: { type: 'string' }, currency1: { type: 'string' }, displayedToken: { type: 'string' },
@@ -110,6 +113,7 @@ export const poolSummary = { type: 'object', properties: {
   fee: { type: 'integer' }, tickSpacing: { type: 'integer' }, hooks: { type: 'string' },
   createdBlock: { type: 'string' }, createdTimestamp: { type: 'integer', nullable: true },
   ponsDesignated: { type: 'boolean' },
+  poolBalances,
   launchTokenAddress: nullableMetric, volume24hUsd: nullableMetric, priceInQuote: nullableMetric,
   priceUsd: nullableMetric, fdvUsd: nullableMetric, tvlUsd: nullableMetric, change1h: nullableMetric,
   change1d: nullableMetric, coverageStatus: { type: 'string' },

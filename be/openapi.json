@@ -915,6 +915,21 @@
                           "ponsDesignated": {
                             "type": "boolean"
                           },
+                          "poolBalances": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "displayedAmountRaw": {
+                                "type": "string"
+                              },
+                              "otherAmountRaw": {
+                                "type": "string"
+                              },
+                              "priceInQuote": {
+                                "type": "string"
+                              }
+                            }
+                          },
                           "launchTokenAddress": {
                             "type": "string",
                             "nullable": true
@@ -1076,6 +1091,21 @@
                           },
                           "ponsDesignated": {
                             "type": "boolean"
+                          },
+                          "poolBalances": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "displayedAmountRaw": {
+                                "type": "string"
+                              },
+                              "otherAmountRaw": {
+                                "type": "string"
+                              },
+                              "priceInQuote": {
+                                "type": "string"
+                              }
+                            }
                           },
                           "launchTokenAddress": {
                             "type": "string",
@@ -1241,6 +1271,21 @@
                     },
                     "ponsDesignated": {
                       "type": "boolean"
+                    },
+                    "poolBalances": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "displayedAmountRaw": {
+                          "type": "string"
+                        },
+                        "otherAmountRaw": {
+                          "type": "string"
+                        },
+                        "priceInQuote": {
+                          "type": "string"
+                        }
+                      }
                     },
                     "launchTokenAddress": {
                       "type": "string",

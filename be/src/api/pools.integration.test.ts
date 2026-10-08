@@ -74,17 +74,27 @@ describe('pool catalog API reader', () => {
     const pool0 = await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] });
     expect(pool0?.currency0Decimals).toBeNull();
     expect(pool0?.currency1Decimals).toBeNull();
+    expect(pool0?.poolBalances).toBeNull();
   });
   it('resolves currency decimals on-chain when an rpcClient is configured', async () => {
     // Stub rpcClient so decimals resolution (assetDecimals) doesn't need a real chain —
     // mirrors the pattern in store.integration.test.ts's own txRpcClient fixture.
-    const rpcClient = { async readContract({ functionName }: { functionName: string }) {
+    const rpcClient = {
+      async getBlockNumber() { return 300n; },
+      async readContract({ functionName }: { functionName: string }) {
       if (functionName === 'decimals') return 18;
+      if (functionName === 'getPoolTVL') return {
+        coreAmount0: 3n * 10n ** 18n, coreAmount1: 2n * 10n ** 18n,
+        sqrtPriceX96: 2n ** 96n, hasCustomAccounting: false,
+      };
       throw new Error(`Unexpected ${functionName}`);
-    } };
+      },
+    };
     const storeWithRpc = createPoolApiStore(pool, rpcClient);
     const pool0 = await storeWithRpc.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] });
     expect(pool0?.currency0Decimals).toBe(18);
     expect(pool0?.currency1Decimals).toBe(18);
+    expect(pool0?.poolBalances).toEqual({ displayedAmountRaw: '3000000000000000000',
+      otherAmountRaw: '2000000000000000000', priceInQuote: '1' });
   });
 });
