@@ -28,15 +28,17 @@
 
 Inputs/conditions the spec implies that a user will plausibly hit; each has a pinned test in the owning task:
 
-1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button disabled, no crash (Tasks 1, 4, 8, 9, 10).
+1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button reads "Quote unavailable" (disabled), no crash (Tasks 1, 4, 9, 10, 11).
 2. Typing fast in the Buy box → earlier searches are aborted, only the last value's result is applied (Task 6).
-3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Tasks 6, 8, 9, 10).
-4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Tasks 6, 8).
-5. Wallet disconnected → the reverse quote still works (it simulates as a synthetic account); forward quote and "Min received" stay hidden as today (Tasks 4, 10).
+3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Tasks 6, 9, 10, 11).
+4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Tasks 6, 8, 9).
+5. Wallet disconnected → the button says "Connect" (not "Switch network") and opens the wallet dialog; the reverse quote still works (it simulates as a synthetic account); forward quote and "Min received" stay hidden as today (Tasks 4, 8, 11).
 6. A token whose balance/allowance storage layout cannot be discovered (e.g. a proxy like WETH) → reverse quote unavailable, and no trade simulation is attempted (Tasks 2, 4).
 7. A tiny input that the curve reverts as dust must not be read as "too large" (Task 1).
 8. A launch inside its snipe-tax window or with a creator tax: the closed-form guess is too low, the simulation still finds the right input (Tasks 1, 3).
-9. The quote asset has no verified USD feed, the feed read fails, or the launched token's own price is unavailable → that side's `$` line is hidden (never `$0`), the other side's still shows, and the launch detail still loads (Tasks 5, 7, 11).
+9. The quote asset has no verified USD feed, the feed read fails, or the launched token's own price is unavailable → that side's `$` line is hidden (never `$0`), the other side's still shows, and the launch detail still loads (Tasks 5, 7, 12).
+10. The sold token's balance is still loading → the button must not flash "Not enough X"; it reads "Checking balance…" until the balance is known (Task 8).
+11. Button ladder order: Connect → Switch network → Enter an amount / Getting quote… → Checking balance… → Not enough X → Approve → Getting quote… → Quote unavailable → Swap (Task 8's table is pinned by `trade-button-state.test.ts`).
 
 ---
 
@@ -1217,7 +1219,7 @@ Expected: all pass; `git diff be/openapi.json` shows only the added `quotePriceU
 
 - [ ] **Step 5: Regenerate the frontend schema**
 
-Run (from `fe/`): `npm run generate:schema` then `npx tsc --noEmit`. Expected: `LaunchDetail` in `fe/src/api/schema.ts` gains `quotePriceUsd?: string | null` (Fastify marks nullable fields optional-or-null — match the existing `priceUsd` shape); the project typechecks. Fix any FE fixture the new field breaks (`quotePriceUsd: null`) — e.g. `fe/e2e/fixtures.ts`/`mock-api.ts` detail mocks and `launch-detail.test.tsx` builders; for the e2e mock set `quotePriceUsd: '3000'` so Task 12 can assert a USD line.
+Run (from `fe/`): `npm run generate:schema` then `npx tsc --noEmit`. Expected: `LaunchDetail` in `fe/src/api/schema.ts` gains `quotePriceUsd?: string | null` (Fastify marks nullable fields optional-or-null — match the existing `priceUsd` shape); the project typechecks. Fix any FE fixture the new field breaks (`quotePriceUsd: null`) — e.g. `fe/e2e/fixtures.ts`/`mock-api.ts` detail mocks and `launch-detail.test.tsx` builders; for the e2e mock set `quotePriceUsd: '3000'` so Task 13 can assert a USD line.
 
 - [ ] **Step 6: Commit (only your hunks — see the heads-up)**
 
@@ -1938,7 +1940,367 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
+### Task 8: Trade button states (Connect / Getting quote… / Not enough X / Swap) and the shared "open wallet dialog" request
+
+What the user asked for (Uniswap behavior): not connected → the button says **Connect** and opens the wallet dialog; while the app is simulating to find the price → **Getting quote…**; once ready, if the wallet lacks the token being entered (e.g. ETH) → **Not enough ETH**; otherwise → **Swap**. Today `ApproveOrActionButton` has no connect state (a disconnected wallet falls into "Switch network" because `chainId` is undefined) and no quoting state (it shows a disabled "Swap").
+
+**Files:**
+- Create: `fe/src/trading/trade-button-state.ts`, `fe/src/trading/trade-button-state.test.ts`
+- Create: `fe/src/wallet/open-wallet-dialog.ts`, `fe/src/wallet/open-wallet-dialog.test.ts`
+- Modify: `fe/src/wallet/wallet-control.tsx`, `fe/src/wallet/wallet-control.test.tsx` (already has uncommitted changes from other work — see Global Constraints; stage only your hunks)
+- Modify: `fe/src/trading/approve-or-action-button.tsx` (has a pending one-line `cursor-pointer` change from other work — stage only your hunks), `fe/src/trading/approve-or-action-button.test.tsx`
+
+**Interfaces:**
+- Produces (`trade-button-state.ts`):
+
+```ts
+export type QuoteState = 'idle' | 'loading' | 'ready' | 'unavailable';
+export type TradeButtonKind =
+  | 'connect' | 'switch-network' | 'enter-amount' | 'loading-quote' | 'loading-balance'
+  | 'insufficient' | 'approve' | 'quote-unavailable' | 'swap';
+export interface TradeButtonInput {
+  isConnected: boolean;
+  isWrongChain: boolean;
+  amountIn: bigint;               // the exact input that will be executed (0n until known/derived)
+  quoteState: QuoteState;
+  balanceKnown: boolean;          // false while the sold token's balance is still loading
+  hasInsufficientBalance: boolean;
+  needsApproval: boolean;
+  canBatchApprove: boolean;
+  tokenInSymbol: string | undefined;
+}
+export interface TradeButtonState { kind: TradeButtonKind; label: string; disabled: boolean }
+export function resolveTradeButton(input: TradeButtonInput): TradeButtonState;
+export function deriveQuoteState(input: {
+  source: 'sell' | 'buy'; reverseStatus: 'idle' | 'loading' | 'ok' | 'unavailable';
+  amountIn: bigint; outputAmount: bigint | null; errorMessage: string | null;
+}): QuoteState;
+```
+- Produces (`open-wallet-dialog.ts`): `OPEN_WALLET_DIALOG_EVENT = 'open-wallet-dialog'` and `openWalletDialog(): void` (dispatches that event on `window`). The header's `WalletControl` — always mounted by `AppShell` — listens and opens its existing connect dialog; no wallet code is duplicated.
+- Changes `ApproveOrActionButton` props: **replaces** `outputAmount: bigint | null` with `quoteState: QuoteState`, and **adds** `isConnected: boolean`, `balanceKnown: boolean`, `onConnect: () => void`. Everything else (`needsApproval`, `amountIn`, `approveAmount?`, `isWrongChain`, `hasInsufficientBalance`, `tokenInSymbol?`, `canBatchApprove?`, `isSubmitting`, `allowance`, `actionLabel`, `onAction`) is unchanged. Its callers (the V3, V4 and curve panels) are all updated by Tasks 9–11 of this plan; the old Buy/Sell panels it also served are deleted in Task 12.
+
+**The ladder (first match wins; the copy is part of the contract):**
+
+| # | Condition | Kind | Label | Enabled |
+|---|---|---|---|---|
+| 1 | not connected | `connect` | `Connect` | yes — opens the wallet dialog |
+| 2 | wrong chain | `switch-network` | `Switch network` | no (unchanged from today) |
+| 3 | `amountIn === 0n` and `quoteState === 'loading'` (a Buy-typed amount is still being turned into an input) | `loading-quote` | `Getting quote…` | no |
+| 3b | `amountIn === 0n` and `quoteState === 'unavailable'` | `quote-unavailable` | `Quote unavailable` | no |
+| 3c | `amountIn === 0n` otherwise | `enter-amount` | `Enter an amount` | no |
+| 4 | balance still loading | `loading-balance` | `Checking balance…` | no |
+| 5 | `hasInsufficientBalance` | `insufficient` | `Not enough {symbol}` (`token` if unknown) | no |
+| 6 | `needsApproval && !canBatchApprove` | `approve` | `Approve` (the existing Approve/Approving…/Confirming approval… states stay inside the component) | yes |
+| 7 | `quoteState` is `loading` or `idle` with an amount | `loading-quote` | `Getting quote…` | no |
+| 8 | `quoteState === 'unavailable'` | `quote-unavailable` | `Quote unavailable` | no |
+| 9 | otherwise | `swap` | `Swap` (the caller's `actionLabel`) | yes, unless `isSubmitting` |
+
+`deriveQuoteState`: `source === 'buy'` and `reverseStatus === 'loading'` → `loading`; `source === 'buy'` and `reverseStatus === 'unavailable'` → `unavailable`; `amountIn === 0n` → `idle`; `outputAmount !== null` → `ready`; `errorMessage !== null` → `unavailable`; else `loading` (the forward quote is still being simulated).
+
+- [ ] **Step 1: Write the failing tests**
+
+```ts
+// fe/src/trading/trade-button-state.test.ts
+import { describe, expect, it } from 'vitest';
+import { deriveQuoteState, resolveTradeButton, type TradeButtonInput } from './trade-button-state';
+
+const ready: TradeButtonInput = {
+  isConnected: true, isWrongChain: false, amountIn: 10n ** 18n, quoteState: 'ready',
+  balanceKnown: true, hasInsufficientBalance: false, needsApproval: false, canBatchApprove: false, tokenInSymbol: 'ETH',
+};
+const resolve = (over: Partial<TradeButtonInput>) => resolveTradeButton({ ...ready, ...over });
+
+describe('resolveTradeButton', () => {
+  it('connect comes first, even with no amount and a wrong chain', () => {
+    expect(resolve({ isConnected: false, amountIn: 0n, isWrongChain: true })).toEqual({ kind: 'connect', label: 'Connect', disabled: false });
+  });
+  it('wrong chain', () => {
+    expect(resolve({ isWrongChain: true })).toEqual({ kind: 'switch-network', label: 'Switch network', disabled: true });
+  });
+  it('no amount', () => {
+    expect(resolve({ amountIn: 0n, quoteState: 'idle' })).toEqual({ kind: 'enter-amount', label: 'Enter an amount', disabled: true });
+  });
+  it('a Buy-typed amount still being converted shows Getting quote…', () => {
+    expect(resolve({ amountIn: 0n, quoteState: 'loading' })).toEqual({ kind: 'loading-quote', label: 'Getting quote…', disabled: true });
+  });
+  it('a Buy-typed amount with no answer shows Quote unavailable', () => {
+    expect(resolve({ amountIn: 0n, quoteState: 'unavailable' })).toEqual({ kind: 'quote-unavailable', label: 'Quote unavailable', disabled: true });
+  });
+  it('balance still loading never claims "Not enough"', () => {
+    expect(resolve({ balanceKnown: false, hasInsufficientBalance: true })).toEqual({ kind: 'loading-balance', label: 'Checking balance…', disabled: true });
+  });
+  it('insufficient balance names the token being entered', () => {
+    expect(resolve({ hasInsufficientBalance: true })).toEqual({ kind: 'insufficient', label: 'Not enough ETH', disabled: true });
+    expect(resolve({ hasInsufficientBalance: true, tokenInSymbol: undefined }).label).toBe('Not enough token');
+  });
+  it('insufficient balance wins over a quote that is still loading (the amount is already known)', () => {
+    expect(resolve({ hasInsufficientBalance: true, quoteState: 'loading' }).kind).toBe('insufficient');
+  });
+  it('approval needed (no batching) shows Approve even before the quote is available', () => {
+    expect(resolve({ needsApproval: true, quoteState: 'unavailable' })).toEqual({ kind: 'approve', label: 'Approve', disabled: false });
+  });
+  it('approval is skipped when the wallet batches it', () => {
+    expect(resolve({ needsApproval: true, canBatchApprove: true }).kind).toBe('swap');
+  });
+  it('quote loading / idle with an amount', () => {
+    expect(resolve({ quoteState: 'loading' }).label).toBe('Getting quote…');
+    expect(resolve({ quoteState: 'idle' }).label).toBe('Getting quote…');
+  });
+  it('quote unavailable', () => {
+    expect(resolve({ quoteState: 'unavailable' })).toEqual({ kind: 'quote-unavailable', label: 'Quote unavailable', disabled: true });
+  });
+  it('ready to swap', () => {
+    expect(resolve({})).toEqual({ kind: 'swap', label: 'Swap', disabled: false });
+  });
+});
+
+describe('deriveQuoteState', () => {
+  const base = { source: 'sell' as const, reverseStatus: 'idle' as const, amountIn: 1n, outputAmount: null, errorMessage: null };
+  it('buy-typed: follows the reverse quote', () => {
+    expect(deriveQuoteState({ ...base, source: 'buy', reverseStatus: 'loading', amountIn: 0n })).toBe('loading');
+    expect(deriveQuoteState({ ...base, source: 'buy', reverseStatus: 'unavailable', amountIn: 0n })).toBe('unavailable');
+  });
+  it('no amount → idle', () => {
+    expect(deriveQuoteState({ ...base, amountIn: 0n })).toBe('idle');
+  });
+  it('forward quote: ready, unavailable on error, loading otherwise', () => {
+    expect(deriveQuoteState({ ...base, outputAmount: 5n })).toBe('ready');
+    expect(deriveQuoteState({ ...base, errorMessage: 'revert' })).toBe('unavailable');
+    expect(deriveQuoteState(base)).toBe('loading');
+  });
+});
+```
+
+```ts
+// fe/src/wallet/open-wallet-dialog.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { OPEN_WALLET_DIALOG_EVENT, openWalletDialog } from './open-wallet-dialog';
+
+describe('openWalletDialog', () => {
+  it('dispatches the open-wallet-dialog event on window', () => {
+    const handler = vi.fn();
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    openWalletDialog();
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  });
+});
+```
+
+In `wallet-control.test.tsx` add (import `act` from `@testing-library/react` and `openWalletDialog` from `./open-wallet-dialog`):
+
+```tsx
+it('opens the connect dialog when a trade panel asks for it', () => {
+  render(<WalletControl />);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  act(() => openWalletDialog());
+  expect(screen.getByRole('dialog', { name: 'Connect a wallet' })).toBeInTheDocument();
+});
+
+it('ignores that request while a wallet is already connected', () => {
+  hooks.account = { address: '0x1111111111111111111111111111111111111111', chainId: 4663, isConnected: true, status: 'connected' };
+  render(<WalletControl />);
+  act(() => openWalletDialog());
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+```
+
+In `approve-or-action-button.test.tsx`: first update every existing render to the new props (`outputAmount` → `quoteState`, plus `isConnected: true`, `balanceKnown: true`, `onConnect: vi.fn()`) — existing behavior assertions (Approve flow, approval error alert, batching skip, labels) must keep passing — then add:
+
+```tsx
+it('shows Connect when disconnected, and clicking it calls onConnect', () => {
+  const onConnect = vi.fn();
+  render(<ApproveOrActionButton {...baseProps} isConnected={false} amountIn={0n} onConnect={onConnect} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  expect(onConnect).toHaveBeenCalledTimes(1);
+});
+it('does not call that a wrong network when no wallet is connected', () => {
+  render(<ApproveOrActionButton {...baseProps} isConnected={false} isWrongChain />);
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+  expect(screen.queryByText('Switch network')).not.toBeInTheDocument();
+});
+it('shows Getting quote… (disabled) while the quote is being simulated', () => {
+  render(<ApproveOrActionButton {...baseProps} quoteState="loading" />);
+  expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+});
+it('shows Not enough {symbol} (disabled) when the wallet cannot cover the amount', () => {
+  render(<ApproveOrActionButton {...baseProps} hasInsufficientBalance tokenInSymbol="ETH" />);
+  expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
+});
+it('shows Swap (enabled) when everything is ready, and calls onAction', () => {
+  const onAction = vi.fn();
+  render(<ApproveOrActionButton {...baseProps} onAction={onAction} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+  expect(onAction).toHaveBeenCalledTimes(1);
+});
+it('shows Quote unavailable (disabled) when no quote can be produced', () => {
+  render(<ApproveOrActionButton {...baseProps} quoteState="unavailable" />);
+  expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
+});
+```
+(`baseProps` = a fully-valid ready state: `isConnected`, `balanceKnown`, `quoteState: 'ready'`, `amountIn: 10n ** 18n`, `needsApproval: false`, `isWrongChain: false`, `hasInsufficientBalance: false`, `isSubmitting: false`, an `allowance` stub with `isApproving: false, isConfirmingApproval: false, approveError: null, approve: vi.fn()`, `actionLabel: 'Swap'`, `onAction: vi.fn()`, `onConnect: vi.fn()`; reuse the file's existing helper if it already has one.)
+
+- [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/trade-button-state.test.ts src/wallet/open-wallet-dialog.test.ts src/wallet/wallet-control.test.tsx src/trading/approve-or-action-button.test.tsx` → FAIL (modules missing / new props).
+
+- [ ] **Step 3: Implement**
+
+```ts
+// fe/src/wallet/open-wallet-dialog.ts
+// A trade panel's "Connect" button asks the header's WalletControl (always mounted) to open the
+// wallet dialog it already owns — one dialog, no duplicated connector logic.
+export const OPEN_WALLET_DIALOG_EVENT = 'open-wallet-dialog';
+
+export function openWalletDialog(): void {
+  window.dispatchEvent(new Event(OPEN_WALLET_DIALOG_EVENT));
+}
+```
+
+`wallet-control.tsx` — beside the existing hooks, BEFORE the early returns (`status === 'reconnecting'` / connected branches), add (import `OPEN_WALLET_DIALOG_EVENT` from `./open-wallet-dialog`):
+
+```tsx
+  // A trade panel's Connect button asks for this dialog. Ignored while connected, so a request can
+  // never leave `open` stuck true and pop the dialog up after a later disconnect.
+  useEffect(() => {
+    if (isConnected) return;
+    const handler = () => setOpen(true);
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    return () => window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  }, [isConnected]);
+```
+
+```ts
+// fe/src/trading/trade-button-state.ts
+export type QuoteState = 'idle' | 'loading' | 'ready' | 'unavailable';
+export type TradeButtonKind =
+  | 'connect' | 'switch-network' | 'enter-amount' | 'loading-quote' | 'loading-balance'
+  | 'insufficient' | 'approve' | 'quote-unavailable' | 'swap';
+
+export interface TradeButtonInput {
+  isConnected: boolean;
+  isWrongChain: boolean;
+  amountIn: bigint;
+  quoteState: QuoteState;
+  balanceKnown: boolean;
+  hasInsufficientBalance: boolean;
+  needsApproval: boolean;
+  canBatchApprove: boolean;
+  tokenInSymbol: string | undefined;
+}
+
+export interface TradeButtonState {
+  kind: TradeButtonKind;
+  label: string;
+  disabled: boolean;
+}
+
+// The one place that decides what the trade button says. First match wins; see the plan's ladder.
+export function resolveTradeButton(input: TradeButtonInput): TradeButtonState {
+  const { isConnected, isWrongChain, amountIn, quoteState, balanceKnown, hasInsufficientBalance, needsApproval, canBatchApprove, tokenInSymbol } = input;
+  if (!isConnected) return { kind: 'connect', label: 'Connect', disabled: false };
+  if (isWrongChain) return { kind: 'switch-network', label: 'Switch network', disabled: true };
+  if (amountIn === 0n) {
+    if (quoteState === 'loading') return { kind: 'loading-quote', label: 'Getting quote…', disabled: true };
+    if (quoteState === 'unavailable') return { kind: 'quote-unavailable', label: 'Quote unavailable', disabled: true };
+    return { kind: 'enter-amount', label: 'Enter an amount', disabled: true };
+  }
+  if (!balanceKnown) return { kind: 'loading-balance', label: 'Checking balance…', disabled: true };
+  if (hasInsufficientBalance) return { kind: 'insufficient', label: `Not enough ${tokenInSymbol ?? 'token'}`, disabled: true };
+  if (needsApproval && !canBatchApprove) return { kind: 'approve', label: 'Approve', disabled: false };
+  if (quoteState === 'loading' || quoteState === 'idle') return { kind: 'loading-quote', label: 'Getting quote…', disabled: true };
+  if (quoteState === 'unavailable') return { kind: 'quote-unavailable', label: 'Quote unavailable', disabled: true };
+  return { kind: 'swap', label: 'Swap', disabled: false };
+}
+
+export function deriveQuoteState(input: {
+  source: 'sell' | 'buy';
+  reverseStatus: 'idle' | 'loading' | 'ok' | 'unavailable';
+  amountIn: bigint;
+  outputAmount: bigint | null;
+  errorMessage: string | null;
+}): QuoteState {
+  const { source, reverseStatus, amountIn, outputAmount, errorMessage } = input;
+  if (source === 'buy' && reverseStatus === 'loading') return 'loading';
+  if (source === 'buy' && reverseStatus === 'unavailable') return 'unavailable';
+  if (amountIn === 0n) return 'idle';
+  if (outputAmount !== null) return 'ready';
+  if (errorMessage !== null) return 'unavailable';
+  return 'loading';
+}
+```
+
+`approve-or-action-button.tsx` — keep the approve-state handling (`isApproving` / `isConfirmingApproval` / `approveError`) and the exported `ApproveOrActionAllowance`; replace the body's decision ladder with the resolver:
+
+```tsx
+export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
+  const { needsApproval, amountIn, approveAmount, isWrongChain, hasInsufficientBalance, tokenInSymbol, canBatchApprove,
+    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, onAction } = props;
+  const state = resolveTradeButton({ isConnected, isWrongChain, amountIn, quoteState, balanceKnown, hasInsufficientBalance,
+    needsApproval, canBatchApprove: Boolean(canBatchApprove), tokenInSymbol });
+  const approveError = allowance.approveError && (
+    <p role="alert" className="text-sm text-destructive">{allowance.approveError}</p>
+  );
+
+  if (state.kind === 'connect') {
+    return <Button type="button" className="cursor-pointer" onClick={onConnect}>{state.label}</Button>;
+  }
+  if (state.kind === 'approve') {
+    return (
+      <>
+        {approveError}
+        <Button type="button" className="cursor-pointer"
+          disabled={allowance.isApproving || allowance.isConfirmingApproval}
+          onClick={() => allowance.approve(approveAmount ?? amountIn)}>
+          {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : state.label}
+        </Button>
+      </>
+    );
+  }
+  return (
+    <>
+      {approveError}
+      <Button type="button" className="cursor-pointer" disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
+        onClick={state.kind === 'swap' ? onAction : undefined}>
+        {state.kind === 'swap' ? actionLabel : state.label}
+      </Button>
+    </>
+  );
+}
+```
+(Update the props interface: remove `outputAmount`, add `quoteState: QuoteState; isConnected: boolean; balanceKnown: boolean; onConnect: () => void`, and import `Button`, `resolveTradeButton`, `QuoteState`.)
+
+**Panel wiring snippet (used by Tasks 9–11; shown once here):** in each panel, `const { address: account, chainId, isConnected } = useAccount();` (add `isConnected`), `import { openWalletDialog } from '@/wallet/open-wallet-dialog'`, `import { deriveQuoteState } from './trade-button-state'`, and:
+
+```tsx
+const quoteState = deriveQuoteState({
+  source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn,
+  outputAmount: quote.outputAmount, errorMessage: quote.errorMessage,
+});
+…
+<ApproveOrActionButton
+  …existing props…
+  quoteState={allowanceStillLoading ? 'loading' : quoteState}   // V3/V4: allowanceStillLoading = erc20Allowance.isAllowanceLoading; curve: just quoteState
+  isConnected={isConnected}
+  balanceKnown={sellsNativeBalanceKnown}                        // the sold token's balance has loaded (native: `nativeBalance.data !== undefined`; ERC20: `tokenInBalance !== undefined`)
+  onConnect={openWalletDialog}
+/>
+```
+and the panel tests' `hooks.account` gets `isConnected: true` (default) so every existing assertion keeps its meaning.
+
+- [ ] **Step 4: Run to verify pass, typecheck, lint** — `npx vitest run src/trading/trade-button-state.test.ts src/wallet src/trading/approve-or-action-button.test.tsx && npx tsc --noEmit`. `tsc` WILL flag the V3/V4/curve panels (they still pass `outputAmount`) — that is expected until Tasks 9–11; to keep this commit green, in this task only update the three existing callers minimally (`outputAmount={x}` → `quoteState={x === null ? 'loading' : 'ready'}`, plus `isConnected={true}`, `balanceKnown={true}`, `onConnect={openWalletDialog}`) and let Tasks 9–11 replace that placeholder with the real wiring. The old `buy-panel.tsx` / `sell-panel.tsx` callers get the same minimal change and are deleted in Task 12.
+
+- [ ] **Step 5: Commit (only your hunks)**
+
+```bash
+git add src/trading/trade-button-state.ts src/trading/trade-button-state.test.ts src/wallet/open-wallet-dialog.ts src/wallet/open-wallet-dialog.test.ts
+git add -p src/wallet/wallet-control.tsx src/wallet/wallet-control.test.tsx src/trading/approve-or-action-button.tsx src/trading/approve-or-action-button.test.tsx src/trading/swap-panel.tsx src/trading/v4-swap-panel.tsx src/trading/buy-panel.tsx src/trading/sell-panel.tsx
+git commit -m "feat: trade button states (Connect, Getting quote, Not enough, Swap) and open-wallet-dialog request
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 9: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel.tsx`
@@ -1992,7 +2354,7 @@ it('shows "Quote unavailable" and disables Swap when the reverse quote has no an
   fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '999999999' } });
   await act(async () => { await vi.advanceTimersByTimeAsync(400); });
   expect(screen.getByText('Quote unavailable')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
   vi.useRealTimers();
 });
 
@@ -2011,6 +2373,42 @@ it('flip keeps the typed number on the same token', () => {
   fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '5' } });
   fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
   expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
+});
+
+it('Connect asks the header to open the wallet dialog', () => {
+  hooks.account.isConnected = false;
+  hooks.account.address = undefined;
+  const handler = vi.fn();
+  window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler); // from '@/wallet/open-wallet-dialog'
+  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+  expect(handler).toHaveBeenCalledTimes(1);
+  window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+});
+
+it('walks the button through Connect → Getting quote… → Not enough LAUNCH → Swap', () => {
+  // add `isConnected: true` to hooks.account and reset it in beforeEach
+  hooks.account.isConnected = false;
+  hooks.account.address = undefined;
+  const props = { poolAddress, tokenA, tokenB, explorerBase: null };
+  const { rerender } = render(<SwapPanel {...props} />);
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+
+  hooks.account.isConnected = true;
+  hooks.account.address = '0x1111111111111111111111111111111111111111';
+  hooks.simulateData = undefined; // the forward quote has not come back yet
+  rerender(<SwapPanel {...props} />);
+  fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+  expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+
+  hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] };
+  hooks.balanceA = 0n; // tokenA (LAUNCH) is the token being sold
+  rerender(<SwapPanel {...props} />);
+  expect(screen.getByRole('button', { name: 'Not enough LAUNCH' })).toBeDisabled();
+
+  hooks.balanceA = 10_000_000_000_000_000_000n;
+  rerender(<SwapPanel {...props} />);
+  expect(screen.getByRole('button', { name: 'Swap' })).toBeEnabled();
 });
 
 it('shows Min received from the quote with the user slippage, and hides it with no quote', () => {
@@ -2071,7 +2469,7 @@ const amounts = useSwapAmounts({
 });
 const amountIn = amounts.amountIn;
 ```
-`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`, `usdPriceFor`, `UsdPrices` (from `./trade-usd`), `minReceivedText` (from `./trade-amount-format`). The Min received row uses the same `settings.slippageBps` and `'pool'` venue kind that `submitSwap`'s `applySlippage` uses — never recompute slippage a second way.
+`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `deriveQuoteState` (`./trade-button-state`), `openWalletDialog` (`@/wallet/open-wallet-dialog`), and destructure `isConnected` from `useAccount()`; `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`, `usdPriceFor`, `UsdPrices` (from `./trade-usd`), `minReceivedText` (from `./trade-amount-format`). The Min received row uses the same `settings.slippageBps` and `'pool'` venue kind that `submitSwap`'s `applySlippage` uses — never recompute slippage a second way.
 
 2. Every `setAmount('')` (the `onSuccess` callbacks) becomes `amounts.reset()`. Flip handler: `() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }` (keeps the typed number; no more clearing).
 
@@ -2087,6 +2485,7 @@ const sellHint = reverseUnavailable ? 'Quote unavailable'
 const buyHint = amounts.source === 'sell' && amountIn > 0n && quote.outputAmount === null && quote.errorMessage
   ? `Quote unavailable: ${quote.errorMessage}` : null;
 const priceFor = (token: SwapToken) => usdPriceFor(usdPrices, token.address);
+const quoteState = deriveQuoteState({ source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn, outputAmount: quote.outputAmount, errorMessage: quote.errorMessage });
 
 return (
   <SwapShell venueLabel="Uniswap V3 pool" venueKind="pool" settings={settings} onSettingsChange={update}>
@@ -2105,7 +2504,7 @@ return (
       minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, displaySymbol(tokenOut, nativeOut))}
       footer={<>
         {permit2.signError && (<p role="alert" className="text-sm text-destructive">{permit2.signError}</p>)}
-        <ApproveOrActionButton … /* unchanged props, EXCEPT: outputAmount={reverseUnavailable ? null : (erc20Allowance.isAllowanceLoading ? null : quote.outputAmount)} */ />
+        <ApproveOrActionButton … /* unchanged props, EXCEPT: drop `outputAmount` and use Task 8's wiring — quoteState={erc20Allowance.isAllowanceLoading ? 'loading' : quoteState} isConnected={isConnected} balanceKnown={nativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined} onConnect={openWalletDialog} */ />
         <TradeStatus … /* unchanged */ />
       </>}
     />
@@ -2130,30 +2529,30 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
+### Task 10: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/v4-swap-panel.tsx`
 - Modify (test): `fe/src/trading/v4-swap-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: as Task 8, with `makeV4ReverseSolve`.
+- Consumes: as Task 9, with `makeV4ReverseSolve`.
 - Produces: `V4SwapPanelProps` gains `usdPrices?: UsdPrices`; `V4SwapToken` gains optional `logoUri?: string | null` (default `null`) so the token pills can show logos (callers that don't have one pass nothing).
 
 - [ ] **Step 1: Update mocks and add failing tests**
 
-Same approach as Task 8: mock `./reverse-quote` (`makeV4ReverseSolve: (...a) => { reverse.makeV4(...a); return reverse.solve; }`), add `usePublicClient: () => ({})` to the wagmi mock, reset `reverse.solve` (default `async (t) => t * 2n`) in `beforeEach`, and change selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add the same six tests as Task 8 (Buy-derives-Sell and submits exact-input with the derived amount, unavailable disables, no solver call for Sell typing/garbage, flip keeps the typed number, Min received row, USD line), adapted for V4: assert `reverse.makeV4` was called with `({}, { poolKey, zeroForOne: true })` and read the submitted swap input the way this file's existing tests do (V4's `encodeV4SwapInput` — mirror `v4SwapEncoding.test.ts` to decode its `amountIn`).
+Same approach as Task 9: mock `./reverse-quote` (`makeV4ReverseSolve: (...a) => { reverse.makeV4(...a); return reverse.solve; }`), add `usePublicClient: () => ({})` to the wagmi mock, reset `reverse.solve` (default `async (t) => t * 2n`) in `beforeEach`, and change selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add the same six tests as Task 9 (Buy-derives-Sell and submits exact-input with the derived amount, unavailable disables, no solver call for Sell typing/garbage, flip keeps the typed number, Min received row, USD line), adapted for V4: assert `reverse.makeV4` was called with `({}, { poolKey, zeroForOne: true })` and read the submitted swap input the way this file's existing tests do (V4's `encodeV4SwapInput` — mirror `v4SwapEncoding.test.ts` to decode its `amountIn`).
 
 - [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/v4-swap-panel.test.tsx` → FAIL.
 
-- [ ] **Step 3: Apply the same transformation as Task 8**
+- [ ] **Step 3: Apply the same transformation as Task 9**
 
 - `solve = useMemo(() => client ? makeV4ReverseSolve(client, { poolKey, zeroForOne }) : null, [client, poolKey, zeroForOne])` with `solveKey: \`v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}\``. `poolKey` is a prop object — its identity can change each parent render, so key the memo on `JSON`-free primitives: `[client, poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, zeroForOne]`.
 - Token selectors: V4 has no ETH/WETH toggle today; render `TokenSelector` with a single fixed option per side: `{ key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null }`, `onSelect={() => {}}`, `chainId={robinhoodChain.id}`. Native ETH (`zeroAddress`) shows symbol `ETH` as today (the caller already passes the symbol).
 - Venue label `"Uniswap V4 pool"`; `venueKind="pool"`.
 - Pass `minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, tokenOut.symbol)}` to `TradeCard` (same `applySlippage` inputs as `submitSwap`).
 - Flip: `setDirection(...)` + `amounts.flip()`; every `setAmount('')` → `amounts.reset()`.
-- Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 8. Keep `submitSwap`, permit2, allowance, batching unchanged.
+- Same `buyText`/hints/`quoteState` wiring as Task 9 (`deriveQuoteState`, `isConnected`, `balanceKnown` = `isNativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined`, `onConnect={openWalletDialog}`; `quoteState={erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}`). Keep `submitSwap`, permit2, allowance, batching unchanged.
 
 - [ ] **Step 4: Run to verify pass** — `npx vitest run src/trading/v4-swap-panel.test.tsx && npx tsc --noEmit && npx eslint src/trading/v4-swap-panel.tsx` → PASS.
 
@@ -2168,7 +2567,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
+### Task 11: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
 
 **Files:**
 - Create: `fe/src/trading/curve-swap-panel.tsx`
@@ -2194,7 +2593,7 @@ export interface CurveSwapPanelProps {
 
 - [ ] **Step 1: Port the behavior tests, then add the new ones**
 
-Open `buy-panel.test.tsx` and `sell-panel.test.tsx`. Create `curve-swap-panel.test.tsx` with the same hoisted-`hooks` + `vi.mock('wagmi', …)` scaffolding (plus `usePublicClient: () => ({})` and the `./reverse-quote` module mock below), and port EVERY test from both files into one `describe` each — "buy direction (default)" and "sell direction (after flip)" — adapting only: the component under test, the input selector (`getByLabelText('Sell amount')` — in the default buy direction the Sell card is the quote asset; after clicking "Flip swap direction" the Sell card is the launched token), and the button label (`Swap` instead of `Buy`/`Sell`; the "Not enough X"/"Approve"/"Enter an amount"/"Switch network" labels are unchanged). Keep each test's assertions on `writeContract`/`sendCalls` args identical (`buy`/`sell` function names, `value`, exact-amount approve, `minTokensOut`/`minQuoteOut` from `applySlippage(…,'curve')`). Add:
+Open `buy-panel.test.tsx` and `sell-panel.test.tsx`. Create `curve-swap-panel.test.tsx` with the same hoisted-`hooks` + `vi.mock('wagmi', …)` scaffolding (plus `usePublicClient: () => ({})` and the `./reverse-quote` module mock below), and port EVERY test from both files into one `describe` each — "buy direction (default)" and "sell direction (after flip)" — adapting only: the component under test, the input selector (`getByLabelText('Sell amount')` — in the default buy direction the Sell card is the quote asset; after clicking "Flip swap direction" the Sell card is the launched token), and the button label (`Swap` instead of `Buy`/`Sell`; labels follow Task 8's ladder: "Not enough X", "Approve", "Enter an amount", "Switch network" are unchanged; a button that used to be a disabled "Swap" because there was no quote is now "Getting quote…" or "Quote unavailable"; add `isConnected: true` to `hooks.account`). Keep each test's assertions on `writeContract`/`sendCalls` args identical (`buy`/`sell` function names, `value`, exact-amount approve, `minTokensOut`/`minQuoteOut` from `applySlippage(…,'curve')`). Add:
 
 ```tsx
 // Mock the reverse builder at its module boundary (Task 4 tests the builder; here we test wiring).
@@ -2206,6 +2605,36 @@ vi.mock('./reverse-quote', () => ({
   makeCurveReverseSolve: (...args: unknown[]) => { reverse.makeCurve(...args); return reverse.solve; },
 }));
 // beforeEach: reverse.solve.mockReset(); reverse.solve.mockResolvedValue(1_000_000_000_000_000_000n); reverse.makeCurve.mockClear();
+
+describe('button states', () => {
+  it('Connect when no wallet is connected; clicking it asks the header to open the wallet dialog', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    const handler = vi.fn();
+    window.addEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+    render(<CurveSwapPanel curveAddress={curve} tokenAddress={token} tokenDecimals={18} quoteAsset={nativeQuote} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(handler).toHaveBeenCalledTimes(1);
+    window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
+  });
+
+  it('walks Getting quote… → Not enough ETH → Swap for a native-ETH buy', () => {
+    const props = { curveAddress: curve, tokenAddress: token, tokenDecimals: 18, quoteAsset: nativeQuote, explorerBase: null };
+    hooks.simulateData = undefined; // forward quote not back yet
+    const { rerender } = render(<CurveSwapPanel {...props} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '0.001' } });
+    expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
+
+    hooks.simulateData = { result: 5n * 10n ** 20n };
+    hooks.balance = { data: { value: 0n }, isLoading: false }; // no ETH
+    rerender(<CurveSwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Not enough ETH' })).toBeDisabled();
+
+    hooks.balance = { data: { value: 10n ** 18n }, isLoading: false };
+    rerender(<CurveSwapPanel {...props} />);
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeEnabled();
+  });
+});
 
 describe('two-way amounts', () => {
   it('buy direction: typing in Buy derives the quote-asset amount from the curve reverse solver', async () => {
@@ -2236,7 +2665,7 @@ describe('two-way amounts', () => {
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '5' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(screen.getByText('Quote unavailable')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
     vi.useRealTimers();
   });
 
@@ -2300,11 +2729,13 @@ import { TradeCard } from './trade-card';
 import { TokenSelector } from './token-selector';
 import { usdPriceFor, usdText } from './trade-usd';
 import { minReceivedText } from './trade-amount-format';
+import { deriveQuoteState } from './trade-button-state';
+import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 
 export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymbol, tokenLogoUri, quoteAsset, explorerBase, usdPrices }: CurveSwapPanelProps) {
   // 'buy' = quote asset -> launched token (curve.buy); 'sell' = launched token -> quote (curve.sell).
   const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
-  const { address: account, chainId } = useAccount();
+  const { address: account, chainId, isConnected } = useAccount();
   const { settings, update } = useTradeSettings();
   const isNativeQuote = quoteAsset.address === zeroAddress;
   const isWrongChain = chainId !== robinhoodChain.id;
@@ -2370,6 +2801,7 @@ export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, toke
   }
 
   const reverseUnavailable = amounts.source === 'buy' && amounts.reverseStatus === 'unavailable';
+  const quoteState = deriveQuoteState({ source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn, outputAmount: quote.outputAmount, errorMessage: quote.errorMessage });
   const buyText = amounts.source === 'buy'
     ? amounts.buyTypedText
     : (quote.outputAmount !== null ? formatUnits(quote.outputAmount, tokenOut.decimals) : '');
@@ -2404,7 +2836,10 @@ export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, toke
             hasInsufficientBalance={hasInsufficientBalance}
             tokenInSymbol={tokenIn.symbol ?? undefined}
             canBatchApprove={canBatch}
-            outputAmount={reverseUnavailable ? null : quote.outputAmount}
+            quoteState={quoteState}
+            isConnected={isConnected}
+            balanceKnown={sellsNative ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
+            onConnect={openWalletDialog}
             isSubmitting={isSubmitting}
             allowance={allowance}
             actionLabel="Swap"
@@ -2424,7 +2859,7 @@ Note the quote-asset pill's logo is `null` (the letter avatar) — the launch de
 
 - [ ] **Step 5: Delete the superseded panels**
 
-`launch-detail.tsx` still imports `CurveTradePanel` until Task 11 — to keep this commit green, do the deletion in Task 11's commit instead. In this task only create the new files.
+`launch-detail.tsx` still imports `CurveTradePanel` until Task 12 — to keep this commit green, do the deletion in Task 12's commit instead. In this task only create the new files.
 
 - [ ] **Step 6: Commit**
 
@@ -2437,7 +2872,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: Wire everything in, update the preview, remove old panels
+### Task 12: Wire everything in, update the preview, remove old panels
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel-preview.tsx`, `fe/src/features/launch/launch-detail.tsx`, `fe/src/features/pools/swap-trigger.tsx`
@@ -2445,7 +2880,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Delete: `fe/src/trading/buy-panel.tsx`, `buy-panel.test.tsx`, `sell-panel.tsx`, `sell-panel.test.tsx`, `curve-trade-panel.tsx`, `curve-trade-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 8–10), `TradeCard`, `SwapShell`.
+- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 9–11), `TradeCard`, `SwapShell`.
 - Produces: `SwapPanelPreview({ sellSymbol, buySymbol })` — same props as today.
 
 - [ ] **Step 1: Write failing tests**
@@ -2542,7 +2977,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: Playwright smoke
+### Task 13: Playwright smoke
 
 **Files:**
 - Modify: `fe/e2e/launch-detail.spec.ts`
@@ -2576,13 +3011,14 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 13: Live verification (report, no code unless a bug is found)
+### Task 14: Live verification (report, no code unless a bug is found)
 
 **Files:** none unless a defect is found (then fix it with a test in the owning task's file).
 
 - [ ] **Step 1:** Run `npm run dev` in `fe/` with the BE running (`be/`), open a launch whose official venue is the **active bonding curve**, connect a funded test wallet (Robinhood Chain 4663).
 - [ ] **Step 2:** Use the curves verified on 2026-10-09 (all `graduated() == false` on chain 4663): **PROMETHEUS** (SPCX-quoted, token `0xeac1200c…e467`, curve `0x5bdcddef…36b4`, real depth), **OBUL** (ETH-quoted, token `0xcc71199b…bd8`, curve `0x4075be45…f948`), **GB** (USDG-quoted, token `0xdb348877…19e1`, curve `0xc23b1d11…9c9c`, almost no activity — `sell` there reverts by design). Compare against Pons's own trade page and Uniswap's swap panel (both `$` lines should appear, and their gap should roughly equal price impact + fees; for a tiny trade the two `$` values should be nearly equal) (`https://www.ponsfamily.com/launchpad/<token>`): e.g. Pons shows 27.28M PROMETHEUS for 1 SPCX; so must this app's forward quote.
   For each of native-ETH buy, ERC20-quoted buy, and sell, record: does typing in **Buy** fill **Sell** *before* the curve is approved and *without* a connected wallet; how many `eth_call` requests per search (DevTools → Network, filter `eth_call`) and the time from the last keystroke to the derived amount; how many requests the one-time slot discovery for each token costs.
+- [ ] **Step 2b:** Walk the button on a real page: disconnected → `Connect` (click opens the wallet dialog); connected with an amount typed → `Getting quote…` for a moment; an amount larger than the wallet's balance of the sold token → `Not enough ETH` (or the sold token's symbol); a covered amount → `Swap`; typing in Buy → `Getting quote…` until Sell fills.
 - [ ] **Step 3:** Repeat on a graduated V3 launch (expect one `quoteExactOutputSingle` call) and a graduated V4 launch / a Pools-page V4 pool (expect a short parallel `quoteExactInputSingleV4` search). Check that the public RPC does not throttle the parallel requests (no 429s); if it does, report the numbers before changing `SOLVER_WIDE_POINTS` / `SOLVER_REFINE_POINTS`.
 - [ ] **Step 4:** Append the measured numbers to the spec under "Two-way quoting" (a short "Measured" paragraph), commit that doc only. If curve latency exceeds ~3 s, tune the constants in `solve-input-for-output.ts` (with a test) or report the numbers to the user before changing them.
 - [ ] **Step 5:** Final check: `npx vitest run && npx tsc --noEmit && npx eslint .` in `fe/`; report any test or lint failure verbatim.
@@ -2591,7 +3027,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ## Self-Review (done)
 
-- **Spec coverage:** parallel solver incl. dust handling and guess (Task 1); state-override slot discovery (Task 2); closed-form guess (Task 3); per-venue reverse builders — V3 single call, V4/curve search, synthetic account (Task 4); quote-asset USD price in the API (Task 5); two-way state, flip semantics, debounce/abort (Task 6); TradeCard/SwapShell + Min received + `$` lines on both cards (Task 7); V3/V4 migration (Tasks 8–9); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 10); wiring, preview, deletions (Task 11); e2e (Task 12); live verification and measurement (Task 13).
+- **Spec coverage:** parallel solver incl. dust handling and guess (Task 1); state-override slot discovery (Task 2); closed-form guess (Task 3); per-venue reverse builders — V3 single call, V4/curve search, synthetic account (Task 4); quote-asset USD price in the API (Task 5); two-way state, flip semantics, debounce/abort (Task 6); TradeCard/SwapShell + Min received + `$` lines on both cards (Task 7); button states Connect / Getting quote… / Not enough X / Swap and the open-wallet-dialog request (Task 8); V3/V4 migration (Tasks 9–10); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 11); wiring, preview, deletions (Task 12); e2e (Task 13); live verification and measurement (Task 14).
 - **Placeholders:** none — the places that say "copy verbatim from buy-panel.tsx" (submission/batch hook boilerplate), "read the submitted call the way the existing tests do", and "insert a launch the way this file's beforeAll does" point to existing files the engineer reads, and name exactly which parts.
-- **Type consistency:** `QuoteFn` (Task 1), `CallClient`/`SIMULATION_ACCOUNT`/`Erc20Layouts` (Task 2), `CurveState` (Task 3), `ReverseSolve` and the three `make…ReverseSolve` signatures (Task 4), `LaunchDetail.quotePriceUsd` (Task 5), `ReverseStatus`/`useSwapAmounts` fields (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`) (Task 6), `TradeCardSide`/`minReceived`/`UsdPrices`/`usdPriceFor` (Task 7) are used with identical names and shapes in Tasks 8–11.
-- **Known risks called out, not hidden:** (1) a token whose storage layout is not discovered (e.g. a proxy) has no reverse quote on the curve — verified layouts: USDG, Pons launch tokens, stock tokens; (2) during a launch's first seconds (snipe tax) the synthetic account may be quoted differently than the user's account, so the forward quote at the derived input (real account) remains the authority for "Min received" and submission; (3) forward quotes for ERC20-quoted buy/sell still need approval first (existing behavior) — extending the same state-override trick to the forward quote is a natural follow-up; (4) parallel probing sends up to 16 `eth_call`s per round to the RPC — Task 13 checks for throttling; (5) the working tree has unrelated uncommitted changes in files this plan edits — commits must stage only their own hunks; (6) the Pools page does not get `$` lines yet (no per-currency USD prices there) — a follow-up.
+- **Type consistency:** `QuoteFn` (Task 1), `CallClient`/`SIMULATION_ACCOUNT`/`Erc20Layouts` (Task 2), `CurveState` (Task 3), `ReverseSolve` and the three `make…ReverseSolve` signatures (Task 4), `LaunchDetail.quotePriceUsd` (Task 5), `ReverseStatus`/`useSwapAmounts` fields (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`) (Task 6), `TradeCardSide`/`minReceived`/`UsdPrices`/`usdPriceFor` (Task 7), `QuoteState`/`resolveTradeButton`/`deriveQuoteState`/`openWalletDialog` and the new `ApproveOrActionButton` props `quoteState`, `isConnected`, `balanceKnown`, `onConnect` (Task 8) are used with identical names and shapes in Tasks 9–12.
+- **Known risks called out, not hidden:** (1) a token whose storage layout is not discovered (e.g. a proxy) has no reverse quote on the curve — verified layouts: USDG, Pons launch tokens, stock tokens; (2) during a launch's first seconds (snipe tax) the synthetic account may be quoted differently than the user's account, so the forward quote at the derived input (real account) remains the authority for "Min received" and submission; (3) forward quotes for ERC20-quoted buy/sell still need approval first (existing behavior), so for such a launch the button can read "Quote unavailable" or "Approve" before approval — extending the same state-override trick to the forward quote is a natural follow-up; (4) parallel probing sends up to 16 `eth_call`s per round to the RPC — Task 14 checks for throttling; (5) the working tree has unrelated uncommitted changes in files this plan edits (including `wallet-control.tsx` and `approve-or-action-button.tsx`) — commits must stage only their own hunks; (6) the Pools page does not get `$` lines yet (no per-currency USD prices there) — a follow-up; (7) the panel's Connect button reaches the header's wallet dialog through a window event, so it needs `WalletControl` mounted (it is, in `AppShell` on every page).

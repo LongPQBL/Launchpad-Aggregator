@@ -96,6 +96,28 @@ Each card shows, under its amount, the USD value of that amount: `amount × that
 - **Pool detail page:** no per-currency USD prices are passed there, so its `$` lines stay hidden. Giving the Pools page the same two-sided USD lines (e.g. from pool-level price data) is a follow-up, not part of this work.
 - Formatting follows the app's existing `formatUsd` (no thousands separators, e.g. `$3000.00`); changing that is out of scope.
 
+## Action button states
+
+One button under the cards; what it says is decided in one place (`resolveTradeButton`). First match wins:
+
+| Situation | Label | Enabled |
+|---|---|---|
+| No wallet connected | `Connect` — opens the wallet dialog (the header's existing one) | yes |
+| Wrong network | `Switch network` | no |
+| Nothing typed | `Enter an amount` | no |
+| A Buy-typed amount is still being turned into an input (reverse quote running) | `Getting quote…` | no |
+| …and that reverse quote has no answer | `Quote unavailable` | no |
+| Sold token's balance still loading | `Checking balance…` | no |
+| Wallet lacks the token being entered (e.g. ETH) | `Not enough ETH` (the sold token's symbol) | no |
+| Spender needs approval and the wallet cannot batch it | `Approve` | yes |
+| Forward quote still being simulated | `Getting quote…` | no |
+| No quote can be produced | `Quote unavailable` | no |
+| Ready | `Swap` | yes |
+
+- `Getting quote…` is the copy chosen for "simulating to find the price" (Uniswap says "Finalizing quote…").
+- The order matters: `Connect` beats everything (a disconnected wallet must never read "Switch network"); `Not enough X` is shown as soon as the amount is known, even while the quote is still loading; a balance that has not loaded yet never reads "Not enough" (it reads `Checking balance…`).
+- The panel's `Connect` button does not own a wallet dialog: it dispatches a window event (`open-wallet-dialog`) that the header's `WalletControl` — mounted on every page — handles by opening the dialog it already has. Ignored while already connected.
+
 ## Venue mapping (unchanged rule, new presentation)
 
 | Page | Venue | Panel |
