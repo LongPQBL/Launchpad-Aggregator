@@ -6,34 +6,37 @@
 
 **Architecture:** A presentational `TradeCard` + `SwapShell` replace the hand-rolled markup of the three panels. A shared `useSwapAmounts` hook holds "which side the user typed in" and, when that is the Buy side, derives the exact-input amount `X` via a reverse quote: V3 uses its exact-out quoter in one call; V4 and the curve use a parallel search (`solveInputForOutput`) over `eth_call` simulations. Curve simulations run as a synthetic account given the needed balance/allowance by state override (ERC20 storage slots discovered per token), and start from an exact closed-form model of the curve as a guess. Execution on every venue stays exact-input using `X`, so Permit2/approval/batching/slippage code is untouched. `BuyPanel`+`SellPanel`+`CurveTradePanel` merge into `CurveSwapPanel`.
 
+**Quote-asset USD:** Task 5 adds `quotePriceUsd` to the launch-detail API so both cards can show a `$` line from each token's own market price (their gap is the price impact plus fees, as on Uniswap).
+
 **Tech Stack:** Next.js (see `fe/AGENTS.md` — this Next has breaking changes; none of this plan touches routing/config), React, wagmi + viem, Tailwind, Vitest + Testing Library, Playwright.
 
 **Spec:** `docs/superpowers/specs/2026-10-09-unified-swap-panel-design.md`
 
 ## Global Constraints
 
-- Frontend only (`fe/`). No backend change, no migration, no change to any on-chain call shape, approval amount, quote, slippage, deadline or EIP-5792 batching behavior.
+- Frontend, plus ONE additive backend field (`quotePriceUsd` on the launch detail, Task 5: no migration, no behavior change to existing fields). No change to any on-chain call shape, approval amount, quote, slippage, deadline or EIP-5792 batching behavior.
 - Frontend copy is English. Code identifiers, tests, comments and filenames are English.
 - `null` means unavailable, never zero: a `$` line is hidden (not `$0`) when no real USD price exists; an unsolvable reverse quote shows "Quote unavailable" and disables the action button — it never guesses.
 - No `Limit` tab and no `Buy | Sell` tab bar anywhere in this work.
 - The venue (curve vs. V3/V4 pool) stays visible as a badge on the panel.
 - Slippage and deadline are edited only in the existing settings popover (as on Uniswap); the panel face shows just a read-only "Min received" row computed with the same `applySlippage` the submit path uses.
 - Light/dark: use existing theme tokens (`bg-card`, `bg-muted`, `text-muted-foreground`, `bg-primary`, …); introduce no new color.
-- Work directly on `main`. Run commands from `fe/` unless stated. Commit only the files a task lists (the working tree has many unrelated uncommitted changes — never `git add -A`).
+- Work directly on `main`. Run commands from `fe/` (Task 5: `be/`) unless stated. The working tree has MANY uncommitted changes that are not part of this plan (e.g. `be/src/api/store.ts`, `server.ts`, `fe/src/api/schema.ts`, `fe/src/features/launch/launch-detail.tsx`, `fe/src/trading/approve-or-action-button.tsx`, and several untracked files). Never `git add -A` / `git add .`. Before editing a file that `git status` shows as already modified, run `git diff <file>` and stage ONLY your own hunks (`git add -p <file>`); never commit someone else's in-progress edits. A task's commit step lists the files it owns; for an already-modified file that means "your hunks only". Untracked files you did not create (e.g. `fe/src/features/pools/swap-trigger.tsx`) are the user's work in progress — edit them only as the task says, and tell the user when a commit would add such a file.
 - Every commit message ends with: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
 
 ## Review Focus
 
 Inputs/conditions the spec implies that a user will plausibly hit; each has a pinned test in the owning task:
 
-1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button disabled, no crash (Tasks 1, 4, 7, 8, 9).
-2. Typing fast in the Buy box → earlier searches are aborted, only the last value's result is applied (Task 5).
-3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Tasks 5, 7, 8, 9).
-4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Tasks 5, 7).
-5. Wallet disconnected → the reverse quote still works (it simulates as a synthetic account); forward quote and "Min received" stay hidden as today (Tasks 4, 9).
+1. Typing a Buy amount larger than the pool/curve can deliver → Sell card shows "Quote unavailable", button disabled, no crash (Tasks 1, 4, 8, 9, 10).
+2. Typing fast in the Buy box → earlier searches are aborted, only the last value's result is applied (Task 6).
+3. Flipping after typing keeps the typed number on the same token and never shows a stale derived value from the old direction (Tasks 6, 8, 9, 10).
+4. Clearing the box or typing `.`/`1e5`/garbage → no RPC calls, no crash, button says "Enter an amount" (Tasks 6, 8).
+5. Wallet disconnected → the reverse quote still works (it simulates as a synthetic account); forward quote and "Min received" stay hidden as today (Tasks 4, 10).
 6. A token whose balance/allowance storage layout cannot be discovered (e.g. a proxy like WETH) → reverse quote unavailable, and no trade simulation is attempted (Tasks 2, 4).
 7. A tiny input that the curve reverts as dust must not be read as "too large" (Task 1).
 8. A launch inside its snipe-tax window or with a creator tax: the closed-form guess is too low, the simulation still finds the right input (Tasks 1, 3).
+9. The quote asset has no verified USD feed, the feed read fails, or the launched token's own price is unavailable → that side's `$` line is hidden (never `$0`), the other side's still shows, and the launch detail still loads (Tasks 5, 7, 11).
 
 ---
 
@@ -1110,7 +1113,124 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 5: `useReverseQuote` (debounced, abortable) and `useSwapAmounts`
+### Task 5: Backend — expose the quote asset's USD price on the launch detail
+
+Why: Uniswap shows a `$` value under **both** cards, each from that token's own market price; the gap between them is the price impact plus fees (e.g. 50 ETH ≈ $123,708 in, 1,352,430 AI ≈ $118,357 out → −4.3%). The API exposes only the launched token's `priceUsd` (computed in `computeStats` as `price-in-quote × quote USD price`, and withheld while indexed coverage is incomplete). The quote asset's own USD price already exists in the backend (`readUsdPrice` → verified Chainlink feed via `quote_usd_feeds`), and it does **not** depend on coverage. This task exposes it on the **detail endpoint only** (the list endpoint is untouched — no extra per-row work), as one additive nullable field.
+
+**Files (run from `be/`):**
+- Modify: `be/src/api/schemas.ts` (`launchDetail.properties`: add `quotePriceUsd`)
+- Modify: `be/src/api/server.ts` (`LaunchDetail` interface: add `quotePriceUsd: string | null`)
+- Modify: `be/src/api/store.ts` (`getLaunch` + one small helper)
+- Test: `be/src/api/store.integration.test.ts`, `be/src/api/server.test.ts`
+- Regenerate (never hand-edit): `be/openapi.json` (`npm run openapi:write`), `fe/src/api/schema.ts` (from `fe/`: `npm run generate:schema`)
+
+**Interfaces:**
+- Produces: `LaunchDetail.quotePriceUsd: string | null` — USD per 1 whole unit of the launch's quote asset, as a decimal string (same formatting as the existing `priceUsd`); `null` when the quote asset has no verified feed, the store has no `rpcClient`, or the read fails. Independent of launch coverage. Never `"0"` as a placeholder.
+
+**Heads-up:** `be/src/api/store.ts`, `be/src/api/server.ts`, `be/src/api/server.test.ts`, `be/src/api/store.integration.test.ts` and `fe/src/api/schema.ts` already have uncommitted changes from other work — see Global Constraints; stage only your own hunks (`git add -p`). For the two generated files, regenerate, then stage only the `quotePriceUsd` hunks (the other pending hunks in `fe/src/api/schema.ts` are not yours).
+
+- [ ] **Step 1: Write the failing tests**
+
+In `store.integration.test.ts`, next to `'getLaunch also returns real stats for a single launch'` (it already defines `rpcClient()` — a fake `readContract` returning feed `decimals` 8 and `latestRoundData` 269170223591 ⇒ 2691.70223591 USD for the ETH quote used by `goodToken`):
+
+```ts
+it('getLaunch returns the quote asset USD price when an rpcClient is configured', async () => {
+  const storeWithRpc = createApiStore(pool, { readContract: rpcClient() } as never);
+  const detail = await storeWithRpc.getLaunch(4663, goodToken);
+  expect(detail).not.toBeNull();
+  expect(detail!.quotePriceUsd).not.toBeNull();
+  expect(Number(detail!.quotePriceUsd)).toBeCloseTo(2691.70223591, 5);
+});
+
+it('getLaunch returns quotePriceUsd null (not 0) when no rpcClient is configured', async () => {
+  const detail = await createApiStore(pool).getLaunch(4663, goodToken);
+  expect(detail!.quotePriceUsd).toBeNull();
+  expect(detail!.name).toBe('Stats0'); // the detail still loads
+});
+
+it('getLaunch still loads, with quotePriceUsd null, when the quote asset has no verified feed', async () => {
+  // Insert a launch the same way this file's beforeAll inserts goodToken, but with a quote asset
+  // that is NOT in quote_usd_feeds (e.g. '0x' + 'ab'.repeat(20)); delete it in afterAll.
+  const detail = await createApiStore(pool, { readContract: rpcClient() } as never).getLaunch(4663, noFeedToken);
+  expect(detail).not.toBeNull();
+  expect(detail!.quotePriceUsd).toBeNull();
+});
+```
+(`'Stats0'` is `goodToken`'s name in this file's fixtures; the assertion only proves the detail still returns. Add the `noFeedToken` insert/cleanup to the file's setup/teardown following its existing pattern.)
+
+In `server.test.ts`, extend the existing launch-detail route test's fake `data` store: give its detail fixture `quotePriceUsd: '2691.7'` and assert the JSON body contains `"quotePriceUsd":"2691.7"`; add a second case with `quotePriceUsd: null` asserting the field is present and `null` (Fastify's response schema must not drop it).
+
+- [ ] **Step 2: Run to verify failure**
+
+Run (from `be/`): `npm run test:integration -- src/api/store.integration.test.ts -t "quote asset USD price"` and `npx vitest run src/api/server.test.ts`
+Expected: FAIL (`quotePriceUsd` undefined / not in the schema). Also run `npx tsc --noEmit` after Step 3 — it will flag every `LaunchDetail` fixture missing the new required field; add `quotePriceUsd: null` to each.
+
+- [ ] **Step 3: Implement**
+
+`schemas.ts` — in `launchDetail.properties` (next to `priceQuote`/`priceStale`):
+
+```ts
+  // USD per 1 whole unit of the launch's quote asset (Chainlink feed), or null. Independent of
+  // coverage: unlike priceUsd/FDV it needs no indexed trades.
+  quotePriceUsd: { type: 'string', nullable: true },
+```
+
+`server.ts` — `LaunchDetail`:
+
+```ts
+  priceStale: boolean;
+  quotePriceUsd: string | null;
+```
+
+`store.ts` — a helper beside `cachedUsdPrice`:
+
+```ts
+// The quote asset's own USD price for the launch detail. Unlike priceUsd it does not depend on the
+// launch's coverage. A feed or RPC failure must never fail the whole detail request.
+async function readQuotePriceUsd(pool: Pool, client: UsdPriceClient | undefined, quoteAssetAddress: string): Promise<string | null> {
+  if (!client) return null;
+  try {
+    const price = await cachedUsdPrice(pool, client, quoteAssetAddress);
+    return price ? String(price.priceUsd) : null;
+  } catch {
+    return null;
+  }
+}
+```
+
+and in `getLaunch`, start it with the other reads and include it in the returned object:
+
+```ts
+      const quotePriceUsdPromise = readQuotePriceUsd(pool, rpcClient, string(row.quote_asset_address));
+      …
+      return { ...summary(row, complete, stats),
+        …existing fields…,
+        quotePriceUsd: await quotePriceUsdPromise,
+        priceStale: … };
+```
+(`rpcClient` is the `createApiStore(pool, rpcClient?)` parameter already in scope; production wires it in `be/src/cli/api.ts`. Do not touch `listLaunches`.)
+
+- [ ] **Step 4: Run to verify pass, typecheck, lint, openapi**
+
+Run (from `be/`): `npm run test:integration -- src/api/store.integration.test.ts && npx vitest run src/api/server.test.ts && npx tsc --noEmit && npx eslint src/api/store.ts src/api/server.ts src/api/schemas.ts && npm run openapi:write && npm run openapi:check`
+Expected: all pass; `git diff be/openapi.json` shows only the added `quotePriceUsd` property. If `openapi:write` also rewrites unrelated parts because of other pending work in `schemas.ts`, stage only the `quotePriceUsd` hunk.
+
+- [ ] **Step 5: Regenerate the frontend schema**
+
+Run (from `fe/`): `npm run generate:schema` then `npx tsc --noEmit`. Expected: `LaunchDetail` in `fe/src/api/schema.ts` gains `quotePriceUsd?: string | null` (Fastify marks nullable fields optional-or-null — match the existing `priceUsd` shape); the project typechecks. Fix any FE fixture the new field breaks (`quotePriceUsd: null`) — e.g. `fe/e2e/fixtures.ts`/`mock-api.ts` detail mocks and `launch-detail.test.tsx` builders; for the e2e mock set `quotePriceUsd: '3000'` so Task 12 can assert a USD line.
+
+- [ ] **Step 6: Commit (only your hunks — see the heads-up)**
+
+```bash
+git add -p be/src/api/schemas.ts be/src/api/server.ts be/src/api/store.ts be/src/api/store.integration.test.ts be/src/api/server.test.ts be/openapi.json fe/src/api/schema.ts
+git commit -m "feat: expose the quote asset USD price on the launch detail
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
+```
+
+---
+
+### Task 6: `useReverseQuote` (debounced, abortable) and `useSwapAmounts`
 
 **Files:**
 - Create: `fe/src/trading/use-reverse-quote.ts`, `fe/src/trading/use-swap-amounts.ts`
@@ -1449,7 +1569,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 6: `TradeCard`, `SwapShell`, USD helper
+### Task 7: `TradeCard`, `SwapShell`, USD helper
 
 **Files:**
 - Create: `fe/src/trading/trade-card.tsx`, `fe/src/trading/swap-shell.tsx`, `fe/src/trading/trade-usd.ts`, `fe/src/trading/trade-amount-format.ts`
@@ -1463,6 +1583,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
   - `SwapShell({ venueLabel: string; settings: TradeSettings; onSettingsChange: (s: TradeSettings) => void; venueKind: 'curve' | 'pool'; children: ReactNode })` — header with a "Swap" pill, a venue badge, the settings gear; children rendered below.
   - `formatTokenAmount(amount: bigint, decimals: number): string` — compact display (`27.0063M`), up to 4 fraction digits; a non-zero amount below 0.0001 → `<0.0001`; zero → `0`.
   - `minReceivedText(outputAmount: bigint | null, slippageBps: number | 'auto', venueKind: 'curve' | 'pool', decimals: number, symbol: string | null): string | null` — `null` when `outputAmount` is `null`; else `` `${formatTokenAmount(applySlippage(outputAmount, slippageBps, venueKind), decimals)} ${symbol ?? ''}`.trim() `` (lives in `trade-amount-format.ts`; it must call the same `applySlippage` the submit path uses).
+  - `type UsdPrices = Record<string, string | null>` (lowercased token address → USD price per whole token, or null) and `usdPriceFor(prices: UsdPrices | undefined, address: string): string | null` (case-insensitive lookup; `null` for a missing/null entry), both in `trade-usd.ts`
   - `usdText(amount: bigint | null, decimals: number, priceUsd: string | null | undefined): string | null` — `null` when amount is `null`/`0n` or price missing; else `formatUsd(String(Number(formatUnits(amount, decimals)) * Number(priceUsd)), 2)`.
 
 - [ ] **Step 1: Write failing tests**
@@ -1600,7 +1721,19 @@ describe('minReceivedText', () => {
 ```ts
 // fe/src/trading/trade-usd.test.ts
 import { describe, expect, it } from 'vitest';
-import { usdText } from './trade-usd';
+import { usdPriceFor, usdText } from './trade-usd';
+
+describe('usdPriceFor', () => {
+  const prices = { '0xabc0000000000000000000000000000000000001': '2.5', '0xabc0000000000000000000000000000000000002': null };
+  it('looks the address up case-insensitively', () => {
+    expect(usdPriceFor(prices, '0xABC0000000000000000000000000000000000001')).toBe('2.5');
+  });
+  it('is null for a null entry, a missing entry, or no prices at all', () => {
+    expect(usdPriceFor(prices, '0xabc0000000000000000000000000000000000002')).toBeNull();
+    expect(usdPriceFor(prices, '0xabc0000000000000000000000000000000000003')).toBeNull();
+    expect(usdPriceFor(undefined, '0xabc0000000000000000000000000000000000001')).toBeNull();
+  });
+});
 
 describe('usdText', () => {
   it('multiplies the token amount by the USD price', () => {
@@ -1630,6 +1763,13 @@ Expected: FAIL — modules missing.
 // fe/src/trading/trade-usd.ts
 import { formatUnits } from 'viem';
 import { formatUsd } from '@/api/format';
+
+// Lowercased token address -> USD price per whole token (decimal string), or null when unknown.
+export type UsdPrices = Record<string, string | null>;
+
+export function usdPriceFor(prices: UsdPrices | undefined, address: string): string | null {
+  return prices?.[address.toLowerCase()] ?? null;
+}
 
 // USD value of a token amount, or null (line hidden) when there is no real price — null means
 // unavailable, never "$0".
@@ -1798,15 +1938,15 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 7: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
+### Task 8: Migrate the V3 `SwapPanel` (`swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel.tsx`
 - Modify (test): `fe/src/trading/swap-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `useSwapAmounts` (Task 5), `makeV3ReverseSolve` (Task 4), `TradeCard`, `SwapShell`, `usdText` (Task 6); wagmi `usePublicClient`.
-- Produces: `SwapPanelProps` gains optional `usdPrice?: { tokenAddress: Address; priceUsd: string | null }` (shows `$` only on the side whose token address matches). All other props unchanged.
+- Consumes: `useSwapAmounts` (Task 6), `makeV3ReverseSolve` (Task 4), `TradeCard`, `SwapShell`, `usdText` (Task 7); wagmi `usePublicClient`.
+- Produces: `SwapPanelProps` gains optional `usdPrices?: UsdPrices` (a `$` line shows on each side whose token address has a non-null entry). All other props unchanged.
 
 - [ ] **Step 1: Update the mocks and add the new failing tests**
 
@@ -1887,10 +2027,20 @@ it('shows Min received from the quote with the user slippage, and hides it with 
   expect(screen.queryByText('Min received')).not.toBeInTheDocument();
 });
 
-it('shows a USD line only on the side whose token has a price', () => {
-  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} usdPrice={{ tokenAddress: tokenA.address, priceUsd: '2' }} />);
+it('shows a USD line on each side that has a price, and hides the side that does not', () => {
+  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} usdPrices={{ [tokenA.address.toLowerCase()]: '2' }} />);
   fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
   expect(screen.getByText('$6.00')).toBeInTheDocument();
+  expect(screen.queryByText(/^\$3000/)).not.toBeInTheDocument(); // the other side has no price: its line is hidden
+});
+
+it('shows both USD lines when both tokens have a price — their gap is the price impact plus fees', () => {
+  hooks.simulateData = { result: [1_000_000_000_000_000_000n, 0n, 1, 1n] }; // 3 LAUNCH sell for 1 WETH out
+  render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null}
+    usdPrices={{ [tokenA.address.toLowerCase()]: '2', [tokenB.address.toLowerCase()]: '3000' }} />);
+  fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+  expect(screen.getByText('$6.00')).toBeInTheDocument();    // 3 LAUNCH x $2
+  expect(screen.getByText('$3000.00')).toBeInTheDocument(); // 1 WETH x $3000
 });
 ```
 
@@ -1921,7 +2071,7 @@ const amounts = useSwapAmounts({
 });
 const amountIn = amounts.amountIn;
 ```
-`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`, `minReceivedText` (from `./trade-amount-format`). The Min received row uses the same `settings.slippageBps` and `'pool'` venue kind that `submitSwap`'s `applySlippage` uses — never recompute slippage a second way.
+`tokenIn`/`tokenOut` derive from `direction` exactly as today (keep `direction` state). Imports: `useMemo`, `usePublicClient` (wagmi), `makeV3ReverseSolve`, `useSwapAmounts`, `TradeCard`, `SwapShell`, `usdText`, `usdPriceFor`, `UsdPrices` (from `./trade-usd`), `minReceivedText` (from `./trade-amount-format`). The Min received row uses the same `settings.slippageBps` and `'pool'` venue kind that `submitSwap`'s `applySlippage` uses — never recompute slippage a second way.
 
 2. Every `setAmount('')` (the `onSuccess` callbacks) becomes `amounts.reset()`. Flip handler: `() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }` (keeps the typed number; no more clearing).
 
@@ -1936,8 +2086,7 @@ const sellHint = reverseUnavailable ? 'Quote unavailable'
   : amounts.source === 'buy' && amounts.reverseStatus === 'loading' ? 'Estimating…' : null;
 const buyHint = amounts.source === 'sell' && amountIn > 0n && quote.outputAmount === null && quote.errorMessage
   ? `Quote unavailable: ${quote.errorMessage}` : null;
-const priceFor = (token: SwapToken) =>
-  usdPrice && usdPrice.tokenAddress.toLowerCase() === token.address.toLowerCase() ? usdPrice.priceUsd : null;
+const priceFor = (token: SwapToken) => usdPriceFor(usdPrices, token.address);
 
 return (
   <SwapShell venueLabel="Uniswap V3 pool" venueKind="pool" settings={settings} onSettingsChange={update}>
@@ -1963,7 +2112,7 @@ return (
   </SwapShell>
 );
 ```
-Add `usdPrice?: { tokenAddress: Address; priceUsd: string | null }` to `SwapPanelProps` and the function parameters. Remove now-unused imports (`Input`, `Button`, `TradeSettingsPopover`, `parseAmountSafe` if unused). Keep `submitSwap`, quote hook, permit2, allowance, batching, ETH/WETH handling byte-for-byte.
+Add `usdPrices?: UsdPrices` to `SwapPanelProps` and the function parameters. Remove now-unused imports (`Input`, `Button`, `TradeSettingsPopover`, `parseAmountSafe` if unused). Keep `submitSwap`, quote hook, permit2, allowance, batching, ETH/WETH handling byte-for-byte.
 
 - [ ] **Step 4: Run to verify pass, typecheck, lint**
 
@@ -1981,30 +2130,30 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 8: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
+### Task 9: Migrate the V4 `V4SwapPanel` (`v4-swap-panel.tsx`)
 
 **Files:**
 - Modify: `fe/src/trading/v4-swap-panel.tsx`
 - Modify (test): `fe/src/trading/v4-swap-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: as Task 7, with `makeV4ReverseSolve`.
-- Produces: `V4SwapPanelProps` gains `usdPrice?: { tokenAddress: Address; priceUsd: string | null }`; `V4SwapToken` gains optional `logoUri?: string | null` (default `null`) so the token pills can show logos (callers that don't have one pass nothing).
+- Consumes: as Task 8, with `makeV4ReverseSolve`.
+- Produces: `V4SwapPanelProps` gains `usdPrices?: UsdPrices`; `V4SwapToken` gains optional `logoUri?: string | null` (default `null`) so the token pills can show logos (callers that don't have one pass nothing).
 
 - [ ] **Step 1: Update mocks and add failing tests**
 
-Same approach as Task 7: mock `./reverse-quote` (`makeV4ReverseSolve: (...a) => { reverse.makeV4(...a); return reverse.solve; }`), add `usePublicClient: () => ({})` to the wagmi mock, reset `reverse.solve` (default `async (t) => t * 2n`) in `beforeEach`, and change selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add the same six tests as Task 7 (Buy-derives-Sell and submits exact-input with the derived amount, unavailable disables, no solver call for Sell typing/garbage, flip keeps the typed number, Min received row, USD line), adapted for V4: assert `reverse.makeV4` was called with `({}, { poolKey, zeroForOne: true })` and read the submitted swap input the way this file's existing tests do (V4's `encodeV4SwapInput` — mirror `v4SwapEncoding.test.ts` to decode its `amountIn`).
+Same approach as Task 8: mock `./reverse-quote` (`makeV4ReverseSolve: (...a) => { reverse.makeV4(...a); return reverse.solve; }`), add `usePublicClient: () => ({})` to the wagmi mock, reset `reverse.solve` (default `async (t) => t * 2n`) in `beforeEach`, and change selectors `getByLabelText(/amount/i)` → `getByLabelText('Sell amount')`. Add the same six tests as Task 8 (Buy-derives-Sell and submits exact-input with the derived amount, unavailable disables, no solver call for Sell typing/garbage, flip keeps the typed number, Min received row, USD line), adapted for V4: assert `reverse.makeV4` was called with `({}, { poolKey, zeroForOne: true })` and read the submitted swap input the way this file's existing tests do (V4's `encodeV4SwapInput` — mirror `v4SwapEncoding.test.ts` to decode its `amountIn`).
 
 - [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/v4-swap-panel.test.tsx` → FAIL.
 
-- [ ] **Step 3: Apply the same transformation as Task 7**
+- [ ] **Step 3: Apply the same transformation as Task 8**
 
 - `solve = useMemo(() => client ? makeV4ReverseSolve(client, { poolKey, zeroForOne }) : null, [client, poolKey, zeroForOne])` with `solveKey: \`v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}\``. `poolKey` is a prop object — its identity can change each parent render, so key the memo on `JSON`-free primitives: `[client, poolKey.currency0, poolKey.currency1, poolKey.fee, poolKey.tickSpacing, poolKey.hooks, zeroForOne]`.
 - Token selectors: V4 has no ETH/WETH toggle today; render `TokenSelector` with a single fixed option per side: `{ key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null }`, `onSelect={() => {}}`, `chainId={robinhoodChain.id}`. Native ETH (`zeroAddress`) shows symbol `ETH` as today (the caller already passes the symbol).
 - Venue label `"Uniswap V4 pool"`; `venueKind="pool"`.
 - Pass `minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, tokenOut.symbol)}` to `TradeCard` (same `applySlippage` inputs as `submitSwap`).
 - Flip: `setDirection(...)` + `amounts.flip()`; every `setAmount('')` → `amounts.reset()`.
-- Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 7. Keep `submitSwap`, permit2, allowance, batching unchanged.
+- Same `buyText`/hints/`outputAmount` gating (`reverseUnavailable ? null : …`) as Task 8. Keep `submitSwap`, permit2, allowance, batching unchanged.
 
 - [ ] **Step 4: Run to verify pass** — `npx vitest run src/trading/v4-swap-panel.test.tsx && npx tsc --noEmit && npx eslint src/trading/v4-swap-panel.tsx` → PASS.
 
@@ -2019,7 +2168,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 9: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
+### Task 10: `CurveSwapPanel` (replaces Buy/Sell/CurveTrade panels)
 
 **Files:**
 - Create: `fe/src/trading/curve-swap-panel.tsx`
@@ -2039,7 +2188,7 @@ export interface CurveSwapPanelProps {
   tokenLogoUri?: string | null;
   quoteAsset: { address: Address; symbol: string | null; decimals: number };
   explorerBase: string | null;
-  usdPrice?: { tokenAddress: Address; priceUsd: string | null };
+  usdPrices?: UsdPrices;
 }
 ```
 
@@ -2149,10 +2298,10 @@ import { useSwapAmounts } from './use-swap-amounts';
 import { SwapShell } from './swap-shell';
 import { TradeCard } from './trade-card';
 import { TokenSelector } from './token-selector';
-import { usdText } from './trade-usd';
+import { usdPriceFor, usdText } from './trade-usd';
 import { minReceivedText } from './trade-amount-format';
 
-export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymbol, tokenLogoUri, quoteAsset, explorerBase, usdPrice }: CurveSwapPanelProps) {
+export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, tokenSymbol, tokenLogoUri, quoteAsset, explorerBase, usdPrices }: CurveSwapPanelProps) {
   // 'buy' = quote asset -> launched token (curve.buy); 'sell' = launched token -> quote (curve.sell).
   const [direction, setDirection] = useState<'buy' | 'sell'>('buy');
   const { address: account, chainId } = useAccount();
@@ -2228,8 +2377,7 @@ export function CurveSwapPanel({ curveAddress, tokenAddress, tokenDecimals, toke
     : amounts.source === 'buy' && amounts.reverseStatus === 'loading' ? 'Estimating…' : null;
   const buyHint = amounts.source === 'sell' && amountIn > 0n && quote.outputAmount === null && quote.errorMessage
     ? `Quote unavailable: ${quote.errorMessage}` : null;
-  const priceFor = (address: Address) =>
-    usdPrice && usdPrice.tokenAddress.toLowerCase() === address.toLowerCase() ? usdPrice.priceUsd : null;
+  const priceFor = (address: Address) => usdPriceFor(usdPrices, address);
   const pill = (t: typeof tokenIn) => (
     <TokenSelector
       options={[{ key: t.address, symbol: t.symbol ?? '—', logoUri: t.logoUri }]}
@@ -2276,7 +2424,7 @@ Note the quote-asset pill's logo is `null` (the letter avatar) — the launch de
 
 - [ ] **Step 5: Delete the superseded panels**
 
-`launch-detail.tsx` still imports `CurveTradePanel` until Task 10 — to keep this commit green, do the deletion in Task 10's commit instead. In this task only create the new files.
+`launch-detail.tsx` still imports `CurveTradePanel` until Task 11 — to keep this commit green, do the deletion in Task 11's commit instead. In this task only create the new files.
 
 - [ ] **Step 6: Commit**
 
@@ -2289,7 +2437,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 10: Wire everything in, update the preview, remove old panels
+### Task 11: Wire everything in, update the preview, remove old panels
 
 **Files:**
 - Modify: `fe/src/trading/swap-panel-preview.tsx`, `fe/src/features/launch/launch-detail.tsx`, `fe/src/features/pools/swap-trigger.tsx`
@@ -2297,7 +2445,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 - Delete: `fe/src/trading/buy-panel.tsx`, `buy-panel.test.tsx`, `sell-panel.tsx`, `sell-panel.test.tsx`, `curve-trade-panel.tsx`, `curve-trade-panel.test.tsx`
 
 **Interfaces:**
-- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 7–9), `TradeCard`, `SwapShell`.
+- Consumes: `CurveSwapPanel`, `SwapPanel`, `V4SwapPanel` (Tasks 8–10), `TradeCard`, `SwapShell`.
 - Produces: `SwapPanelPreview({ sellSymbol, buySymbol })` — same props as today.
 
 - [ ] **Step 1: Write failing tests**
@@ -2319,7 +2467,7 @@ describe('SwapPanelPreview', () => {
   });
 });
 ```
-In `launch-detail.test.tsx`: update any assertion that looked for `Buy`/`Sell` tabs of the curve panel to look for the single `Swap` panel (`getByText('Bonding curve')` badge, `getByLabelText('Sell amount')`); add a test that, for a launch with `priceUsd: '2'` and a curve venue, typing `3` in `Sell amount` is NOT required — instead assert the panel receives `usdPrice` by typing in the launched-token side (flip first) and expecting `$6.00`.
+In `launch-detail.test.tsx`: update any assertion that looked for `Buy`/`Sell` tabs of the curve panel to look for the single `Swap` panel (`getByText('Bonding curve')` badge, `getByLabelText('Sell amount')`); add tests that, for a curve launch with `priceUsd: '2'` and `quotePriceUsd: '3000'` (native-ETH quote): typing `0.001` in `Sell amount` (the quote side) shows `$3.00`; flipping and typing `3` shows `$6.00` on the launched-token side; and with `quotePriceUsd: null` the quote side shows no `$` line while the launched-token side still does.
 
 - [ ] **Step 2: Run to verify failure** — `npx vitest run src/trading/swap-panel-preview.test.tsx src/features/launch/launch-detail.test.tsx` → FAIL.
 
@@ -2368,12 +2516,12 @@ export function SwapPanelPreview({ sellSymbol, buySymbol }: { sellSymbol: string
   tokenLogoUri={detail.logoUri}
   quoteAsset={{ address: detail.quoteAsset.address as `0x${string}`, symbol: detail.quoteAsset.symbol, decimals: detail.quoteAsset.decimals }}
   explorerBase={explorerBase ?? null}
-  usdPrice={{ tokenAddress: detail.tokenAddress as `0x${string}`, priceUsd: detail.priceUsd ?? null }}
+  usdPrices={usdPrices}
 />
 ```
-and pass `usdPrice={{ tokenAddress: detail.tokenAddress as `0x${string}`, priceUsd: detail.priceUsd ?? null }}` to the existing `SwapPanel` (V3) and `V4SwapPanel` blocks. Replace the import of `CurveTradePanel` with `CurveSwapPanel`. For the V4 block, add `logoUri` to the launch-token side only: `{ …, logoUri: detail.logoUri }` on whichever of `tokenA`/`tokenB` is the launched token (it is the side where the address equals `detail.tokenAddress`).
+and pass `usdPrices={usdPrices}` to the existing `SwapPanel` (V3) and `V4SwapPanel` blocks. Define once near the top of `LaunchDetail`: `const usdPrices: UsdPrices = { [detail.tokenAddress.toLowerCase()]: detail.priceUsd ?? null, [detail.quoteAsset.address.toLowerCase()]: detail.quotePriceUsd ?? null };` (import `UsdPrices` from `@/trading/trade-usd`; `quotePriceUsd` exists after Task 5's regenerated `fe/src/api/schema.ts`). The V3 panel's WETH leg and the V4 native-ETH leg both use the quote asset's address, so both resolve to `quotePriceUsd`. Replace the import of `CurveTradePanel` with `CurveSwapPanel`. For the V4 block, add `logoUri` to the launch-token side only: `{ …, logoUri: detail.logoUri }` on whichever of `tokenA`/`tokenB` is the launched token (it is the side where the address equals `detail.tokenAddress`).
 
-`swap-trigger.tsx`: change `<Dialog … title="Swap">` to `title={`${tokenA.symbol ?? 'Token'} / ${tokenB.symbol ?? 'Token'}`}` (the panel now renders its own "Swap" heading). Pass nothing else — pool pages have no USD price, so `$` stays hidden.
+`swap-trigger.tsx`: change `<Dialog … title="Swap">` to `title={`${tokenA.symbol ?? 'Token'} / ${tokenB.symbol ?? 'Token'}`}` (the panel now renders its own "Swap" heading). Pass nothing else — the Pools page does not pass `usdPrices`, so its `$` lines stay hidden (see the spec's follow-up note).
 
 Delete the six old files with `git rm`.
 
@@ -2394,7 +2542,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 11: Playwright smoke
+### Task 12: Playwright smoke
 
 **Files:**
 - Modify: `fe/e2e/launch-detail.spec.ts`
@@ -2428,12 +2576,12 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ---
 
-### Task 12: Live verification (report, no code unless a bug is found)
+### Task 13: Live verification (report, no code unless a bug is found)
 
 **Files:** none unless a defect is found (then fix it with a test in the owning task's file).
 
 - [ ] **Step 1:** Run `npm run dev` in `fe/` with the BE running (`be/`), open a launch whose official venue is the **active bonding curve**, connect a funded test wallet (Robinhood Chain 4663).
-- [ ] **Step 2:** Use the curves verified on 2026-10-09 (all `graduated() == false` on chain 4663): **PROMETHEUS** (SPCX-quoted, token `0xeac1200c…e467`, curve `0x5bdcddef…36b4`, real depth), **OBUL** (ETH-quoted, token `0xcc71199b…bd8`, curve `0x4075be45…f948`), **GB** (USDG-quoted, token `0xdb348877…19e1`, curve `0xc23b1d11…9c9c`, almost no activity — `sell` there reverts by design). Compare against Pons's own trade page (`https://www.ponsfamily.com/launchpad/<token>`): e.g. Pons shows 27.28M PROMETHEUS for 1 SPCX; so must this app's forward quote.
+- [ ] **Step 2:** Use the curves verified on 2026-10-09 (all `graduated() == false` on chain 4663): **PROMETHEUS** (SPCX-quoted, token `0xeac1200c…e467`, curve `0x5bdcddef…36b4`, real depth), **OBUL** (ETH-quoted, token `0xcc71199b…bd8`, curve `0x4075be45…f948`), **GB** (USDG-quoted, token `0xdb348877…19e1`, curve `0xc23b1d11…9c9c`, almost no activity — `sell` there reverts by design). Compare against Pons's own trade page and Uniswap's swap panel (both `$` lines should appear, and their gap should roughly equal price impact + fees; for a tiny trade the two `$` values should be nearly equal) (`https://www.ponsfamily.com/launchpad/<token>`): e.g. Pons shows 27.28M PROMETHEUS for 1 SPCX; so must this app's forward quote.
   For each of native-ETH buy, ERC20-quoted buy, and sell, record: does typing in **Buy** fill **Sell** *before* the curve is approved and *without* a connected wallet; how many `eth_call` requests per search (DevTools → Network, filter `eth_call`) and the time from the last keystroke to the derived amount; how many requests the one-time slot discovery for each token costs.
 - [ ] **Step 3:** Repeat on a graduated V3 launch (expect one `quoteExactOutputSingle` call) and a graduated V4 launch / a Pools-page V4 pool (expect a short parallel `quoteExactInputSingleV4` search). Check that the public RPC does not throttle the parallel requests (no 429s); if it does, report the numbers before changing `SOLVER_WIDE_POINTS` / `SOLVER_REFINE_POINTS`.
 - [ ] **Step 4:** Append the measured numbers to the spec under "Two-way quoting" (a short "Measured" paragraph), commit that doc only. If curve latency exceeds ~3 s, tune the constants in `solve-input-for-output.ts` (with a test) or report the numbers to the user before changing them.
@@ -2443,7 +2591,7 @@ Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"
 
 ## Self-Review (done)
 
-- **Spec coverage:** TradeCard/SwapShell + Min received + USD line (Task 6); two-way state, flip semantics, debounce/abort (Task 5); parallel solver incl. dust handling and guess (Task 1); state-override slot discovery (Task 2); closed-form guess (Task 3); per-venue reverse builders — V3 single call, V4/curve search, synthetic account (Task 4); V3/V4 migration (Tasks 7–8); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 9); wiring, preview, deletions (Task 10); e2e (Task 11); live verification and measurement (Task 12); no backend change.
-- **Placeholders:** none — the places that say "copy verbatim from buy-panel.tsx" (submission/batch hook boilerplate) and "read the submitted call the way the existing tests do" point to existing files the engineer reads, and name exactly which parts.
-- **Type consistency:** `QuoteFn` (Task 1), `CallClient`/`SIMULATION_ACCOUNT`/`Erc20Layouts` (Task 2), `CurveState` (Task 3), `ReverseSolve` and the three `make…ReverseSolve` signatures (Task 4), `ReverseStatus`/`useSwapAmounts` fields (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`) (Task 5), `TradeCardSide`/`minReceived`/`usdPrice` (Task 6) are used with identical names and shapes in Tasks 7–10.
-- **Known risks called out, not hidden:** (1) a token whose storage layout is not discovered (e.g. a proxy) simply has no reverse quote on the curve — verified layouts: USDG, Pons launch tokens, stock tokens; (2) during a launch's first seconds (snipe tax) the synthetic account may be quoted differently than the user's real account, so the forward quote at the derived input (real account) remains the authority for "Min received" and submission; (3) forward quotes for ERC20-quoted buy/sell still need approval first (existing behavior) — extending the same state-override trick to the forward quote is a natural follow-up, not part of this plan; (4) parallel probing sends up to 16 `eth_call`s per round to the RPC — Task 12 checks for throttling.
+- **Spec coverage:** parallel solver incl. dust handling and guess (Task 1); state-override slot discovery (Task 2); closed-form guess (Task 3); per-venue reverse builders — V3 single call, V4/curve search, synthetic account (Task 4); quote-asset USD price in the API (Task 5); two-way state, flip semantics, debounce/abort (Task 6); TradeCard/SwapShell + Min received + `$` lines on both cards (Task 7); V3/V4 migration (Tasks 8–9); `CurveSwapPanel` replacing Buy/Sell/CurveTrade with ported regression tests (Task 10); wiring, preview, deletions (Task 11); e2e (Task 12); live verification and measurement (Task 13).
+- **Placeholders:** none — the places that say "copy verbatim from buy-panel.tsx" (submission/batch hook boilerplate), "read the submitted call the way the existing tests do", and "insert a launch the way this file's beforeAll does" point to existing files the engineer reads, and name exactly which parts.
+- **Type consistency:** `QuoteFn` (Task 1), `CallClient`/`SIMULATION_ACCOUNT`/`Erc20Layouts` (Task 2), `CurveState` (Task 3), `ReverseSolve` and the three `make…ReverseSolve` signatures (Task 4), `LaunchDetail.quotePriceUsd` (Task 5), `ReverseStatus`/`useSwapAmounts` fields (`sellText`, `buyTypedText`, `amountIn`, `reverseStatus`, `onSellChange`, `onBuyChange`, `flip`, `reset`) (Task 6), `TradeCardSide`/`minReceived`/`UsdPrices`/`usdPriceFor` (Task 7) are used with identical names and shapes in Tasks 8–11.
+- **Known risks called out, not hidden:** (1) a token whose storage layout is not discovered (e.g. a proxy) has no reverse quote on the curve — verified layouts: USDG, Pons launch tokens, stock tokens; (2) during a launch's first seconds (snipe tax) the synthetic account may be quoted differently than the user's account, so the forward quote at the derived input (real account) remains the authority for "Min received" and submission; (3) forward quotes for ERC20-quoted buy/sell still need approval first (existing behavior) — extending the same state-override trick to the forward quote is a natural follow-up; (4) parallel probing sends up to 16 `eth_call`s per round to the RPC — Task 13 checks for throttling; (5) the working tree has unrelated uncommitted changes in files this plan edits — commits must stage only their own hunks; (6) the Pools page does not get `$` lines yet (no per-currency USD prices there) — a follow-up.
