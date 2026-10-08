@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, within, screen, waitFor } from '@testing-library/react';
 import { decodeAbiParameters, maxUint256, parseAbiParameters } from 'viem';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { V4SwapPanel } from './v4-swap-panel';
@@ -120,12 +120,17 @@ beforeEach(() => {
   hooks.erc20AllowanceLoading = false;
 });
 
+// Each TradeCard side is the label's parent element, so the token pills can be asserted per side.
+function card(label: 'Sell' | 'Buy') {
+  return within(screen.getByText(label).parentElement as HTMLElement);
+}
+
 describe('V4SwapPanel', () => {
   it('defaults to swapping tokenA for tokenB, deriving zeroForOne from the real pool key', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(screen.getByText('Sell')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
+    expect(card('Sell').getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    expect(card('Buy').getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
+    expect(card('Sell').queryByRole('button', { name: /ROBIN/ })).not.toBeInTheDocument();
   });
 
   it('encodes the real zeroForOne bit matching the UI direction, not just the displayed label', async () => {
@@ -154,9 +159,9 @@ describe('V4SwapPanel', () => {
   it('flips direction when the toggle is clicked', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip|swap direction/i }));
-    // Both pills remain; the sell input now sits on the ROBIN side (same symbols, swapped roles).
-    expect(screen.getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    expect(card('Sell').getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
+    expect(card('Buy').getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    expect(card('Sell').queryByRole('button', { name: /LAUNCH/ })).not.toBeInTheDocument();
   });
 
   it('shows Approve (targeting Permit2, not the router) when the ERC20->Permit2 allowance is insufficient', () => {
@@ -430,6 +435,20 @@ describe('V4SwapPanel', () => {
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '.' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(reverse.solve).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('re-solves with a different solver key when only the pool tickSpacing changes', async () => {
+    vi.useFakeTimers();
+    const props = { tokenA, tokenB, explorerBase: null };
+    const { rerender } = render(<V4SwapPanel poolKey={poolKey} {...props} />);
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.solve).toHaveBeenCalledTimes(1);
+    rerender(<V4SwapPanel poolKey={{ ...poolKey, tickSpacing: 60 }} {...props} />);
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.makeV4).toHaveBeenLastCalledWith({}, { poolKey: { ...poolKey, tickSpacing: 60 }, zeroForOne: true });
+    expect(reverse.solve).toHaveBeenCalledTimes(2);
     vi.useRealTimers();
   });
 
