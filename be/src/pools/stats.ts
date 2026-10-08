@@ -5,18 +5,12 @@ import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
+import { readLensSnapshot } from './lens.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { poolPriceInQuote, poolPriceRational, sumUsdValues, percentChange } from './valuation.js';
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const erc20DecimalsAbi = parseAbi(['function decimals() view returns (uint8)']);
-const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951' as Address;
-const RESERVES_LENS = '0x0000001b173C3bbF3984D417d8614E3eed34865B' as Address;
-const lensAbi = parseAbi([
-  'struct PoolKey { address currency0; address currency1; uint24 fee; int24 tickSpacing; address hooks; }',
-  'struct PoolTVL { uint256 coreAmount0; uint256 coreAmount1; uint256 hookReserves0; uint256 hookReserves1; uint256 hookEffective0; uint256 hookEffective1; uint160 sqrtPriceX96; int24 tick; uint128 activeLiquidity; uint256 blockNumber; address statsProvider; uint16 hookPermissions; bool hasCustomAccounting; uint8 statsStatus; }',
-  'function getPoolTVL(address manager, PoolKey key) view returns (PoolTVL result)',
-]);
 const MAX_RECENT_TRADES = 10_000;
 
 export interface PoolKey { chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string }
@@ -130,30 +124,21 @@ async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: Poo
   displayedDecimals: number | null, quoteDecimals: number | null, quoteUsd: number | null): Promise<{
     poolBalances: PoolBalanceSnapshot | null; tvlUsd: string | null;
   }> {
-  if (!client?.getBlockNumber || displayedDecimals === null || quoteDecimals === null) {
-    return { poolBalances: null, tvlUsd: null };
-  }
+  if (displayedDecimals === null || quoteDecimals === null) return { poolBalances: null, tvlUsd: null };
+  const lens = await readLensSnapshot(client, catalog);
+  if (!lens) return { poolBalances: null, tvlUsd: null };
   try {
-    const blockNumber = await client.getBlockNumber();
-    const result = await client.readContract({ address: RESERVES_LENS, abi: lensAbi, functionName: 'getPoolTVL',
-      args: [POOL_MANAGER, { currency0: catalog.currency0 as Address, currency1: catalog.currency1 as Address,
-        fee: catalog.fee, tickSpacing: catalog.tick_spacing, hooks: catalog.hooks as Address }],
-      blockNumber, gas: 30_000_000n });
-    if (!result || typeof result !== 'object' || !('coreAmount0' in result) || !('coreAmount1' in result)
-      || !('sqrtPriceX96' in result) || !('hasCustomAccounting' in result)
-      || typeof result.coreAmount0 !== 'bigint' || typeof result.coreAmount1 !== 'bigint'
-      || typeof result.sqrtPriceX96 !== 'bigint' || result.coreAmount0 < 0n || result.coreAmount1 < 0n
-      || result.sqrtPriceX96 <= 0n || result.hasCustomAccounting !== false) return { poolBalances: null, tvlUsd: null };
-    const priceInQuote = poolPriceInQuote(result.sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0, 100);
+    const { blockNumber, coreAmount0, coreAmount1, sqrtPriceX96 } = lens;
+    const priceInQuote = poolPriceInQuote(sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0, 100);
     const poolBalances = priceInQuote === null ? null : {
-      displayedAmountRaw: (displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1).toString(),
-      otherAmountRaw: (displayedIsCurrency0 ? result.coreAmount1 : result.coreAmount0).toString(),
+      displayedAmountRaw: (displayedIsCurrency0 ? coreAmount0 : coreAmount1).toString(),
+      otherAmountRaw: (displayedIsCurrency0 ? coreAmount1 : coreAmount0).toString(),
       priceInQuote,
     };
     const tvlUsd = quoteUsd === null ? null : calculateTvlUsd({
-      tokenRaw: displayedIsCurrency0 ? result.coreAmount0 : result.coreAmount1,
-      quoteRaw: displayedIsCurrency0 ? result.coreAmount1 : result.coreAmount0,
-      blockNumber, basis: 'pool_principal', sqrtPriceX96: result.sqrtPriceX96,
+      tokenRaw: displayedIsCurrency0 ? coreAmount0 : coreAmount1,
+      quoteRaw: displayedIsCurrency0 ? coreAmount1 : coreAmount0,
+      blockNumber, basis: 'pool_principal', sqrtPriceX96,
       tokenIsCurrency0: displayedIsCurrency0,
     }, quoteDecimals, displayedDecimals, quoteUsd);
     return { poolBalances, tvlUsd };
