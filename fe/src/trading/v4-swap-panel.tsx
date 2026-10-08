@@ -66,7 +66,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }
     tokenInDecimals: tokenIn.decimals,
     tokenOutDecimals: tokenOut.decimals,
     solve,
-    solveKey: `v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.hooks}:${zeroForOne}`,
+    solveKey: `v4:${poolKey.currency0}:${poolKey.currency1}:${poolKey.fee}:${poolKey.tickSpacing}:${poolKey.hooks}:${zeroForOne}`,
   });
   const amountIn = amounts.amountIn;
 
