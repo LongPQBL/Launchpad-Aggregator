@@ -123,6 +123,19 @@ cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill ho
 nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
 nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
+**Snapshot TVL của pool V4:** `%` thay đổi TVL so với 24h trước cần lịch sử TVL, mà chain chỉ
+trả TVL tại block hiện tại, nên có một worker chụp TVL mỗi giờ vào bảng `pool_tvl_snapshots`
+(migration `0047`):
+
+```sh
+npm run -w be pools:tvl-snapshots:worker
+```
+
+Cần `DATABASE_URL` của app DB và `RH_HTTP_RPC_URL`. Tùy chọn: `POOL_TVL_SNAPSHOT_INTERVAL_SECONDS`
+(mặc định 3600, trong khoảng 60–14400) và `POOL_TVL_SNAPSHOT_RETENTION_HOURS` (mặc định 168,
+tối thiểu 26; snapshot cũ hơn mức này bị xoá sau mỗi lượt chụp). Trong khoảng 24h đầu sau khi
+worker bắt đầu chạy, `%` TVL hiển thị "—" vì chưa có snapshot cũ để so; đó là bình thường.
+
 ### Sync gần thời gian thực (incremental) và repair reorg — thay cho vòng lặp đọc lại toàn bảng
 
 Từ bản near-realtime-sync, chế độ `ENVIO_SYNC_TARGET=real` của `sync:envio-staging:loop` **không còn**
