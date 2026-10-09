@@ -5,33 +5,11 @@ import { formatUnits } from 'viem';
 import { displaySymbol, formatAmount, formatSide } from '@/api/format';
 import type { PoolTrade } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
-
-const TICK_INTERVAL_MS = 1_000;
 
 function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-// Mirrors transaction-list.tsx's own useNow/formatRelativeTime — kept local rather than shared
-// since one is a hook (needs 'use client') and the other pure, and each is two lines.
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
-function formatRelativeTime(timestampSeconds: number, nowMs: number): string {
-  const diffSeconds = Math.max(0, Math.floor(nowMs / 1000) - timestampSeconds);
-  if (diffSeconds < 60) return `${diffSeconds}s`;
-  const minutes = Math.floor(diffSeconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(diffSeconds / 3600);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(diffSeconds / 86_400)}d`;
 }
 
 // decimals unknown (API returned null) shows '—' rather than guessing a magnitude for a raw

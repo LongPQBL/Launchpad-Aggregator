@@ -24,7 +24,7 @@ import { decodeCursor, encodeCursor } from './cursor.js';
 import { readMetricRankingPage } from './metricRanking.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
-import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
+import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, GlobalTransactionResponse, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -615,6 +615,57 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           usdValueStatus: valuations[i]!.status,
         };
       }) as Page<TransactionResponse>;
+    },
+    async listAllTransactions(query: ListQuery): Promise<Page<GlobalTransactionResponse>> {
+      const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+      // NULLS LAST is not cosmetic: trades_global_order_idx is declared DESC NULLS LAST, and Postgres
+      // only walks an index for an ORDER BY whose null ordering matches it (measured: 39s without, 0.3s with).
+      const result = await pool.query(`
+        SELECT t.chain_id, t.token_address, t.venue_id, t.block_number, t.tx_hash, t.log_index, t.timestamp, t.side,
+          t.activity_kind, t.token_amount_raw, t.quote_amount_raw, t.trader_address,
+          l.name, l.symbol, l.logo_uri, l.token_decimals, l.quote_asset_decimals,
+          l.quote_asset_address AS launch_quote_asset_address, l.quote_asset_symbol
+        FROM trades t
+        JOIN venues v ON v.id = t.venue_id
+        JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
+        WHERE v.official = true AND ($1::integer IS NULL OR t.chain_id = $1)
+          AND ($2::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($2::bigint, $3::text, $4::integer))
+        ORDER BY t.block_number DESC NULLS LAST, t.tx_hash DESC NULLS LAST, t.log_index DESC NULLS LAST
+        LIMIT $5`,
+      [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1]);
+      const rows = result.rows as Row[];
+      const visible = rows.slice(0, query.limit);
+      const valuations = await Promise.all(visible.map((row) => valueTradeUsd(pool, number(row.chain_id), string(row.launch_quote_asset_address), {
+        timestamp: number(row.timestamp), quoteAmountRaw: BigInt(string(row.quote_amount_raw)),
+        quoteAssetDecimals: nullableNumber(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
+      })));
+      // Same demand-driven backfill as listTrades, coalesced to one job per (chain, quote asset) on this page.
+      const pendingByQuote = new Map<string, { chainId: number; quoteAsset: string; timestamps: number[] }>();
+      valuations.forEach((valuation, i) => {
+        if (valuation.status !== 'pending') return;
+        const row = visible[i]!;
+        const key = `${number(row.chain_id)}:${string(row.launch_quote_asset_address)}`;
+        const entry = pendingByQuote.get(key) ?? { chainId: number(row.chain_id), quoteAsset: string(row.launch_quote_asset_address), timestamps: [] };
+        entry.timestamps.push(number(row.timestamp));
+        pendingByQuote.set(key, entry);
+      });
+      await Promise.all([...pendingByQuote.values()].map(async ({ chainId, quoteAsset, timestamps }) => {
+        const feed = await resolveVerifiedFeed(pool, chainId, quoteAsset);
+        if (feed) await enqueueRoundBackfillJob(pool, chainId, feed.feedAddress, Math.min(...timestamps) - 3600, Math.max(...timestamps) + 3600).catch(() => {});
+      }));
+      return page(rows, query.limit, (row, i) => ({
+        token: { chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: nullableString(row.name),
+          symbol: nullableString(row.symbol), logoUri: nullableString(row.logo_uri) },
+        venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
+        logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side), activityKind: string(row.activity_kind),
+        tokenAmount: row.token_decimals === null ? null : formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
+        quoteAmount: row.quote_asset_decimals === null ? null : formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)),
+        quoteAsset: { address: string(row.launch_quote_asset_address), symbol: nullableString(row.quote_asset_symbol) },
+        traderAddress: string(row.trader_address),
+        usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
+        usdValueApprox: valuations[i]!.status === 'priced',
+        usdValueStatus: valuations[i]!.status,
+      })) as Page<GlobalTransactionResponse>;
     },
     async listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }> {
       const head = await safeHead();

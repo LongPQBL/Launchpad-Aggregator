@@ -7,6 +7,7 @@ import { getLaunchTransactions, type OfficialVenue, type Transaction } from '@/a
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
+import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
 
 export interface TransactionListProps {
@@ -112,32 +113,9 @@ function TransactionRowsSkeleton({ count }: { count: number }) {
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-const TICK_INTERVAL_MS = 1_000;
 
 function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
-}
-
-// Ticks the Time column forward live (e.g. "10s" -> "11s") without needing a full data refresh —
-// mirrors formatAge in launch-list.tsx / poolAge in pool-list.tsx but adds the re-render clock those
-// don't need, since a launch/pool row's age is read once per page load rather than watched live.
-function useNow(): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), TICK_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
-
-function formatRelativeTime(timestampSeconds: number, nowMs: number): string {
-  const diffSeconds = Math.max(0, Math.floor(nowMs / 1000) - timestampSeconds);
-  if (diffSeconds < 60) return `${diffSeconds}s`;
-  const minutes = Math.floor(diffSeconds / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(diffSeconds / 3600);
-  if (hours < 24) return `${hours}h`;
-  return `${Math.floor(diffSeconds / 86_400)}d`;
 }
 
 // Pool quote assets vary per pool and this endpoint doesn't resolve arbitrary ERC20 symbols — same

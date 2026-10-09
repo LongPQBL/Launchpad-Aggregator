@@ -4,7 +4,7 @@ import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { InvalidMetricCursorError, type LaunchSort, type SortDirection } from '../metricCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
-import { candle, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
+import { candle, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
 const LIFECYCLE_STATUSES = new Set(['trading', 'swept', 'graduated', 'rescued']);
@@ -60,6 +60,13 @@ function tokenParams(value: { chainId: string; tokenAddress: string }): { chainI
 }
 
 export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void {
+  // Latest official trades across every launch (the Explore "Transactions" feed).
+  app.get<{ Querystring: Record<string, string | undefined> }>('/v1/transactions', { schema: { response: { 200: pageSchema(globalTransaction) } } }, async (request, reply) => {
+    const query = listQuery(request.query);
+    if (!query) return reply.code(400).send({ error: 'Invalid transaction query' });
+    if (!deps.data.listAllTransactions) return reply.code(503).send({ error: 'Transactions feed unavailable' });
+    return deps.data.listAllTransactions(query);
+  });
   app.get<{ Querystring: Record<string, string | undefined> }>('/v1/launches', { schema: { response: { 200: pageSchema(launchSummary) } } }, async (request, reply) => {
     const query = launchListQuery(request.query);
     if (!query) return reply.code(400).send({ error: 'Invalid launch query' });

@@ -25,3 +25,18 @@ describe('search API', () => {
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=pons' })).statusCode).toBe(503);
   });
 });
+
+describe('global transactions API', () => {
+  it('rejects a bad query and reports 503 when the store has no global feed', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data });
+    expect((await app.inject({ method: 'GET', url: '/v1/transactions?limit=x' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/transactions' })).statusCode).toBe(503);
+  });
+
+  it('serves the feed from the store', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data, listAllTransactions: async () => ({ items: [], nextCursor: null }) } });
+    const response = await app.inject({ method: 'GET', url: '/v1/transactions?limit=5&chainId=4663' });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [], nextCursor: null });
+  });
+});

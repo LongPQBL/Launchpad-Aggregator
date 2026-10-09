@@ -92,6 +92,20 @@ export const transaction = { type: 'object', properties: {
   usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
 } } as const;
 
+export const globalTransaction = { type: 'object', properties: {
+  token: { type: 'object', properties: {
+    chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string', nullable: true },
+    symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true },
+  } },
+  venueId: { type: 'string' }, blockNumber: { type: 'string' }, txHash: { type: 'string' }, logIndex: { type: 'integer' },
+  timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
+  tokenAmount: { type: 'string', nullable: true }, quoteAmount: { type: 'string', nullable: true },
+  quoteAsset: { type: 'object', properties: { address: { type: 'string' }, symbol: { type: 'string', nullable: true } } },
+  traderAddress: { type: 'string' },
+  usdValue: { type: 'string', nullable: true }, usdValueApprox: { type: 'boolean' },
+  usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
+} } as const;
+
 export const candle = { type: 'object', properties: {
   intervalSeconds: { type: 'integer' }, bucketStart: { type: 'integer' },
   open: { type: 'string' }, high: { type: 'string' }, low: { type: 'string' }, close: { type: 'string' },

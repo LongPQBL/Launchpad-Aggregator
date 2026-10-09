@@ -538,6 +538,9 @@ export const trades = pgTable('trades', {
   index('trades_token_block_idx').on(table.chainId, table.tokenAddress, table.blockNumber),
   index('trades_token_timestamp_idx').on(table.chainId, table.tokenAddress, table.timestamp),
   index('trades_trader_idx').on(table.chainId, table.traderAddress),
+  // Serves the global latest-trades feed (GET /v1/transactions): without it that page is a full
+  // sort of the whole table (measured ~23s on 3.5M rows).
+  index('trades_global_order_idx').on(table.blockNumber.desc(), table.txHash.desc(), table.logIndex.desc()),
 ]);
 
 export const candles = pgTable('candles', {

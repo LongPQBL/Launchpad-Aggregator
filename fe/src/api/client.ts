@@ -219,3 +219,13 @@ export interface SearchResults { tokens: readonly SearchTokenHit[]; pools: reado
 export async function searchAll(query: string, signal?: AbortSignal): Promise<SearchResults> {
   return request<SearchResults>('/v1/search', { q: query }, signal);
 }
+
+type GlobalTransactionsBody = paths['/v1/transactions']['get']['responses'][200]['content']['application/json'];
+export type GlobalTransaction = Required<Omit<NonNullable<GlobalTransactionsBody['items']>[number], 'token' | 'quoteAsset'>> & {
+  token: Required<NonNullable<NonNullable<GlobalTransactionsBody['items']>[number]['token']>>;
+  quoteAsset: Required<NonNullable<NonNullable<GlobalTransactionsBody['items']>[number]['quoteAsset']>>;
+};
+export interface GlobalTransactionPage { items: readonly GlobalTransaction[]; nextCursor: string | null }
+export async function getAllTransactions(query: { cursor?: string; limit?: number; chainId?: number } = {}): Promise<GlobalTransactionPage> {
+  return request<GlobalTransactionPage>('/v1/transactions', { cursor: query.cursor, limit: query.limit, chainId: query.chainId });
+}

@@ -112,6 +112,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/transactions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                token?: {
+                                    chainId?: number;
+                                    tokenAddress?: string;
+                                    name?: string | null;
+                                    symbol?: string | null;
+                                    logoUri?: string | null;
+                                };
+                                venueId?: string;
+                                blockNumber?: string;
+                                txHash?: string;
+                                logIndex?: number;
+                                timestamp?: number;
+                                side?: string;
+                                activityKind?: string;
+                                tokenAmount?: string | null;
+                                quoteAmount?: string | null;
+                                quoteAsset?: {
+                                    address?: string;
+                                    symbol?: string | null;
+                                };
+                                traderAddress?: string;
+                                usdValue?: string | null;
+                                usdValueApprox?: boolean;
+                                /** @enum {string} */
+                                usdValueStatus?: "priced" | "pending" | "unavailable";
+                            }[];
+                            nextCursor?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/launches": {
         parameters: {
             query?: never;
