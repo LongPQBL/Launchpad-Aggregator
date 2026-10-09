@@ -52,6 +52,21 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
   const displayedSlippagePercent = settings.slippageBps === 'auto' ? autoSlippagePercent : settings.slippageBps / 100;
   const [slippageDraft, setSlippageDraft] = useState(() => String(displayedSlippagePercent));
   const isEditingSlippage = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', closeOnOutsideClick);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeOnOutsideClick);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (isEditingSlippage.current) return;
@@ -60,7 +75,7 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
   }, [displayedSlippagePercent]);
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <div className={isAutoSlippage ? 'inline-flex items-center' : 'inline-flex items-center rounded-full bg-white/10 pl-3'}>
         {!isAutoSlippage && <span className="text-sm font-medium text-white/60">{displayedSlippagePercent}%</span>}
         <Button type="button" variant="ghost" aria-label="Trade settings" aria-expanded={open} onClick={() => setOpen(!open)} className="h-11 w-11 p-2">

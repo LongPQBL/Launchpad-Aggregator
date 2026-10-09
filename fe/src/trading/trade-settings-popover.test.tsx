@@ -5,6 +5,23 @@ import { TradeSettingsPopover } from './trade-settings-popover';
 const baseSettings = { slippageBps: 'auto' as const, deadlineMinutes: 30, oneClickTradeOptIn: false };
 
 describe('TradeSettingsPopover', () => {
+  it('closes on an outside click or Escape, but stays open for a click inside it', () => {
+    render(<div><span>outside</span><TradeSettingsPopover settings={baseSettings} onChange={vi.fn()} venueKind="curve" /></div>);
+    const openPopover = () => fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+
+    openPopover();
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Auto' }));
+    expect(screen.getByRole('button', { name: 'Auto' })).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByText('outside'));
+    expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
+
+    openPopover();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
+  });
+
+
   it('shows an inline settings icon and shows feature descriptions in circular info tooltips', () => {
     const { container } = render(<TradeSettingsPopover settings={baseSettings} onChange={vi.fn()} venueKind="pool" />);
     fireEvent.click(screen.getByRole('button', { name: /settings/i }));
