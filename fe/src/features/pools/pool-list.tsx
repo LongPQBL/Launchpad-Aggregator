@@ -64,7 +64,7 @@ function PoolRowsSkeleton({ count }: { count: number }) {
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-full animate-pulse rounded bg-muted" /></div>
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle">
         <span className="flex items-center gap-3">
-          <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
+          <span className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-muted" />
           <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </span>
       </div>
@@ -148,7 +148,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     {primaryVenue && <section aria-label="Pons primary venue"><Card>
       <CardContent className="flex flex-wrap items-center gap-3 pt-4">
         {primaryVenue.kind === 'curve' ? <>
-          <PoolLogo token0={{ symbol: primaryVenue.token.symbol, logoUri: primaryVenue.token.logoUri }}
+          <PoolLogo size="small" token0={{ symbol: primaryVenue.token.symbol, logoUri: primaryVenue.token.logoUri }}
             token1={{ symbol: primaryVenue.quoteSymbol, logoUri: null }} chainId={primaryVenue.chainId} />
           <div className="min-w-0">
             <p className="text-sm font-semibold">{primaryVenue.token.symbol} / {primaryVenue.quoteSymbol}</p>
@@ -158,11 +158,11 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
             </div>
           </div>
         </> : <>
-          {primaryVenue.pool ? <PoolLogo
+          {primaryVenue.pool ? <PoolLogo size="small"
             token0={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency0, primaryVenue.pool.currency0Symbol, primaryVenue.pool.currency0LogoUri, displayedToken)}
             token1={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency1, primaryVenue.pool.currency1Symbol, primaryVenue.pool.currency1LogoUri, displayedToken)}
             chainId={primaryVenue.pool.chainId}
-          /> : <span aria-hidden="true" className="h-9 w-9 rounded-full bg-accent" />}
+          /> : <span aria-hidden="true" className="h-10 w-10 rounded-full bg-accent" />}
           <div className="min-w-0">
             {primaryVenue.pool
               ? <Link className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</Link>
@@ -208,7 +208,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           </div>
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
             <span className="flex items-center gap-3">
-              <PoolLogo token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
+              <PoolLogo size="small" token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
               <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Pons designated'}</span></span>
             </span>
           </div>

@@ -30,3 +30,14 @@ describe('PoolLogo', () => {
     expect(screen.queryByRole('img', { name: 'Robinhood Chain' })).not.toBeInTheDocument();
   });
 });
+
+describe('PoolLogo size', () => {
+  it('renders smaller circles for list rows than for page headers', () => {
+    const tokens = { token0: { symbol: 'AAA', logoUri: null }, token1: { symbol: 'BBB', logoUri: null } };
+    const { container: header } = render(<PoolLogo {...tokens} />);
+    const { container: row } = render(<PoolLogo {...tokens} size="small" />);
+    expect(header.querySelectorAll('.h-12.w-12')).toHaveLength(4);
+    expect(row.querySelectorAll('.h-10.w-10')).toHaveLength(4);
+    expect(row.querySelector('.h-12')).toBeNull();
+  });
+});
