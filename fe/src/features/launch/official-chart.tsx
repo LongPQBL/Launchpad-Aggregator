@@ -146,10 +146,16 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     return () => window.removeEventListener('popstate', handlePopState);
   }, [selectChart, showCurrencyToggle, currency]);
 
-  useEffect(() => {
+  // Adopt new props during render (React's "adjust state during render" pattern); only the hover
+  // callback, an external side effect, stays in an effect.
+  const [syncedProps, setSyncedProps] = useState({ candles, currency, intervalSeconds });
+  if (syncedProps.candles !== candles || syncedProps.currency !== currency || syncedProps.intervalSeconds !== intervalSeconds) {
+    setSyncedProps({ candles, currency, intervalSeconds });
     setActiveCurrency(currency);
     setActiveInterval(intervalSeconds);
     setChartCandles(candles);
+  }
+  useEffect(() => {
     onHoverPointRef.current?.(null);
   }, [candles, currency, intervalSeconds]);
 

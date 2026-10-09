@@ -37,14 +37,14 @@ describe('PoolTransactionList', () => {
   it('keeps "Buy" meaning the displayed token was acquired when currency0 is displayed', () => {
     render(<PoolTransactionList trades={[trade({ side: 'buy' })]} displayedSymbol="MOCK1" otherSymbol="ETH"
       displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
-    expect(screen.getByText('Buy')).toBeInTheDocument();
+    expect(screen.getByText(/^Buy /)).toBeInTheDocument();
   });
 
   it('flips Buy to Sell (and vice versa) when the flip link makes currency1 the displayed token', () => {
     render(<PoolTransactionList trades={[trade({ side: 'buy' })]} displayedSymbol="ETH" otherSymbol="MOCK1"
       displayedDecimals={18} otherDecimals={18} displayedIsCurrency0={false} explorerBase={null} />);
-    expect(screen.getByText('Sell')).toBeInTheDocument();
-    expect(screen.queryByText('Buy')).not.toBeInTheDocument();
+    expect(screen.getByText(/^Sell /)).toBeInTheDocument();
+    expect(screen.queryByText(/^Buy /)).not.toBeInTheDocument();
   });
 
   it('shows a loading state for a pending USD value', () => {

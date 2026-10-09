@@ -275,10 +275,11 @@ describe('V4SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Not enough ROBIN' })).toBeDisabled();
   });
 
-  it('does not crash and shows an "Enter an amount" label when the amount contains scientific notation', () => {
+  it('does not crash and strips letters when the amount contains scientific notation', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1e5' } });
-    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+    // Letters are stripped on input, so '1e5' becomes the plain amount '15'.
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('15');
   });
 
   it('does not leave an unhandled promise rejection when the wallet rejects the Permit2 signature', async () => {
@@ -430,7 +431,7 @@ describe('V4SwapPanel', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(reverse.makeV4).toHaveBeenCalledWith({}, { poolKey, zeroForOne: true });
     expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
-    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('2');
     vi.useRealTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(hooks.writeContract).toHaveBeenCalledTimes(1);
@@ -454,7 +455,7 @@ describe('V4SwapPanel', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(reverse.makeV4).toHaveBeenLastCalledWith({}, { poolKey, zeroForOne: false });
     expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
-    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('2');
     vi.useRealTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(hooks.writeContract).toHaveBeenCalledTimes(1);
@@ -505,7 +506,7 @@ describe('V4SwapPanel', () => {
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '5' } });
     fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
-    expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
+    expect(screen.getByLabelText('Buy amount')).toHaveValue('5');
   });
 
   it('Connect asks the header to open the wallet dialog', () => {

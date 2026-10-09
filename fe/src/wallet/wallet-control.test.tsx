@@ -47,34 +47,37 @@ describe('WalletControl', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('explains when no browser wallet is detected', async () => {
+  it('marks every supported wallet as not detected when no browser wallet is installed', async () => {
     render(<WalletControl />);
-    fireEvent.click(screen.getByRole('button', { name: 'Connect wallet' }));
-    expect(await screen.findByText(/No browser wallet detected/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(await screen.findAllByText('Not detected')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /MetaMask/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Phantom/ })).toBeDisabled();
   });
 
-  it('waits for browser wallet discovery before saying none is installed', async () => {
+  it('waits for browser wallet discovery before marking wallets as not detected', async () => {
     let finishDiscovery!: (provider: object) => void;
-    hooks.connectors = [{ uid: 'late-wallet', name: 'Late Wallet', type: 'injected',
+    hooks.connectors = [{ uid: 'late-metamask', name: 'MetaMask', type: 'injected',
       getProvider: () => new Promise((resolve) => { finishDiscovery = resolve; }) }];
     render(<WalletControl />);
-    fireEvent.click(screen.getByRole('button', { name: 'Connect wallet' }));
-    expect(screen.getByText('Looking for browser wallets…')).toBeInTheDocument();
-    expect(screen.queryByText(/No browser wallet detected/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(screen.getByText('Looking for wallets…')).toBeInTheDocument();
+    expect(screen.queryByText('Not detected')).not.toBeInTheDocument();
     finishDiscovery({});
-    expect(await screen.findByRole('button', { name: 'Late Wallet' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'MetaMask' })).toBeEnabled());
   });
 
   it('offers each detected browser wallet and connects only after selection', async () => {
     const metamask = { uid: 'metamask', name: 'MetaMask', type: 'injected', getProvider: async () => ({}) };
-    const rabby = { uid: 'rabby', name: 'Rabby', type: 'injected', getProvider: async () => ({}) };
-    hooks.connectors = [metamask, rabby];
+    const phantom = { uid: 'phantom', name: 'Phantom', type: 'injected', getProvider: async () => ({}) };
+    hooks.connectors = [metamask, phantom];
     render(<WalletControl />);
     expect(hooks.connect).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Connect wallet' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'MetaMask' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'MetaMask' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'MetaMask' }));
     expect(hooks.connect).toHaveBeenCalledWith({ connector: metamask }, expect.any(Object));
-    expect(screen.getByRole('button', { name: 'Rabby' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Phantom' })).toBeEnabled();
   });
 
   it('shows the connected address and disconnects', () => {
@@ -106,7 +109,7 @@ describe('WalletControl', () => {
   it('shows rejected connection and switch requests without losing the account', async () => {
     hooks.connectError = new Error('User rejected the request');
     const view = render(<WalletControl />);
-    fireEvent.click(screen.getByRole('button', { name: 'Connect wallet' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('User rejected the request');
 
     hooks.account = { address: '0x1234567890123456789012345678901234567890', chainId: 1,

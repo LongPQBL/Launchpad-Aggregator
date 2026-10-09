@@ -76,11 +76,14 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
 
-  useEffect(() => {
+  // Reset to the server-provided page when it changes (React's "adjust state during render" pattern).
+  const [syncedSource, setSyncedSource] = useState({ transactions, initialCursor });
+  if (syncedSource.transactions !== transactions || syncedSource.initialCursor !== initialCursor) {
+    setSyncedSource({ transactions, initialCursor });
     setItems(transactions);
     setNextCursor(initialCursor ?? null);
     setLoadError(false);
-  }, [initialCursor, transactions]);
+  }
 
   const loadMore = useCallback(async () => {
     if (chainId === undefined || !tokenAddress || !nextCursor || loadingRef.current) return;

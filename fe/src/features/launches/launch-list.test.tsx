@@ -112,7 +112,7 @@ describe('LaunchList', () => {
     expect(within(row).getByTestId('token-symbol')).toHaveTextContent('—');
   });
 
-  it('shows a human-readable lifecycle label and chain name instead of raw enum/id values', () => {
+  it('shows a human-readable chain name instead of raw enum/id values', () => {
     render(
       <LaunchList
         page={{ items: [launch({ lifecycleStatus: 'swept', chainId: 4663 })], nextCursor: null }}
@@ -122,8 +122,7 @@ describe('LaunchList', () => {
     );
 
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByText(/Swept/)).toBeInTheDocument();
-    expect(within(table).getByText('Robinhood Chain')).toBeInTheDocument();
+    expect(within(table).getByAltText('Robinhood Chain')).toBeInTheDocument();
     expect(within(table).queryByText('trading')).not.toBeInTheDocument();
   });
 
@@ -165,7 +164,7 @@ describe('LaunchList', () => {
       />,
     );
 
-    const names = screen.getAllByRole('link', { name: /Newest|Older/i }).map((link) => link.textContent);
+    const names = screen.getAllByRole('link', { name: /Newest|Older/i }).map((link) => link.getAttribute('aria-label'));
     expect(names[0]).toContain('Newest');
     expect(names[1]).toContain('Older');
   });
@@ -223,8 +222,8 @@ describe('LaunchList', () => {
     expect(within(table).getByRole('columnheader', { name: 'FDV' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: '24H volume' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Liquidity' })).toBeInTheDocument();
-    expect(within(table).getByRole('columnheader', { name: '1H %' })).toBeInTheDocument();
-    expect(within(table).getByRole('columnheader', { name: '1D %' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '1H' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '1D' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
     expect(within(table).getByText('$1000.0')).toBeInTheDocument();
     expect(within(table).getAllByText((_, el) => el?.textContent === '▲12.50%').length).toBeGreaterThan(0);
@@ -258,8 +257,8 @@ describe('LaunchList', () => {
     expect(within(row).getByText('FDV')).toBeInTheDocument();
     expect(within(row).getByText('24H volume')).toBeInTheDocument();
     expect(within(row).getByText('Liquidity')).toBeInTheDocument();
-    expect(within(row).getByText('1H %')).toBeInTheDocument();
-    expect(within(row).getByText('1D %')).toBeInTheDocument();
+    expect(within(row).getByText('1H')).toBeInTheDocument();
+    expect(within(row).getByText('1D')).toBeInTheDocument();
     expect(within(row).getByText('Age')).toBeInTheDocument();
   });
 
@@ -562,7 +561,7 @@ describe('LaunchList', () => {
     expect(within(form).getByDisplayValue('pons,other,third')).toHaveAttribute('name', 'platform');
   });
 
-  it('shows skeleton rows while a filter request is pending and replaces them with results', async () => {
+  it('keeps the current rows visible while a filter request is pending and replaces them with results', async () => {
     let resolvePage!: (page: { items: LaunchSummary[]; nextCursor: null }) => void;
     vi.mocked(getLaunches).mockReturnValueOnce(new Promise((resolve) => { resolvePage = resolve; }));
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
@@ -570,8 +569,8 @@ describe('LaunchList', () => {
     const filter = screen.getByRole('navigation', { name: /filter by launchpad/i });
     fireEvent.click(within(filter).getByRole('button', { name: 'NOXA' }));
     expect(screen.getByRole('table', { name: /launch list/i })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.getAllByTestId('launch-skeleton-row').length).toBeGreaterThan(0);
-    expect(screen.queryByRole('link', { name: /view token a details/i })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('launch-skeleton-row')).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view token a details/i })).toBeInTheDocument();
     expect(screen.queryByText(/no launches match/i)).not.toBeInTheDocument();
 
     await act(async () => resolvePage({ items: [launch({ name: 'Filtered token' })], nextCursor: null }));

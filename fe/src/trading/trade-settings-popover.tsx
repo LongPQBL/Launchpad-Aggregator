@@ -56,7 +56,6 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
   useEffect(() => {
     if (isEditingSlippage.current) return;
     // Sync values loaded from storage or changed outside this input.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSlippageDraft(String(displayedSlippagePercent));
   }, [displayedSlippagePercent]);
 

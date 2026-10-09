@@ -78,11 +78,14 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     });
   }, [items, sortBy, sortDirection]);
 
-  useEffect(() => {
+  // Reset to the server-provided page when it changes (React's "adjust state during render" pattern).
+  const [syncedPage, setSyncedPage] = useState(page);
+  if (syncedPage !== page) {
+    setSyncedPage(page);
     setItems(page?.items ?? []);
     setNextCursor(page?.nextCursor ?? null);
     setLoadError(false);
-  }, [page]);
+  }
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingRef.current || (tokenAddress && chainId === undefined)) return;

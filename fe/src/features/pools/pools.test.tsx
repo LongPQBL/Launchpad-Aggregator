@@ -89,7 +89,7 @@ describe('Pools UI', () => {
     rerender(<PoolList page={page} tokenAddress={b} />);
     const scoped = screen.getByRole('link', { name: /0x1111.*0x2222/ });
     expect(scoped).toHaveAttribute('href', expect.stringContaining(`displayedToken=${b}`));
-    expect(screen.getByText('Pons designated pool')).toBeInTheDocument();
+    expect(screen.getByText(/Pons designated/)).toBeInTheDocument();
   });
   it('shows missing metrics, coverage and both side switches without APR', () => {
     render(<PoolDetail pool={pool} trades={{ items: [], nextCursor: null }} candles={null} />);
@@ -193,7 +193,10 @@ describe('Pools UI', () => {
     act(() => {
       handler({ time: 1_700_000_300, seriesData: new Map([[chartStub, { time: 1_700_000_300, close: 0.05 }]]) });
     });
-    expect(screen.getByText((_, node) => node?.textContent === '1 CASHCAT = 0.05 ETH · 11/15/2023, 5:18:20 AM')).toBeInTheDocument();
+    // Local-time formatting, so derive the expected stamp instead of hardcoding one timezone.
+    const stamp = new Date(1_700_000_300 * 1000).toLocaleString('en-US');
+    expect(screen.getByText((_, node) => node?.tagName === 'P' && (node.textContent ?? '').startsWith('1 CASHCAT = 0.0500 ETH')
+      && (node.textContent ?? '').endsWith(`· ${stamp}`) && !(node.textContent ?? '').includes('$'))).toBeInTheDocument();
 
     act(() => { handler({ seriesData: new Map() }); });
     expect(screen.getByText((_, node) => node?.textContent === '1 CASHCAT = 0.0447 ETH ($0.1)')).toBeInTheDocument();

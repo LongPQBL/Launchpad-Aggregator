@@ -180,7 +180,7 @@ describe('CurveSwapPanel - buy direction (default)', () => {
     hooks.simulateData = { result: 588938000000000000000000n };
     render(panel(nativeQuote));
     typeSell('0.001');
-    expect(screen.getByLabelText('Buy amount')).toHaveValue(588938);
+    expect(screen.getByLabelText('Buy amount')).toHaveValue('588938');
   });
 
   it('keeps Swap disabled until the quote resolves, never submitting with zero slippage protection', () => {
@@ -251,10 +251,11 @@ describe('CurveSwapPanel - buy direction (default)', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('does not crash on scientific-notation input and leaves the button disabled', () => {
+  it('does not crash on scientific-notation input and strips the letters', () => {
     render(panel(nativeQuote));
     expect(() => typeSell('1e5')).not.toThrow();
-    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+    // Letters are stripped on input, so '1e5' becomes the plain amount '15'.
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('15');
   });
 
   it('submits approve+buy as one batch when approval is needed and the wallet supports atomic call batching', () => {
@@ -474,11 +475,12 @@ describe('CurveSwapPanel - sell direction (after flip)', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('does not crash on scientific-notation input and leaves the button disabled', () => {
+  it('does not crash on scientific-notation input and strips the letters', () => {
     hooks.allowance = 2000000000000000000n;
     renderSell();
     expect(() => typeSell('1e5')).not.toThrow();
-    expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
+    // Letters are stripped on input, so '1e5' becomes the plain amount '15'.
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('15');
   });
 
   it('submits approve+sell as one batch when approval is needed and the wallet supports atomic call batching', () => {
@@ -601,7 +603,7 @@ describe('two-way amounts', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(reverse.makeCurve).toHaveBeenCalledWith({}, { curveAddress: curve, direction: 'buy', tokenAddress: token, quoteAssetAddress: nativeQuote.address, isNativeQuote: true });
     expect(reverse.solve).toHaveBeenCalledWith(10_000_000_000_000_000_000n, expect.anything());
-    expect(screen.getByLabelText('Sell amount')).toHaveValue(1);
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('1');
     vi.useRealTimers();
   });
 
@@ -634,7 +636,7 @@ describe('two-way amounts', () => {
     fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '5' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(400); });
     expect(reverse.solve).toHaveBeenCalledTimes(1);
-    expect(screen.getByLabelText('Sell amount')).toHaveValue(1);
+    expect(screen.getByLabelText('Sell amount')).toHaveValue('1');
     vi.useRealTimers();
   });
 
@@ -643,7 +645,7 @@ describe('two-way amounts', () => {
     expect(screen.getByText('Bonding curve')).toBeInTheDocument();
     typeSell('5');
     flip();
-    expect(screen.getByLabelText('Buy amount')).toHaveValue(5);
+    expect(screen.getByLabelText('Buy amount')).toHaveValue('5');
     expect(screen.getByText('Bonding curve')).toBeInTheDocument();
   });
 
