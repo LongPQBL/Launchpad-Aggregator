@@ -19,13 +19,13 @@ export type PrimaryLaunchVenue =
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
 
 type PoolSort = 'fdvUsd' | 'volume24hUsd' | 'tvlUsd' | 'change1h' | 'change1d' | 'age';
-const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc' }[] = [
-  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc' },
-  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc' },
-  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc' },
-  { label: '1H', sort: 'change1h', defaultDirection: 'desc' },
-  { label: '1D', sort: 'change1d', defaultDirection: 'desc' },
-  { label: 'Age', sort: 'age', defaultDirection: 'asc' },
+const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; width: string }[] = [
+  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
+  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[15%]' },
+  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
+  { label: '1H', sort: 'change1h', defaultDirection: 'desc', width: 'md:w-[9%]' },
+  { label: '1D', sort: 'change1d', defaultDirection: 'desc', width: 'md:w-[9%]' },
+  { label: 'Age', sort: 'age', defaultDirection: 'asc', width: 'md:w-[9%]' },
 ];
 
 function poolSortValue(pool: PoolSummary, sort: PoolSort): number | null {
@@ -52,6 +52,28 @@ function pairLabel(pool: PoolSummary, displayedToken?: PoolListDisplayedToken): 
     displayedToken && side(address) === side(displayedToken.address) ? displayedToken.symbol : (symbol ?? short(address));
   return `${label(pool.currency0, pool.currency0Symbol)} / ${label(pool.currency1, pool.currency1Symbol)}`;
 }
+// Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
+const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-14', 'w-10', 'w-10', 'w-8'] as const;
+
+function PoolRowsSkeleton({ count }: { count: number }) {
+  return Array.from({ length: count }, (_, index) => (
+    <div key={index} role="row" aria-hidden="true" data-testid="pool-skeleton-row" className="rounded-lg p-3 md:table-row md:rounded-none md:p-0">
+      <div role="cell" className="md:table-cell md:p-4 md:align-middle"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
+      <div role="cell" className="md:table-cell md:p-4 md:align-middle">
+        <span className="flex items-center gap-3">
+          <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
+          <span className="grid gap-1.5"><span className="h-3 w-28 animate-pulse rounded bg-muted" /><span className="h-2.5 w-16 animate-pulse rounded bg-muted" /></span>
+        </span>
+      </div>
+      {POOL_SKELETON_NUMERIC_WIDTHS.map((width, cell) => (
+        <div key={cell} role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+          <span className={cn('ml-auto block h-4 animate-pulse rounded bg-muted', width)} />
+        </div>
+      ))}
+    </div>
+  ));
+}
+
 export function PoolList({ page, error = false, tokenAddress, chainId, displayedToken, primaryVenue }: {
   page: PoolPage | null; error?: boolean; tokenAddress?: string; chainId?: number;
   displayedToken?: PoolListDisplayedToken;
@@ -152,15 +174,15 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     {!tokenAddress && page && <div><h1 className="text-2xl font-semibold">Pools</h1>
       <p className="text-sm text-muted-foreground">Verified indexed Uniswap pools on Robinhood Chain. Supported sources: {page.supportedProtocols.map((p) => p.replace('uniswap_', '')).join(', ')}.</p></div>}
     {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
-    {page && tokenAddress ? <div role="table" aria-label="Pools for this token" className="w-full overflow-hidden rounded-lg md:table md:border-separate md:border-spacing-0">
+    {page && tokenAddress ? <div role="table" aria-label="Pools for this token" className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
         <div role="row" className="md:table-row md:h-10 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
-          {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection }) => {
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[5%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[27%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
+          {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, width }) => {
             const active = sortBy === sort;
             return <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-              className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide md:text-right', active && 'text-foreground dark:text-white')}>
+              className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide md:text-right', width, active && 'text-foreground dark:text-white')}>
               <button type="button" className={cn('inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
                 onClick={() => {
                   const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection;
@@ -192,6 +214,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
             <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
           </div>)}
         </div>)}
+        {loadingMore && <PoolRowsSkeleton count={6} />}
       </div>
     </div> : page && <div className="grid gap-3 md:grid-cols-2">{items.map((pool) => <Card key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`}>
       <CardHeader className={cn('flex-row items-center gap-3', tokenAddress && 'w-52 shrink-0')}>
@@ -222,7 +245,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       </CardContent></Card>)}</div>
     }
     {nextCursor && <div ref={sentinelRef} aria-hidden="true" className="h-px" />}
-    {loadingMore && <p role="status" className="text-center text-sm text-muted-foreground">Loading more pools…</p>}
+    {loadingMore && <p role="status" className={tokenAddress ? 'sr-only' : 'text-center text-sm text-muted-foreground'}>Loading more pools…</p>}
     {loadError && <div className="text-center text-sm"><span role="alert">Could not load more pools. </span><button type="button" onClick={() => void loadMore()}>Retry</button></div>}
   </section>;
 }

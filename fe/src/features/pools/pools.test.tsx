@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { getPools, type PoolSummary } from '@/api/client';
+import { getLaunchPools, getPools, type PoolSummary } from '@/api/client';
 import { PoolList } from './pool-list';
 import { PoolDetail } from './pool-detail';
 
@@ -34,6 +34,7 @@ const pool: PoolSummary = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${
 vi.mock('@/api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/api/client')>(),
   getPools: vi.fn(),
+  getLaunchPools: vi.fn(),
 }));
 
 // `chartStub` doubles as both the chart and the series returned from `addSeries` (the `apply`
@@ -54,6 +55,28 @@ vi.mock('lightweight-charts', () => ({
 }));
 
 describe('Pools UI', () => {
+  it('shows skeleton rows in the token pools table while the next page loads', async () => {
+    let onIntersect: IntersectionObserverCallback | undefined;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: IntersectionObserverCallback) { onIntersect = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    let resolvePage!: (page: Awaited<ReturnType<typeof getLaunchPools>>) => void;
+    vi.mocked(getLaunchPools).mockReturnValueOnce(new Promise((resolve) => { resolvePage = resolve; }));
+    render(<PoolList page={{ items: [pool], nextCursor: 'cursor-2', supportedProtocols: ['uniswap_v4'] }} tokenAddress={b} chainId={4663} />);
+    expect(screen.queryAllByTestId('pool-skeleton-row')).toHaveLength(0);
+
+    await act(async () => {
+      onIntersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    });
+    expect(screen.getAllByTestId('pool-skeleton-row')).toHaveLength(6);
+
+    await act(async () => resolvePage({ items: [{ ...pool, poolId: `0x${'b'.repeat(64)}` }], nextCursor: null, supportedProtocols: ['uniswap_v4'] }));
+    expect(screen.queryAllByTestId('pool-skeleton-row')).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it('appends the next pool batch when the list end enters view', async () => {
     let onIntersect: IntersectionObserverCallback | undefined;
     class ObserverMock {
