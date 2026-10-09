@@ -161,6 +161,7 @@ export interface paths {
                                 quoteAsset?: {
                                     address?: string;
                                     symbol?: string | null;
+                                    logoUri?: string | null;
                                 };
                                 traderAddress?: string;
                                 usdValue?: string | null;

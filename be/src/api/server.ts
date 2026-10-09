@@ -68,10 +68,11 @@ export interface GlobalTransactionResponse {
   blockNumber: string; txHash: string; logIndex: number; timestamp: number;
   side: string; activityKind: string | null;
   tokenAmount: string | null; quoteAmount: string | null;
-  quoteAsset: { address: string; symbol: string | null };
+  quoteAsset: { address: string; symbol: string | null; logoUri: string | null };
   traderAddress: string;
   usdValue: string | null; usdValueApprox: boolean; usdValueStatus: 'priced' | 'pending' | 'unavailable';
 }
+export interface GlobalTransactionQuery extends Omit<ListQuery, 'chainId'> { chainId?: number | number[] }
 export interface CandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string; quoteVolume: string;
 }
@@ -114,7 +115,7 @@ export interface ApiDeps {
     listTrades(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TradeResponse>>;
     listTransactions(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TransactionResponse>>;
     // Optional so test doubles that predate the global feed keep compiling; the route answers 503 without it.
-    listAllTransactions?(query: ListQuery): Promise<Page<GlobalTransactionResponse>>;
+    listAllTransactions?(query: GlobalTransactionQuery): Promise<Page<GlobalTransactionResponse>>;
     listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
     listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }>;
   };

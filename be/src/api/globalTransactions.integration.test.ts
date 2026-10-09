@@ -98,7 +98,16 @@ describe('listAllTransactions', () => {
     expect(second.items[0]!.blockNumber).toBe(String(BASE_BLOCK + 2));
   });
 
-  it('filters by chain', async () => {
+  it('filters by one chain or a list of chains', async () => {
     expect((await store.listAllTransactions!({ limit: 5, chainId: 999_999 })).items).toEqual([]);
+    expect((await store.listAllTransactions!({ limit: 5, chainId: [999_999] })).items).toEqual([]);
+    const both = await store.listAllTransactions!({ limit: 5, chainId: [999_999, chainId] });
+    expect(both.items.length).toBeGreaterThan(0);
+    expect(both.items.every((row) => row.token.chainId === chainId)).toBe(true);
+  });
+
+  it('labels the quote asset with its symbol and a logo field (null when unknown)', async () => {
+    const page = await store.listAllTransactions!({ limit: 1 });
+    expect(page.items[0]!.quoteAsset).toMatchObject({ address: `0x${'00'.repeat(20)}`, symbol: 'ETH', logoUri: null });
   });
 });

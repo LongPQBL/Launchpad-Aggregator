@@ -226,7 +226,7 @@ export type GlobalTransaction = Required<Omit<NonNullable<GlobalTransactionsBody
   quoteAsset: Required<NonNullable<NonNullable<GlobalTransactionsBody['items']>[number]['quoteAsset']>>;
 };
 export interface GlobalTransactionPage { items: readonly GlobalTransaction[]; nextCursor: string | null }
-export async function getAllTransactions(query: { cursor?: string; limit?: number; chainId?: number } = {}): Promise<GlobalTransactionPage> {
+export async function getAllTransactions(query: { cursor?: string; limit?: number; chainId?: number | readonly number[] } = {}): Promise<GlobalTransactionPage> {
   return request<GlobalTransactionPage>('/v1/transactions', { cursor: query.cursor, limit: query.limit, chainId: query.chainId });
 }
 

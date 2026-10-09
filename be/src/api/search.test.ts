@@ -38,6 +38,8 @@ describe('global transactions API', () => {
     const response = await app.inject({ method: 'GET', url: '/v1/transactions?limit=5&chainId=4663' });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({ items: [], nextCursor: null });
+    expect((await app.inject({ method: 'GET', url: '/v1/transactions?chainId=4663,1' })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/v1/transactions?chainId=4663,x' })).statusCode).toBe(400);
   });
 });
 

@@ -270,6 +270,10 @@
                               "symbol": {
                                 "type": "string",
                                 "nullable": true
+                              },
+                              "logoUri": {
+                                "type": "string",
+                                "nullable": true
                               }
                             }
                           },

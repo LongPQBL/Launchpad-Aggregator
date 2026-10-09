@@ -48,12 +48,12 @@ export interface TokenLogoProps {
   logoUri: string | null;
   symbol: string;
   chainId?: number;
-  size?: 'default' | 'large';
+  size?: 'small' | 'default' | 'large';
 }
 
 export function TokenLogo({ logoUri, symbol, chainId, size = 'default' }: TokenLogoProps) {
-  const logoSize = size === 'large' ? 'h-14 w-14' : 'h-8 w-8';
-  const badgeSize = size === 'large' ? 'h-5 w-5' : 'h-4 w-4';
+  const logoSize = size === 'large' ? 'h-14 w-14' : size === 'small' ? 'h-5 w-5' : 'h-8 w-8';
+  const badgeSize = size === 'large' ? 'h-5 w-5' : size === 'small' ? 'h-2.5 w-2.5' : 'h-4 w-4';
 
   return (
     <span className={`relative inline-flex ${logoSize} shrink-0`}>

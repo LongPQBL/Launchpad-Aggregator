@@ -227,7 +227,7 @@ const globalTransactions = {
     blockNumber: String(900 - index), txHash: `0x${(index + 500).toString(16).padStart(64, '0')}`, logIndex: index,
     timestamp: 1_780_000_000 - index * 120, side: index % 2 === 0 ? 'buy' : 'sell', activityKind: index % 4 === 0 ? null : 'user_trade',
     tokenAmount: String(12_345_678 + index), quoteAmount: (0.5 + index * 0.1).toFixed(4),
-    quoteAsset: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH' },
+    quoteAsset: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH', logoUri: null },
     traderAddress: `0x${(index + 700).toString(16).padStart(40, '0')}`,
     usdValue: (1500 + index * 10).toFixed(2), usdValueApprox: true, usdValueStatus: 'priced',
   })),

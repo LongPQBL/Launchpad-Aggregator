@@ -27,4 +27,10 @@ describe('resolveLogoUrl', () => {
   it('falls back to the placeholder for a CID with a query string', () => {
     expect(resolveLogoUrl('ipfs://bafkreigp5feyxvdwyrzlzw3i3rcfrzgtxriswboc34j26tsf6wkvmeoqcu?x=1')).toBeNull();
   });
+
+  it('accepts a bundled /images asset but not a traversal or an arbitrary path', () => {
+    expect(resolveLogoUrl('/images/tokens/eth.svg')).toBe('/images/tokens/eth.svg');
+    expect(resolveLogoUrl('/images/../secret.svg')).toBeNull();
+    expect(resolveLogoUrl('/etc/passwd')).toBeNull();
+  });
 });

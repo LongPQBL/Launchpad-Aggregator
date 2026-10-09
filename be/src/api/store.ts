@@ -12,6 +12,8 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
 import { assetDecimals } from '../pools/stats.js';
+import { createTokenMetadataResolver } from '../pools/tokenMetadata.js';
+import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
@@ -24,7 +26,7 @@ import { decodeCursor, encodeCursor } from './cursor.js';
 import { readMetricRankingPage } from './metricRanking.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
-import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, GlobalTransactionResponse, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
+import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, GlobalTransactionQuery, GlobalTransactionResponse, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -226,6 +228,7 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
 }
 
 export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
+  const quoteMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined;
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
   // "use whichever source has a reading, prefer the more current one" behavior needed here.
   // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
@@ -616,7 +619,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         };
       }) as Page<TransactionResponse>;
     },
-    async listAllTransactions(query: ListQuery): Promise<Page<GlobalTransactionResponse>> {
+    async listAllTransactions(query: GlobalTransactionQuery): Promise<Page<GlobalTransactionResponse>> {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
       // Each branch applies the cursor and its own ORDER BY ... LIMIT before the UNION, so a branch only
       // produces one page of rows. NULLS LAST is not cosmetic: trades_global_order_idx and
@@ -632,7 +635,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           FROM trades t
           JOIN venues v ON v.id = t.venue_id
           JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
-          WHERE v.official = true AND ($1::integer IS NULL OR t.chain_id = $1)
+          WHERE v.official = true AND ($1::integer[] IS NULL OR t.chain_id = ANY($1))
             AND ($2::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($2::bigint, $3::text, $4::integer))
           ORDER BY t.block_number DESC NULLS LAST, t.tx_hash DESC NULLS LAST, t.log_index DESC NULLS LAST
           LIMIT $5
@@ -655,7 +658,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
             ORDER BY m.token_address LIMIT 1
           ) lt
           JOIN launches l ON l.chain_id = pt.chain_id AND l.token_address = lt.token_address
-          WHERE ($1::integer IS NULL OR pt.chain_id = $1)
+          WHERE ($1::integer[] IS NULL OR pt.chain_id = ANY($1))
             AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
               AND ov.kind IN ('v4_pool','v3_pool') AND ov.ref = pc.pool_id AND ov.official = true)
             AND ($2::bigint IS NULL OR (pt.block_number, pt.tx_hash, pt.log_index) < ($2::bigint, $3::text, $4::integer))
@@ -665,7 +668,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         SELECT * FROM (SELECT * FROM official_page UNION ALL SELECT * FROM pool_page) merged
         ORDER BY block_number DESC NULLS LAST, tx_hash DESC NULLS LAST, log_index DESC NULLS LAST
         LIMIT $5`,
-      [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1]);
+      [query.chainId === undefined ? null : [query.chainId].flat(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1]);
       const rows = result.rows as Row[];
       const visible = rows.slice(0, query.limit);
 
@@ -694,6 +697,15 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           quoteDecimals: decimalsByAddress.get(quoteAddress) ?? null, quoteSymbol: quoteAddress === ZERO ? 'ETH' : null };
       });
 
+      // Symbol and logo of each distinct quote asset on this page (cached per address); without an RPC client the
+      // launch's own stored symbol (official rows) stands in and no logo is available.
+      const quoteMeta = new Map<string, { symbol: string | null; logoUri: string | null }>();
+      if (quoteMetadataResolver) {
+        await Promise.all([...new Set(interpreted.map((i) => i.quoteAddress))].map(async (address) => {
+          const meta = await quoteMetadataResolver.resolve(address).catch(() => null);
+          if (meta) quoteMeta.set(address, { symbol: meta.symbol, logoUri: meta.logoUri });
+        }));
+      }
       const valuations = await Promise.all(visible.map((row, i) => {
         const info = interpreted[i]!;
         if (info.quoteDecimals === null) return Promise.resolve({ status: 'unavailable' as const });
@@ -730,7 +742,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           logIndex: number(row.log_index), timestamp: number(row.timestamp), side: info.side, activityKind: nullableString(row.activity_kind),
           tokenAmount: tokenDecimals === null ? null : formatUnits(info.tokenAmountRaw, tokenDecimals),
           quoteAmount: info.quoteDecimals === null ? null : formatUnits(info.quoteAmountRaw, info.quoteDecimals),
-          quoteAsset: { address: info.quoteAddress, symbol: info.quoteSymbol },
+          quoteAsset: { address: info.quoteAddress, symbol: quoteMeta.get(info.quoteAddress)?.symbol ?? info.quoteSymbol,
+            logoUri: quoteMeta.get(info.quoteAddress)?.logoUri ?? null },
           traderAddress: string(row.trader_address),
           usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
           usdValueApprox: valuations[i]!.status === 'priced',

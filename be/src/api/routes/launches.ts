@@ -62,8 +62,12 @@ function tokenParams(value: { chainId: string; tokenAddress: string }): { chainI
 export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void {
   // Latest official trades across every launch (the Explore "Transactions" feed).
   app.get<{ Querystring: Record<string, string | undefined> }>('/v1/transactions', { schema: { response: { 200: pageSchema(globalTransaction) } } }, async (request, reply) => {
-    const query = listQuery(request.query);
+    // chainId may be one id or a comma-separated list, like /v1/launches.
+    const ids = request.query.chainId?.split(',').map(chainId);
+    if (ids?.some((id) => id === null)) return reply.code(400).send({ error: 'Invalid transaction query' });
+    const query = listQuery({ ...request.query, chainId: undefined });
     if (!query) return reply.code(400).send({ error: 'Invalid transaction query' });
+    if (ids) (query as { chainId?: number | number[] }).chainId = ids as number[];
     if (!deps.data.listAllTransactions) return reply.code(503).send({ error: 'Transactions feed unavailable' });
     return deps.data.listAllTransactions(query);
   });

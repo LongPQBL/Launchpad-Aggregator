@@ -1,21 +1,29 @@
 import { expect, test } from './fixtures';
 import { CHAIN_ID } from './mock-api';
 
-test('the Transactions page lists trades across launches, marking pool swaps, with fixed column widths', async ({ page }) => {
+test('the Transactions page reads each trade as "Swap A for B", marks pool swaps, and has chain and type filters', async ({ page }) => {
   await page.goto('/transactions');
   const table = page.getByRole('table', { name: 'Latest transactions' });
   await expect(table).toBeVisible();
   await expect(table.getByRole('row')).toHaveCount(11);
   await expect(table.getByText('(pool)').first()).toBeVisible();
-  // 12345678 tokens are abbreviated, not printed as a long digit string.
+  // A buy pays ETH for the launch token; a sell is the reverse.
+  await expect(table.getByText(/^Swap$/).first()).toBeVisible();
+  await expect(table.getByRole('row').nth(1)).toContainText('ETH');
+  await expect(table.getByRole('row').nth(1)).toContainText('E2E');
+  // Token amounts are abbreviated, and wallets use the checksum form with three dots.
   await expect(table.getByText('12.35M').first()).toBeVisible();
+  await expect(table.getByText(/^0x[0-9a-fA-F]{4}\.\.\.[0-9a-fA-F]{4}$/).first()).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Filter by chain' })).toBeVisible();
+  await expect(table.getByRole('button', { name: 'Filter by type' })).toBeVisible();
+});
 
-  // Header positions must not shift when the content changes (table-fixed layout).
-  const timeBefore = await table.getByRole('columnheader', { name: 'Time' }).boundingBox();
-  const walletBefore = await table.getByRole('columnheader', { name: 'Wallet' }).boundingBox();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  expect(timeBefore).not.toBeNull();
-  expect(walletBefore).not.toBeNull();
+test('choosing a chain filters the transactions and is kept in the URL', async ({ page }) => {
+  await page.goto('/transactions');
+  await page.getByLabel('All chains').click();
+  await page.getByRole('button', { name: /Robinhood Chain/ }).click();
+  await expect(page).toHaveURL(/chainId=4663/);
+  await expect(page.getByRole('table', { name: 'Latest transactions' }).getByRole('row')).toHaveCount(11);
 });
 
 test('the header search finds a launch and navigates to it', async ({ page }) => {
@@ -46,7 +54,7 @@ test('the Portfolio page asks for a wallet instead of showing anything when none
 
 test('the pool page shows daily Volume and TVL bars, with an unavailable day drawn as unavailable', async ({ page }) => {
   await page.goto('/pools');
-  await page.getByRole('link').filter({ hasText: /MOCK1/ }).first().click();
+  await page.getByRole('link', { name: /View pool MOCK1/ }).first().click();
   const history = page.getByRole('region', { name: 'Pool history' });
   await expect(history).toBeVisible();
   await expect(history.getByTestId('history-bar-unavailable')).toHaveCount(1);

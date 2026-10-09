@@ -103,7 +103,7 @@ export const globalTransaction = { type: 'object', properties: {
   blockNumber: { type: 'string' }, txHash: { type: 'string' }, logIndex: { type: 'integer' },
   timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string', nullable: true },
   tokenAmount: { type: 'string', nullable: true }, quoteAmount: { type: 'string', nullable: true },
-  quoteAsset: { type: 'object', properties: { address: { type: 'string' }, symbol: { type: 'string', nullable: true } } },
+  quoteAsset: { type: 'object', properties: { address: { type: 'string' }, symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true } } },
   traderAddress: { type: 'string' },
   usdValue: { type: 'string', nullable: true }, usdValueApprox: { type: 'boolean' },
   usdValueStatus: { type: 'string', enum: ['priced', 'pending', 'unavailable'] },
