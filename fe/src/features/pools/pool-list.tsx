@@ -4,11 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { PercentChange } from '@/components/percent-change';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
-import { formatPoolUsd, poolAge, short } from './pool-format';
+import { formatPoolUsd, formatVolumeToTvl, poolAge, short, volumeToTvl } from './pool-format';
 
 function side(address: string): string { return address.toLowerCase(); }
 
@@ -17,18 +16,19 @@ export type PrimaryLaunchVenue =
   | { kind: 'curve'; token: PoolListDisplayedToken; quoteSymbol: string; chainId: number }
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
 
-type PoolSort = 'fdvUsd' | 'volume24hUsd' | 'tvlUsd' | 'change1h' | 'change1d' | 'age';
+type PoolSort = 'fdvUsd' | 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
 const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; width: string }[] = [
-  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
-  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[15%]' },
-  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
-  { label: '1H', sort: 'change1h', defaultDirection: 'desc', width: 'md:w-[9%]' },
-  { label: '1D', sort: 'change1d', defaultDirection: 'desc', width: 'md:w-[9%]' },
+  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc', width: 'md:w-[12%]' },
+  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[14%]' },
+  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[12%]' },
+  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
+  { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', width: 'md:w-[10%]' },
   { label: 'Age', sort: 'age', defaultDirection: 'asc', width: 'md:w-[9%]' },
 ];
 
 function poolSortValue(pool: PoolSummary, sort: PoolSort): number | null {
   if (sort === 'age') return pool.createdTimestamp === null ? null : -pool.createdTimestamp;
+  if (sort === 'volumeToTvl') return volumeToTvl(pool);
   const value = pool[sort];
   if (value === null) return null;
   const number = Number(value);
@@ -52,7 +52,7 @@ function pairLabel(pool: PoolSummary, displayedToken?: PoolListDisplayedToken): 
   return `${label(pool.currency0, pool.currency0Symbol)} / ${label(pool.currency1, pool.currency1Symbol)}`;
 }
 // Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
-const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-14', 'w-10', 'w-10', 'w-8'] as const;
+const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-14', 'w-16', 'w-10', 'w-8'] as const;
 
 function PoolRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
@@ -211,7 +211,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           </div>
           {([
             ['FDV', formatPoolUsd(pool.fdvUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)], ['Liquidity', formatPoolUsd(pool.tvlUsd)],
-            ['1H', <PercentChange key="change1h" value={pool.change1h} />], ['1D', <PercentChange key="change1d" value={pool.change1d} />], ['Age', poolAge(pool.createdTimestamp)],
+            ['30D volume', formatPoolUsd(pool.volume30dUsd)], ['1D Vol/TVL', formatVolumeToTvl(volumeToTvl(pool))], ['Age', poolAge(pool.createdTimestamp)],
           ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
             <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
           </div>)}

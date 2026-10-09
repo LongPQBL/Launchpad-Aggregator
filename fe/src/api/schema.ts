@@ -567,6 +567,7 @@ export interface paths {
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
+                                volume30dUsd?: string | null;
                                 volume24hChange?: string | null;
                                 priceInQuote?: string | null;
                                 priceUsd?: string | null;
@@ -647,6 +648,7 @@ export interface paths {
                                 } | null;
                                 launchTokenAddress?: string | null;
                                 volume24hUsd?: string | null;
+                                volume30dUsd?: string | null;
                                 volume24hChange?: string | null;
                                 priceInQuote?: string | null;
                                 priceUsd?: string | null;
@@ -727,6 +729,7 @@ export interface paths {
                             } | null;
                             launchTokenAddress?: string | null;
                             volume24hUsd?: string | null;
+                            volume30dUsd?: string | null;
                             volume24hChange?: string | null;
                             priceInQuote?: string | null;
                             priceUsd?: string | null;

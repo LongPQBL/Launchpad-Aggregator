@@ -4,6 +4,8 @@ import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { readPoolCandles, type PoolCandleResponse } from '../pools/candleCache.js';
 import { assetDecimals, readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
 import { readPoolDailyHistory, type PoolDayHistory } from '../pools/history.js';
+import { sumUsdValues } from '../pools/valuation.js';
+import { ttlMemo } from './ttlMemo.js';
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
 export interface PoolSummary extends PoolStats {
@@ -16,6 +18,8 @@ export interface PoolSummary extends PoolStats {
   fee: number; tickSpacing: number; hooks: string; createdBlock: string;
   createdTimestamp: number | null;
   ponsDesignated: boolean; launchTokenAddress: string | null;
+  /** USD volume over the last 30 UTC days; null when any day is unpriced or the pool is still being indexed. */
+  volume30dUsd: string | null;
 }
 export interface PoolListQuery { limit: number; cursor?: string; chainId?: number; tokenAddress?: string;
   protocol?: PoolKey['protocol']; excludeOfficial?: boolean }
@@ -85,13 +89,25 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       value === 'uniswap_v3' || value === 'uniswap_v2');
     return ['uniswap_v4', ...additional];
   }
+  // 30-day volume needs a per-pool oracle-priced aggregate, so it is cached for a few minutes: a list page
+  // asks for up to 100 pools at once and the figure moves slowly.
+  const volume30d = ttlMemo(async (cacheKey: string, key?: PoolKey): Promise<string | null> => {
+    if (!key) return null;
+    try {
+      const history = await readPoolDailyHistory(pool, key, { days: 30, asOf: Math.floor(Date.now() / 1000), rpcClient });
+      if (!history.complete) return null;
+      const days = history.items.map((item) => item.volumeUsd);
+      return days.every((value): value is string => value !== null) ? sumUsdValues(days) : null;
+    } catch { return null; }
+  }, 5 * 60_000);
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
     const createdAtPromise = createdTimestamp(String(row.block_number));
-    const [stats, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
+    const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
       createdAtPromise.then((created) => readPoolStats(pool, key, displayedToken, Math.floor(Date.now() / 1000),
         { rpcClient, createdTimestamp: created })),
+      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, key),
       createdAtPromise,
       currencyMetadata(row.currency0),
       currencyMetadata(row.currency1),
@@ -106,7 +122,7 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       currency1Decimals,
       tickSpacing: Number(row.tick_spacing), hooks: row.hooks, createdBlock: String(row.block_number),
       createdTimestamp: createdAt,
-      ponsDesignated: row.pons_designated, launchTokenAddress: row.launch_token_address, ...stats };
+      ponsDesignated: row.pons_designated, launchTokenAddress: row.launch_token_address, volume30dUsd, ...stats };
   }
   const select = `SELECT p.chain_id,p.protocol,p.pool_id,p.currency0,p.currency1,p.fee,p.tick_spacing,p.hooks,
     p.block_number,p.log_index,

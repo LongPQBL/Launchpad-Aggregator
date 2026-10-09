@@ -168,6 +168,7 @@ const mockPools = Array.from({ length: 60 }, (_, index) => ({
   ponsDesignated: index === 0,
   launchTokenAddress: null,
   volume24hUsd: (52_000 - index * 640).toFixed(2),
+  volume30dUsd: index === 4 ? null : ((52_000 - index * 640) * 21).toFixed(2),
   // null => hidden in the UI (pool #3 has no volume change at all; #2 is new).
   volume24hChange: index === 1 || index === 2 ? null : (-62.38 + index * 9).toFixed(2),
   tvlChange: index === 2 || index % 4 === 3 ? null : (-13.38 + index * 6).toFixed(2),
@@ -199,6 +200,7 @@ const launchPools = Array.from({ length: 4 }, (_, index) => ({
   ponsDesignated: false,
   launchTokenAddress: TOKEN_ADDRESS,
   volume24hUsd: (2450 - index * 375).toFixed(2),
+  volume30dUsd: ((2450 - index * 375) * 18).toFixed(2),
   volume24hChange: (index * 5 - 10).toFixed(2),
   tvlChange: (index * 4 - 8).toFixed(2),
   priceInQuote: (0.0001 + index * 0.00001).toFixed(8),

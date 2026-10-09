@@ -57,6 +57,7 @@ describe('pool catalog API reader', () => {
     expect(first.items).toHaveLength(1);
     expect(first.items[0].displayedToken).toBe(b);
     expect(first.items[0].volume24hUsd).toBeNull();
+    expect(first.items[0].volume30dUsd).toBeNull();
     expect(first.nextCursor).not.toBeNull();
     const second = await store.listPools({ chainId: 4663, limit: 1, tokenAddress: b, cursor: first.nextCursor! });
     expect(second.items).toHaveLength(1);

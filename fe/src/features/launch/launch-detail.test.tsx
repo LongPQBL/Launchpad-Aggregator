@@ -161,7 +161,7 @@ describe('LaunchDetail', () => {
       currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
       currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
       hooks: '0x0000000000000000000000000000000000000000', createdBlock: '123', createdTimestamp: null,
-      ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null,
+      ponsDesignated: false, launchTokenAddress: null, volume24hUsd: null, volume30dUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null,
       poolBalances: null,
       priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
       coverageStatus: 'backfilling', lastTradeTimestamp: null };
@@ -753,7 +753,7 @@ describe('LaunchDetail', () => {
           currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
-          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume30dUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
           poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}
@@ -782,7 +782,7 @@ describe('LaunchDetail', () => {
           currency1Symbol: 'MYTOK', currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: tokenAddress,
-          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume30dUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
           poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}
@@ -821,7 +821,7 @@ describe('LaunchDetail', () => {
           currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
           hooks: '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044', createdBlock: '123', createdTimestamp: null,
           ponsDesignated: true, launchTokenAddress: '0x1111111111111111111111111111111111111111',
-          volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
+          volume24hUsd: null, volume30dUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null, priceUsd: null, fdvUsd: null, tvlUsd: null,
           poolBalances: null,
           change1h: null, change1d: null, coverageStatus: 'backfilling', lastTradeTimestamp: null,
         }}

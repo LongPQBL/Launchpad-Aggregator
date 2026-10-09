@@ -35,3 +35,17 @@ export function formatPoolUsd(value: string | null): string {
     ? compactUsd.format(numeric)
     : trimFractionZeros(formatUsd(value, 2));
 }
+
+/** 24h volume divided by liquidity: how many times the pool's liquidity turned over today. Null (not 0) when either side is unknown or there is no liquidity. */
+export function volumeToTvl(pool: { volume24hUsd: string | null; tvlUsd: string | null }): number | null {
+  if (pool.volume24hUsd === null || pool.tvlUsd === null) return null;
+  const volume = Number(pool.volume24hUsd);
+  const tvl = Number(pool.tvlUsd);
+  return Number.isFinite(volume) && Number.isFinite(tvl) && tvl > 0 ? volume / tvl : null;
+}
+
+const compactRatio = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 });
+export function formatVolumeToTvl(ratio: number | null): string {
+  if (ratio === null) return '—';
+  return ratio >= 1_000 ? compactRatio.format(ratio) : ratio.toFixed(2);
+}

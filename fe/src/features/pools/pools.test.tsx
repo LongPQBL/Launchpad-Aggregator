@@ -26,7 +26,7 @@ const pool: PoolSummary = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${
   currency0Symbol: null, currency0Name: null, currency0LogoUri: null, currency0Decimals: 18,
   currency1Symbol: null, currency1Name: null, currency1LogoUri: null, currency1Decimals: 18,
   hooks: '0x0000000000000000000000000000000000000000', createdBlock: '123', createdTimestamp: null,
-  ponsDesignated: true, launchTokenAddress: b, volume24hUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null,
+  ponsDesignated: true, launchTokenAddress: b, volume24hUsd: null, volume30dUsd: null, volume24hChange: null, tvlChange: null, priceInQuote: null,
   poolBalances: null,
   priceUsd: null, fdvUsd: null, tvlUsd: null, change1h: null, change1d: null,
   coverageStatus: 'backfilling', lastTradeTimestamp: null };
@@ -121,6 +121,18 @@ describe('Pools UI', () => {
     expect(within(screen.getByText('FDV').parentElement!).getByText('—')).toBeInTheDocument();
     expect(screen.queryByText('backfilling')).not.toBeInTheDocument();
     expect(screen.queryByText(/APR/i)).not.toBeInTheDocument();
+  });
+  it('shows 30D volume and 1D Vol/TVL columns instead of the 1H/1D price changes, with an em dash for unknown values', () => {
+    const known: PoolSummary = { ...pool, volume30dUsd: '1200000', volume24hUsd: '300000', tvlUsd: '100000' };
+    const unknown: PoolSummary = { ...pool, poolId: `0x${'c'.repeat(64)}`, volume30dUsd: null, volume24hUsd: '5', tvlUsd: null };
+    render(<PoolList page={{ items: [known, unknown], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
+    expect(screen.getByRole('columnheader', { name: /30D volume/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /1D Vol\/TVL/ })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /^1H$/ })).not.toBeInTheDocument();
+    const [, knownRow, unknownRow] = screen.getAllByRole('row');
+    expect(within(knownRow!).getByText('$1.2M')).toBeInTheDocument();
+    expect(within(knownRow!).getByText('3.00')).toBeInTheDocument();
+    expect(within(unknownRow!).getAllByText('—').length).toBeGreaterThanOrEqual(2);
   });
   it('shows a protocol/fee badge and real token symbols/logos when the API resolved them', () => {
     const resolved: PoolSummary = { ...pool, currency0Symbol: 'GUY', currency0LogoUri: 'https://example.com/guy.png',
