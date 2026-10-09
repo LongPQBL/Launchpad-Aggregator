@@ -247,8 +247,14 @@ const poolHistory = {
 };
 
 export function startMockApi(port: number): Server {
+  const delayMs = Number(process.env.MOCK_API_DELAY_MS ?? 0);
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
+    // MOCK_API_DELAY_MS simulates a slow backend to see the loading behaviour of navigations (never used by the e2e suite).
+    if (delayMs > 0 && url.pathname !== '/v1/events') { setTimeout(() => handle(req, res, url), delayMs); return; }
+    handle(req, res, url);
+  });
+  const handle = (req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, url: URL) => {
     // Echo the request's own origin, like be/src/api/server.ts's @fastify/cors config does for
     // the configured FE_ORIGIN, instead of a permissive wildcard that would hide CORS bugs.
     const origin = req.headers.origin;
@@ -377,7 +383,7 @@ export function startMockApi(port: number): Server {
       res.statusCode = 404;
       res.end(JSON.stringify({ error: 'not found' }));
     }
-  });
+  };
   server.listen(port);
   return server;
 }

@@ -1,4 +1,3 @@
-import { AppShell } from '@/components/app-shell';
 import { getPools, type PoolPage } from '@/api/client';
 import { PoolList } from '@/features/pools/pool-list';
 
@@ -11,5 +10,5 @@ export default async function PoolsPage({ searchParams }: Props) {
   const chainId = chainRaw && /^\d+$/.test(chainRaw) ? Number(chainRaw) : undefined;
   let page: PoolPage | null = null;
   try { page = await getPools({ cursor, chainId }); } catch { /* show retry state */ }
-  return <AppShell><PoolList page={page} error={!page} /></AppShell>;
+  return <><PoolList page={page} error={!page} /></>;
 }

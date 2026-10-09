@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import './globals.css';
+import { AppShell } from '@/components/app-shell';
 import { WalletProviders } from '@/wallet/providers';
 import { themeInitScript } from './theme-init-script';
 
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
-      <body><WalletProviders>{children}</WalletProviders></body>
+      {/* The shell lives in the layout, not in each page, so the header (wallet connection, search, theme) persists
+         across navigations instead of being torn down and rebuilt with every page. */}
+      <body><WalletProviders><AppShell>{children}</AppShell></WalletProviders></body>
     </html>
   );
 }

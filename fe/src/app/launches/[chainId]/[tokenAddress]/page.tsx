@@ -1,5 +1,4 @@
 import { notFound } from 'next/navigation';
-import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchDetail } from '@/features/launch/launch-detail';
 import { findActiveVenue, getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions, getPoolDetail } from '@/api/client';
@@ -34,12 +33,12 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
     detail = await getLaunchDetail(chainId, tokenAddress);
   } catch {
     return (
-      <AppShell>
+      <>
         <div role="alert">
           <p>Could not load launch details from the server. Please try again.</p>
           <a href={`/launches/${chainId}/${tokenAddress}`}>Retry</a>
         </div>
-      </AppShell>
+      </>
     );
   }
   if (detail === null) notFound();
@@ -57,12 +56,12 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   const hasPendingTrade = transactions?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 
   return (
-    <AppShell>
+    <>
       {/* Launch-only (not chainResourceKey): matchesResourceKeys() already lets a launch key
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
       <LaunchDetail detail={detail} transactions={transactions} candles={candles} pools={pools} v4Pool={v4Pool} chartCurrency={chartCurrency} chartInterval={chartInterval} showSwapPreview={showSwapPreview} />
-    </AppShell>
+    </>
   );
 }

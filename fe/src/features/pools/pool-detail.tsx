@@ -32,9 +32,7 @@ export function PoolDetail({ pool, trades, candles, history = null }: { pool: Po
   const icon = chainIcon(pool.chainId);
   return <article className="space-y-4">
     <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-base text-muted-foreground">
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
-          component router-context-free for unit tests, matching launch-detail.tsx's own breadcrumb. */}
-      <a href="/pools">Pools</a>
+      <Link href="/pools">Pools</Link>
       <span aria-hidden="true">›</span>
       <span className="font-medium text-foreground">{pairLabel}</span>
     </nav>
@@ -81,7 +79,7 @@ export function PoolDetail({ pool, trades, candles, history = null }: { pool: Po
               displayedIsCurrency0={displayedIsCurrency0}
               explorerBase={explorerBase ?? null}
             />
-            {trades.nextCursor && <a className="mt-3 block" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</a>}
+            {trades.nextCursor && <Link className="mt-3 block" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</Link>}
           </>
             : <p role="status">Could not load pool trades.</p>}
         </section>

@@ -1,5 +1,4 @@
 import { notFound } from 'next/navigation';
-import { AppShell } from '@/components/app-shell';
 import { getPoolCandles, getPoolDetail, getPoolHistory, getPoolTrades } from '@/api/client';
 import { PoolDetail } from '@/features/pools/pool-detail';
 
@@ -17,12 +16,12 @@ export default async function PoolDetailPage({ params, searchParams }: Props) {
     || (protocol === 'uniswap_v4' ? !/^0x[0-9a-fA-F]{64}$/.test(poolId) : !/^0x[0-9a-fA-F]{40}$/.test(poolId))) notFound();
   let detail;
   try { detail = await getPoolDetail(chainId, protocol, poolId, first(query.displayedToken)); }
-  catch { return <AppShell><p role="alert">Could not load this pool. Please try again.</p></AppShell>; }
+  catch { return <><p role="alert">Could not load this pool. Please try again.</p></>; }
   if (!detail) notFound();
   const [trades, candles, history] = await Promise.all([
     getPoolTrades(detail, first(query.cursor)).catch(() => null),
     getPoolCandles(detail).catch(() => null),
     getPoolHistory(detail).catch(() => null),
   ]);
-  return <AppShell><PoolDetail pool={detail} trades={trades} candles={candles} history={history} /></AppShell>;
+  return <><PoolDetail pool={detail} trades={trades} candles={candles} history={history} /></>;
 }

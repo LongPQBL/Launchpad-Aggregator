@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { Card, CardContent } from '@/components/ui/card';
@@ -161,7 +162,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           /> : <span aria-hidden="true" className="h-9 w-9 rounded-full bg-accent" />}
           <div className="min-w-0">
             {primaryVenue.pool
-              ? <a className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</a>
+              ? <Link className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</Link>
               : <p className="text-sm font-semibold">Pons Uniswap V4 pool</p>}
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <Badge variant="secondary">{primaryVenue.protocol.replace('uniswap_', '').toUpperCase()}</Badge>
@@ -199,7 +200,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
         {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
           <div role="cell" className="pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle">
-            <a href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
+            <Link href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
             {index + 1}
           </div>
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">

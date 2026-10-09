@@ -70,3 +70,23 @@ test('the pool page shows daily Volume and TVL bars, with an unavailable day dra
   await history.getByRole('tab', { name: 'TVL' }).click();
   await expect(history.getByTestId('history-bar')).not.toHaveCount(0);
 });
+
+test('moving between pages keeps the header and does not reload the browser page', async ({ page }) => {
+  await page.goto('/pools');
+  await page.evaluate(() => {
+    document.querySelector('header')!.dataset.keep = '1';
+    (window as unknown as { __noReload: boolean }).__noReload = true;
+  });
+  const nav = page.getByRole('navigation', { name: 'Main navigation' });
+  await nav.getByRole('link', { name: 'Transactions' }).click();
+  await expect(page.getByRole('table', { name: 'Latest transactions' })).toBeVisible();
+  await nav.getByRole('link', { name: 'Launches' }).click();
+  await expect(page).toHaveURL(/\/launches$/);
+  await expect(page.getByRole('table', { name: 'Launch list' })).toBeVisible();
+  await nav.getByRole('link', { name: 'Pools' }).click();
+  await page.getByRole('link', { name: /View pool MOCK1/ }).first().click();
+  await expect(page.getByRole('region', { name: 'Pool history' })).toBeVisible();
+
+  expect(await page.evaluate(() => document.querySelector('header')?.dataset.keep)).toBe('1');
+  expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload)).toBe(true);
+});

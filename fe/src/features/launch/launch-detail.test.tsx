@@ -199,7 +199,7 @@ describe('LaunchDetail', () => {
     render(<LaunchDetail detail={detail({ symbol: 'TKA' })} transactions={null} candles={null} />);
 
     const breadcrumb = screen.getByRole('navigation', { name: /breadcrumb/i });
-    expect(within(breadcrumb).getByRole('link', { name: 'Launches' })).toHaveAttribute('href', '/');
+    expect(within(breadcrumb).getByRole('link', { name: 'Launches' })).toHaveAttribute('href', '/launches');
     expect(within(breadcrumb).getByText('TKA')).toBeInTheDocument();
   });
 

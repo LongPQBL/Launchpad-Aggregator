@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { chainExplorerBase, chainName } from '@/api/chains';
 import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatUsd, formatUsdCompact, formatVenueKind, tvlTooltip } from '@/api/format';
 import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
@@ -88,9 +89,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
   return (
     <article className="flex flex-col gap-4">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-base text-muted-foreground">
-        {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- plain <a> keeps this
-            component router-context-free for unit tests, matching launch-list.tsx's retry link. */}
-        <a href="/">Launches</a>
+        <Link href="/launches">Launches</Link>
         <span aria-hidden="true">›</span>
         <span className="font-medium text-foreground">{displaySymbol(detail.symbol)}</span>
       </nav>

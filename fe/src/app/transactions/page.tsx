@@ -1,4 +1,3 @@
-import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { GlobalTransactionList } from '@/features/transactions/global-transaction-list';
 import { ROADMAP_CHAIN_IDS } from '@/api/chains';
@@ -29,13 +28,13 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
   const chainIds = [...new Set([...ROADMAP_CHAIN_IDS, ...indexedChainIds, ...selectedChainIds])];
 
   return (
-    <AppShell>
+    <>
       {page && <LiveRefreshIndicator resourceKeys={indexedChainIds.map(chainResourceKey)} />}
       <div className="space-y-4">
         {page
           ? <GlobalTransactionList heading="Transactions" transactions={page.items} nextCursor={page.nextCursor} chainIds={chainIds} selectedChainIds={selectedChainIds} />
           : <div role="alert"><h1 className="text-2xl font-semibold">Transactions</h1><p>Could not load transactions from the server. Please try again.</p><a href="/transactions">Retry</a></div>}
       </div>
-    </AppShell>
+    </>
   );
 }

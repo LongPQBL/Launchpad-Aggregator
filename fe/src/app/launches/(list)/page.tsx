@@ -1,4 +1,3 @@
-import { AppShell } from '@/components/app-shell';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchList } from '@/features/launches/launch-list';
 import { ApiError, getLaunches, getSources, type LaunchPage, type Source, type LaunchQuery } from '@/api/client';
@@ -54,9 +53,9 @@ export default async function LaunchesPage({ searchParams }: LaunchesPageProps) 
   const resourceKeys = [...new Set(sources.map((source) => source.chainId))].map(chainResourceKey);
 
   return (
-    <AppShell>
+    <>
       {!error && <LiveRefreshIndicator resourceKeys={resourceKeys} />}
       <LaunchList page={page} sources={sources} error={error} rankingUnavailable={rankingUnavailable} chainId={chainIds} search={search} status={status} platform={platforms} tab={tab} sort={sort} direction={direction} />
-    </AppShell>
+    </>
   );
 }
