@@ -40,3 +40,16 @@ describe('global transactions API', () => {
     expect(response.json()).toEqual({ items: [], nextCursor: null });
   });
 });
+
+describe('wallet positions API', () => {
+  it('validates the address and limit, and serves positions from the store', async () => {
+    const positions = { items: [] };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, wallets: { listPositions: async () => positions } });
+    const wallet = `0x${'8b'.repeat(20)}`;
+    expect((await app.inject({ method: 'GET', url: `/v1/wallets/${wallet}/positions` })).json()).toEqual(positions);
+    expect((await app.inject({ method: 'GET', url: '/v1/wallets/not-an-address/positions' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `/v1/wallets/${wallet}/positions?limit=0` })).statusCode).toBe(400);
+    const without = await createApiServer({ feOrigin: 'http://localhost:3000', data });
+    expect((await without.inject({ method: 'GET', url: `/v1/wallets/${wallet}/positions` })).statusCode).toBe(503);
+  });
+});

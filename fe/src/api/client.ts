@@ -236,3 +236,14 @@ export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boole
 export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, days = 30): Promise<PoolHistory> {
   return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { days });
 }
+
+type WalletPositionsBody = paths['/v1/wallets/{address}/positions']['get']['responses'][200]['content']['application/json'];
+type RawWalletPosition = NonNullable<WalletPositionsBody['items']>[number];
+export type WalletPosition = Required<Omit<RawWalletPosition, 'token' | 'quoteAsset'>> & {
+  token: Required<NonNullable<RawWalletPosition['token']>>;
+  quoteAsset: Required<NonNullable<RawWalletPosition['quoteAsset']>>;
+};
+export interface WalletPositions { items: readonly WalletPosition[] }
+export async function getWalletPositions(address: string, chainId: number, signal?: AbortSignal): Promise<WalletPositions> {
+  return request<WalletPositions>(`/v1/wallets/${encodeURIComponent(address)}/positions`, { chainId }, signal);
+}

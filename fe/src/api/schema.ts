@@ -954,6 +954,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/wallets/{address}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    address: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                token?: {
+                                    chainId?: number;
+                                    tokenAddress?: string;
+                                    name?: string | null;
+                                    symbol?: string | null;
+                                    logoUri?: string | null;
+                                    decimals?: number | null;
+                                };
+                                tradeCount?: number;
+                                buyCount?: number;
+                                sellCount?: number;
+                                firstTradeAt?: number;
+                                lastTradeAt?: number;
+                                quoteAsset?: {
+                                    address?: string;
+                                    symbol?: string | null;
+                                };
+                                quoteSpent?: string | null;
+                                quoteReceived?: string | null;
+                                priceUsd?: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;

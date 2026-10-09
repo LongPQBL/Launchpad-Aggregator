@@ -5,6 +5,7 @@ import { createApiServer } from '../api/server.js';
 import { createApiStore } from '../api/store.js';
 import { createPoolApiStore } from '../api/poolStore.js';
 import { createSearchStore } from '../api/searchStore.js';
+import { createWalletStore } from '../api/walletStore.js';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 
@@ -14,7 +15,7 @@ const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
 const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool, rpcClient),
-  pools: createPoolApiStore(pool, rpcClient), search: createSearchStore(pool), events });
+  pools: createPoolApiStore(pool, rpcClient), search: createSearchStore(pool), wallets: createWalletStore(pool), events });
 
 try {
   await app.listen({ host: config.host, port: config.port });

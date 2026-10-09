@@ -174,3 +174,17 @@ export const poolHistory = { type: 'object', properties: {
   } } },
   complete: { type: 'boolean' },
 } } as const;
+
+export const walletPositions = { type: 'object', properties: {
+  items: { type: 'array', items: { type: 'object', properties: {
+    token: { type: 'object', properties: {
+      chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string', nullable: true },
+      symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true }, decimals: { type: 'integer', nullable: true },
+    } },
+    tradeCount: { type: 'integer' }, buyCount: { type: 'integer' }, sellCount: { type: 'integer' },
+    firstTradeAt: { type: 'integer' }, lastTradeAt: { type: 'integer' },
+    quoteAsset: { type: 'object', properties: { address: { type: 'string' }, symbol: { type: 'string', nullable: true } } },
+    quoteSpent: { type: 'string', nullable: true }, quoteReceived: { type: 'string', nullable: true },
+    priceUsd: { type: 'string', nullable: true },
+  } } },
+} } as const;
