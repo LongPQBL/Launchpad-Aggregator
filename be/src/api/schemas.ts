@@ -166,3 +166,11 @@ export const searchResults = { type: 'object', properties: {
     } },
   } } },
 } } as const;
+
+export const poolHistory = { type: 'object', properties: {
+  items: { type: 'array', items: { type: 'object', properties: {
+    day: { type: 'integer' }, tradeCount: { type: 'integer' },
+    volumeUsd: { type: 'string', nullable: true }, tvlUsd: { type: 'string', nullable: true },
+  } } },
+  complete: { type: 'boolean' },
+} } as const;

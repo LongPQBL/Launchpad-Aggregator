@@ -1,4 +1,4 @@
-import { poolHref, type PoolCandlePage, type PoolSummary, type PoolTradePage } from '@/api/client';
+import { poolHref, type PoolCandlePage, type PoolHistory, type PoolSummary, type PoolTradePage } from '@/api/client';
 import { chainExplorerBase, chainIcon, chainName } from '@/api/chains';
 import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { CopyableTokenAddress } from '@/features/launch/copyable-token-address';
 import { PoolChart } from './pool-chart';
+import { PoolHistoryChart } from './pool-history-chart';
 import { PoolLogo } from './pool-logo';
 import { PoolStats } from './pool-stats';
 import { PoolLinks } from './pool-links';
@@ -13,7 +14,7 @@ import { PoolTransactionList } from './pool-transaction-list';
 import { SwapTrigger } from './swap-trigger';
 import { short as symbol } from './pool-format';
 
-export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null }) {
+export function PoolDetail({ pool, trades, candles, history = null }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null }) {
   const displayedIsCurrency0 = pool.displayedToken === pool.currency0;
   const other = displayedIsCurrency0 ? pool.currency1 : pool.currency0;
   const otherSymbol = displayedIsCurrency0 ? pool.currency1Symbol : pool.currency0Symbol;
@@ -67,6 +68,7 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
       <div className="flex flex-col gap-4">
         {candles && <PoolChart pool={pool} candles={candles} coverageStatus={pool.coverageStatus} quoteSymbol={quote} tokenSymbol={displayedSymbol} />}
+        {history && <PoolHistoryChart items={history.items} complete={history.complete} />}
         <section aria-labelledby="pool-transactions-heading" className="space-y-3">
           <h2 id="pool-transactions-heading" className="text-2xl font-semibold">Transactions</h2>
           {trades ? <>

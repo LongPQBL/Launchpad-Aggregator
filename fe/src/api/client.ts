@@ -229,3 +229,10 @@ export interface GlobalTransactionPage { items: readonly GlobalTransaction[]; ne
 export async function getAllTransactions(query: { cursor?: string; limit?: number; chainId?: number } = {}): Promise<GlobalTransactionPage> {
   return request<GlobalTransactionPage>('/v1/transactions', { cursor: query.cursor, limit: query.limit, chainId: query.chainId });
 }
+
+type PoolHistoryBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/history']['get']['responses'][200]['content']['application/json'];
+export type PoolDayHistory = Required<NonNullable<PoolHistoryBody['items']>[number]>;
+export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean }
+export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, days = 30): Promise<PoolHistory> {
+  return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { days });
+}

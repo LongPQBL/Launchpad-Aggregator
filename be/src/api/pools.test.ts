@@ -56,4 +56,17 @@ describe('pool API', () => {
     expect((await app.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v4/${id}/candles?intervalSeconds=7` })).statusCode).toBe(400);
     await app.close();
   });
+  it('serves daily pool history and validates the window', async () => {
+    const { pools, data } = setup();
+    const history = { items: [{ day: 86_400, tradeCount: 1, volumeUsd: '6', tvlUsd: null }], complete: true };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools: { ...pools, listPoolHistory: async () => history } });
+    const url = `/v1/pools/4663/uniswap_v4/${id}/history`;
+    const ok = await app.inject({ method: 'GET', url: `${url}?days=7` });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual(history);
+    expect((await app.inject({ method: 'GET', url: `${url}?days=0` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${url}?days=91` })).statusCode).toBe(400);
+    const without = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });
+    expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
+  });
 });

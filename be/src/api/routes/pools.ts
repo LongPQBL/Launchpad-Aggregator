@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
+import { MAX_HISTORY_DAYS } from '../../pools/history.js';
 import type { PoolKey } from '../../pools/stats.js';
-import { pageSchema, poolCandle, poolPage, poolSummary, poolTrade } from '../schemas.js';
+import { pageSchema, poolCandle, poolHistory, poolPage, poolSummary, poolTrade } from '../schemas.js';
 import type { ApiDeps } from '../server.js';
 
 const poolIdPattern = /^0x[0-9a-fA-F]{64}$/;
@@ -82,6 +83,16 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
       try { return await deps.pools.listPoolTrades(identity, displayedToken,
         { limit: Math.min(limit, 100), ...(request.query.cursor ? { cursor: request.query.cursor } : {}) }); }
       catch (error) { if (error instanceof Error && error.message === 'Invalid pool trade cursor') return reply.code(400).send({ error: 'Invalid cursor' }); throw error; }
+    });
+  app.get<{ Params: Params; Querystring: Query }>('/v1/pools/:chainId/:protocol/:poolId/history',
+    { schema: { response: { 200: poolHistory } } }, async (request, reply) => {
+      const identity = key(request.params);
+      if (!identity) return reply.code(404).send({ error: 'Pool not found' });
+      const days = request.query.days === undefined ? 30 : Number(request.query.days);
+      if (!Number.isSafeInteger(days) || days < 1 || days > MAX_HISTORY_DAYS) return reply.code(400).send({ error: 'Invalid history window' });
+      if (!deps.pools?.listPoolHistory) return unavailable(reply);
+      try { return await deps.pools.listPoolHistory(identity, days); }
+      catch (error) { if (error instanceof Error && error.message === 'Pool not found') return reply.code(404).send({ error: 'Pool not found' }); throw error; }
     });
   app.get<{ Params: Params; Querystring: Query }>('/v1/pools/:chainId/:protocol/:poolId/candles',
     { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: poolCandle }, complete: { type: 'boolean' } } } } } },
