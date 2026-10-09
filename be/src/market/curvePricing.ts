@@ -27,6 +27,35 @@ const DEFAULT_TABLES: CurvePricingTables = {
   rawCurveBuybackTable: 'envio."RawCurveBuyback"',
 };
 
+// A launch whose replay keeps failing (e.g. its Envio raw row is missing) must not occupy a batch
+// slot every tick: with `limit` of them the worker would never reach any other launch. Back off
+// per launch, process-locally (a restart simply retries everything once), doubling up to an hour.
+const FAILURE_BACKOFF_BASE_MS = 60_000;
+const FAILURE_BACKOFF_MAX_MS = 60 * 60_000;
+const failures = new Map<string, { count: number; retryAt: number }>();
+
+export function __resetCurvePricingBackoffForTests(): void {
+  failures.clear();
+}
+
+function launchKeyOf(chainId: number, tokenAddress: string): string {
+  return `${chainId}:${tokenAddress}`;
+}
+
+function recordFailure(key: string, nowMs: number): void {
+  const count = (failures.get(key)?.count ?? 0) + 1;
+  failures.set(key, { count, retryAt: nowMs + Math.min(FAILURE_BACKOFF_MAX_MS, FAILURE_BACKOFF_BASE_MS * 2 ** (count - 1)) });
+}
+
+function backedOffKeys(nowMs: number): string[] {
+  const keys: string[] = [];
+  for (const [key, state] of failures) {
+    if (state.retryAt > nowMs) keys.push(key);
+    else if (state.retryAt + FAILURE_BACKOFF_MAX_MS < nowMs) failures.delete(key);
+  }
+  return keys;
+}
+
 interface DueLaunch {
   chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number;
 }
@@ -39,7 +68,7 @@ interface DueTrade {
 // Finds launches with a priced-behind (or never-started) curve, not just never-started: a launch
 // already caught up has no row returned here (its checkpoint's (block, logIndex) is >= its latest
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
-async function findDueLaunches(pool: Pool, limit: number): Promise<DueLaunch[]> {
+async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
   const result = await pool.query(`
     SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals
     FROM launches l
@@ -49,7 +78,8 @@ async function findDueLaunches(pool: Pool, limit: number): Promise<DueLaunch[]> 
     LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
     WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
       AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
-    LIMIT $1`, [limit]);
+      AND (l.chain_id::text || ':' || l.token_address) <> ALL($2::text[])
+    LIMIT $1`, [limit, excludedKeys]);
   return result.rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),
     tokenDecimals: Number(row.token_decimals), quoteAssetDecimals: Number(row.quote_asset_decimals),
@@ -108,9 +138,10 @@ function priceFromReserves(reserves: CurveReserves, tokenDecimals: number, quote
 // checkpoint doesn't exist yet, because every V2 curve starts with the full supply and 0 quote
 // (verified live against an active and a graduated launch; see the 2026-10-06 plan).
 export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client: UsdPriceClient, limit: number,
-  now: Date, tables: CurvePricingTables = DEFAULT_TABLES): Promise<{ processed: number; pricedTrades: number }> {
-  const due = await findDueLaunches(pool, limit);
+  now: Date, tables: CurvePricingTables = DEFAULT_TABLES): Promise<{ processed: number; pricedTrades: number; failed: number }> {
+  const due = await findDueLaunches(pool, limit, backedOffKeys(now.getTime()));
   let pricedTrades = 0;
+  let failed = 0;
   for (const launch of due) {
     try {
       const checkpoint = await readCheckpoint(pool, launch.chainId, launch.tokenAddress);
@@ -121,7 +152,7 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
         reserves = checkpoint.reserves; afterBlock = checkpoint.lastBlockNumber; afterLogIndex = checkpoint.lastLogIndex;
       } else {
         const totalSupply = await readTotalSupply(client, launch.tokenAddress as `0x${string}`);
-        if (totalSupply === null) continue;
+        if (totalSupply === null) throw new Error('totalSupply() unavailable');
         reserves = { quote: 0n, token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
       }
       const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex);
@@ -165,11 +196,14 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
         dbClient.release();
       }
       pricedTrades += updates.length;
-    } catch {
+      failures.delete(launchKeyOf(launch.chainId, launch.tokenAddress));
+    } catch (error) {
       // One launch's bad data (or a transient RPC failure for its first totalSupply read) must not
-      // block the rest of the batch; it is simply retried next tick.
-      continue;
+      // block the rest of the batch: back it off and retry later.
+      failed += 1;
+      recordFailure(launchKeyOf(launch.chainId, launch.tokenAddress), now.getTime());
+      console.error(`Curve pricing failed for ${launch.chainId}:${launch.tokenAddress}:`, error instanceof Error ? error.message : error);
     }
   }
-  return { processed: due.length, pricedTrades };
+  return { processed: due.length, pricedTrades, failed };
 }

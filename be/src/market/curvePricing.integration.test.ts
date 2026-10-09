@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { applyCurvePricingOnce } from './curvePricing.js';
+import { __resetCurvePricingBackoffForTests, applyCurvePricingOnce } from './curvePricing.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -55,6 +55,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  __resetCurvePricingBackoffForTests();
   await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await envioPool.query(`DELETE FROM ${tables.rawCurveTradeTable} WHERE "chainId" = $1`, [chainId]);
@@ -112,5 +113,23 @@ describe('applyCurvePricingOnce', () => {
     const row = (await pool.query(
       `SELECT price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND tx_hash = $2`, [chainId, hash('6')])).rows[0];
     expect(row).toEqual({ price_numerator_raw: '55', price_denominator_raw: '960' });
+  });
+
+  it('backs off a launch whose replay fails so it stops occupying a batch slot, then retries it later', async () => {
+    // A priced-behind trade with no matching Envio raw row cannot be replayed.
+    await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
+      side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
+      VALUES ($1,$2,$3,400,$4,$5,1,1700000000,'buy','90','100',$6,'CurveBuy','user_trade',$2)`,
+    [chainId, token, venueId, hash('a'), hash('7'), quote]);
+    const start = new Date();
+
+    const first = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, start, tables);
+    expect(first).toMatchObject({ processed: 1, pricedTrades: 0, failed: 1 });
+
+    const during = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(start.getTime() + 1_000), tables);
+    expect(during.processed).toBe(0);
+
+    const after = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(start.getTime() + 61_000), tables);
+    expect(after.processed).toBe(1);
   });
 });
