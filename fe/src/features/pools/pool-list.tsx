@@ -172,8 +172,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       </CardContent>
     </Card></section>}
     {(error || !page) && <p role="alert">Could not load pools.</p>}
-    {!tokenAddress && page && <div><h1 className="text-2xl font-semibold">Pools</h1>
-      <p className="text-sm text-muted-foreground">Verified indexed Uniswap pools on Robinhood Chain. Supported sources: {page.supportedProtocols.map((p) => p.replace('uniswap_', '')).join(', ')}.</p></div>}
+    {!tokenAddress && page && <h1 className="text-2xl font-semibold">Pools</h1>}
     {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
