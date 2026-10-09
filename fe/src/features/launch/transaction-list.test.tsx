@@ -25,6 +25,26 @@ const noVenues: readonly OfficialVenue[] = [];
 const quoteAsset = { address: '0xquote', symbol: 'ROBIN' };
 
 describe('TransactionList', () => {
+  it('keeps already-loaded pages when the server refreshes the first page', async () => {
+    let intersect!: (entries: { isIntersecting: boolean }[]) => void;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: typeof intersect) { intersect = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    vi.mocked(getLaunchTransactions).mockResolvedValue({ items: [transaction({ txHash: '0xbbbbbbbb2', blockNumber: '90' })], nextCursor: null });
+    const props = { venues: noVenues, tokenSymbol: 'DELTA', quoteAsset, chainId: 4663, tokenAddress: '0xtoken' };
+    const { rerender } = render(<TransactionList {...props} transactions={[transaction()]} nextCursor="cursor-1" />);
+    await act(async () => intersect([{ isIntersecting: true }]));
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+
+    // router.refresh() delivers the same first page as a new array instance.
+    rerender(<TransactionList {...props} transactions={[transaction()]} nextCursor="cursor-1" />);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+    vi.unstubAllGlobals();
+  });
+
+
   it('shows skeleton rows while the next page loads, then replaces them with the new rows', async () => {
     let resolvePage!: (page: { items: Transaction[]; nextCursor: string | null }) => void;
     vi.mocked(getLaunchTransactions).mockReturnValue(new Promise((resolve) => { resolvePage = resolve; }) as never);

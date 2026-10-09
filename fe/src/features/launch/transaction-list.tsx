@@ -6,6 +6,7 @@ import { displaySymbol, formatActivityKind, formatAmount, formatSide } from '@/a
 import { getLaunchTransactions, type OfficialVenue, type Transaction } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
+import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 
 export interface TransactionListProps {
@@ -169,12 +170,15 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
 
-  // Reset to the server-provided page when it changes (React's "adjust state during render" pattern).
+  // Merge the server-provided first page when it changes, keeping pages the user already loaded
+  // (React's "adjust state during render" pattern).
   const [syncedSource, setSyncedSource] = useState({ transactions, initialCursor });
   if (syncedSource.transactions !== transactions || syncedSource.initialCursor !== initialCursor) {
     setSyncedSource({ transactions, initialCursor });
-    setItems(transactions);
-    setNextCursor(initialCursor ?? null);
+    const merged = mergeRefreshedPage(transactions, initialCursor ?? null, items, nextCursor,
+      (row) => `${row.blockNumber}-${row.txHash}-${row.logIndex}`);
+    setItems(merged.items);
+    setNextCursor(merged.nextCursor);
     setLoadError(false);
   }
 

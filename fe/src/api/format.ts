@@ -48,14 +48,25 @@ export function formatUsd(value: string | null, decimals: number): string {
   return `$${numeric.toFixed(dynamicDecimals(numeric, decimals))}`;
 }
 
+// For list/detail headline figures (FDV, TVL, market cap, volume): from $1,000 up, abbreviates the
+// way Uniswap does ("$1.2M") instead of printing a long digit string. Below that it is exactly
+// formatUsd. Not for amounts a user acts on (trade inputs, transaction rows) — those stay exact.
+export function formatUsdCompact(value: string | null, decimals: number): string {
+  if (value === null) return '—';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || Math.abs(numeric) < 1_000) return formatUsd(value, decimals);
+  return `$${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: decimals }).format(numeric)}`;
+}
+
 export type PercentDirection = 'up' | 'down' | 'flat';
 
 // text is unsigned — the caller renders a ▲/▼ for direction (see PercentChange in launch-list.tsx)
 // instead of a +/- sign, matching the reference UI, so direction is reported separately.
 export function formatPercent(value: string | null): { text: string; className: string; direction: PercentDirection } {
   if (value === null) return { text: '—', className: 'text-muted-foreground', direction: 'flat' };
-  const numeric = Number(value);
-  const rounded = Math.abs(numeric).toFixed(2);
+  // Direction follows the rounded figure: -0.001 displays as 0.00%, so it must not render as a red down arrow.
+  const rounded = Math.abs(Number(value)).toFixed(2);
+  const numeric = Number(rounded) === 0 ? 0 : Number(value);
   if (numeric > 0) return { text: `${rounded}%`, className: 'text-emerald-600', direction: 'up' };
   if (numeric < 0) return { text: `${rounded}%`, className: 'text-red-600', direction: 'down' };
   return { text: `${rounded}%`, className: 'text-muted-foreground', direction: 'flat' };

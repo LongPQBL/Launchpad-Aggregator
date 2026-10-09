@@ -225,7 +225,7 @@ describe('LaunchList', () => {
     expect(within(table).getByRole('columnheader', { name: '1H' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: '1D' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Age' })).toBeInTheDocument();
-    expect(within(table).getByText('$1000.0')).toBeInTheDocument();
+    expect(within(table).getByText('$1K')).toBeInTheDocument();
     expect(within(table).getAllByText((_, el) => el?.textContent === '▲12.50%').length).toBeGreaterThan(0);
     expect(within(table).getAllByText((_, el) => el?.textContent === '▼5.00%').length).toBeGreaterThan(0);
     expect(within(table).getByText('2d')).toBeInTheDocument();
@@ -448,7 +448,7 @@ describe('LaunchList', () => {
       />,
     );
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByText(/~\$1234\.6/)).toBeInTheDocument();
+    expect(within(table).getByText(/~\$1\.2K/)).toBeInTheDocument();
   });
 
   it('explains that the volume ranking is updating on 503, and points to the recent tab instead of a generic error', () => {

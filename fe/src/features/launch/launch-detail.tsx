@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatUsd, formatUsdCompact, formatVenueKind, tvlTooltip } from '@/api/format';
 import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
@@ -164,10 +164,10 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             <section aria-label="Stats">
           <h2 className="text-2xl font-semibold">Stats</h2>
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
-            <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsd(detail.tvlUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsd(detail.marketCapUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsd(detail.fdvUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsd(detail.officialVolume24hUsd, 1)}</dd></div>
+            <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.tvlUsd, 1)}</dd></div>
+            <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.marketCapUsd, 1)}</dd></div>
+            <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.fdvUsd, 1)}</dd></div>
+            <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.officialVolume24hUsd, 1)}</dd></div>
             <div><dt className="text-sm text-muted-foreground">52W High</dt><dd className="mt-0.5 text-lg font-semibold">{formatPrice(detail.week52High, detail.quoteAsset.symbol)}</dd></div>
             <div><dt className="text-sm text-muted-foreground">52W Low</dt><dd className="mt-0.5 text-lg font-semibold">{formatPrice(detail.week52Low, detail.quoteAsset.symbol)}</dd></div>
               </dl>

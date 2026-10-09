@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PercentChange } from '@/components/percent-change';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
+import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 import { formatPoolUsd, poolAge, short } from './pool-format';
 
@@ -100,12 +101,15 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     });
   }, [items, sortBy, sortDirection]);
 
-  // Reset to the server-provided page when it changes (React's "adjust state during render" pattern).
+  // Merge the server-provided first page when it changes, keeping pages the user already loaded
+  // (React's "adjust state during render" pattern).
   const [syncedPage, setSyncedPage] = useState(page);
   if (syncedPage !== page) {
     setSyncedPage(page);
-    setItems(page?.items ?? []);
-    setNextCursor(page?.nextCursor ?? null);
+    const merged = mergeRefreshedPage(page?.items ?? [], page?.nextCursor ?? null, items, nextCursor,
+      (pool) => `${pool.chainId}:${pool.protocol}:${pool.poolId}`);
+    setItems(merged.items);
+    setNextCursor(merged.nextCursor);
     setLoadError(false);
   }
 

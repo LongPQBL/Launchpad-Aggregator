@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { chainIcon, chainName } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsd, tvlTooltip } from '@/api/format';
+import { formatLifecycleStatus, formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -511,17 +511,17 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[12%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">FDV</span>
-                  <span>{formatUsd(launch.fdvUsd, 1)}</span>
+                  <span>{formatUsdCompact(launch.fdvUsd, 1)}</span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[15%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">24H volume</span>
                   <span title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
-                    {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                    {launch.officialVolume24hUsd !== null ? `~${formatUsdCompact(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
                   </span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[12%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>
-                  <span title={tvlTooltip(launch)}>{formatUsd(launch.tvlUsd, 1)}</span>
+                  <span title={tvlTooltip(launch)}>{formatUsdCompact(launch.tvlUsd, 1)}</span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[8%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">1H</span>

@@ -283,7 +283,7 @@ describe('LaunchDetail', () => {
     expect(terms.map((term) => term.textContent)).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
     expect(terms[0]).toHaveClass('text-sm');
     expect(definitions[0]).toHaveClass('text-lg', 'font-semibold');
-    expect(definitions.map((definition) => definition.textContent)).toEqual(['$1200.5', '$269.2', '$269.2', '$10.4', '0.0800 ROBIN', '0.00100 ROBIN']);
+    expect(definitions.map((definition) => definition.textContent)).toEqual(['$1.2K', '$269.2', '$269.2', '$10.4', '0.0800 ROBIN', '0.00100 ROBIN']);
     const statLabels = terms.map((el) => el.textContent);
     expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
   });

@@ -9,6 +9,7 @@ import {
   formatQuote,
   formatSide,
   formatUsd,
+  formatUsdCompact,
   formatVenueKind,
   toChartValue,
 } from './format';
@@ -32,7 +33,20 @@ describe('formatUsd', () => {
   });
 });
 
+describe('formatUsdCompact', () => {
+  it('abbreviates from $1,000 up and leaves smaller values exactly as formatUsd does', () => {
+    expect(formatUsdCompact('1234567.8', 1)).toBe('$1.2M');
+    expect(formatUsdCompact('45200', 1)).toBe('$45.2K');
+    expect(formatUsdCompact('269.17', 1)).toBe('$269.2');
+    expect(formatUsdCompact(null, 1)).toBe('—');
+  });
+});
+
 describe('formatPercent', () => {
+  it('does not mark a change that rounds to 0.00 as a down or up move', () => {
+    expect(formatPercent('-0.001')).toEqual({ text: '0.00%', className: 'text-muted-foreground', direction: 'flat' });
+  });
+
   it('shows "—" instead of a fabricated value when null', () => {
     expect(formatPercent(null)).toEqual({ text: '—', className: 'text-muted-foreground', direction: 'flat' });
   });

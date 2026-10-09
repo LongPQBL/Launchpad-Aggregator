@@ -1,6 +1,6 @@
 import type { Address } from 'viem';
 import type { PoolSummary } from '@/api/client';
-import { formatUsd } from '@/api/format';
+import { formatUsdCompact } from '@/api/format';
 import { PercentChange } from '@/components/percent-change';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { formatPoolUsd, isYoungerThan24h, poolAge } from './pool-format';
@@ -48,7 +48,7 @@ export function PoolStats({ protocol, poolAddress, fee, tvlUsd, fdvUsd, volume24
           </div>
         </div>
         <div><dt className="text-sm text-muted-foreground">TVL</dt><dd className="text-lg font-semibold">{formatPoolUsd(tvlUsd)}{tvlChange !== null && <span data-testid="tvl-change" className="ml-2 text-sm font-normal"><PercentChange value={tvlChange} /></span>}</dd></div>
-        <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="text-lg font-semibold">{formatUsd(fdvUsd, 1)}</dd></div>
+        <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="text-lg font-semibold">{formatUsdCompact(fdvUsd, 1)}</dd></div>
         <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="text-lg font-semibold">{formatPoolUsd(volume24hUsd)}{volume24hChange !== null
             ? <span data-testid="volume-24h-change" className="ml-2 text-sm font-normal"><PercentChange value={volume24hChange} /></span>
             : volume24hUsd !== null && isYoungerThan24h(createdTimestamp)
