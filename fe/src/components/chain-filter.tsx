@@ -70,7 +70,6 @@ export function ChainFilter({ chainIds, selected, onChange, open, onToggle }: { 
               {selected.includes(id) && <SelectedCheck />}
             </button>
           ))}
-          <p className="mt-1 border-t border-border px-2 pt-2 text-xs text-muted-foreground">Planned chains may not have launch data yet</p>
         </div>
       </details>
     </nav>
