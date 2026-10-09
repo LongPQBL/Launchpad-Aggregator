@@ -492,8 +492,11 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const launchRow = (await pool.query('SELECT token_decimals FROM launches WHERE chain_id = $1 AND token_address = $2',
         [chainId, token])).rows[0] as Row | undefined;
       const tokenDecimals = launchRow ? nullableNumber(launchRow.token_decimals) : null;
+      // Each branch applies the cursor and its own ORDER BY ... LIMIT before the UNION, so a branch
+      // only ever produces one page's worth of rows. Sorting the whole union first made the heaviest
+      // token (~129k trades) take 0.5-4.4s per page; measured with this shape it takes ~10ms.
       const result = await pool.query(`
-        WITH merged AS (
+        WITH official_page AS (
           SELECT 'official' AS source, t.venue_id, NULL::text AS protocol, NULL::text AS pool_id,
             NULL::text AS currency0, NULL::text AS currency1,
             t.tx_hash, t.log_index, t.block_number, t.timestamp, t.side, t.activity_kind,
@@ -503,12 +506,14 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           JOIN venues v ON v.id = t.venue_id
           JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
           WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-
-          UNION ALL
-
-          -- pt.chain_id = $1 is required (not implied by the pool_catalog join alone): without it,
-          -- a token at the same address on another chain could pull that chain's pool swaps into
-          -- this launch's feed (final-review Important 1).
+            AND ($3::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($3::bigint, $4::text, $5::integer))
+          ORDER BY t.block_number DESC, t.tx_hash DESC, t.log_index DESC
+          LIMIT $6
+        ),
+        -- pt.chain_id = $1 is required (not implied by the pool_catalog join alone): without it,
+        -- a token at the same address on another chain could pull that chain's pool swaps into
+        -- this launch's feed (final-review Important 1).
+        pool_page AS (
           SELECT 'pool' AS source, NULL::text AS venue_id, pt.protocol, pt.pool_id,
             pc.currency0, pc.currency1,
             pt.tx_hash, pt.log_index, pt.block_number, pt.timestamp, NULL::text AS side, NULL::text AS activity_kind,
@@ -521,9 +526,11 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
               AND m.pool_id = pc.pool_id AND m.token_address = $2)
             AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
               AND ov.kind IN ('v4_pool','v3_pool') AND ov.ref = pc.pool_id AND ov.official = true)
+            AND ($3::bigint IS NULL OR (pt.block_number, pt.tx_hash, pt.log_index) < ($3::bigint, $4::text, $5::integer))
+          ORDER BY pt.block_number DESC, pt.tx_hash DESC, pt.log_index DESC
+          LIMIT $6
         )
-        SELECT * FROM merged
-        WHERE ($3::bigint IS NULL OR (block_number, tx_hash, log_index) < ($3::bigint, $4::text, $5::integer))
+        SELECT * FROM (SELECT * FROM official_page UNION ALL SELECT * FROM pool_page) merged
         ORDER BY block_number DESC, tx_hash DESC, log_index DESC
         LIMIT $6`,
       [chainId, token, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
