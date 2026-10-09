@@ -16,17 +16,18 @@ export interface PoolLogoProps {
 
 // token0 renders in front (caller passes whichever side is currently "displayed" first, so
 // flipping the pair swaps which logo sits on top), token1 behind and offset right — two full
-// circles stacked like a coin pile (Uniswap's pair-icon convention), not a split circle. The ring
-// around token0 is page-background colored so its edge reads cleanly against token1 behind it.
+// circles stacked like a coin pile (Uniswap's pair-icon convention), not a split circle. There is no
+// outline ring (in the dark theme it read as a black border); each circle sits on an opaque background so a
+// translucent placeholder letter does not show the other logo through it.
 export function PoolLogo({ token0, token1, chainId, size = 'default' }: PoolLogoProps) {
   const small = size === 'small';
   const circle = small ? 'h-10 w-10' : 'h-12 w-12';
   return (
     <span className={`relative inline-flex shrink-0 ${small ? 'h-10 w-[60px]' : 'h-12 w-[72px]'}`}>
-      <span className={`absolute ${small ? 'left-5' : 'left-6'} top-0 ${circle} overflow-hidden rounded-full`}>
+      <span className={`absolute ${small ? 'left-5' : 'left-6'} top-0 ${circle} overflow-hidden rounded-full bg-card`}>
         <TokenImage logoUri={token1.logoUri} symbol={token1.symbol} className={circle} />
       </span>
-      <span className={`absolute left-0 top-0 ${circle} overflow-hidden rounded-full ring-2 ring-card`}>
+      <span className={`absolute left-0 top-0 ${circle} overflow-hidden rounded-full bg-card`}>
         <TokenImage logoUri={token0.logoUri} symbol={token0.symbol} className={circle} />
       </span>
       {chainId === 4663 && (
