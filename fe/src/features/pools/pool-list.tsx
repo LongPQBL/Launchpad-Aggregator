@@ -1,10 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { chainName } from '@/api/chains';
-import { formatPercent } from '@/api/format';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { PercentChange } from '@/components/percent-change';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
@@ -178,7 +176,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     {!tokenAddress && page && <div><h1 className="text-2xl font-semibold">Pools</h1>
       <p className="text-sm text-muted-foreground">Verified indexed Uniswap pools on Robinhood Chain. Supported sources: {page.supportedProtocols.map((p) => p.replace('uniswap_', '')).join(', ')}.</p></div>}
     {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
-    {page && tokenAddress ? <div role="table" aria-label="Pools for this token" className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
+    {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
         <div role="row" className="md:table-row md:h-10 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
           <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[5%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
@@ -202,7 +200,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
         {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
           <div role="cell" className="pointer-events-none text-foreground md:table-cell md:p-4 md:align-middle">
-            <a href={poolHref(pool, tokenAddress)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
+            <a href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
             {index + 1}
           </div>
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:align-middle">
@@ -220,36 +218,9 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
         </div>)}
         {loadingMore && <PoolRowsSkeleton count={6} />}
       </div>
-    </div> : page && <div className="grid gap-3 md:grid-cols-2">{items.map((pool) => <Card key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`}>
-      <CardHeader className={cn('flex-row items-center gap-3', tokenAddress && 'w-52 shrink-0')}>
-        <PoolLogo
-          token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)}
-          token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)}
-          chainId={pool.chainId}
-        />
-        <div>
-          <a className="text-sm font-semibold" href={poolHref(pool, tokenAddress ?? pool.displayedToken)}>{pairLabel(pool, displayedToken)}</a>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge variant="secondary">{`${pool.protocol.replace('uniswap_', '')} · ${pool.fee / 10_000}%`}</Badge>
-            <span className="text-xs text-muted-foreground">{chainName(pool.chainId)}</span>
-            {pool.ponsDesignated && <span className="text-xs">Pons designated pool</span>}
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="grid grid-cols-2 gap-2">
-        <p><span className="text-xs text-muted-foreground">24h volume</span><br /><span className="text-sm font-medium">{formatPoolUsd(pool.volume24hUsd)}</span></p>
-        <p><span className="text-xs text-muted-foreground">Liquidity</span><br /><span className="text-sm font-medium">{formatPoolUsd(pool.tvlUsd)}</span></p>
-        <p><span className="text-xs text-muted-foreground">Price</span><br /><span className="text-sm font-medium">{formatPoolUsd(pool.priceUsd)}</span></p>
-        <p><span className="text-xs text-muted-foreground">FDV</span><br /><span className="text-sm font-medium">{formatPoolUsd(pool.fdvUsd)}</span></p>
-        <p><span className="text-xs text-muted-foreground">1h</span><br /><span className={cn('text-sm font-medium', formatPercent(pool.change1h).className)}>{formatPercent(pool.change1h).text}</span></p>
-        <p><span className="text-xs text-muted-foreground">1d</span><br /><span className={cn('text-sm font-medium', formatPercent(pool.change1d).className)}>{formatPercent(pool.change1d).text}</span></p>
-        {pool.coverageStatus !== 'backfilling' && <p><span className="text-xs text-muted-foreground">Coverage</span><br /><span className="text-sm">{pool.coverageStatus.replace('_', ' ')}</span></p>}
-        <p><span className="text-xs text-muted-foreground">Age</span><br /><span className="text-sm">{poolAge(pool.createdTimestamp)}</span></p>
-        <p><span className="text-xs text-muted-foreground">Last trade</span><br /><span className="text-sm">{pool.lastTradeTimestamp === null ? '—' : new Date(pool.lastTradeTimestamp * 1000).toLocaleString('en-US')}</span></p>
-      </CardContent></Card>)}</div>
-    }
+    </div> : null}
     {nextCursor && <div ref={sentinelRef} aria-hidden="true" className="h-px" />}
-    {loadingMore && <p role="status" className={tokenAddress ? 'sr-only' : 'text-center text-sm text-muted-foreground'}>Loading more pools…</p>}
+    {loadingMore && <p role="status" className="sr-only">Loading more pools…</p>}
     {loadError && <div className="text-center text-sm"><span role="alert">Could not load more pools. </span><button type="button" onClick={() => void loadMore()}>Retry</button></div>}
   </section>;
 }

@@ -126,8 +126,9 @@ describe('Pools UI', () => {
     const resolved: PoolSummary = { ...pool, currency0Symbol: 'GUY', currency0LogoUri: 'https://example.com/guy.png',
       currency1Symbol: 'ETH', currency1LogoUri: 'https://example.com/eth.png' };
     render(<PoolList page={{ items: [resolved], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
-    expect(screen.getByRole('link', { name: 'GUY / ETH' })).toBeInTheDocument();
-    expect(screen.getByText('v4 · 0.3%')).toBeInTheDocument();
+    // The global list uses the same table as a token's Pools tab (each row is one link covering the row).
+    expect(screen.getByRole('link', { name: 'View pool GUY / ETH' })).toBeInTheDocument();
+    expect(screen.getByText(/v4 · 0\.3%/)).toBeInTheDocument();
     expect(screen.getAllByRole('img', { name: /token logo/i })).toHaveLength(2);
   });
   it('prefers the embedding launch\'s own known symbol/logo for its side even when the API metadata is null', () => {
