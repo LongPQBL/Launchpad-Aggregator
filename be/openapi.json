@@ -1549,6 +1549,99 @@
         }
       }
     },
+    "/v1/search": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tokens": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          },
+                          "tokenAddress": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "logoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "platform": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "pools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "chainId": {
+                            "type": "integer"
+                          },
+                          "protocol": {
+                            "type": "string"
+                          },
+                          "poolId": {
+                            "type": "string"
+                          },
+                          "fee": {
+                            "type": "integer"
+                          },
+                          "currency0": {
+                            "type": "string"
+                          },
+                          "currency1": {
+                            "type": "string"
+                          },
+                          "launchToken": {
+                            "type": "object",
+                            "properties": {
+                              "address": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "symbol": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "logoUri": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/events": {
       "get": {
         "responses": {

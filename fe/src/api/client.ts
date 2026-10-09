@@ -50,21 +50,24 @@ function apiBaseUrl(): string {
 }
 const REQUEST_TIMEOUT_MS = 8_000;
 
-async function rawFetch(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>): Promise<Response> {
+async function rawFetch(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>,
+  signal?: AbortSignal): Promise<Response> {
   const url = new URL(path, apiBaseUrl());
   for (const [key, value] of Object.entries(searchParams ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value));
   }
 
   try {
-    return await fetch(url, { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS), cache: 'no-store' });
+    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    return await fetch(url, { signal: signal ? AbortSignal.any([timeout, signal]) : timeout, cache: 'no-store' });
   } catch (cause) {
     throw new ApiError(`Failed to call ${path}`, cause);
   }
 }
 
-async function request<T>(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>): Promise<T> {
-  const response = await rawFetch(path, searchParams);
+async function request<T>(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>,
+  signal?: AbortSignal): Promise<T> {
+  const response = await rawFetch(path, searchParams, signal);
   if (!response.ok) {
     throw new ApiError(`${path} returned error ${response.status}`, undefined, response.status);
   }
@@ -204,4 +207,15 @@ export async function getPoolTrades(pool: PoolSummary, cursor?: string): Promise
 export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>, intervalSeconds = 3600): Promise<PoolCandlePage> {
   return request<PoolCandlePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/candles`,
     { displayedToken: pool.displayedToken, intervalSeconds });
+}
+
+// Mirrors be/src/api/searchStore.ts. Lightweight identity-only hits: no market stats, so a dropdown can render fast.
+export interface SearchTokenHit { chainId: number; tokenAddress: string; name: string | null; symbol: string | null; logoUri: string | null; platform: string }
+export interface SearchPoolHit {
+  chainId: number; protocol: string; poolId: string; fee: number; currency0: string; currency1: string;
+  launchToken: { address: string; name: string | null; symbol: string | null; logoUri: string | null };
+}
+export interface SearchResults { tokens: readonly SearchTokenHit[]; pools: readonly SearchPoolHit[] }
+export async function searchAll(query: string, signal?: AbortSignal): Promise<SearchResults> {
+  return request<SearchResults>('/v1/search', { q: query }, signal);
 }

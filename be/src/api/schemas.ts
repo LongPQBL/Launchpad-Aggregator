@@ -137,3 +137,18 @@ export const poolCandle = { type: 'object', properties: {
   open: { type: 'string' }, high: { type: 'string' }, low: { type: 'string' }, close: { type: 'string' },
   tradeCount: { type: 'integer' },
 } } as const;
+
+export const searchResults = { type: 'object', properties: {
+  tokens: { type: 'array', items: { type: 'object', properties: {
+    chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string', nullable: true },
+    symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true }, platform: { type: 'string' },
+  } } },
+  pools: { type: 'array', items: { type: 'object', properties: {
+    chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' }, fee: { type: 'integer' },
+    currency0: { type: 'string' }, currency1: { type: 'string' },
+    launchToken: { type: 'object', properties: {
+      address: { type: 'string' }, name: { type: 'string', nullable: true },
+      symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true },
+    } },
+  } } },
+} } as const;

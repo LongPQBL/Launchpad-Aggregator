@@ -785,6 +785,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            tokens?: {
+                                chainId?: number;
+                                tokenAddress?: string;
+                                name?: string | null;
+                                symbol?: string | null;
+                                logoUri?: string | null;
+                                platform?: string;
+                            }[];
+                            pools?: {
+                                chainId?: number;
+                                protocol?: string;
+                                poolId?: string;
+                                fee?: number;
+                                currency0?: string;
+                                currency1?: string;
+                                launchToken?: {
+                                    address?: string;
+                                    name?: string | null;
+                                    symbol?: string | null;
+                                    logoUri?: string | null;
+                                };
+                            }[];
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
