@@ -25,6 +25,9 @@ const CHAIN_ICONS: Record<number, string> = {
   56: '/images/chains/bnb-smart-chain.png',
 };
 
+// Every chain offered in the chain filters, indexed or not yet (a filter on a not-yet-indexed chain simply shows nothing).
+export const ROADMAP_CHAIN_IDS = [4663, 8453, 42161, 5042, 4326, 143, 1155, 988, 4200, 56] as const;
+
 export function chainName(chainId: number): string {
   return CHAIN_NAMES[chainId] ?? `Chain ${chainId}`;
 }

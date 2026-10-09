@@ -90,6 +90,12 @@ describe('GlobalTransactionList', () => {
     expect(window.location.search).toContain('chainId=4663');
   });
 
+  it('offers every chain it is given as an option, like the launches page filter', () => {
+    render(<GlobalTransactionList transactions={[row()]} nextCursor={null} chainIds={[4663, 8453, 42161]} />);
+    fireEvent.click(screen.getByLabelText('All chains'));
+    for (const name of ['Robinhood Chain', 'Base', 'Arbitrum']) expect(screen.getByRole('button', { name: new RegExp(name) })).toBeInTheDocument();
+  });
+
   it('appends the next page with skeleton rows while it loads', async () => {
     let intersect!: (entries: { isIntersecting: boolean }[]) => void;
     vi.stubGlobal('IntersectionObserver', class {

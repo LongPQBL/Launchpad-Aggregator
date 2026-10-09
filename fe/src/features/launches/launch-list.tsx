@@ -2,7 +2,7 @@
 
 import { ChainFilter, ChevronIcon, SelectedCheck, SelectionIcons, toggleValue } from '@/components/chain-filter';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { chainIcon, chainName } from '@/api/chains';
+import { chainIcon, chainName, ROADMAP_CHAIN_IDS } from '@/api/chains';
 import { formatLifecycleStatus, formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
 import { Button } from '@/components/ui/button';
@@ -32,7 +32,6 @@ const TABS = [
   { value: 'recent', label: 'Recently launched' },
 ] as const;
 const ROADMAP_PLATFORMS = ['pons', 'full.fun', 'bow', 'noxa', 'bankr', 'pools.xyz', 'letscash.fun', 'long', 'varo'] as const;
-const ROADMAP_CHAIN_IDS = [4663, 8453, 42161, 5042, 4326, 143, 1155, 988, 4200, 56] as const;
 
 interface CurrentFilters {
   chainId?: number | readonly number[];
