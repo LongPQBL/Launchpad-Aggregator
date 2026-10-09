@@ -1,8 +1,14 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficialVenue, Transaction } from '@/api/client';
+import { getLaunchTransactions } from '@/api/client';
 import { TransactionList } from './transaction-list';
+
+vi.mock('@/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/client')>()),
+  getLaunchTransactions: vi.fn(),
+}));
 
 function transaction(overrides: Partial<Transaction> = {}): Transaction {
   return {
@@ -19,6 +25,54 @@ const noVenues: readonly OfficialVenue[] = [];
 const quoteAsset = { address: '0xquote', symbol: 'ROBIN' };
 
 describe('TransactionList', () => {
+  it('shows skeleton rows while the next page loads, then replaces them with the new rows', async () => {
+    let resolvePage!: (page: { items: Transaction[]; nextCursor: string | null }) => void;
+    vi.mocked(getLaunchTransactions).mockReturnValue(new Promise((resolve) => { resolvePage = resolve; }) as never);
+    let intersect!: (entries: { isIntersecting: boolean }[]) => void;
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(callback: typeof intersect) { intersect = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    render(<TransactionList transactions={[transaction()]} venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset}
+      chainId={4663} tokenAddress="0xtoken" nextCursor="cursor-1" />);
+    expect(screen.queryAllByTestId('transaction-skeleton-row')).toHaveLength(0);
+
+    act(() => intersect([{ isIntersecting: true }]));
+    expect(screen.getAllByTestId('transaction-skeleton-row')).toHaveLength(6);
+
+    await act(async () => resolvePage({ items: [transaction({ txHash: '0xbbbbbbbb2', logIndex: 1 })], nextCursor: null }));
+    expect(screen.queryAllByTestId('transaction-skeleton-row')).toHaveLength(0);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+    vi.unstubAllGlobals();
+  });
+
+  it('filters rows by Buy/Sell from the Type header, with both selected by default', () => {
+    render(<TransactionList transactions={[
+      transaction({ txHash: '0xaaaaaaaa1', side: 'buy' }),
+      transaction({ txHash: '0xbbbbbbbb2', side: 'sell' }),
+    ]} venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Filter by type' }));
+    expect(screen.queryByRole('button', { name: /^All/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Buy/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /^Sell/ })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: /^Buy/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(2);
+    expect(screen.getByRole('button', { name: /^Buy/ })).toHaveAttribute('aria-pressed', 'false');
+
+    // Deselecting everything is allowed and shows no rows.
+    fireEvent.click(screen.getByRole('button', { name: /^Sell/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(1);
+    expect(screen.getByText('No transactions match this filter.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Buy/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Sell/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(3);
+  });
+
   it('shows a loading state for a pending USD value, keeping the onchain amount visible', () => {
     render(<TransactionList transactions={[transaction({ usdValueStatus: 'pending' })]} venues={noVenues}
       tokenSymbol="DELTA" quoteAsset={quoteAsset} />);

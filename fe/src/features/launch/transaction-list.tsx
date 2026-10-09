@@ -1,5 +1,6 @@
 'use client';
 
+import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { displaySymbol, formatActivityKind, formatAmount, formatSide } from '@/api/format';
 import { getLaunchTransactions, type OfficialVenue, type Transaction } from '@/api/client';
@@ -16,6 +17,97 @@ export interface TransactionListProps {
   chainId?: number;
   tokenAddress?: string;
   nextCursor?: string | null;
+}
+
+type SideFilter = 'buy' | 'sell';
+const SIDE_OPTIONS: readonly { value: SideFilter; label: string }[] = [
+  { value: 'buy', label: 'Buy' },
+  { value: 'sell', label: 'Sell' },
+];
+
+function UpDownIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+      <path d="M4.5 6.5 8 3l3.5 3.5" /><path d="M4.5 9.5 8 13l3.5-3.5" />
+    </svg>
+  );
+}
+
+// Every type starts selected; clicking an option toggles it. Deselecting everything is allowed and shows nothing.
+function TypeFilter({ selected, onChange }: { selected: readonly SideFilter[]; onChange: (values: SideFilter[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [open]);
+
+  const toggle = (value: SideFilter) => {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  };
+
+  return (
+    <>
+      <button ref={buttonRef} type="button" aria-haspopup="true" aria-expanded={open} aria-label="Filter by type"
+        onClick={() => {
+          const rect = buttonRef.current?.getBoundingClientRect();
+          if (rect) setMenuPosition({ top: rect.bottom + 8, left: rect.left });
+          setOpen((v) => !v);
+        }}
+        className="inline-flex cursor-pointer items-center gap-1.5 font-medium">
+        <UpDownIcon />
+        Type
+      </button>
+      {/* Portaled with fixed positioning: the table's overflow-x-auto container would otherwise clip the menu when the table is short (e.g. nothing selected). */}
+      {open && menuPosition && createPortal(
+        <div ref={menuRef} role="menu" aria-label="Type filter" style={{ top: menuPosition.top, left: menuPosition.left }} className="fixed z-50 w-40 rounded-lg border border-border bg-card p-1 text-foreground shadow-md">
+          {SIDE_OPTIONS.map(({ value, label }) => (
+            <button key={value} type="button" onClick={() => toggle(value)} aria-pressed={selected.includes(value)}
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm font-normal hover:bg-muted">
+              {label} {selected.includes(value) && <SelectedCheck />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function SelectedCheck() {
+  return (
+    <span data-selected-check className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ccff00]/20 text-[#ccff00]">
+      <svg aria-hidden viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3.5 8.5 3 3 6-7" /></svg>
+    </span>
+  );
+}
+
+// Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
+const SKELETON_CELL_WIDTHS = ['w-10', 'w-14', 'w-16', 'w-24', 'w-12', 'w-20', 'w-20'] as const;
+
+function TransactionRowsSkeleton({ count }: { count: number }) {
+  return Array.from({ length: count }, (_, index) => (
+    <TableRow key={index} aria-hidden="true" data-testid="transaction-skeleton-row" className="h-[52px] border-0 hover:bg-transparent">
+      {SKELETON_CELL_WIDTHS.map((width, cell) => (
+        <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell > 1 && 'text-right')}>
+          <span className={cn('block h-4 animate-pulse rounded bg-muted', cell > 1 && 'ml-auto', width)} />
+        </TableCell>
+      ))}
+    </TableRow>
+  ));
 }
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
@@ -73,6 +165,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
   const [nextCursor, setNextCursor] = useState<string | null>(initialCursor ?? null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  const [sideFilter, setSideFilter] = useState<SideFilter[]>(['buy', 'sell']);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
 
@@ -112,22 +205,24 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
     return () => observer.disconnect();
   }, [loadError, loadMore, nextCursor]);
 
+  const visibleItems = sideFilter.length === SIDE_OPTIONS.length ? items : items.filter((row) => (sideFilter as readonly string[]).includes(row.side));
+
   return (
     <>
-    <Table aria-label="Transactions" className="border-separate border-spacing-0">
+    <Table aria-label="Transactions" className="table-fixed border-separate border-spacing-0">
       <TableHeader className="border-b-0 [&_tr]:!border-0">
         <TableRow className="h-10 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
-          <TableHead className="pl-4">Time</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead className="text-right">{displaySymbol(tokenSymbol)}</TableHead>
-          <TableHead className="text-right">For</TableHead>
-          <TableHead className="text-right">USD</TableHead>
-          <TableHead className="text-right">Wallet</TableHead>
-          <TableHead className="text-right">Explorer</TableHead>
+          <TableHead className="w-[9%] pl-4">Time</TableHead>
+          <TableHead className="w-[16%]"><TypeFilter selected={sideFilter} onChange={setSideFilter} /></TableHead>
+          <TableHead className="w-[15%] text-right">{displaySymbol(tokenSymbol)}</TableHead>
+          <TableHead className="w-[18%] text-right">For</TableHead>
+          <TableHead className="w-[13%] text-right">USD</TableHead>
+          <TableHead className="w-[14%] text-right">Wallet</TableHead>
+          <TableHead className="w-[15%] text-right">Explorer</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {items.map((row) => {
+        {visibleItems.map((row) => {
           const activityLabel = row.source === 'official' ? formatActivityKind(row.activityKind ?? '') : null;
           return (
             <TableRow key={`${row.blockNumber}-${row.txHash}-${row.logIndex}`} className="border-0 hover:bg-transparent">
@@ -170,10 +265,12 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
             </TableRow>
           );
         })}
+        {loadingMore && <TransactionRowsSkeleton count={6} />}
       </TableBody>
     </Table>
-      {nextCursor && chainId !== undefined && tokenAddress && <div ref={sentinelRef} data-testid="transactions-load-more-sentinel" aria-hidden="true" className="h-px" />}
-      {loadingMore && <p role="status" className="text-center text-sm text-muted-foreground">Loading more transactions…</p>}
+      {items.length > 0 && visibleItems.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No transactions match this filter.</p>}
+      {nextCursor && sideFilter.length > 0 && chainId !== undefined && tokenAddress && <div ref={sentinelRef} data-testid="transactions-load-more-sentinel" aria-hidden="true" className="h-px" />}
+      {loadingMore && <p role="status" className="sr-only">Loading more transactions…</p>}
       {loadError && <div className="text-center text-sm"><span role="alert">Could not load more transactions. </span><button type="button" onClick={() => void loadMore()}>Retry</button></div>}
     </>
   );
