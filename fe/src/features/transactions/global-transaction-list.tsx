@@ -8,6 +8,7 @@ import { displaySymbol, formatActivityKind, formatAmount, formatUsdCompact } fro
 import { getAllTransactions, launchHref, type GlobalTransaction } from '@/api/client';
 import { quoteLogoUri } from '@/api/quote-logo';
 import { ChainFilter } from '@/components/chain-filter';
+import { PageHeading } from '@/components/page-heading';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
 import { TypeFilter } from '@/features/transactions/type-filter';
@@ -149,13 +150,12 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
   return (
     <>
       {(heading || chainIds.length > 0) && (
-        <div className="flex items-center justify-between gap-3">
-          {heading ? <h1 className="text-2xl font-semibold">{heading}</h1> : <span />}
+        <PageHeading title={heading ?? ''}>
           {chainIds.length > 0 && (
             <ChainFilter chainIds={chainIds} selected={selectedChains} onChange={(values) => { void changeChains(values); }}
               open={chainMenuOpen} onToggle={() => setChainMenuOpen((open) => !open)} />
           )}
-        </div>
+        </PageHeading>
       )}
       <Table aria-label="Latest transactions" className="table-fixed border-separate border-spacing-0">
         <TableHeader className="border-b-0 [&_tr]:!border-0">

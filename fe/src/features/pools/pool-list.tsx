@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PageHeading } from '@/components/page-heading';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
@@ -56,15 +57,15 @@ const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-16', 'w-10', 'w-8'] as 
 function PoolRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <div key={index} role="row" aria-hidden="true" data-testid="pool-skeleton-row" className="rounded-lg p-3 md:table-row md:rounded-none md:p-0">
-      <div role="cell" className="md:table-cell md:p-4 md:align-middle"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
-      <div role="cell" className="md:table-cell md:p-4 md:align-middle">
+      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
+      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle">
         <span className="flex items-center gap-3">
           <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
           <span className="grid gap-1.5"><span className="h-3 w-28 animate-pulse rounded bg-muted" /><span className="h-2.5 w-16 animate-pulse rounded bg-muted" /></span>
         </span>
       </div>
       {POOL_SKELETON_NUMERIC_WIDTHS.map((width, cell) => (
-        <div key={cell} role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+        <div key={cell} role="cell" className="md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
           <span className={cn('ml-auto block h-4 animate-pulse rounded bg-muted', width)} />
         </div>
       ))}
@@ -172,17 +173,17 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       </CardContent>
     </Card></section>}
     {(error || !page) && <p role="alert">Could not load pools.</p>}
-    {!tokenAddress && page && <h1 className="text-2xl font-semibold">Pools</h1>}
+    {!tokenAddress && page && <PageHeading title="Pools" />}
     {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
-        <div role="row" className="md:table-row md:h-10 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[5%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[29%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
+        <div role="row" className="md:table-row md:h-12 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-12 md:w-[5%] md:px-4 md:align-middle md:text-sm md:font-medium">#</div>
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-12 md:w-[29%] md:px-4 md:align-middle md:text-sm md:font-medium">Pool</div>
           {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, width }) => {
             const active = sortBy === sort;
             return <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-              className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide md:text-right', width, active && 'text-foreground dark:text-white')}>
+              className={cn('text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium md:text-right', width, active && 'text-foreground dark:text-white')}>
               <button type="button" className={cn('inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
                 onClick={() => {
                   const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection;
@@ -196,12 +197,12 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
         </div>
       </div>
       <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-        {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
-          <div role="cell" className="pointer-events-none text-foreground md:table-cell md:p-4 md:align-middle">
+        {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
+          <div role="cell" className="pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle">
             <a href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
             {index + 1}
           </div>
-          <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:align-middle">
+          <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
             <span className="flex items-center gap-3">
               <PoolLogo token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
               <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Pons designated'}</span></span>
@@ -210,7 +211,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           {([
             ['TVL', formatPoolUsd(pool.tvlUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)],
             ['30D volume', formatPoolUsd(pool.volume30dUsd)], ['1D Vol/TVL', formatVolumeToTvl(volumeToTvl(pool))], ['Age', poolAge(pool.createdTimestamp)],
-          ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+          ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
             <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
           </div>)}
         </div>)}
