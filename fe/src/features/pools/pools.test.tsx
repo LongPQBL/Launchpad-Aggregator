@@ -127,6 +127,11 @@ describe('Pools UI', () => {
     const unknown: PoolSummary = { ...pool, poolId: `0x${'c'.repeat(64)}`, volume30dUsd: null, volume24hUsd: '5', tvlUsd: null };
     render(<PoolList page={{ items: [known, unknown], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
     expect(screen.getByRole('columnheader', { name: /30D volume/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /^TVL$/ })).toBeInTheDocument();
+    expect(screen.queryByRole('columnheader', { name: /FDV|Liquidity/ })).not.toBeInTheDocument();
+    // TVL leads the numeric columns, straight after the pool name.
+    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
+    expect(headers.slice(0, 4)).toEqual(['#', 'Pool', 'TVL', '24H volume']);
     expect(screen.getByRole('columnheader', { name: /1D Vol\/TVL/ })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^1H$/ })).not.toBeInTheDocument();
     const [, knownRow, unknownRow] = screen.getAllByRole('row');

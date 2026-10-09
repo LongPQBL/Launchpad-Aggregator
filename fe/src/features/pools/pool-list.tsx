@@ -16,13 +16,12 @@ export type PrimaryLaunchVenue =
   | { kind: 'curve'; token: PoolListDisplayedToken; quoteSymbol: string; chainId: number }
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
 
-type PoolSort = 'fdvUsd' | 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
+type PoolSort = 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
 const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; width: string }[] = [
-  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc', width: 'md:w-[12%]' },
-  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[14%]' },
-  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[12%]' },
-  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', width: 'md:w-[13%]' },
-  { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', width: 'md:w-[10%]' },
+  { label: 'TVL', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[14%]' },
+  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[16%]' },
+  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', width: 'md:w-[15%]' },
+  { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', width: 'md:w-[12%]' },
   { label: 'Age', sort: 'age', defaultDirection: 'asc', width: 'md:w-[9%]' },
 ];
 
@@ -52,7 +51,7 @@ function pairLabel(pool: PoolSummary, displayedToken?: PoolListDisplayedToken): 
   return `${label(pool.currency0, pool.currency0Symbol)} / ${label(pool.currency1, pool.currency1Symbol)}`;
 }
 // Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
-const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-14', 'w-16', 'w-10', 'w-8'] as const;
+const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-16', 'w-10', 'w-8'] as const;
 
 function PoolRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
@@ -180,7 +179,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       <div role="rowgroup" className="hidden md:table-header-group">
         <div role="row" className="md:table-row md:h-10 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
           <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[5%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[27%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[29%] md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
           {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, width }) => {
             const active = sortBy === sort;
             return <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
@@ -210,7 +209,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
             </span>
           </div>
           {([
-            ['FDV', formatPoolUsd(pool.fdvUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)], ['Liquidity', formatPoolUsd(pool.tvlUsd)],
+            ['TVL', formatPoolUsd(pool.tvlUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)],
             ['30D volume', formatPoolUsd(pool.volume30dUsd)], ['1D Vol/TVL', formatVolumeToTvl(volumeToTvl(pool))], ['Age', poolAge(pool.createdTimestamp)],
           ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
             <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
