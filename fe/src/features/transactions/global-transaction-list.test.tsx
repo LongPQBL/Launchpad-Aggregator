@@ -52,11 +52,11 @@ describe('GlobalTransactionList', () => {
     expect(screen.getByText('Buyback by Pons')).toBeInTheDocument();
   });
 
-  it('marks a pool swap "(pool)" and falls back to a short address for an unknown quote symbol', () => {
+  it('shows a pool swap like any other swap (no extra marker) and falls back to a short address for an unknown quote symbol', () => {
     render(<GlobalTransactionList transactions={[row({ source: 'pool', venueId: null, activityKind: null,
       pool: { protocol: 'uniswap_v4', poolId: '0xpool' }, quoteAsset: { address: '0x9999999999999999999999999999999999999999', symbol: null, logoUri: null } })]} nextCursor={null} />);
     const body = screen.getAllByRole('row')[1]!;
-    expect(within(body).getByText('(pool)')).toBeInTheDocument();
+    expect(within(body).queryByText('(pool)')).not.toBeInTheDocument();
     expect(within(body).getAllByText('0x9999…9999').length).toBeGreaterThan(0);
   });
 

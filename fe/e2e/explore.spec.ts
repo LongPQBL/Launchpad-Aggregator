@@ -1,12 +1,12 @@
 import { expect, test } from './fixtures';
 import { CHAIN_ID } from './mock-api';
 
-test('the Transactions page reads each trade as "Swap A for B", marks pool swaps, and has chain and type filters', async ({ page }) => {
+test('the Transactions page reads each trade as "Swap A for B" and has chain and type filters', async ({ page }) => {
   await page.goto('/transactions');
   const table = page.getByRole('table', { name: 'Latest transactions' });
   await expect(table).toBeVisible();
   await expect(table.getByRole('row')).toHaveCount(11);
-  await expect(table.getByText('(pool)').first()).toBeVisible();
+  await expect(table.getByText('(pool)')).toHaveCount(0);
   // A buy pays ETH for the launch token; a sell is the reverse.
   await expect(table.getByText(/^Swap$/).first()).toBeVisible();
   await expect(table.getByRole('row').nth(1)).toContainText('ETH');

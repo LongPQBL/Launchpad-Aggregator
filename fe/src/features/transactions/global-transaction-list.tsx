@@ -187,7 +187,6 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
                     {tokenPart(sold)}
                     <span className="text-muted-foreground">for</span>
                     {tokenPart(received)}
-                    {row.source === 'pool' && <span className="text-xs text-muted-foreground">(pool)</span>}
                   </span>
                 </TableCell>
                 <TableCell className="text-right text-base">
