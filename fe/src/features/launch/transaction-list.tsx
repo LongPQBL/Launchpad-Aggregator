@@ -120,7 +120,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
       <TableHeader className="border-b-0 [&_tr]:!border-0">
         <TableRow className="h-10 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
           <TableHead className="w-[9%] pl-4">Time</TableHead>
-          <TableHead className="w-[16%]"><TypeFilter selected={sideFilter} onChange={setSideFilter} /></TableHead>
+          <TableHead className="w-[16%]"><TypeFilter options={SIDE_OPTIONS} selected={sideFilter} onChange={setSideFilter} /></TableHead>
           <TableHead className="w-[15%] text-right">{displaySymbol(tokenSymbol)}</TableHead>
           <TableHead className="w-[18%] text-right">For</TableHead>
           <TableHead className="w-[13%] text-right">USD</TableHead>

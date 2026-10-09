@@ -65,13 +65,19 @@ describe('GlobalTransactionList', () => {
     expect(within(within(screen.getAllByRole('row')[1]!).getAllByRole('cell')[2]!).getByText('—')).toBeInTheDocument();
   });
 
-  it('filters rows by Buy/Sell from the Type header', () => {
+  it('offers only "Swap" in the Type filter (not Buy/Sell), selected by default, and hides everything when it is unticked', () => {
     render(<GlobalTransactionList transactions={[row({ txHash: '0xa', side: 'buy' }), row({ txHash: '0xb', side: 'sell' })]} nextCursor={null} />);
     expect(screen.getAllByRole('row')).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: 'Filter by type' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Buy/ }));
-    expect(screen.getAllByRole('row')).toHaveLength(2);
-    expect(within(screen.getAllByRole('row')[1]!).getByText(/Swap/)).toHaveTextContent('Swap');
+    expect(screen.getByRole('button', { name: /^Swap/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByRole('button', { name: /^Buy/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^Sell/ })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^Swap/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(1);
+    expect(screen.getByText('No transactions match this filter.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Swap/ }));
+    expect(screen.getAllByRole('row')).toHaveLength(3);
   });
 
   it('refetches the first page for the chosen chains, with skeleton rows while it loads, and puts them in the URL', async () => {

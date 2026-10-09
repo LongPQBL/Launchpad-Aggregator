@@ -10,7 +10,7 @@ import { quoteLogoUri } from '@/api/quote-logo';
 import { ChainFilter } from '@/components/chain-filter';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
-import { SIDE_OPTIONS, TypeFilter, type SideFilter } from '@/features/transactions/type-filter';
+import { TypeFilter } from '@/features/transactions/type-filter';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,10 @@ export interface GlobalTransactionListProps {
   /** Page heading, shown on the same row as the chain filter. */
   heading?: string;
 }
+
+// Every row of this feed is a swap, so "Swap" is the only type to filter on (Uniswap also lists Add and Remove).
+type TransactionType = 'swap';
+const TYPE_OPTIONS: readonly { value: TransactionType; label: string }[] = [{ value: 'swap', label: 'Swap' }];
 
 const SKELETON_WIDTHS = ['w-8', 'w-48', 'w-14', 'w-20', 'w-20', 'w-24', 'w-20'] as const;
 
@@ -76,7 +80,7 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
   const [nextCursor, setNextCursor] = useState<string | null>(initialCursor);
   const [selectedChains, setSelectedChains] = useState<readonly number[]>(selectedChainIds);
   const [chainMenuOpen, setChainMenuOpen] = useState(false);
-  const [sideFilter, setSideFilter] = useState<SideFilter[]>(['buy', 'sell']);
+  const [typeFilter, setTypeFilter] = useState<TransactionType[]>(['swap']);
   const [filtering, setFiltering] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -140,7 +144,7 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
     return () => observer.disconnect();
   }, [filtering, loadError, loadMore, nextCursor]);
 
-  const visibleItems = sideFilter.length === SIDE_OPTIONS.length ? items : items.filter((row) => (sideFilter as readonly string[]).includes(row.side));
+  const visibleItems = typeFilter.includes('swap') ? items : [];
 
   return (
     <>
@@ -157,7 +161,7 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
         <TableHeader className="border-b-0 [&_tr]:!border-0">
           <TableRow className="h-12 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
             <TableHead className="w-[7%] pl-4">Time</TableHead>
-            <TableHead className="w-[31%]"><TypeFilter selected={sideFilter} onChange={setSideFilter} /></TableHead>
+            <TableHead className="w-[31%]"><TypeFilter options={TYPE_OPTIONS} selected={typeFilter} onChange={setTypeFilter} /></TableHead>
             <TableHead className="w-[10%] text-right">USD</TableHead>
             <TableHead className="w-[14%] text-right">Token amount</TableHead>
             <TableHead className="w-[14%] text-right">Token amount</TableHead>

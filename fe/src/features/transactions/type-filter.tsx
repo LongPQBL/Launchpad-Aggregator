@@ -18,7 +18,9 @@ function UpDownIcon() {
 }
 
 // Every type starts selected; clicking an option toggles it. Deselecting everything is allowed and shows nothing.
-export function TypeFilter({ selected, onChange }: { selected: readonly SideFilter[]; onChange: (values: SideFilter[]) => void }) {
+export function TypeFilter<T extends string>({ options, selected, onChange }: {
+  options: readonly { value: T; label: string }[]; selected: readonly T[]; onChange: (values: T[]) => void;
+}) {
   const [open, setOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -39,7 +41,7 @@ export function TypeFilter({ selected, onChange }: { selected: readonly SideFilt
     };
   }, [open]);
 
-  const toggle = (value: SideFilter) => {
+  const toggle = (value: T) => {
     onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
   };
 
@@ -58,7 +60,7 @@ export function TypeFilter({ selected, onChange }: { selected: readonly SideFilt
       {/* Portaled with fixed positioning: the table's overflow-x-auto container would otherwise clip the menu when the table is short (e.g. nothing selected). */}
       {open && menuPosition && createPortal(
         <div ref={menuRef} role="menu" aria-label="Type filter" style={{ top: menuPosition.top, left: menuPosition.left }} className="fixed z-50 w-40 rounded-lg border border-border bg-card p-1 text-foreground shadow-md">
-          {SIDE_OPTIONS.map(({ value, label }) => (
+          {options.map(({ value, label }) => (
             <button key={value} type="button" onClick={() => toggle(value)} aria-pressed={selected.includes(value)}
               className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm font-normal hover:bg-muted">
               {label} {selected.includes(value) && <TypeCheck />}
