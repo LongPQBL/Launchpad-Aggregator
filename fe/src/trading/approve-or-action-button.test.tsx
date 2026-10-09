@@ -34,7 +34,7 @@ describe('ApproveOrActionButton', () => {
     );
     const button = screen.getByRole('button', { name: 'Approve' });
     expect(button).not.toBeDisabled();
-    expect(button.className).toContain('bg-[#ccff00]');
+    expect(button.className).toContain('bg-brand');
     fireEvent.click(button);
     expect(allowance.approve).toHaveBeenCalledWith(1_000n);
   });
@@ -180,7 +180,7 @@ describe('ApproveOrActionButton', () => {
     />);
     const switchButton = screen.getByRole('button', { name: 'Switch to Base' });
     expect(switchButton).toBeEnabled();
-    expect(switchButton.className).toContain('bg-[#ccff00]');
+    expect(switchButton.className).toContain('bg-brand');
 
     rerender(<ApproveOrActionButton
       needsApproval={false} amountIn={0n} isWrongChain={false} isConnected balanceKnown hasInsufficientBalance={false}

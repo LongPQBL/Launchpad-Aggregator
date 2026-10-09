@@ -20,6 +20,10 @@
   --color-ring: #3b5fe3;
   --color-success: #16a34a;
   --color-success-foreground: #ffffff;
+  /* Trade call-to-action accent (swap/connect buttons, selected-state marks). Same in both themes. */
+  --color-brand: #ccff00;
+  --color-brand-hover: #bff000;
+  --color-brand-foreground: #151515;
 }
 
 .dark {

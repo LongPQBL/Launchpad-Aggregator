@@ -75,7 +75,7 @@ export function TokenCell({ chainId, tokenAddress, name, symbol, logoUri }: Toke
               onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copyAddress(); }}
               aria-label={copied ? 'Copied' : 'Copy token address'}
               className={copied
-                ? 'pointer-events-auto relative z-20 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600 p-0 text-white hover:bg-green-700'
+                ? 'pointer-events-auto relative z-20 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success p-0 text-success-foreground hover:bg-success/90'
                 : 'pointer-events-auto relative z-20 flex h-6 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground'}
             >
               {copied ? <CheckIcon /> : <><span>{shortAddress(tokenAddress)}</span><CopyIcon /></>}

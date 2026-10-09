@@ -31,7 +31,7 @@ describe('TokenCell', () => {
 
     expect(writeText).toHaveBeenCalledWith(tokenAddress);
     const copiedButton = screen.getByRole('button', { name: 'Copied' });
-    expect(copiedButton).toHaveClass('h-6', 'w-6', 'rounded-full', 'bg-green-600', 'text-white');
+    expect(copiedButton).toHaveClass('h-6', 'w-6', 'rounded-full', 'bg-success', 'text-success-foreground');
     expect(copiedButton).not.toHaveTextContent('Copied');
   });
 });

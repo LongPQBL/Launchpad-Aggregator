@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import { useGatedRefresh } from '@/hooks/use-gated-refresh';
 import { useLiveRefresh } from '@/hooks/use-live-refresh';
 
 const STATUS_LABELS = {
@@ -16,7 +17,8 @@ export interface LiveRefreshIndicatorProps {
 
 export function LiveRefreshIndicator({ resourceKeys, retryWhilePending }: LiveRefreshIndicatorProps) {
   const router = useRouter();
-  const status = useLiveRefresh(resourceKeys, () => router.refresh(), { retryWhilePending });
+  const refresh = useGatedRefresh(() => router.refresh());
+  const status = useLiveRefresh(resourceKeys, refresh, { retryWhilePending });
 
   if (status === 'live') return null;
 

@@ -37,7 +37,7 @@ export function CopyableTokenAddress({ address, label = 'Token address', copyLab
         onClick={() => void copyAddress()}
         aria-label={copied ? 'Copied' : copyLabel ?? `Copy ${label.toLowerCase()}`}
         className={copied
-          ? 'inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full bg-green-600 p-0 text-white hover:bg-green-700'
+          ? 'inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full bg-success p-0 text-success-foreground hover:bg-success/90'
           : showCopyIcon
             ? 'inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full p-0 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
             : 'pointer-events-none inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-full p-0 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover/address:pointer-events-auto group-hover/address:opacity-100 group-focus-within/address:pointer-events-auto group-focus-within/address:opacity-100'}

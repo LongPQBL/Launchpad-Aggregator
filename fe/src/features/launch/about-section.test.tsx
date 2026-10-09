@@ -50,7 +50,7 @@ describe('AboutSection copy-address control', () => {
     const copiedButton = screen.getByRole('button', { name: 'Copied' });
     expect(copiedButton).toHaveClass('bg-black', 'text-white');
     expect(copiedButton).toHaveTextContent('0x1111…1111');
-    expect(copiedButton.querySelector('span.bg-green-600')).toHaveClass('h-[14px]', 'w-[14px]');
+    expect(copiedButton.querySelector('span.bg-success')).toHaveClass('h-[14px]', 'w-[14px]');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     setClipboard({ writeText: () => Promise.reject(new Error('denied')) });

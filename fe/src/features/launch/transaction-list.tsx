@@ -90,7 +90,7 @@ function TypeFilter({ selected, onChange }: { selected: readonly SideFilter[]; o
 
 function SelectedCheck() {
   return (
-    <span data-selected-check className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#ccff00]/20 text-[#ccff00]">
+    <span data-selected-check className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand/20 text-brand">
       <svg aria-hidden viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3.5 8.5 3 3 6-7" /></svg>
     </span>
   );

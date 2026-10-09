@@ -84,7 +84,7 @@ export function WalletControl() {
   return (
     <div className="relative text-sm">
       <Button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} disabled={connectPending}
-        className="cursor-pointer bg-[#ccff00] text-[#151515] hover:bg-[#bff000]">
+        className="cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover">
         {connectPending ? 'Connecting…' : 'Connect'}
       </Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="Connect a wallet" className="z-[60]">

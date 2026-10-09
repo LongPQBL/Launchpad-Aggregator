@@ -11,14 +11,14 @@ describe('PercentChange', () => {
   it('colors only the arrow; the number stays a soft white', () => {
     render(<PercentChange value="-11.43" />);
     const arrow = screen.getByText('▼');
-    expect(arrow.className).toContain('text-red-600');
+    expect(arrow.className).toContain('text-destructive');
     const wrapper = arrow.parentElement!;
     expect(wrapper.className).toContain('text-foreground/70');
     expect(wrapper.textContent).toBe('▼11.43%');
   });
   it('uses an up arrow for gains and no arrow for zero', () => {
     const { unmount } = render(<PercentChange value="5" />);
-    expect(screen.getByText('▲').className).toContain('text-emerald-600');
+    expect(screen.getByText('▲').className).toContain('text-success');
     unmount();
     render(<PercentChange value="0" />);
     expect(screen.queryByText('▲')).toBeNull();

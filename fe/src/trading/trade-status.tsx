@@ -16,7 +16,7 @@ export function TradeStatus({ status, txHash, errorMessage, explorerBase }: Trad
 
   if (status === 'pending') return <p className="text-sm text-muted-foreground">Confirm in your wallet…</p>;
   if (status === 'confirming') return <p className="text-sm text-muted-foreground">Confirming on-chain… {explorerLink}</p>;
-  if (status === 'confirmed') return <p className="text-sm text-emerald-600">Confirmed. {explorerLink}</p>;
+  if (status === 'confirmed') return <p className="text-sm text-success">Confirmed. {explorerLink}</p>;
   return (
     <p role="alert" className="text-sm text-destructive">
       {/* A replayed revert whose eth_call now succeeds can decode to an empty string (see

@@ -29,11 +29,15 @@ export function formatPrice(value: string | null, symbol: string | null): string
 // non-zero amount down to "0.00" — show the honest "<0.01" instead. Distinct from formatUsd's
 // dynamic-decimals behavior (FDV/TVL/market cap), which expands precision instead of truncating
 // the display — do not reuse this for those call sites.
+const COMPACT_AMOUNT = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 });
+
 export function formatAmount(value: string | null, decimals = 2): string {
   if (value === null) return '—';
   const numeric = Number(value);
   if (numeric === 0) return (0).toFixed(0);
   if (Math.abs(numeric) < 0.01) return '<0.01';
+  // From 1,000 up, abbreviate the way Uniswap's transaction table does ("12.3M") instead of a long digit string.
+  if (decimals === 2 && Math.abs(numeric) >= 1_000) return COMPACT_AMOUNT.format(numeric);
   const fixed = numeric.toFixed(decimals);
   return decimals === 2 ? fixed.replace(/(\.\d*?[1-9])0+$|\.0+$/, '$1') : fixed;
 }
@@ -67,8 +71,8 @@ export function formatPercent(value: string | null): { text: string; className: 
   // Direction follows the rounded figure: -0.001 displays as 0.00%, so it must not render as a red down arrow.
   const rounded = Math.abs(Number(value)).toFixed(2);
   const numeric = Number(rounded) === 0 ? 0 : Number(value);
-  if (numeric > 0) return { text: `${rounded}%`, className: 'text-emerald-600', direction: 'up' };
-  if (numeric < 0) return { text: `${rounded}%`, className: 'text-red-600', direction: 'down' };
+  if (numeric > 0) return { text: `${rounded}%`, className: 'text-success', direction: 'up' };
+  if (numeric < 0) return { text: `${rounded}%`, className: 'text-destructive', direction: 'down' };
   return { text: `${rounded}%`, className: 'text-muted-foreground', direction: 'flat' };
 }
 

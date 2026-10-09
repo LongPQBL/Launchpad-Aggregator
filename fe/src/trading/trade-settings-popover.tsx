@@ -92,7 +92,7 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
               : 'The maximum price movement accepted before the trade fails. Auto adjusts the allowance for the selected pool.'} />
             <div className="flex items-center gap-1 rounded-full border border-white/15 p-1">
             <Button type="button" size="sm"
-              className={isAutoSlippage ? 'rounded-full bg-[#ccff00]/20 text-[#ccff00] hover:bg-[#ccff00]/25 hover:text-[#ccff00]' : 'rounded-full bg-white/10 text-white/50 hover:bg-white/10 hover:text-white/60'}
+              className={isAutoSlippage ? 'rounded-full bg-brand/20 text-brand hover:bg-brand/25 hover:text-brand' : 'rounded-full bg-white/10 text-white/50 hover:bg-white/10 hover:text-white/60'}
               onClick={() => {
                 isEditingSlippage.current = false;
                 setSlippageDraft(String(autoSlippagePercent));

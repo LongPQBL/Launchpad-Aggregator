@@ -63,7 +63,7 @@ function CopyIcon() {
 
 function CopiedIcon() {
   return (
-    <span aria-hidden className="inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full bg-green-600 text-white">
+    <span aria-hidden className="inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full bg-success text-success-foreground">
       <svg viewBox="0 0 16 16" width="10" height="10" fill="none">
         <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       </svg>

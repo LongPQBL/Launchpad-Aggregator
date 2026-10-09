@@ -33,6 +33,14 @@ describe('formatUsd', () => {
   });
 });
 
+describe('formatAmount', () => {
+  it('abbreviates amounts from 1,000 up and keeps smaller ones to 2 decimals', () => {
+    expect(formatAmount('12345678.9')).toBe('12.35M');
+    expect(formatAmount('1500')).toBe('1.5K');
+    expect(formatAmount('523.1349')).toBe('523.13');
+  });
+});
+
 describe('formatUsdCompact', () => {
   it('abbreviates from $1,000 up and leaves smaller values exactly as formatUsd does', () => {
     expect(formatUsdCompact('1234567.8', 1)).toBe('$1.2M');
@@ -52,11 +60,11 @@ describe('formatPercent', () => {
   });
 
   it('rounds a positive change to 2 decimal places, unsigned, with an "up" direction and a green class', () => {
-    expect(formatPercent('12.3456')).toEqual({ text: '12.35%', className: 'text-emerald-600', direction: 'up' });
+    expect(formatPercent('12.3456')).toEqual({ text: '12.35%', className: 'text-success', direction: 'up' });
   });
 
   it('rounds a negative change to 2 decimal places, unsigned (the caller renders the down arrow), with a red class', () => {
-    expect(formatPercent('-3.456')).toEqual({ text: '3.46%', className: 'text-red-600', direction: 'down' });
+    expect(formatPercent('-3.456')).toEqual({ text: '3.46%', className: 'text-destructive', direction: 'down' });
   });
 
   it('shows exactly zero with a flat direction, in a neutral class', () => {
