@@ -32,10 +32,9 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
     <AppShell>
       {page && <LiveRefreshIndicator resourceKeys={indexedChainIds.map(chainResourceKey)} />}
       <div className="space-y-4">
-        <h1 className="text-2xl font-semibold">Transactions</h1>
         {page
-          ? <GlobalTransactionList transactions={page.items} nextCursor={page.nextCursor} chainIds={chainIds} selectedChainIds={selectedChainIds} />
-          : <div role="alert"><p>Could not load transactions from the server. Please try again.</p><a href="/transactions">Retry</a></div>}
+          ? <GlobalTransactionList heading="Transactions" transactions={page.items} nextCursor={page.nextCursor} chainIds={chainIds} selectedChainIds={selectedChainIds} />
+          : <div role="alert"><h1 className="text-2xl font-semibold">Transactions</h1><p>Could not load transactions from the server. Please try again.</p><a href="/transactions">Retry</a></div>}
       </div>
     </AppShell>
   );

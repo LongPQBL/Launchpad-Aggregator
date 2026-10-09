@@ -22,6 +22,8 @@ export interface GlobalTransactionListProps {
   chainIds?: readonly number[];
   /** Chains the server already filtered `transactions` by; empty = all. */
   selectedChainIds?: readonly number[];
+  /** Page heading, shown on the same row as the chain filter. */
+  heading?: string;
 }
 
 const SKELETON_WIDTHS = ['w-8', 'w-48', 'w-14', 'w-20', 'w-20', 'w-24', 'w-20'] as const;
@@ -68,7 +70,7 @@ function AssetSide({ symbol, logoUri, chainId, address }: { symbol: string; logo
 
 // The newest trades across every launch (Explore > Transactions). Same behaviours as a single launch's
 // transaction table: infinite scroll, merge-not-reset on a server refresh, skeleton rows while loading.
-export function GlobalTransactionList({ transactions, nextCursor: initialCursor, chainIds = [], selectedChainIds = [] }: GlobalTransactionListProps) {
+export function GlobalTransactionList({ transactions, nextCursor: initialCursor, chainIds = [], selectedChainIds = [], heading }: GlobalTransactionListProps) {
   const now = useNow();
   const [items, setItems] = useState(transactions);
   const [nextCursor, setNextCursor] = useState<string | null>(initialCursor);
@@ -142,10 +144,13 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
 
   return (
     <>
-      {chainIds.length > 0 && (
-        <div className="flex justify-end">
-          <ChainFilter chainIds={chainIds} selected={selectedChains} onChange={(values) => { void changeChains(values); }}
-            open={chainMenuOpen} onToggle={() => setChainMenuOpen((open) => !open)} />
+      {(heading || chainIds.length > 0) && (
+        <div className="flex items-center justify-between gap-3">
+          {heading ? <h1 className="text-2xl font-semibold">{heading}</h1> : <span />}
+          {chainIds.length > 0 && (
+            <ChainFilter chainIds={chainIds} selected={selectedChains} onChange={(values) => { void changeChains(values); }}
+              open={chainMenuOpen} onToggle={() => setChainMenuOpen((open) => !open)} />
+          )}
         </div>
       )}
       <Table aria-label="Latest transactions" className="table-fixed border-separate border-spacing-0">

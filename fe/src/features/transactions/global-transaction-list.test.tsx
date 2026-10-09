@@ -90,6 +90,12 @@ describe('GlobalTransactionList', () => {
     expect(window.location.search).toContain('chainId=4663');
   });
 
+  it('puts the heading on the same row as the chain filter', () => {
+    render(<GlobalTransactionList heading="Transactions" transactions={[row()]} nextCursor={null} chainIds={[4663]} />);
+    const heading = screen.getByRole('heading', { name: 'Transactions' });
+    expect(heading.parentElement).toContainElement(screen.getByRole('navigation', { name: 'Filter by chain' }));
+  });
+
   it('offers every chain it is given as an option, like the launches page filter', () => {
     render(<GlobalTransactionList transactions={[row()]} nextCursor={null} chainIds={[4663, 8453, 42161]} />);
     fireEvent.click(screen.getByLabelText('All chains'));
