@@ -297,7 +297,12 @@ export function startMockApi(port: number): Server {
         supportedProtocols: ['uniswap_v4'],
       }));
     } else if (url.pathname === '/v1/transactions') {
-      res.end(JSON.stringify(globalTransactions));
+      // Like the real API: chainId is one id or a comma-separated list; no chainId means every chain.
+      const chainIds = url.searchParams.get('chainId')?.split(',').map((value) => Number(value.trim()));
+      res.end(JSON.stringify({
+        ...globalTransactions,
+        items: chainIds ? globalTransactions.items.filter((item) => chainIds.includes(item.token.chainId)) : globalTransactions.items,
+      }));
     } else if (url.pathname === '/v1/search') {
       const query = (url.searchParams.get('q') ?? '').toLowerCase();
       const tokens = mockLaunches.filter((launch) => launch.name.toLowerCase().includes(query) || launch.symbol.toLowerCase().includes(query))

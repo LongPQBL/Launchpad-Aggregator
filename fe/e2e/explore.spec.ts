@@ -18,12 +18,21 @@ test('the Transactions page reads each trade as "Swap A for B" and has chain and
   await expect(table.getByRole('button', { name: 'Filter by type' })).toBeVisible();
 });
 
-test('choosing a chain filters the transactions and is kept in the URL', async ({ page }) => {
+test('choosing a chain filters the transactions to that chain and is kept in the URL', async ({ page }) => {
   await page.goto('/transactions');
+  const table = page.getByRole('table', { name: 'Latest transactions' });
+  await expect(table.getByRole('row')).toHaveCount(11);
+
+  // Another chain has no trades: the Robinhood rows must go, not stay on screen.
   await page.getByLabel('All chains').click();
+  await page.getByRole('button', { name: /^Base/ }).click();
+  await expect(page).toHaveURL(/chainId=8453/);
+  await expect(page.getByText('No transactions yet.')).toBeVisible();
+  await expect(table.getByRole('row')).toHaveCount(1);
+
+  // The menu stays open after a pick; adding Robinhood Chain brings its trades back.
   await page.getByRole('button', { name: /Robinhood Chain/ }).click();
-  await expect(page).toHaveURL(/chainId=4663/);
-  await expect(page.getByRole('table', { name: 'Latest transactions' }).getByRole('row')).toHaveCount(11);
+  await expect(table.getByRole('row')).toHaveCount(11);
 });
 
 test('the header search finds a launch and navigates to it', async ({ page }) => {
