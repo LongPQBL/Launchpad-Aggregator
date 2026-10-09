@@ -64,7 +64,7 @@ function PoolRowsSkeleton({ count }: { count: number }) {
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-full animate-pulse rounded bg-muted" /></div>
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle">
         <span className="flex items-center gap-3">
-          <span className="h-10 w-10 shrink-0 animate-pulse rounded-full bg-muted" />
+          <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
           <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </span>
       </div>
@@ -162,7 +162,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
             token0={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency0, primaryVenue.pool.currency0Symbol, primaryVenue.pool.currency0LogoUri, displayedToken)}
             token1={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency1, primaryVenue.pool.currency1Symbol, primaryVenue.pool.currency1LogoUri, displayedToken)}
             chainId={primaryVenue.pool.chainId}
-          /> : <span aria-hidden="true" className="h-10 w-10 rounded-full bg-accent" />}
+          /> : <span aria-hidden="true" className="h-9 w-9 rounded-full bg-accent" />}
           <div className="min-w-0">
             {primaryVenue.pool
               ? <Link className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</Link>

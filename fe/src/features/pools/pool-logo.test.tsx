@@ -37,7 +37,7 @@ describe('PoolLogo size', () => {
     const { container: header } = render(<PoolLogo {...tokens} />);
     const { container: row } = render(<PoolLogo {...tokens} size="small" />);
     expect(header.querySelectorAll('.h-12.w-12')).toHaveLength(4);
-    expect(row.querySelectorAll('.h-10.w-10')).toHaveLength(4);
+    expect(row.querySelectorAll('.h-9.w-9')).toHaveLength(4);
     expect(row.querySelector('.h-12')).toBeNull();
   });
 });
