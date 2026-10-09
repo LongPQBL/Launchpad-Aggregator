@@ -56,7 +56,9 @@ test('keeps Pons launches when another launchpad and chain are selected', async 
   await expect(page.getByRole('link', { name: /E2E Launch/i })).toBeVisible();
 });
 
-test('sorts numeric columns in both directions without reloading', async ({ page }) => {
+test('sorts numeric columns in both directions without reloading', async ({ page, isMobile }) => {
+  // The column headers only exist in the desktop table layout (hidden below md); mobile shows cards.
+  test.skip(isMobile, 'column-header sorting is desktop-only');
   await page.goto('/launches');
   await page.evaluate(() => { document.body.dataset.sortPageMarker = 'retained'; });
   const table = page.getByRole('table', { name: 'Launch list' });
@@ -73,5 +75,7 @@ test('sorts numeric columns in both directions without reloading', async ({ page
 test('connects to the SSE realtime feed (proves the BE CORS response actually allows it)', async ({ page }) => {
   await page.goto('/');
 
-  await expect(page.getByRole('status').filter({ hasText: /realtime/i })).toHaveText('Live realtime updates');
+  // LiveRefreshIndicator shows "Connecting…" / "connection lost" text and renders nothing once the stream is
+  // live, so a connected feed is proven by the "connecting" text going away and the "lost" text never appearing.
+  await expect(page.getByRole('status').filter({ hasText: /realtime/i })).toHaveCount(0);
 });

@@ -7,6 +7,7 @@ vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<ty
 
 function row(overrides: Partial<GlobalTransaction> = {}): GlobalTransaction {
   return {
+    source: 'official', pool: null,
     token: { chainId: 4663, tokenAddress: '0xaaa', name: 'Zorb', symbol: 'ZRB', logoUri: null },
     venueId: 'v', blockNumber: '100', txHash: '0xtx1', logIndex: 0, timestamp: 1_700_000_000, side: 'buy', activityKind: 'user_trade',
     tokenAmount: '10', quoteAmount: '1', quoteAsset: { address: '0x0', symbol: 'ETH' }, traderAddress: '0x1234567890123456789012345678901234567890',
@@ -17,6 +18,14 @@ function row(overrides: Partial<GlobalTransaction> = {}): GlobalTransaction {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('GlobalTransactionList', () => {
+  it('marks a swap from a non-official pool with "(pool)" and falls back to a short address for an unknown quote symbol', () => {
+    render(<GlobalTransactionList transactions={[row({ source: 'pool', venueId: null, activityKind: null,
+      pool: { protocol: 'uniswap_v4', poolId: '0xpool' }, quoteAsset: { address: '0x1234567890123456789012345678901234567890', symbol: null } })]} nextCursor={null} />);
+    const body = screen.getAllByRole('row')[1]!;
+    expect(within(body).getByText('(pool)')).toBeInTheDocument();
+    expect(within(body).getByText(/1 0x1234…7890/)).toBeInTheDocument();
+  });
+
   it('shows each trade with a link to its launch, the side, the amounts and a compact USD value', () => {
     render(<GlobalTransactionList transactions={[row()]} nextCursor={null} />);
     const body = screen.getAllByRole('row')[1]!;

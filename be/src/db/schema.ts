@@ -429,6 +429,8 @@ export const poolTrades = pgTable('pool_trades', {
     foreignColumns: [poolCatalog.chainId, poolCatalog.protocol, poolCatalog.poolId] }).onDelete('cascade'),
   index('pool_trades_pool_time_idx').on(table.chainId, table.protocol, table.poolId, table.timestamp),
   index('pool_trades_pool_block_idx').on(table.chainId, table.protocol, table.poolId, table.blockNumber),
+  // Serves the global latest-transactions feed (see trades_global_order_idx); same NULLS LAST requirement.
+  index('pool_trades_global_order_idx').on(table.blockNumber.desc(), table.txHash.desc(), table.logIndex.desc()),
 ]);
 
 export const poolSyncCursors = pgTable('pool_sync_cursors', {

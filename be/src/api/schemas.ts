@@ -93,12 +93,15 @@ export const transaction = { type: 'object', properties: {
 } } as const;
 
 export const globalTransaction = { type: 'object', properties: {
+  source: { type: 'string', enum: ['official', 'pool'] },
+  venueId: { type: 'string', nullable: true },
+  pool: { type: 'object', nullable: true, properties: { protocol: { type: 'string' }, poolId: { type: 'string' } } },
   token: { type: 'object', properties: {
     chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string', nullable: true },
     symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true },
   } },
-  venueId: { type: 'string' }, blockNumber: { type: 'string' }, txHash: { type: 'string' }, logIndex: { type: 'integer' },
-  timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string' },
+  blockNumber: { type: 'string' }, txHash: { type: 'string' }, logIndex: { type: 'integer' },
+  timestamp: { type: 'integer' }, side: { type: 'string' }, activityKind: { type: 'string', nullable: true },
   tokenAmount: { type: 'string', nullable: true }, quoteAmount: { type: 'string', nullable: true },
   quoteAsset: { type: 'object', properties: { address: { type: 'string' }, symbol: { type: 'string', nullable: true } } },
   traderAddress: { type: 'string' },

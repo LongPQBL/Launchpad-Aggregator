@@ -344,6 +344,13 @@
       "when": 1791560814740,
       "tag": "0048_outstanding_centennial",
       "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1791562198366,
+      "tag": "0049_tough_pestilence",
+      "breakpoints": true
     }
   ]
 }

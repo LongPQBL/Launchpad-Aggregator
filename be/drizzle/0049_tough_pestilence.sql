@@ -1,0 +1,1 @@
+CREATE INDEX "pool_trades_global_order_idx" ON "pool_trades" USING btree ("block_number" DESC NULLS LAST,"tx_hash" DESC NULLS LAST,"log_index" DESC NULLS LAST);

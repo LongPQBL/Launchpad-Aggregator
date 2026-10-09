@@ -618,34 +618,97 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     async listAllTransactions(query: ListQuery): Promise<Page<GlobalTransactionResponse>> {
       const cursor = query.cursor ? decodeCursor(query.cursor) : null;
-      // NULLS LAST is not cosmetic: trades_global_order_idx is declared DESC NULLS LAST, and Postgres
-      // only walks an index for an ORDER BY whose null ordering matches it (measured: 39s without, 0.3s with).
+      // Each branch applies the cursor and its own ORDER BY ... LIMIT before the UNION, so a branch only
+      // produces one page of rows. NULLS LAST is not cosmetic: trades_global_order_idx and
+      // pool_trades_global_order_idx are declared DESC NULLS LAST, and Postgres only walks an index for an
+      // ORDER BY whose null ordering matches it (measured on trades: 39s without, 0.3s with).
       const result = await pool.query(`
-        SELECT t.chain_id, t.token_address, t.venue_id, t.block_number, t.tx_hash, t.log_index, t.timestamp, t.side,
-          t.activity_kind, t.token_amount_raw, t.quote_amount_raw, t.trader_address,
-          l.name, l.symbol, l.logo_uri, l.token_decimals, l.quote_asset_decimals,
-          l.quote_asset_address AS launch_quote_asset_address, l.quote_asset_symbol
-        FROM trades t
-        JOIN venues v ON v.id = t.venue_id
-        JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
-        WHERE v.official = true AND ($1::integer IS NULL OR t.chain_id = $1)
-          AND ($2::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($2::bigint, $3::text, $4::integer))
-        ORDER BY t.block_number DESC NULLS LAST, t.tx_hash DESC NULLS LAST, t.log_index DESC NULLS LAST
+        WITH official_page AS (
+          SELECT 'official' AS source, t.chain_id, t.token_address, t.venue_id, NULL::text AS protocol, NULL::text AS pool_id,
+            NULL::text AS currency0, NULL::text AS currency1, t.tx_hash, t.log_index, t.block_number, t.timestamp,
+            t.side, t.activity_kind, t.token_amount_raw AS amount_a_raw, t.quote_amount_raw AS amount_b_raw, t.trader_address,
+            l.name, l.symbol, l.logo_uri, l.token_decimals,
+            l.quote_asset_address, l.quote_asset_decimals, l.quote_asset_symbol
+          FROM trades t
+          JOIN venues v ON v.id = t.venue_id
+          JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
+          WHERE v.official = true AND ($1::integer IS NULL OR t.chain_id = $1)
+            AND ($2::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($2::bigint, $3::text, $4::integer))
+          ORDER BY t.block_number DESC NULLS LAST, t.tx_hash DESC NULLS LAST, t.log_index DESC NULLS LAST
+          LIMIT $5
+        ),
+        -- Swaps of any verified pool that holds a launched token, except a pool that is itself an official
+        -- venue (those swaps are already official trades — never counted twice). A pool whose two sides are both
+        -- launches is attributed to the lexicographically first one so each swap appears once.
+        pool_page AS (
+          SELECT 'pool' AS source, pt.chain_id, lt.token_address, NULL::text AS venue_id, pt.protocol, pt.pool_id,
+            pc.currency0, pc.currency1, pt.tx_hash, pt.log_index, pt.block_number, pt.timestamp,
+            NULL::text AS side, NULL::text AS activity_kind, pt.amount0_raw AS amount_a_raw, pt.amount1_raw AS amount_b_raw, pt.trader_address,
+            l.name, l.symbol, l.logo_uri, l.token_decimals,
+            NULL::text AS quote_asset_address, NULL::integer AS quote_asset_decimals, NULL::text AS quote_asset_symbol
+          FROM pool_trades pt
+          JOIN pool_catalog pc ON pc.chain_id = pt.chain_id AND pc.protocol = pt.protocol AND pc.pool_id = pt.pool_id AND pc.verified = true
+          CROSS JOIN LATERAL (
+            SELECT m.token_address FROM pool_members m
+            JOIN launches ml ON ml.chain_id = m.chain_id AND ml.token_address = m.token_address
+            WHERE m.chain_id = pc.chain_id AND m.protocol = pc.protocol AND m.pool_id = pc.pool_id
+            ORDER BY m.token_address LIMIT 1
+          ) lt
+          JOIN launches l ON l.chain_id = pt.chain_id AND l.token_address = lt.token_address
+          WHERE ($1::integer IS NULL OR pt.chain_id = $1)
+            AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
+              AND ov.kind IN ('v4_pool','v3_pool') AND ov.ref = pc.pool_id AND ov.official = true)
+            AND ($2::bigint IS NULL OR (pt.block_number, pt.tx_hash, pt.log_index) < ($2::bigint, $3::text, $4::integer))
+          ORDER BY pt.block_number DESC NULLS LAST, pt.tx_hash DESC NULLS LAST, pt.log_index DESC NULLS LAST
+          LIMIT $5
+        )
+        SELECT * FROM (SELECT * FROM official_page UNION ALL SELECT * FROM pool_page) merged
+        ORDER BY block_number DESC NULLS LAST, tx_hash DESC NULLS LAST, log_index DESC NULLS LAST
         LIMIT $5`,
       [query.chainId ?? null, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1]);
       const rows = result.rows as Row[];
       const visible = rows.slice(0, query.limit);
-      const valuations = await Promise.all(visible.map((row) => valueTradeUsd(pool, number(row.chain_id), string(row.launch_quote_asset_address), {
-        timestamp: number(row.timestamp), quoteAmountRaw: BigInt(string(row.quote_amount_raw)),
-        quoteAssetDecimals: nullableNumber(row.quote_asset_decimals), blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index),
-      })));
-      // Same demand-driven backfill as listTrades, coalesced to one job per (chain, quote asset) on this page.
+
+      // A pool swap carries only raw amount0/amount1: resolve the counter (quote) asset's decimals once per
+      // distinct address on this page. The launch token's own decimals come from its launch row.
+      const ZERO = '0x0000000000000000000000000000000000000000';
+      const poolQuoteAddress = (row: Row): string => (string(row.currency0) === string(row.token_address) ? string(row.currency1) : string(row.currency0));
+      const distinctPoolQuotes = [...new Set(visible.filter((row) => row.source === 'pool').map(poolQuoteAddress))];
+      const decimalsByAddress = new Map<string, number | null>(
+        await Promise.all(distinctPoolQuotes.map(async (address) => [address, await assetDecimals(rpcClient, address)] as const)),
+      );
+
+      interface Interpreted { side: string; tokenAmountRaw: bigint; quoteAmountRaw: bigint; quoteAddress: string; quoteDecimals: number | null; quoteSymbol: string | null }
+      const interpreted: Interpreted[] = visible.map((row) => {
+        if (row.source === 'official') {
+          return { side: string(row.side), tokenAmountRaw: BigInt(string(row.amount_a_raw)), quoteAmountRaw: BigInt(string(row.amount_b_raw)),
+            quoteAddress: string(row.quote_asset_address), quoteDecimals: nullableNumber(row.quote_asset_decimals), quoteSymbol: nullableString(row.quote_asset_symbol) };
+        }
+        const launchIsCurrency0 = string(row.currency0) === string(row.token_address);
+        const tokenSigned = BigInt(string(launchIsCurrency0 ? row.amount_a_raw : row.amount_b_raw));
+        const quoteSigned = BigInt(string(launchIsCurrency0 ? row.amount_b_raw : row.amount_a_raw));
+        const quoteAddress = poolQuoteAddress(row);
+        // Same sign convention as the official V4 decoder: the trader's launch-token balance increasing means a buy.
+        return { side: tokenSigned > 0n ? 'buy' : 'sell', tokenAmountRaw: tokenSigned < 0n ? -tokenSigned : tokenSigned,
+          quoteAmountRaw: quoteSigned < 0n ? -quoteSigned : quoteSigned, quoteAddress,
+          quoteDecimals: decimalsByAddress.get(quoteAddress) ?? null, quoteSymbol: quoteAddress === ZERO ? 'ETH' : null };
+      });
+
+      const valuations = await Promise.all(visible.map((row, i) => {
+        const info = interpreted[i]!;
+        if (info.quoteDecimals === null) return Promise.resolve({ status: 'unavailable' as const });
+        return valueTradeUsd(pool, number(row.chain_id), info.quoteAddress, { timestamp: number(row.timestamp),
+          quoteAmountRaw: info.quoteAmountRaw, quoteAssetDecimals: info.quoteDecimals,
+          blockNumber: BigInt(string(row.block_number)), logIndex: number(row.log_index) });
+      }));
+      // Demand-driven backfill, coalesced to one job per (chain, quote asset) on this page.
       const pendingByQuote = new Map<string, { chainId: number; quoteAsset: string; timestamps: number[] }>();
       valuations.forEach((valuation, i) => {
         if (valuation.status !== 'pending') return;
         const row = visible[i]!;
-        const key = `${number(row.chain_id)}:${string(row.launch_quote_asset_address)}`;
-        const entry = pendingByQuote.get(key) ?? { chainId: number(row.chain_id), quoteAsset: string(row.launch_quote_asset_address), timestamps: [] };
+        const quoteAsset = interpreted[i]!.quoteAddress;
+        const key = `${number(row.chain_id)}:${quoteAsset}`;
+        const entry = pendingByQuote.get(key) ?? { chainId: number(row.chain_id), quoteAsset, timestamps: [] };
         entry.timestamps.push(number(row.timestamp));
         pendingByQuote.set(key, entry);
       });
@@ -653,19 +716,27 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         const feed = await resolveVerifiedFeed(pool, chainId, quoteAsset);
         if (feed) await enqueueRoundBackfillJob(pool, chainId, feed.feedAddress, Math.min(...timestamps) - 3600, Math.max(...timestamps) + 3600).catch(() => {});
       }));
-      return page(rows, query.limit, (row, i) => ({
-        token: { chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: nullableString(row.name),
-          symbol: nullableString(row.symbol), logoUri: nullableString(row.logo_uri) },
-        venueId: string(row.venue_id), blockNumber: string(row.block_number), txHash: string(row.tx_hash),
-        logIndex: number(row.log_index), timestamp: number(row.timestamp), side: string(row.side), activityKind: string(row.activity_kind),
-        tokenAmount: row.token_decimals === null ? null : formatUnits(BigInt(string(row.token_amount_raw)), number(row.token_decimals)),
-        quoteAmount: row.quote_asset_decimals === null ? null : formatUnits(BigInt(string(row.quote_amount_raw)), number(row.quote_asset_decimals)),
-        quoteAsset: { address: string(row.launch_quote_asset_address), symbol: nullableString(row.quote_asset_symbol) },
-        traderAddress: string(row.trader_address),
-        usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
-        usdValueApprox: valuations[i]!.status === 'priced',
-        usdValueStatus: valuations[i]!.status,
-      })) as Page<GlobalTransactionResponse>;
+
+      return page(rows, query.limit, (row, i) => {
+        const info = interpreted[i]!;
+        const tokenDecimals = nullableNumber(row.token_decimals);
+        return {
+          source: row.source as 'official' | 'pool',
+          token: { chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: nullableString(row.name),
+            symbol: nullableString(row.symbol), logoUri: nullableString(row.logo_uri) },
+          venueId: nullableString(row.venue_id),
+          pool: row.protocol ? { protocol: string(row.protocol) as 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2', poolId: string(row.pool_id) } : null,
+          blockNumber: string(row.block_number), txHash: string(row.tx_hash),
+          logIndex: number(row.log_index), timestamp: number(row.timestamp), side: info.side, activityKind: nullableString(row.activity_kind),
+          tokenAmount: tokenDecimals === null ? null : formatUnits(info.tokenAmountRaw, tokenDecimals),
+          quoteAmount: info.quoteDecimals === null ? null : formatUnits(info.quoteAmountRaw, info.quoteDecimals),
+          quoteAsset: { address: info.quoteAddress, symbol: info.quoteSymbol },
+          traderAddress: string(row.trader_address),
+          usdValue: valuations[i]!.status === 'priced' ? (valuations[i] as { status: 'priced'; usdValue: string }).usdValue : null,
+          usdValueApprox: valuations[i]!.status === 'priced',
+          usdValueStatus: valuations[i]!.status,
+        };
+      }) as Page<GlobalTransactionResponse>;
     },
     async listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }> {
       const head = await safeHead();

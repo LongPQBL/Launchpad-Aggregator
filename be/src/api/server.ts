@@ -60,9 +60,13 @@ export interface TransactionResponse {
 }
 // One row of the global latest-trades feed: an official venue trade plus the launch it belongs to.
 export interface GlobalTransactionResponse {
+  // 'pool' = a swap in a pool that holds this launched token (not an official venue); side is relative to the token.
+  source: 'official' | 'pool';
   token: { chainId: number; tokenAddress: string; name: string | null; symbol: string | null; logoUri: string | null };
-  venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number;
-  side: string; activityKind: string;
+  venueId: string | null;
+  pool: { protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string } | null;
+  blockNumber: string; txHash: string; logIndex: number; timestamp: number;
+  side: string; activityKind: string | null;
   tokenAmount: string | null; quoteAmount: string | null;
   quoteAsset: { address: string; symbol: string | null };
   traderAddress: string;

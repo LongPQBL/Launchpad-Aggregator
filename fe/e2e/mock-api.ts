@@ -216,6 +216,34 @@ const launchPools = Array.from({ length: 4 }, (_, index) => ({
   lastTradeTimestamp: 1_780_000_000 - (index + 1) * 300,
 }));
 
+const globalTransactions = {
+  items: Array.from({ length: 10 }, (_, index) => ({
+    source: index % 4 === 0 ? 'pool' : 'official',
+    venueId: index % 4 === 0 ? null : 'pons-v2-curve:0xtoken',
+    pool: index % 4 === 0 ? { protocol: 'uniswap_v4', poolId: `0x${'1'.padStart(64, '0')}` } : null,
+    token: { chainId: CHAIN_ID, tokenAddress: TOKEN_ADDRESS, name: 'E2E Launch', symbol: 'E2E', logoUri: null },
+    blockNumber: String(900 - index), txHash: `0x${(index + 500).toString(16).padStart(64, '0')}`, logIndex: index,
+    timestamp: 1_780_000_000 - index * 120, side: index % 2 === 0 ? 'buy' : 'sell', activityKind: index % 4 === 0 ? null : 'user_trade',
+    tokenAmount: String(12_345_678 + index), quoteAmount: (0.5 + index * 0.1).toFixed(4),
+    quoteAsset: { address: '0x0000000000000000000000000000000000000000', symbol: 'ETH' },
+    traderAddress: `0x${(index + 700).toString(16).padStart(40, '0')}`,
+    usdValue: (1500 + index * 10).toFixed(2), usdValueApprox: true, usdValueStatus: 'priced',
+  })),
+  nextCursor: null,
+};
+
+const DAY_SECONDS = 86_400;
+const poolHistory = {
+  items: Array.from({ length: 30 }, (_, index) => ({
+    day: Math.floor(1_780_000_000 / DAY_SECONDS) * DAY_SECONDS - (29 - index) * DAY_SECONDS,
+    tradeCount: index % 5 === 0 ? 0 : 3 + index,
+    // Day 7 is deliberately unavailable (an unpriced swap) and every fifth day is a real zero.
+    volumeUsd: index === 7 ? null : index % 5 === 0 ? '0' : String(1000 + index * 350),
+    tvlUsd: index >= 22 ? String(40_000 + index * 100) : null,
+  })),
+  complete: true,
+};
+
 export function startMockApi(port: number): Server {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -266,6 +294,19 @@ export function startMockApi(port: number): Server {
         nextCursor: secondPage ? null : 'mock-pools-page-2',
         supportedProtocols: ['uniswap_v4'],
       }));
+    } else if (url.pathname === '/v1/transactions') {
+      res.end(JSON.stringify(globalTransactions));
+    } else if (url.pathname === '/v1/search') {
+      const query = (url.searchParams.get('q') ?? '').toLowerCase();
+      const tokens = mockLaunches.filter((launch) => launch.name.toLowerCase().includes(query) || launch.symbol.toLowerCase().includes(query))
+        .slice(0, 5).map((launch) => ({ chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name,
+          symbol: launch.symbol, logoUri: null, platform: launch.platform }));
+      const pools = tokens.length === 0 ? [] : [{ chainId: CHAIN_ID, protocol: 'uniswap_v4', poolId: mockPools[0].poolId, fee: 3000,
+        currency0: mockPools[0].currency0, currency1: mockPools[0].currency1,
+        launchToken: { address: tokens[0].tokenAddress, name: tokens[0].name, symbol: tokens[0].symbol, logoUri: null } }];
+      res.end(JSON.stringify({ tokens, pools }));
+    } else if (/^\/v1\/wallets\/0x[0-9a-fA-F]{40}\/positions$/.test(url.pathname)) {
+      res.end(JSON.stringify({ items: [] }));
     } else if (url.pathname === '/v1/sources') {
       res.end(JSON.stringify({ items: [{ id: 'pons-v2', chainId: CHAIN_ID, platform: 'pons', protocolVersion: 'v2' }] }));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`) {
@@ -291,6 +332,8 @@ export function startMockApi(port: number): Server {
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(url.pathname)) {
       const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? 3600);
       res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote')));
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(url.pathname)) {
+      res.end(JSON.stringify(poolHistory));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
         txHash: `0x${(index + 900).toString(16).padStart(64, '0')}`,

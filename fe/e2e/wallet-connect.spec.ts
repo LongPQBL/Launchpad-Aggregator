@@ -36,13 +36,18 @@ test('connects an injected wallet and switches to Robinhood Chain', async ({ pag
       },
     };
     Object.defineProperty(window, 'ethereum', { configurable: true, value: provider });
+    // The wallet dialog lists MetaMask/Phantom and enables a row only when a provider of that name is announced
+    // (EIP-6963), so announce this mock as MetaMask.
+    const info = { uuid: '00000000-0000-4000-8000-000000000001', name: 'MetaMask', icon: 'data:image/svg+xml;base64,PHN2Zy8+', rdns: 'io.metamask' };
+    const announce = () => window.dispatchEvent(new CustomEvent('eip6963:announceProvider', { detail: Object.freeze({ info, provider }) }));
+    window.addEventListener('eip6963:requestProvider', announce);
+    announce();
   });
 
   await page.goto('/');
   expect(await page.evaluate(() => window.localStorage.getItem('e2e-wallet-authorized'))).toBeNull();
-  await page.getByRole('button', { name: 'Connect wallet' }).click();
-  const walletChoices = page.getByRole('group', { name: 'Browser wallets' });
-  await walletChoices.getByRole('button').first().click();
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+  await page.getByRole('dialog', { name: 'Connect a wallet' }).getByRole('button', { name: /MetaMask/ }).click();
 
   await expect(page.getByText('0x1234…7890')).toBeVisible();
   await page.getByRole('button', { name: 'Switch to Robinhood Chain' }).click();
@@ -50,7 +55,7 @@ test('connects an injected wallet and switches to Robinhood Chain', async ({ pag
   await page.reload();
   await expect(page.getByText('0x1234…7890')).toBeVisible();
   await page.getByRole('button', { name: 'Disconnect' }).click();
-  await expect(page.getByRole('button', { name: 'Connect wallet' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Connect wallet' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
 });

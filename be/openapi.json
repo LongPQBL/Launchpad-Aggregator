@@ -188,6 +188,29 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "official",
+                              "pool"
+                            ]
+                          },
+                          "venueId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "pool": {
+                            "type": "object",
+                            "nullable": true,
+                            "properties": {
+                              "protocol": {
+                                "type": "string"
+                              },
+                              "poolId": {
+                                "type": "string"
+                              }
+                            }
+                          },
                           "token": {
                             "type": "object",
                             "properties": {
@@ -211,9 +234,6 @@
                               }
                             }
                           },
-                          "venueId": {
-                            "type": "string"
-                          },
                           "blockNumber": {
                             "type": "string"
                           },
@@ -230,7 +250,8 @@
                             "type": "string"
                           },
                           "activityKind": {
-                            "type": "string"
+                            "type": "string",
+                            "nullable": true
                           },
                           "tokenAmount": {
                             "type": "string",

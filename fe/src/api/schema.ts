@@ -136,6 +136,13 @@ export interface paths {
                     content: {
                         "application/json": {
                             items?: {
+                                /** @enum {string} */
+                                source?: "official" | "pool";
+                                venueId?: string | null;
+                                pool?: {
+                                    protocol?: string;
+                                    poolId?: string;
+                                } | null;
                                 token?: {
                                     chainId?: number;
                                     tokenAddress?: string;
@@ -143,13 +150,12 @@ export interface paths {
                                     symbol?: string | null;
                                     logoUri?: string | null;
                                 };
-                                venueId?: string;
                                 blockNumber?: string;
                                 txHash?: string;
                                 logIndex?: number;
                                 timestamp?: number;
                                 side?: string;
-                                activityKind?: string;
+                                activityKind?: string | null;
                                 tokenAmount?: string | null;
                                 quoteAmount?: string | null;
                                 quoteAsset?: {

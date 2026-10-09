@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { displaySymbol, formatAmount, formatSide } from '@/api/format';
+import { displaySymbol, formatActivityKind, formatAmount, formatSide } from '@/api/format';
 import { getAllTransactions, launchHref, type GlobalTransaction } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
@@ -112,11 +112,14 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
                   <span className="truncate">{displaySymbol(row.token.symbol)}</span>
                 </Link>
               </TableCell>
-              <TableCell className={cn('text-base font-semibold', row.side === 'buy' && 'text-success', row.side === 'sell' && 'text-destructive')}>
-                {formatSide(row.side)}
+              <TableCell className="text-base font-semibold">
+                <span className={cn(row.side === 'buy' && 'text-success', row.side === 'sell' && 'text-destructive')}>
+                  {(row.activityKind && formatActivityKind(row.activityKind)) || formatSide(row.side)}
+                </span>
+                {row.source === 'pool' && <span className="ml-1 text-xs text-muted-foreground">(pool)</span>}
               </TableCell>
               <TableCell className="text-right text-base font-semibold">{formatAmount(row.tokenAmount)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatAmount(row.quoteAmount)} {displaySymbol(row.quoteAsset.symbol)}</TableCell>
+              <TableCell className="text-right text-base font-semibold">{formatAmount(row.quoteAmount)} {row.quoteAsset.symbol ?? shortAddress(row.quoteAsset.address)}</TableCell>
               <TableCell className="text-right text-base font-semibold">
                 {row.usdValueStatus === 'pending' ? 'Calculating…' : row.usdValue === null ? '—' : `$${formatAmount(row.usdValue)}`}
               </TableCell>

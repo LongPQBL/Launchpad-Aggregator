@@ -12,14 +12,16 @@ test('shows launch identity, source, and official venues', async ({ page }) => {
   await expect(venueSection.getByText('Bonding curve')).toBeVisible();
 });
 
-test('shows the syncing coverage state honestly instead of hiding it', async ({ page }) => {
-  const badges = page.getByTestId('coverage-badge');
-  await expect(badges.first()).toBeVisible();
-  await expect(badges.first()).toHaveText('Backfilling');
+// The UI deliberately shows no badge while a source is still backfilling (CoverageBadge renders nothing for
+// it); what must never happen is a "Caught up" claim for a launch whose mock coverage is `backfilling`.
+test('never claims the launch is fully caught up while its coverage is still backfilling', async ({ page }) => {
+  await expect(page.getByRole('heading', { name: /E2E Launch/i })).toBeVisible();
+  await expect(page.getByText('Caught up')).toHaveCount(0);
 });
 
-test('shows the official trade history table', async ({ page }) => {
-  await expect(page.getByRole('table', { name: /official trades/i })).toBeVisible();
+test('shows the transactions table on the Transactions tab', async ({ page }) => {
+  await expect(page.getByRole('tab', { name: 'Transactions' })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('table', { name: 'Transactions' })).toBeVisible();
 });
 
 test('renders the official chart without crashing on the BE\'s real (newest-first) candle order', async ({ page }) => {
@@ -48,8 +50,8 @@ test('the trade panel never offers Limit or Buy/Sell tabs', async ({ page }) => 
 
 test('renders the unified swap panel with its venue badge and both amount inputs', async ({ page }) => {
   await expect(page.getByText('Bonding curve').first()).toBeVisible();
-  await expect(page.getByRole('spinbutton', { name: 'Sell amount' })).toBeVisible();
-  await expect(page.getByRole('spinbutton', { name: 'Buy amount' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Sell amount' })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Buy amount' })).toBeVisible();
 });
 
 test('shows and expands Show more for a long description at both mobile and desktop widths', async ({ page }) => {
