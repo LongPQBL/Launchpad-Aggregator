@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { displaySymbol, formatActivityKind, formatAmount, formatSide } from '@/api/format';
+import { chainExplorerBase } from '@/api/chains';
 import { getAllTransactions, launchHref, type GlobalTransaction } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
@@ -13,7 +14,6 @@ import { cn } from '@/lib/utils';
 export interface GlobalTransactionListProps {
   transactions: readonly GlobalTransaction[];
   nextCursor: string | null;
-  explorerBase?: string;
 }
 
 const SKELETON_WIDTHS = ['w-10', 'w-28', 'w-14', 'w-16', 'w-20', 'w-14', 'w-20', 'w-20'] as const;
@@ -40,7 +40,7 @@ function SkeletonRows({ count }: { count: number }) {
 
 // The newest official trades across every launch (Explore > Transactions). Same behaviours as a single
 // launch's transaction table: infinite scroll, merge-not-reset on a server refresh, skeleton rows while loading.
-export function GlobalTransactionList({ transactions, nextCursor: initialCursor, explorerBase }: GlobalTransactionListProps) {
+export function GlobalTransactionList({ transactions, nextCursor: initialCursor }: GlobalTransactionListProps) {
   const now = useNow();
   const [items, setItems] = useState(transactions);
   const [nextCursor, setNextCursor] = useState<string | null>(initialCursor);
@@ -101,7 +101,10 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
           </TableRow>
         </TableHeader>
         <TableBody>
-          {items.map((row) => (
+          {items.map((row) => {
+            // Each row links to its own chain's explorer, so the feed keeps working when a second chain is indexed.
+            const explorerBase = chainExplorerBase(row.token.chainId);
+            return (
             <TableRow key={rowKey(row)} className="border-0 hover:bg-transparent">
               <TableCell className="pl-4 text-base font-semibold" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
                 {formatRelativeTime(row.timestamp, now)}
@@ -134,7 +137,8 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
                   : shortAddress(row.txHash)}
               </TableCell>
             </TableRow>
-          ))}
+            );
+          })}
           {loadingMore && <SkeletonRows count={6} />}
         </TableBody>
       </Table>

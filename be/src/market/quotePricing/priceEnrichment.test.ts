@@ -16,7 +16,7 @@ describe('enrichPricesOnce', () => {
       { id: 'j1', jobType: 'feed_resolution', quoteAssetAddress: '0xquote', feedAddress: null, rangeStart: null, rangeEnd: null, attempts: 0, leaseId: 'l1' },
     ]);
     vi.mocked(feedDiscovery.discoverAndVerifyFeed).mockResolvedValue({ feedAddress: '0xfeed' as never, aggregatorAddress: '0xagg' as never });
-    const report = await enrichPricesOnce({} as never, {} as never, new Date(), vi.fn());
+    const report = await enrichPricesOnce({} as never, {} as never, 4663, new Date(), vi.fn());
     expect(feedRegistry.upsertQuoteFeed).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ verificationStatus: 'verified', feedAddress: '0xfeed' }));
     expect(priceJobStore.finishPriceJob).toHaveBeenCalledWith(expect.anything(), expect.anything(), { ok: true }, expect.anything());
     expect(report).toEqual({ claimed: 1, done: 1, pending: 0 });
@@ -28,7 +28,7 @@ describe('enrichPricesOnce', () => {
       { id: 'j1', jobType: 'feed_resolution', quoteAssetAddress: '0xquote', feedAddress: null, rangeStart: null, rangeEnd: null, attempts: 0, leaseId: 'l1' },
     ]);
     vi.mocked(feedDiscovery.discoverAndVerifyFeed).mockResolvedValue({ feedAddress: '0xfeed' as never, aggregatorAddress: '0xagg' as never });
-    await enrichPricesOnce({} as never, {} as never, now, vi.fn());
+    await enrichPricesOnce({} as never, {} as never, 4663, now, vi.fn());
     const nowSeconds = Math.floor(now.getTime() / 1000);
     expect(priceJobStore.enqueueRoundBackfillJob).toHaveBeenCalledWith(expect.anything(), 4663, '0xfeed', nowSeconds - 86_400, nowSeconds);
   });
@@ -38,7 +38,7 @@ describe('enrichPricesOnce', () => {
       { id: 'j2', jobType: 'feed_resolution', quoteAssetAddress: '0xquote2', feedAddress: null, rangeStart: null, rangeEnd: null, attempts: 0, leaseId: 'l2' },
     ]);
     vi.mocked(feedDiscovery.discoverAndVerifyFeed).mockResolvedValue(null);
-    const report = await enrichPricesOnce({} as never, {} as never, new Date(), vi.fn());
+    const report = await enrichPricesOnce({} as never, {} as never, 4663, new Date(), vi.fn());
     expect(feedRegistry.upsertQuoteFeed).not.toHaveBeenCalled();
     expect(priceJobStore.finishPriceJob).toHaveBeenCalledWith(expect.anything(), expect.anything(), { ok: false, errorKind: 'rejected', error: expect.any(String) }, expect.anything());
     expect(report).toEqual({ claimed: 1, done: 0, pending: 1 });
@@ -49,7 +49,7 @@ describe('enrichPricesOnce', () => {
       { id: 'j3', jobType: 'round_backfill', quoteAssetAddress: null, feedAddress: '0xagg', rangeStart: 1000, rangeEnd: 2000, attempts: 0, leaseId: 'l3' },
     ]);
     vi.mocked(roundBackfill.backfillRoundsForFeed).mockResolvedValue(5);
-    const report = await enrichPricesOnce({} as never, {} as never, new Date(), vi.fn());
+    const report = await enrichPricesOnce({} as never, {} as never, 4663, new Date(), vi.fn());
     expect(roundBackfill.backfillRoundsForFeed).toHaveBeenCalledWith(expect.anything(), expect.anything(), 4663, '0xagg', 1000, 2000);
     expect(report.done).toBe(1);
   });
@@ -59,7 +59,7 @@ describe('enrichPricesOnce', () => {
       { id: 'j4', jobType: 'round_backfill', quoteAssetAddress: null, feedAddress: '0xagg2', rangeStart: 1000, rangeEnd: 2000, attempts: 0, leaseId: 'l4' },
     ]);
     vi.mocked(roundBackfill.backfillRoundsForFeed).mockRejectedValue(new Error('RPC timeout'));
-    const report = await enrichPricesOnce({} as never, {} as never, new Date(), vi.fn());
+    const report = await enrichPricesOnce({} as never, {} as never, 4663, new Date(), vi.fn());
     expect(priceJobStore.finishPriceJob).toHaveBeenCalledWith(expect.anything(), expect.anything(), { ok: false, errorKind: 'transport', error: 'RPC timeout' }, expect.anything());
     expect(report.pending).toBe(1);
   });

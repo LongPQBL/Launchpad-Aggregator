@@ -9,7 +9,6 @@ import { displayName, displaySymbol, formatAmount, formatUsdCompact } from '@/ap
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
 import { erc20Abi } from '@/trading/erc20Abi';
-import { robinhoodChain } from '@/wallet/config';
 import { cn } from '@/lib/utils';
 
 const SKELETON_WIDTHS = ['w-32', 'w-16', 'w-14', 'w-16', 'w-12', 'w-24'] as const;
@@ -42,7 +41,7 @@ export function PortfolioView() {
     const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the request start for the loading skeleton; nothing else drives this transition
     setStatus('loading');
-    getWalletPositions(address, robinhoodChain.id, controller.signal)
+    getWalletPositions(address, controller.signal)
       .then((result) => { setLoaded({ address, items: result.items }); setStatus('idle'); })
       .catch(() => { if (!controller.signal.aborted) setStatus('error'); });
     return () => controller.abort();

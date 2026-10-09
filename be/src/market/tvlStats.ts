@@ -1,6 +1,7 @@
 import type { Address } from 'viem';
 import type { Pool } from 'pg';
 import { v2FactoryStateAbi } from '../launchpads/pons/v2/abi.js';
+import { isSupportedChain } from '../chains/registry.js';
 import { readUsdPrice, type UsdPriceClient } from './usdPricing.js';
 import { readVenueAmounts, type TvlReadClient, type VenueAmountInput, type VenueAmounts } from './tvlReserves.js';
 import { calculateTvlUsd } from './tvlValue.js';
@@ -26,10 +27,11 @@ export interface CurrentTvlInput {
 
 export async function readCurrentTvl(pool: Pool, client: UsdPriceClient & TvlReadClient, input: CurrentTvlInput,
   now: () => number = Date.now): Promise<TvlFields> {
-  if (input.chainId !== 4663 || !client.getBlockNumber) return { ...NULL_TVL, tvlUnavailableReason: 'chain_unavailable' };
+  const clientIsForOtherChain = client.chain !== undefined && client.chain.id !== input.chainId;
+  if (!isSupportedChain(input.chainId) || clientIsForOtherChain || !client.getBlockNumber) return { ...NULL_TVL, tvlUnavailableReason: 'chain_unavailable' };
   try {
     const [blockResult, quoteResult] = await Promise.allSettled([
-      client.getBlockNumber(), readUsdPrice(pool, client, input.quote, now),
+      client.getBlockNumber(), readUsdPrice(pool, client, input.chainId, input.quote, now),
     ]);
     if (blockResult.status === 'rejected') return { ...NULL_TVL, tvlUnavailableReason: 'chain_unavailable' };
     const blockNumber = blockResult.value;

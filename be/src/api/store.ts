@@ -66,19 +66,19 @@ const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: nu
 const CHAIN_READ_TTL_MS = 60_000;
 const usdPriceMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, Awaited<ReturnType<typeof readUsdPrice>>>>>>();
 const totalSupplyMemos = new WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, bigint | null>>>();
-function cachedUsdPrice(pool: Pool, client: UsdPriceClient, quoteAssetAddress: string) {
+function cachedUsdPrice(pool: Pool, client: UsdPriceClient, chainId: number, quoteAssetAddress: string) {
   let byClient = usdPriceMemos.get(pool);
   if (!byClient) { byClient = new WeakMap(); usdPriceMemos.set(pool, byClient); }
   let memo = byClient.get(client);
-  if (!memo) { memo = ttlMemo((quote: string) => readUsdPrice(pool, client, quote), CHAIN_READ_TTL_MS); byClient.set(client, memo); }
-  return memo(quoteAssetAddress);
+  if (!memo) { memo = ttlMemo((key: string) => { const [chain, quote] = key.split(':'); return readUsdPrice(pool, client, Number(chain), quote!); }, CHAIN_READ_TTL_MS); byClient.set(client, memo); }
+  return memo(`${chainId}:${quoteAssetAddress}`);
 }
 // The quote asset's own USD price for the launch detail. Unlike priceUsd it does not depend on the
 // launch's coverage. A feed or RPC failure must never fail the whole detail request.
-async function readQuotePriceUsd(pool: Pool, client: UsdPriceClient | undefined, quoteAssetAddress: string): Promise<string | null> {
+async function readQuotePriceUsd(pool: Pool, client: UsdPriceClient | undefined, chainId: number, quoteAssetAddress: string): Promise<string | null> {
   if (!client) return null;
   try {
-    const price = await cachedUsdPrice(pool, client, quoteAssetAddress);
+    const price = await cachedUsdPrice(pool, client, chainId, quoteAssetAddress);
     return price ? String(price.priceUsd) : null;
   } catch {
     return null;
@@ -141,7 +141,7 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
   if (!rpcClient || !complete) return { ...NULL_STATS, ...(await tvlPromise) };
   try {
     const [usdPrice, totalSupply, priceResult] = await Promise.all([
-      cachedUsdPrice(pool, rpcClient, string(row.quote_asset_address)),
+      cachedUsdPrice(pool, rpcClient, number(row.chain_id), string(row.quote_asset_address)),
       cachedTotalSupply(rpcClient, string(row.token_address)),
       pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
@@ -407,7 +407,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const row = result.rows[0] as Row | undefined;
       if (!row) return null;
       const complete = Boolean(row.launch_coverage_complete);
-      const quotePriceUsdPromise = readQuotePriceUsd(pool, rpcClient, string(row.quote_asset_address));
+      const quotePriceUsdPromise = readQuotePriceUsd(pool, rpcClient, chainId, string(row.quote_asset_address));
       const venueRows = await pool.query(`SELECT id, kind, ref, effective_from_block, effective_to_block FROM venues
         WHERE chain_id = $1 AND token_address = $2 AND official = true ORDER BY effective_from_block`, [chainId, tokenAddress.toLowerCase()]);
       const lastPrice = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, v.kind AS venue_kind FROM trades t

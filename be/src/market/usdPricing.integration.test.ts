@@ -50,7 +50,7 @@ describe('readUsdPrice', () => {
       if (functionName === 'latestRoundData') return [1n, 99992674n, 1n, 1_790_782_723n, 1n];
       throw new Error(`unexpected ${functionName}`);
     });
-    const result = await readUsdPrice(pool, { readContract }, USDG_ADDRESS, () => 1_790_859_457_000);
+    const result = await readUsdPrice(pool, { readContract }, 4663, USDG_ADDRESS, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 0.99992674, updatedAt: 1_790_782_723, source: 'chainlink' });
     expect(readContract).toHaveBeenCalledTimes(2);
   });
@@ -62,7 +62,7 @@ describe('readUsdPrice', () => {
       if (functionName === 'latestRoundData') return [1n, 180_00000000n, 1n, 1_790_859_457n, 1n];
       throw new Error(`unexpected ${functionName}`);
     });
-    expect(await readUsdPrice(pool, { readContract }, NVDA_ADDRESS, () => 1_790_859_457_000))
+    expect(await readUsdPrice(pool, { readContract }, 4663, NVDA_ADDRESS, () => 1_790_859_457_000))
       .toEqual({ priceUsd: 180, updatedAt: 1_790_859_457, source: 'chainlink' });
   });
 
@@ -75,14 +75,14 @@ describe('readUsdPrice', () => {
       if (functionName === 'latestRoundData') return [1n, 99992674n, 1n, 1_790_782_723n, 1n];
       throw new Error(`unexpected ${functionName}`);
     });
-    const result = await readUsdPrice(pool, { readContract }, freshQuote, () => 1_790_859_457_000);
+    const result = await readUsdPrice(pool, { readContract }, 4663, freshQuote, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 0.99992674, updatedAt: 1_790_782_723, source: 'chainlink' });
   });
 
   it('returns null without calling the RPC for a quote asset address with no verified feed row', async () => {
     const readContract = vi.fn();
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(pool, client, UNSEEDED_ADDRESS, Date.now);
+    const result = await readUsdPrice(pool, client, 4663, UNSEEDED_ADDRESS, Date.now);
     expect(result).toBeNull();
     expect(readContract).not.toHaveBeenCalled();
   });
@@ -94,7 +94,7 @@ describe('readUsdPrice', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(pool, client, WETH_ADDRESS.toUpperCase(), () => 1_790_859_457_000);
+    const result = await readUsdPrice(pool, client, 4663, WETH_ADDRESS.toUpperCase(), () => 1_790_859_457_000);
     expect(result).not.toBeNull();
   });
 });
@@ -114,7 +114,7 @@ describe('readUsdPrice — known feed', () => {
     // Frozen clock matching the fixture's updatedAt — using the real wall clock here would make
     // this test fail every day further past 1790859457 + 24h, since the code correctly rejects a
     // stale feed answer (final-review Important 4).
-    const result = await readUsdPrice(pool, client, ETH_ADDRESS, () => 1_790_859_457_000);
+    const result = await readUsdPrice(pool, client, 4663, ETH_ADDRESS, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
@@ -125,7 +125,7 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const result = await readUsdPrice(pool, client, WETH_ADDRESS, () => 1_790_859_457_000);
+    const result = await readUsdPrice(pool, client, 4663, WETH_ADDRESS, () => 1_790_859_457_000);
     expect(result).toEqual({ priceUsd: 2691.70223591, updatedAt: 1790859457, source: 'chainlink' });
   });
 
@@ -140,10 +140,10 @@ describe('readUsdPrice — known feed', () => {
     const client: UsdPriceClient = { readContract };
     let fakeNow = 1_000_000;
     const now = () => fakeNow;
-    await readUsdPrice(pool, client, ETH_ADDRESS, now);
+    await readUsdPrice(pool, client, 4663, ETH_ADDRESS, now);
     const callsAfterFirst = calls;
     fakeNow += 59_000;
-    const second = await readUsdPrice(pool, client, ETH_ADDRESS, now);
+    const second = await readUsdPrice(pool, client, 4663, ETH_ADDRESS, now);
     expect(calls).toBe(callsAfterFirst); // no new RPC call
     expect(second).toEqual({ priceUsd: 3000, updatedAt: 1000, source: 'chainlink' });
   });
@@ -157,9 +157,9 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    const first = await readUsdPrice(pool, client, ETH_ADDRESS, now);
+    const first = await readUsdPrice(pool, client, 4663, ETH_ADDRESS, now);
     fakeNow += 61_000;
-    const second = await readUsdPrice(pool, client, ETH_ADDRESS, now);
+    const second = await readUsdPrice(pool, client, 4663, ETH_ADDRESS, now);
     expect(first!.priceUsd).toBe(1000);
     expect(second!.priceUsd).toBe(2000);
   });
@@ -174,7 +174,7 @@ describe('readUsdPrice — known feed', () => {
     });
     const client: UsdPriceClient = { readContract };
     const frozenNow = () => 1_790_859_457_000;
-    const [a, b] = await Promise.all([readUsdPrice(pool, client, ETH_ADDRESS, frozenNow), readUsdPrice(pool, client, ETH_ADDRESS, frozenNow)]);
+    const [a, b] = await Promise.all([readUsdPrice(pool, client, 4663, ETH_ADDRESS, frozenNow), readUsdPrice(pool, client, 4663, ETH_ADDRESS, frozenNow)]);
     expect(a).toEqual(b);
     expect(calls).toBe(2); // one decimals() + one latestRoundData() call, not four
   });
@@ -186,7 +186,7 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    await expect(readUsdPrice(pool, client, ETH_ADDRESS)).rejects.toThrow(/invalid/i);
+    await expect(readUsdPrice(pool, client, 4663, ETH_ADDRESS)).rejects.toThrow(/invalid/i);
   });
 
   it('rejects an answer older than 24 hours instead of silently serving a stale price (final-review Important 4)', async () => {
@@ -198,7 +198,7 @@ describe('readUsdPrice — known feed', () => {
       throw new Error(`unexpected ${functionName}`);
     });
     const client: UsdPriceClient = { readContract };
-    await expect(readUsdPrice(pool, client, ETH_ADDRESS, () => nowSeconds * 1000)).rejects.toThrow(/stale/i);
+    await expect(readUsdPrice(pool, client, 4663, ETH_ADDRESS, () => nowSeconds * 1000)).rejects.toThrow(/stale/i);
   });
 
   it('rejects a price too large to represent as a finite number', async () => {
@@ -207,7 +207,7 @@ describe('readUsdPrice — known feed', () => {
       if (functionName === 'latestRoundData') return roundData(10n ** 400n, 1_790_859_457);
       throw new Error(`unexpected ${functionName}`);
     });
-    await expect(readUsdPrice(pool, { readContract }, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/invalid/i);
+    await expect(readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/invalid/i);
   });
 
   it('rejects a feed timestamp more than five minutes in the future', async () => {
@@ -216,6 +216,46 @@ describe('readUsdPrice — known feed', () => {
       if (functionName === 'latestRoundData') return roundData(269170223591n, 1_790_859_457 + 3600);
       throw new Error(`unexpected ${functionName}`);
     });
-    await expect(readUsdPrice(pool, { readContract }, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/future/i);
+    await expect(readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => 1_790_859_457_000)).rejects.toThrow(/future/i);
   });
 });
+
+describe('readUsdPrice — resilience and chain isolation', () => {
+  const NOW_MS = 1_790_859_457_000;
+  const round = [1n, 300000000000n, 1790859457n, 1790859457n, 1n];
+
+  it('reads a feed\'s decimals once, not with every price refresh', async () => {
+    const calls: string[] = [];
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      calls.push(functionName);
+      return functionName === 'decimals' ? 8 : round;
+    });
+    await readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS);
+    await readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS + 61_000);
+    expect(calls.filter((name) => name === 'decimals')).toHaveLength(1);
+    expect(calls.filter((name) => name === 'latestRoundData')).toHaveLength(2);
+  });
+
+  it('remembers a failing feed briefly instead of repeating the failing RPC on every request, then retries', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'decimals') return 8;
+      throw new Error('rpc down');
+    });
+    await expect(readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS)).rejects.toThrow('rpc down');
+    const callsAfterFirst = readContract.mock.calls.length;
+    await expect(readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS + 5_000)).rejects.toThrow('rpc down');
+    expect(readContract.mock.calls.length).toBe(callsAfterFirst);
+
+    await expect(readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS + 16_000)).rejects.toThrow('rpc down');
+    expect(readContract.mock.calls.length).toBeGreaterThan(callsAfterFirst);
+  });
+
+  it('does not reuse one chain\'s feed or cached price for the same address on another chain', async () => {
+    const readContract = vi.fn(async ({ functionName }: { functionName: string }) => (functionName === 'decimals' ? 8 : round));
+    expect(await readUsdPrice(pool, { readContract }, 4663, ETH_ADDRESS, () => NOW_MS)).not.toBeNull();
+    // Chain 999999 has no verified feed for this address, so there is nothing to price it with — and the
+    // 4663 cache entry must not answer for it.
+    expect(await readUsdPrice(pool, { readContract }, 999_999, ETH_ADDRESS, () => NOW_MS)).toBeNull();
+  });
+});
+

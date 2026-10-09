@@ -24,7 +24,9 @@ export async function enqueueRoundBackfillJob(pool: Pool, chainId: number, feedA
   );
 }
 
-export async function claimDuePriceJobs(pool: Pool, now: Date, limit: number, leaseMs: number): Promise<PriceJob[]> {
+// `chainId` scopes the claim to jobs for one chain: a worker holds one chain's RPC client, so it must never lease
+// (and then fail or mis-answer) another chain's jobs.
+export async function claimDuePriceJobs(pool: Pool, now: Date, limit: number, leaseMs: number, chainId?: number): Promise<PriceJob[]> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -32,8 +34,9 @@ export async function claimDuePriceJobs(pool: Pool, now: Date, limit: number, le
       `SELECT id, job_type, quote_asset_address, feed_address, range_start, range_end, attempts FROM price_jobs
        WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= $1)
          AND (lease_until IS NULL OR lease_until <= $1)
+         AND ($3::integer IS NULL OR chain_id = $3)
        ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED`,
-      [now, limit],
+      [now, limit, chainId ?? null],
     );
     const claims: PriceJob[] = [];
     for (const row of due.rows as Record<string, unknown>[]) {

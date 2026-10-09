@@ -8,7 +8,7 @@ const client = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https
 
 for (let round = 0; round < 200; round++) {
   await maintainRollingWindows(pool, 4663, new Date()).catch((error) => console.error('rolling windows failed:', error));
-  const report = await enrichPricesOnce(pool, client, new Date(), quoteFeedRegistry.resolve).catch((error) => {
+  const report = await enrichPricesOnce(pool, client, 4663, new Date(), quoteFeedRegistry.resolve).catch((error) => {
     console.error('price enrichment failed:', error);
     return null;
   });

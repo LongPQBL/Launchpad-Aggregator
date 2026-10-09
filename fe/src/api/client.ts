@@ -244,6 +244,7 @@ export type WalletPosition = Required<Omit<RawWalletPosition, 'token' | 'quoteAs
   quoteAsset: Required<NonNullable<RawWalletPosition['quoteAsset']>>;
 };
 export interface WalletPositions { items: readonly WalletPosition[] }
-export async function getWalletPositions(address: string, chainId: number, signal?: AbortSignal): Promise<WalletPositions> {
+// Without a chainId the positions on every indexed chain are returned.
+export async function getWalletPositions(address: string, signal?: AbortSignal, chainId?: number): Promise<WalletPositions> {
   return request<WalletPositions>(`/v1/wallets/${encodeURIComponent(address)}/positions`, { chainId }, signal);
 }

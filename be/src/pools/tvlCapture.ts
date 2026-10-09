@@ -36,7 +36,7 @@ async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, n
   const quoteIsCurrency0 = quoteAddress === row.currency0;
   const [decimals0, decimals1] = await Promise.all([assetDecimals(client, row.currency0), assetDecimals(client, row.currency1)]);
   if (decimals0 === null || decimals1 === null) return false;
-  const quoteUsd = await readUsdPrice(pool, client, quoteAddress, () => nowSeconds * 1000);
+  const quoteUsd = await readUsdPrice(pool, client, row.chain_id, quoteAddress, () => nowSeconds * 1000);
   if (!quoteUsd) return false;
   const lens = await readLensSnapshot(client, row);
   if (!lens) return false;

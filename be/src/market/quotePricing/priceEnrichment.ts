@@ -5,25 +5,23 @@ import { discoverAndVerifyFeed, type DiscoveryClient } from './feedDiscovery.js'
 import { upsertQuoteFeed } from './feedRegistry.js';
 import { backfillRoundsForFeed, type BackfillRpcClient } from './roundBackfill.js';
 
-const CHAIN_ID = 4663;
-
 export async function enrichPricesOnce(
-  pool: Pool, client: DiscoveryClient & BackfillRpcClient, now: Date,
+  pool: Pool, client: DiscoveryClient & BackfillRpcClient, chainId: number, now: Date,
   lookupBySymbol: (address: string) => Promise<Address | null>, limit = 10,
 ): Promise<{ claimed: number; done: number; pending: number }> {
-  const claims = await claimDuePriceJobs(pool, now, limit, 300_000);
+  const claims = await claimDuePriceJobs(pool, now, limit, 300_000, chainId);
   let done = 0;
   let pending = 0;
   for (const job of claims) {
     if (job.jobType === 'feed_resolution') {
       const result = await discoverAndVerifyFeed(client, lookupBySymbol, job.quoteAssetAddress as Address);
       if (result) {
-        await upsertQuoteFeed(pool, { chainId: CHAIN_ID, quoteAssetAddress: job.quoteAssetAddress as Address,
+        await upsertQuoteFeed(pool, { chainId, quoteAssetAddress: job.quoteAssetAddress as Address,
           feedAddress: result.feedAddress, aggregatorAddress: result.aggregatorAddress, discoverySource: 'directory', verificationStatus: 'verified', now });
         // Don't make a caller wait for the next rolling-window tick (maintainRollingWindows) —
         // a newly verified feed gets its last-24h history backfilled immediately.
         const nowSeconds = Math.floor(now.getTime() / 1000);
-        await enqueueRoundBackfillJob(pool, CHAIN_ID, result.feedAddress, nowSeconds - 86_400, nowSeconds);
+        await enqueueRoundBackfillJob(pool, chainId, result.feedAddress, nowSeconds - 86_400, nowSeconds);
         await finishPriceJob(pool, job, { ok: true }, now);
         done++;
       } else {
@@ -37,7 +35,7 @@ export async function enrichPricesOnce(
       }
     } else {
       try {
-        await backfillRoundsForFeed(client, pool, CHAIN_ID, job.feedAddress as Address, job.rangeStart!, job.rangeEnd!);
+        await backfillRoundsForFeed(client, pool, chainId, job.feedAddress as Address, job.rangeStart!, job.rangeEnd!);
         await finishPriceJob(pool, job, { ok: true }, now);
         done++;
       } catch (error) {

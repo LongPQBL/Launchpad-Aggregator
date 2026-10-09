@@ -175,7 +175,7 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     displayedIsCurrency0) : null;
   const quoteFeed = await resolveVerifiedFeed(pool, key.chainId, quoteAddress);
   const currentQuoteUsd = options.rpcClient && quoteFeed
-    ? await readUsdPrice(pool, options.rpcClient, quoteAddress, () => asOf * 1000).catch(() => null) : null;
+    ? await readUsdPrice(pool, options.rpcClient, key.chainId, quoteAddress, () => asOf * 1000).catch(() => null) : null;
   const priceUsd = priceInQuote !== null && currentQuoteUsd
     ? (Number(priceInQuote) * currentQuoteUsd.priceUsd).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 })
     : null;
