@@ -11,16 +11,16 @@ import { TokenLogo } from '@/features/launches/token-logo';
 import { erc20Abi } from '@/trading/erc20Abi';
 import { cn } from '@/lib/utils';
 
-const SKELETON_WIDTHS = ['w-32', 'w-16', 'w-14', 'w-16', 'w-12', 'w-24'] as const;
+const SKELETON_CELLS = [0, 1, 2, 3, 4, 5] as const;
 
 interface Row { position: WalletPosition; balance: string | null; valueUsd: number | null }
 
 function SkeletonRows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <TableRow key={index} aria-hidden="true" data-testid="portfolio-skeleton-row" className="h-[52px] border-0 hover:bg-transparent">
-      {SKELETON_WIDTHS.map((width, cell) => (
-        <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell > 0 && 'text-right')}>
-          <span className={cn('block h-4 animate-pulse rounded bg-muted', cell > 0 && 'ml-auto', width)} />
+      {SKELETON_CELLS.map((cell) => (
+        <TableCell key={cell} className={cn(cell === 0 && 'pl-4')}>
+          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </TableCell>
       ))}
     </TableRow>

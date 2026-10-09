@@ -9,6 +9,7 @@ import { PageHeading } from '@/components/page-heading';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
+import { poolColumnWidth, type PoolColumnId } from './pool-columns';
 import { formatPoolUsd, formatVolumeToTvl, poolAge, short, volumeToTvl } from './pool-format';
 
 function side(address: string): string { return address.toLowerCase(); }
@@ -19,12 +20,12 @@ export type PrimaryLaunchVenue =
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
 
 type PoolSort = 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
-const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; width: string }[] = [
-  { label: 'TVL', sort: 'tvlUsd', defaultDirection: 'desc', width: 'md:w-[14%]' },
-  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', width: 'md:w-[16%]' },
-  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', width: 'md:w-[15%]' },
-  { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', width: 'md:w-[12%]' },
-  { label: 'Age', sort: 'age', defaultDirection: 'asc', width: 'md:w-[9%]' },
+const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; column: PoolColumnId }[] = [
+  { label: 'TVL', sort: 'tvlUsd', defaultDirection: 'desc', column: 'tvl' },
+  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', column: 'volume24h' },
+  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', column: 'volume30d' },
+  { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', column: 'volumeToTvl' },
+  { label: 'Age', sort: 'age', defaultDirection: 'asc', column: 'age' },
 ];
 
 function poolSortValue(pool: PoolSummary, sort: PoolSort): number | null {
@@ -53,21 +54,23 @@ function pairLabel(pool: PoolSummary, displayedToken?: PoolListDisplayedToken): 
   return `${label(pool.currency0, pool.currency0Symbol)} / ${label(pool.currency1, pool.currency1Symbol)}`;
 }
 // Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
-const POOL_SKELETON_NUMERIC_WIDTHS = ['w-14', 'w-16', 'w-16', 'w-10', 'w-8'] as const;
+// Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout, each bar
+// spanning its column.
+const POOL_SKELETON_NUMERIC_CELLS = 5;
 
 function PoolRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
-    <div key={index} role="row" aria-hidden="true" data-testid="pool-skeleton-row" className="rounded-lg p-3 md:table-row md:rounded-none md:p-0">
-      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
+    <div key={index} role="row" aria-hidden="true" data-testid="pool-skeleton-row" className="rounded-lg p-3 md:table-row md:h-[60px] md:rounded-none md:p-0">
+      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-full animate-pulse rounded bg-muted" /></div>
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle">
         <span className="flex items-center gap-3">
           <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
-          <span className="grid gap-1.5"><span className="h-3 w-28 animate-pulse rounded bg-muted" /><span className="h-2.5 w-16 animate-pulse rounded bg-muted" /></span>
+          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </span>
       </div>
-      {POOL_SKELETON_NUMERIC_WIDTHS.map((width, cell) => (
+      {Array.from({ length: POOL_SKELETON_NUMERIC_CELLS }, (_, cell) => (
         <div key={cell} role="cell" className="md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
-          <span className={cn('ml-auto block h-4 animate-pulse rounded bg-muted', width)} />
+          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </div>
       ))}
     </div>
@@ -179,12 +182,12 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
         <div role="row" className="md:table-row md:h-12 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-12 md:w-[5%] md:px-4 md:align-middle md:text-sm md:font-medium">#</div>
-          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-12 md:w-[29%] md:px-4 md:align-middle md:text-sm md:font-medium">Pool</div>
-          {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, width }) => {
+          <div role="columnheader" style={{ width: poolColumnWidth('index') }} className="text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium">#</div>
+          <div role="columnheader" style={{ width: poolColumnWidth('pool') }} className="text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium">Pool</div>
+          {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, column }) => {
             const active = sortBy === sort;
-            return <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-              className={cn('text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium md:text-right', width, active && 'text-foreground dark:text-white')}>
+            return <div key={sort} role="columnheader" style={{ width: poolColumnWidth(column) }} aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
+              className={cn('text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium md:text-right', active && 'text-foreground dark:text-white')}>
               <button type="button" className={cn('inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
                 onClick={() => {
                   const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection;

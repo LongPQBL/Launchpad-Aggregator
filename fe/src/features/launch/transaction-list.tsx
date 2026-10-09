@@ -23,14 +23,14 @@ export interface TransactionListProps {
 }
 
 // Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
-const SKELETON_CELL_WIDTHS = ['w-10', 'w-14', 'w-16', 'w-24', 'w-12', 'w-20', 'w-20'] as const;
+const SKELETON_CELL_COUNT = [0, 1, 2, 3, 4, 5, 6] as const;
 
 function TransactionRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <TableRow key={index} aria-hidden="true" data-testid="transaction-skeleton-row" className="h-[52px] border-0 hover:bg-transparent">
-      {SKELETON_CELL_WIDTHS.map((width, cell) => (
-        <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell > 1 && 'text-right')}>
-          <span className={cn('block h-4 animate-pulse rounded bg-muted', cell > 1 && 'ml-auto', width)} />
+      {SKELETON_CELL_COUNT.map((cell) => (
+        <TableCell key={cell} className={cn(cell === 0 && 'pl-4')}>
+          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </TableCell>
       ))}
     </TableRow>

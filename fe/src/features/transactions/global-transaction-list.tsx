@@ -11,6 +11,7 @@ import { ChainFilter } from '@/components/chain-filter';
 import { PageHeading } from '@/components/page-heading';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { TokenLogo } from '@/features/launches/token-logo';
+import { TRANSACTION_COLUMNS, transactionColumnWidth } from '@/features/transactions/transaction-columns';
 import { TypeFilter } from '@/features/transactions/type-filter';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
@@ -31,7 +32,6 @@ export interface GlobalTransactionListProps {
 type TransactionType = 'swap';
 const TYPE_OPTIONS: readonly { value: TransactionType; label: string }[] = [{ value: 'swap', label: 'Swap' }];
 
-const SKELETON_WIDTHS = ['w-8', 'w-48', 'w-14', 'w-20', 'w-20', 'w-24', 'w-20'] as const;
 
 function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
@@ -54,9 +54,9 @@ function rowKey(row: GlobalTransaction): string {
 function SkeletonRows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <TableRow key={index} aria-hidden="true" data-testid="global-transaction-skeleton-row" className="h-[60px] border-0 hover:bg-transparent">
-      {SKELETON_WIDTHS.map((width, cell) => (
-        <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell > 1 && 'text-right')}>
-          <span className={cn('block h-4 animate-pulse rounded bg-muted', cell > 1 && 'ml-auto', width)} />
+      {TRANSACTION_COLUMNS.map((_, cell) => (
+        <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell === TRANSACTION_COLUMNS.length - 1 && 'pr-4')}>
+          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
         </TableCell>
       ))}
     </TableRow>
@@ -160,13 +160,13 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
       <Table aria-label="Latest transactions" className="table-fixed border-separate border-spacing-0">
         <TableHeader className="border-b-0 [&_tr]:!border-0">
           <TableRow className="h-12 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
-            <TableHead className="w-[7%] pl-4">Time</TableHead>
-            <TableHead className="w-[31%]"><TypeFilter options={TYPE_OPTIONS} selected={typeFilter} onChange={setTypeFilter} /></TableHead>
-            <TableHead className="w-[10%] text-right">USD</TableHead>
-            <TableHead className="w-[14%] text-right">Token amount</TableHead>
-            <TableHead className="w-[14%] text-right">Token amount</TableHead>
-            <TableHead className="w-[12%] text-right">Wallet</TableHead>
-            <TableHead className="w-[12%] pr-4 text-right">Explorer</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(0) }} className="pl-4">Time</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(1) }}><TypeFilter options={TYPE_OPTIONS} selected={typeFilter} onChange={setTypeFilter} /></TableHead>
+            <TableHead style={{ width: transactionColumnWidth(2) }} className="text-right">USD</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(3) }} className="text-right">Token amount</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(4) }} className="text-right">Token amount</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(5) }} className="text-right">Wallet</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(6) }} className="pr-4 text-right">Explorer</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
