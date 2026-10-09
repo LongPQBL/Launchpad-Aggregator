@@ -110,7 +110,6 @@ export function PoolDetail({ pool, trades, candles, history = null }: { pool: Po
           poolAddress={pool.poolId as `0x${string}`}
           fee={pool.fee}
           tvlUsd={pool.tvlUsd}
-          fdvUsd={pool.fdvUsd}
           volume24hUsd={pool.volume24hUsd}
           volume24hChange={pool.volume24hChange}
           tvlChange={pool.tvlChange}

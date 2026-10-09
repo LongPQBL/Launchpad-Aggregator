@@ -118,7 +118,9 @@ describe('Pools UI', () => {
     render(<PoolDetail pool={pool} trades={{ items: [], nextCursor: null }} candles={null} />);
     const flipLink = screen.getByRole('link', { name: 'Flip token order' });
     expect(flipLink).toHaveAttribute('href', expect.stringContaining(`displayedToken=${b}`));
-    expect(within(screen.getByText('FDV').parentElement!).getByText('—')).toBeInTheDocument();
+    expect(within(screen.getByText('TVL').parentElement!).getByText('—')).toBeInTheDocument();
+    // FDV is a property of the token, not of the pool, so the pool page does not show it.
+    expect(screen.queryByText('FDV')).not.toBeInTheDocument();
     expect(screen.queryByText('backfilling')).not.toBeInTheDocument();
     expect(screen.queryByText(/APR/i)).not.toBeInTheDocument();
   });
