@@ -209,7 +209,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
             <span className="flex items-center gap-3">
               <PoolLogo size="small" token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
-              <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Pons designated'}</span></span>
+              <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Official Pons pool'}</span></span>
             </span>
           </div>
           {([

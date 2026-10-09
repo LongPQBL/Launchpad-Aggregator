@@ -112,7 +112,7 @@ describe('Pools UI', () => {
     rerender(<PoolList page={page} tokenAddress={b} />);
     const scoped = screen.getByRole('link', { name: /0x1111.*0x2222/ });
     expect(scoped).toHaveAttribute('href', expect.stringContaining(`displayedToken=${b}`));
-    expect(screen.getByText(/Pons designated/)).toBeInTheDocument();
+    expect(screen.getByText(/Official Pons pool/)).toBeInTheDocument();
   });
   it('shows missing metrics, coverage and both side switches without APR', () => {
     render(<PoolDetail pool={pool} trades={{ items: [], nextCursor: null }} candles={null} />);

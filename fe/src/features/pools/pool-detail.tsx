@@ -58,7 +58,7 @@ export function PoolDetail({ pool, trades, candles, history = null }: { pool: Po
           <Badge variant="secondary">{pool.protocol.replace('uniswap_', '')}</Badge>
           <Badge variant="secondary">{pool.fee / 10_000}%</Badge>
           <CopyableTokenAddress address={pool.poolId} />
-          {pool.ponsDesignated && <span>Pons designated pool</span>}
+          {pool.ponsDesignated && <span>Official Pons pool</span>}
         </div>
       </div>
     </CardHeader></Card>
