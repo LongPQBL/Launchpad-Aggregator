@@ -111,10 +111,10 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
 
   return (
     <>
-    <Table aria-label="Transactions">
-      <TableHeader>
-        <TableRow>
-          <TableHead>Time</TableHead>
+    <Table aria-label="Transactions" className="border-separate border-spacing-0">
+      <TableHeader className="border-b-0 [&_tr]:!border-0">
+        <TableRow className="h-10 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
+          <TableHead className="pl-4">Time</TableHead>
           <TableHead>Type</TableHead>
           <TableHead className="text-right">{displaySymbol(tokenSymbol)}</TableHead>
           <TableHead className="text-right">For</TableHead>
@@ -127,37 +127,37 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
         {items.map((row) => {
           const activityLabel = row.source === 'official' ? formatActivityKind(row.activityKind ?? '') : null;
           return (
-            <TableRow key={`${row.blockNumber}-${row.txHash}-${row.logIndex}`}>
-              <TableCell className="text-foreground" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
+            <TableRow key={`${row.blockNumber}-${row.txHash}-${row.logIndex}`} className="border-0 hover:bg-transparent">
+              <TableCell className="pl-4 text-base font-semibold text-foreground" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
                 {formatRelativeTime(row.timestamp, now)}
               </TableCell>
-              <TableCell>
-                <span className={cn('font-medium', !activityLabel && row.side === 'buy' && 'text-success', !activityLabel && row.side === 'sell' && 'text-destructive')}>
+              <TableCell className="text-base font-semibold">
+                <span className={cn('font-semibold', !activityLabel && row.side === 'buy' && 'text-success', !activityLabel && row.side === 'sell' && 'text-destructive')}>
                   {activityLabel ?? formatSide(row.side)}
                 </span>
                 {row.source === 'pool' && <span className="ml-1 text-xs text-muted-foreground">(pool)</span>}
               </TableCell>
-              <TableCell className="text-right">{formatAmount(row.tokenAmount)}</TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right text-base font-semibold">{formatAmount(row.tokenAmount)}</TableCell>
+              <TableCell className="text-right text-base font-semibold">
                 <span className="inline-flex items-center justify-end gap-1">
                   {formatAmount(row.quoteAmount)} <span className={quoteLabelIsAddress(row, quoteAsset) ? 'cursor-pointer' : undefined}>{quoteLabel(row, quoteAsset)}</span>
-                  <TokenLogo logoUri={null} symbol={quoteLabel(row, quoteAsset)} />
+                  <TokenLogo logoUri={null} symbol={quoteLabel(row, quoteAsset)} chainId={chainId} />
                 </span>
               </TableCell>
               <TableCell
-                className="text-right"
+                className="text-right text-base font-semibold"
                 title={row.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
                 {row.usdValueStatus === 'pending' ? 'Calculating…' : formatUsdAmount(row.usdValue)}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right text-base font-semibold">
                 {explorerBase ? (
                   <a href={`${explorerBase}/address/${row.traderAddress}`} target="_blank" rel="noreferrer noopener">
                     <span className="cursor-pointer">{shortAddress(row.traderAddress)}</span>
                   </a>
                 ) : <span className="cursor-pointer">{shortAddress(row.traderAddress)}</span>}
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell className="text-right text-base font-semibold">
                 {explorerBase ? (
                   <a className="cursor-pointer" href={`${explorerBase}/tx/${row.txHash}`} target="_blank" rel="noreferrer noopener">
                     {shortAddress(row.txHash)}
@@ -169,7 +169,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
         })}
       </TableBody>
     </Table>
-      {nextCursor && chainId !== undefined && tokenAddress && <div ref={sentinelRef} aria-hidden="true" className="h-px" />}
+      {nextCursor && chainId !== undefined && tokenAddress && <div ref={sentinelRef} data-testid="transactions-load-more-sentinel" aria-hidden="true" className="h-px" />}
       {loadingMore && <p role="status" className="text-center text-sm text-muted-foreground">Loading more transactions…</p>}
       {loadError && <div className="text-center text-sm"><span role="alert">Could not load more transactions. </span><button type="button" onClick={() => void loadMore()}>Retry</button></div>}
     </>

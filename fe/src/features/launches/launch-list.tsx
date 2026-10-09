@@ -51,6 +51,7 @@ const SORT_COLUMNS = [
   { label: '1D', sort: 'change1d' },
   { label: 'Age', sort: 'recent' },
 ] as const;
+const SORT_COLUMN_WIDTHS = ['md:w-[12%]', 'md:w-[15%]', 'md:w-[12%]', 'md:w-[8%]', 'md:w-[8%]', 'md:w-[7%]'] as const;
 
 function defaultSort(tab: string | undefined): NonNullable<LaunchQuery['sort']> {
   return tab === 'recent' ? 'recent' : 'volume24hUsd';
@@ -438,8 +439,8 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
               className={cn(
                 'rounded-md px-3 py-1 text-sm transition-colors',
                 activeTab === value
-                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
-                  : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  ? 'bg-foreground/10 text-foreground hover:bg-foreground/15 dark:bg-white/10 dark:text-white dark:hover:bg-white/15'
+                  : 'text-muted-foreground hover:bg-foreground/5 hover:text-foreground',
               )}
             >
               {label}
@@ -455,24 +456,24 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
       {filtering && <p role="status" className="sr-only">Updating launches…</p>}
       {filterError && <div role="alert" className="text-sm">Could not update launches. <button type="button" className="underline" onClick={() => { void refreshFilters(current, false); }}>Retry</button></div>}
 
-      <div role="table" aria-label="Launch list" aria-busy={filtering || loadingMore} className="relative z-0 w-full overflow-hidden rounded-lg border border-border md:table md:border-separate md:border-spacing-0">
+      <div role="table" aria-label="Launch list" aria-busy={filtering || loadingMore} className="relative z-0 w-full overflow-hidden rounded-lg border border-border md:table md:table-fixed md:border-separate md:border-spacing-0">
         <div role="rowgroup" className="hidden bg-muted md:table-header-group">
           <div role="row" className="md:table-row">
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Token</div>
-            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Launchpad</div>
-            {SORT_COLUMNS.map(({ label, sort }) => {
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[4%] md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">#</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[22%] md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">Token</div>
+            <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:w-[12%] md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">Launchpad</div>
+            {SORT_COLUMNS.map(({ label, sort }, index) => {
               const active = sortBy === sort;
               return (
                 <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-                  className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide',
-                    active && 'bg-accent text-accent-foreground')}>
-                  <button type="button" className="inline-flex items-center gap-1 text-inherit hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring"
+                  className={cn('text-muted-foreground md:table-cell md:h-10 md:px-2 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4', SORT_COLUMN_WIDTHS[index],
+                    active && 'text-white')}>
+                  <button type="button" className={cn('inline-flex items-center gap-1 text-inherit focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'hover:text-white' : 'hover:text-foreground')}
                     onClick={() => {
                       const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection(sort);
                       void refreshFilters({ ...current, tab: sort === 'recent' ? 'recent' : 'all', sort, direction });
                     }}>
-                    {label} {active && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>}
+                    {active && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>} {label}
                   </button>
                 </div>
               );
@@ -480,7 +481,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
           </div>
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-          {filtering ? <LaunchRowsSkeleton count={Math.max(items.length, 8)} /> : items.map((launch, index) => {
+          {filtering && items.length === 0 ? <LaunchRowsSkeleton count={8} /> : items.map((launch, index) => {
             return (
               <div
                 key={`${launch.chainId}-${launch.tokenAddress}`}
@@ -490,7 +491,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                   'md:table-row md:rounded-none md:border-0 md:border-b md:border-border md:bg-transparent md:p-0 md:transition-colors md:hover:bg-muted/60',
                 )}
               >
-                <div role="cell" className="pointer-events-none text-foreground md:table-cell md:p-4 md:align-middle">
+                <div role="cell" className="pointer-events-none text-foreground md:table-cell md:w-[4%] md:p-2 md:align-middle lg:p-4">
                   <a
                     href={launchHref(launch.chainId, launch.tokenAddress)}
                     aria-label={`View ${launch.name ?? launch.tokenAddress} details`}
@@ -498,39 +499,39 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                   />
                   {index + 1}
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[22%] md:p-2 md:align-middle lg:p-4">
                   <TokenCell chainId={launch.chainId} tokenAddress={launch.tokenAddress} name={launch.name}
                     symbol={launch.symbol} logoUri={launch.logoUri} />
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[12%] md:p-2 md:align-middle lg:p-4">
                   <span className="inline-flex items-center gap-2" title={`${launchpadName(launch.platform)} ${launch.protocolVersion}`}>
                     <LaunchpadIcon platform={launch.platform} />
                     <span>{launchpadName(launch.platform)}</span>
                   </span>
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[12%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">FDV</span>
                   <span>{formatUsd(launch.fdvUsd, 1)}</span>
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[15%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">24H volume</span>
                   <span title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
                     {launch.officialVolume24hUsd !== null ? `~${formatUsd(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
                   </span>
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[12%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>
                   <span title={tvlTooltip(launch)}>{formatUsd(launch.tvlUsd, 1)}</span>
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[8%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">1H</span>
                   <span><PercentChange value={launch.change1h} /></span>
                 </div>
-                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:w-[8%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">1D</span>
                   <span><PercentChange value={launch.change1d} /></span>
                 </div>
-                <div role="cell" className="md:table-cell md:p-4 md:text-right md:align-middle">
+                <div role="cell" className="md:table-cell md:w-[7%] md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Age</span>
                   <span className="text-muted-foreground">{formatAge(launch.launchTimestamp)}</span>
                 </div>

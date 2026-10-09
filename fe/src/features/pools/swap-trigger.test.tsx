@@ -18,14 +18,13 @@ const props = {
 };
 
 describe('SwapTrigger', () => {
-  // The header's wallet dialog is earlier in the DOM than this swap dialog and both are
-  // `fixed inset-0 z-50`, so a still-open swap dialog would cover it: "Connect" must close it.
-  it('closes its swap dialog when a panel asks the header to open the wallet dialog', () => {
+  // The wallet dialog sits above the swap dialog, allowing both to remain open together.
+  it('keeps the swap dialog open when a panel asks the header to open the wallet dialog', () => {
     render(<SwapTrigger {...props} />);
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(screen.getByRole('dialog', { name: 'AAA / BBB' })).toBeInTheDocument();
     act(() => openWalletDialog());
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'AAA / BBB' })).toBeInTheDocument();
   });
 
   it('ignores the wallet-dialog event while its own dialog is closed and still opens afterwards', () => {

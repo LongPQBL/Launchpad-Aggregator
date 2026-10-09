@@ -1,6 +1,14 @@
 import { parseUnits } from 'viem';
 import { resolveAutoSlippageBps } from './use-trade-settings';
 
+// Keep swap inputs editable as text while discarding signs, letters and duplicate decimal points.
+// Accept a comma as the decimal separator for keyboards that emit it in decimal mode.
+export function sanitizeAmountInput(value: string): string {
+  const normalized = value.replace(/,/g, '.').replace(/[^\d.]/g, '');
+  const decimal = normalized.indexOf('.');
+  return decimal === -1 ? normalized : `${normalized.slice(0, decimal + 1)}${normalized.slice(decimal + 1).replace(/\./g, '')}`;
+}
+
 // A plain decimal string only — rejects scientific notation ("1e5") and anything else
 // viem's parseUnits would throw on. Callers run this during render (computing amountIn),
 // so a throw here would crash the whole page, not just one trading panel.

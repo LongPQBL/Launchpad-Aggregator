@@ -174,16 +174,14 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('Could not load pools.')).toBeInTheDocument();
   });
 
-  it('shows a Next transactions link with the cursor when there is a next page, and hides it when there is none', () => {
+  it('shows the transaction load-more sentinel when there is a next page, and hides it when there is none', () => {
     const view = render(<LaunchDetail detail={detail({ chainId: 4663, tokenAddress: '0xabc' })}
       transactions={{ items: [], nextCursor: 'abc123' }} candles={null} />);
-    const link = view.container.querySelector('a[href*="cursor="]');
-    expect(link).not.toBeNull();
-    expect(link).toHaveAttribute('href', '/launches/4663/0xabc?cursor=abc123');
+    expect(view.getByTestId('transactions-load-more-sentinel')).toBeInTheDocument();
 
     view.rerender(<LaunchDetail detail={detail({ chainId: 4663, tokenAddress: '0xabc' })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);
-    expect(view.container.querySelector('a[href*="cursor="]')).toBeNull();
+    expect(view.queryByTestId('transactions-load-more-sentinel')).not.toBeInTheDocument();
   });
 
   it('shows an X icon link in the header when twitterUrl is set, and a Share button always', () => {
@@ -498,7 +496,7 @@ describe('LaunchDetail', () => {
     act(() => {
       handler({ time: 1_700_000_300, seriesData: new Map([[series, { time: 1_700_000_300, close: 0.000000160 }]]) });
     });
-    expect(screen.getByTestId('official-price')).toHaveTextContent('0.00000016 ROBIN');
+    expect(screen.getByTestId('official-price')).toHaveTextContent('0.000000160 ROBIN');
 
     act(() => { handler({ seriesData: new Map() }); });
     expect(screen.getByTestId('official-price')).toHaveTextContent('$0.11');
@@ -591,7 +589,7 @@ describe('LaunchDetail', () => {
 
     const explorerLink = screen.getByRole('link', { name: /robinhood chain explorer/i });
     expect(explorerLink).toHaveAttribute('href', 'https://robinhoodchain.blockscout.com/token/0xabc');
-    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy token address' })).toBeInTheDocument();
   });
 
   it('hides the Website pill when websiteUrl is null, and the Twitter pill when twitterUrl is null', () => {

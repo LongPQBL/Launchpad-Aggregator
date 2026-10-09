@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { HttpRequestError } from 'viem';
+import { HttpRequestError, RpcRequestError } from 'viem';
 import { SOLVER_MAX_ROUNDS, SOLVER_WIDE_POINTS, solveInputForOutput, type QuoteFn } from './solve-input-for-output';
 
 const never = new AbortController().signal;
@@ -56,8 +56,10 @@ describe('solveInputForOutput', () => {
     expect(fn.mock.calls.length).toBeLessThanOrEqual(2 * SOLVER_WIDE_POINTS);
   });
 
-  it('treats a throwing quote function (a plain Error, i.e. a revert) as a failed probe', async () => {
-    expect(await solveInputForOutput(async () => { throw new Error('revert'); }, 1000n)).toBeNull();
+  it('treats a genuine RPC revert as a failed probe', async () => {
+    expect(await solveInputForOutput(async () => {
+      throw new RpcRequestError({ body: {}, url: 'https://rpc.example', error: { code: 3, message: 'execution reverted' } });
+    }, 1000n)).toBeNull();
   });
 
   // Target 3e18 on a linear quote: X* = 1e18. The first wide round brackets it as (6.9e16, 1.1e18];
@@ -74,6 +76,15 @@ describe('solveInputForOutput', () => {
     };
     await expect(solveInputForOutput(quote, 3n * 10n ** 18n)).rejects.toBeInstanceOf(HttpRequestError);
     expect(failed).toBe(true);
+  });
+
+  it('rejects a JSON-RPC -32002 limit during refinement instead of returning an oversized input', async () => {
+    const limited = new RpcRequestError({ body: {}, url: 'https://rpc.example', error: { code: -32002, message: 'rate limited' } });
+    const quote: QuoteFn = async (x) => {
+      if (x > 5n * 10n ** 17n && x < 10n ** 18n) throw limited;
+      return x * 3n;
+    };
+    await expect(solveInputForOutput(quote, 3n * 10n ** 18n)).rejects.toBe(limited);
   });
 
   it('rejects on a programming error instead of reading it as "no answer"', async () => {

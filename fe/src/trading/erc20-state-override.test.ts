@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { HttpRequestError, InvalidAddressError, decodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
+import { HttpRequestError, InvalidAddressError, RpcRequestError, decodeFunctionData, parseAbi, type Address, type Hex } from 'viem';
 import {
   MAX_UINT256, SIMULATION_ACCOUNT, allowanceSlotAt, balanceSlotAt, clearErc20LayoutCache,
   discoverErc20Layouts, nativeBalanceOverride, spendStateOverride,
@@ -61,8 +61,10 @@ describe('discoverErc20Layouts', () => {
     expect(layouts).toEqual({ balanceSlot: null, allowanceSlot: null });
   });
 
-  it('treats a failing node as "not found"', async () => {
-    const client = makeFakeClient(() => { throw new Error('rpc down'); });
+  it('treats a reverted probe as "not found"', async () => {
+    const client = makeFakeClient(() => {
+      throw new RpcRequestError({ body: {}, url: 'https://rpc.example', error: { code: 3, message: 'execution reverted' } });
+    });
     expect(await discoverErc20Layouts(client, token)).toEqual({ balanceSlot: null, allowanceSlot: null });
   });
 

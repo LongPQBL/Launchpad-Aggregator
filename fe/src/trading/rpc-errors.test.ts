@@ -25,10 +25,17 @@ describe('isTransportError', () => {
 });
 
 describe('isNoAnswerError', () => {
-  it('reverts and plain test-fake errors mean "no answer"', () => {
-    expect(isNoAnswerError(new Error('revert'))).toBe(true);
+  it('only accepts an on-chain revert as no answer', () => {
+    expect(isNoAnswerError(new Error('revert'))).toBe(false);
     const revert = new RpcRequestError({ body: {}, url, error: { code: 3, message: 'execution reverted' } });
     expect(isNoAnswerError(new CallExecutionError(revert, {}))).toBe(true);
+  });
+
+  it('propagates RPC rate limits even when wrapped by viem', () => {
+    const limited = new RpcRequestError({ body: {}, url, error: { code: -32002, message: 'rate limited' } });
+    expect(isNoAnswerError(limited)).toBe(false);
+    expect(isNoAnswerError(new CallExecutionError(limited, {}))).toBe(false);
+    expect(isNoAnswerError(new HttpRequestError({ url, status: 429 }))).toBe(false);
   });
 
   it('transport and programming errors are NOT "no answer" (they must propagate)', () => {

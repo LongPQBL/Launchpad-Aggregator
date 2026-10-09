@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { ApproveOrActionButton, type ApproveOrActionAllowance } from './approve-or-action-button';
+import { SWITCH_WALLET_NETWORK_EVENT } from '@/wallet/open-wallet-dialog';
 
 function baseAllowance(overrides: Partial<ApproveOrActionAllowance> = {}): ApproveOrActionAllowance {
   return {
@@ -33,6 +34,7 @@ describe('ApproveOrActionButton', () => {
     );
     const button = screen.getByRole('button', { name: 'Approve' });
     expect(button).not.toBeDisabled();
+    expect(button.className).toContain('bg-[#ccff00]');
     fireEvent.click(button);
     expect(allowance.approve).toHaveBeenCalledWith(1_000n);
   });
@@ -54,7 +56,9 @@ describe('ApproveOrActionButton', () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Approving…' })).toBeDisabled();
+    const button = screen.getByRole('button', { name: 'Approving…' });
+    expect(button).toBeDisabled();
+    expect(button.className).toContain('bg-white/10');
   });
 
   it('shows "Confirming approval…" while the approval tx is mining and disables the button', () => {
@@ -141,7 +145,10 @@ describe('ApproveOrActionButton', () => {
     expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
   });
 
-  it('shows a "Switch network" label and disables the button on the wrong chain', () => {
+  it('switches to Robinhood Chain when clicked on the wrong network', () => {
+    let requestedChainId: number | undefined;
+    const handler = (event: Event) => { requestedChainId = (event as CustomEvent<{ chainId: number }>).detail.chainId; };
+    window.addEventListener(SWITCH_WALLET_NETWORK_EVENT, handler);
     render(
       <ApproveOrActionButton
         needsApproval={false}
@@ -158,7 +165,32 @@ describe('ApproveOrActionButton', () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+    const button = screen.getByRole('button', { name: 'Switch to Robinhood Chain' });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    expect(requestedChainId).toBe(4663);
+    window.removeEventListener(SWITCH_WALLET_NETWORK_EVENT, handler);
+  });
+
+  it('uses the pool chain name in the switch label and gives informational states a muted disabled style', () => {
+    const { rerender } = render(<ApproveOrActionButton
+      needsApproval={false} amountIn={0n} isWrongChain isConnected balanceKnown hasInsufficientBalance={false}
+      quoteState="idle" onConnect={vi.fn()} isSubmitting={false} allowance={baseAllowance()}
+      actionLabel="Swap" onAction={vi.fn()} targetChainName="Base"
+    />);
+    const switchButton = screen.getByRole('button', { name: 'Switch to Base' });
+    expect(switchButton).toBeEnabled();
+    expect(switchButton.className).toContain('bg-[#ccff00]');
+
+    rerender(<ApproveOrActionButton
+      needsApproval={false} amountIn={0n} isWrongChain={false} isConnected balanceKnown hasInsufficientBalance={false}
+      quoteState="idle" onConnect={vi.fn()} isSubmitting={false} allowance={baseAllowance()}
+      actionLabel="Swap" onAction={vi.fn()}
+    />);
+    const informationalButton = screen.getByRole('button', { name: 'Enter an amount' });
+    expect(informationalButton).toBeDisabled();
+    expect(informationalButton.className).toContain('bg-white/10');
+    expect(informationalButton.className).toContain('text-white/40');
   });
 
   it('shows an "Enter an amount" label and disables the button when amountIn is zero', () => {
@@ -239,7 +271,7 @@ describe('ApproveOrActionButton', () => {
         onAction={vi.fn()}
       />,
     );
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Switch to Robinhood Chain' })).toBeInTheDocument();
   });
 
   it('approves a separately-provided approveAmount instead of amountIn, when given one', () => {

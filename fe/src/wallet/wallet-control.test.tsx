@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WalletControl } from './wallet-control';
-import { openWalletDialog } from './open-wallet-dialog';
+import { openWalletDialog, requestWalletNetworkSwitch } from './open-wallet-dialog';
 
 const hooks = vi.hoisted(() => ({
   account: { address: undefined as string | undefined, chainId: undefined as number | undefined, isConnected: false, status: 'disconnected' },
@@ -92,6 +92,14 @@ describe('WalletControl', () => {
       isConnected: true, status: 'connected' };
     render(<WalletControl />);
     fireEvent.click(screen.getByRole('button', { name: 'Switch to Robinhood Chain' }));
+    expect(hooks.switchChain).toHaveBeenCalledWith({ chainId: 4663 });
+  });
+
+  it('handles a network switch requested by a trade panel', () => {
+    hooks.account = { address: '0x1234567890123456789012345678901234567890', chainId: 1,
+      isConnected: true, status: 'connected' };
+    render(<WalletControl />);
+    act(() => requestWalletNetworkSwitch(4663));
     expect(hooks.switchChain).toHaveBeenCalledWith({ chainId: 4663 });
   });
 

@@ -33,25 +33,26 @@ export function TokenSelector({ options, selected, onSelect, chainId }: TokenSel
       <Button
         type="button"
         variant="outline"
-        size="sm"
-        className="flex items-center gap-1.5 rounded-full"
+        className="h-12 gap-2 rounded-full bg-black px-3 text-base text-white hover:bg-black hover:text-white"
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
         <TokenLogo logoUri={selected.logoUri} symbol={selected.symbol} chainId={chainId} />
         <span>{selected.symbol}</span>
-        <span aria-hidden="true">▾</span>
+        <svg aria-hidden="true" viewBox="0 0 16 16" width="14" height="14" fill="none" className="shrink-0">
+          <path d="M4 6l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </Button>
       {open && (
-        <ul role="listbox" className="absolute right-0 z-20 mt-2 w-40 rounded-md border border-border bg-card p-1 shadow-lg text-sm">
+        <ul role="listbox" className="absolute right-0 z-20 mt-2 w-48 rounded-md border border-border bg-card p-1.5 text-base shadow-lg">
           {options.map((option) => (
             <li key={option.key}>
               <button
                 type="button"
                 role="option"
                 aria-selected={option.key === selected.key}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent"
+                className="flex w-full items-center gap-2 rounded px-3 py-2 text-left hover:bg-foreground/5"
                 onClick={() => { onSelect(option.key); setOpen(false); }}
               >
                 <TokenLogo logoUri={option.logoUri} symbol={option.symbol} chainId={chainId} />

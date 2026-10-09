@@ -1,5 +1,5 @@
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatPrice, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
+import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatUsd, formatVenueKind, tvlTooltip } from '@/api/format';
 import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
@@ -62,6 +62,17 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
   // condition to add beyond effectiveToBlock — the curve-vs-V4 distinction already lives in
   // activeCurveVenue's own lifecycleStatus === 'trading' gate above.
   const activeV4Venue = findActiveVenue(detail.officialVenues, 'v4_pool');
+  const ponsPrimaryVenue = detail.platform !== 'pons' ? undefined
+    : activeCurveVenue ? {
+      kind: 'curve' as const,
+      chainId: detail.chainId,
+      token: { address: detail.tokenAddress, symbol: displaySymbol(detail.symbol), logoUri: detail.logoUri },
+      quoteSymbol: displaySymbol(detail.quoteAsset.symbol),
+    }
+      : activeV4Venue ? { kind: 'pool' as const, pool: v4Pool, poolId: activeV4Venue.ref, protocol: 'uniswap_v4' }
+        : activeV3Venue ? { kind: 'pool' as const, pool: null, poolId: activeV3Venue.ref, protocol: 'uniswap_v3' }
+        : null;
+  const visibleOfficialVenues = detail.officialVenues;
 
   // V4SwapPanel's tokenA/tokenB props are a presentation default (which side starts as "being
   // sold"), independent of zeroForOne — V4SwapPanel derives that itself from address comparison
@@ -85,7 +96,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
       </nav>
 
       <Card className="border-0 bg-transparent">
-        <CardHeader>
+        <CardHeader className="border-b border-border">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <TokenLogo logoUri={detail.logoUri} symbol={displaySymbol(detail.symbol)} chainId={detail.chainId} size="large" />
@@ -93,7 +104,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                 <h1 className="text-2xl font-semibold leading-none">
                   {displayName(detail.name, detail.tokenAddress)} <span className="text-lg text-muted-foreground">{displaySymbol(detail.symbol)}</span>
                 </h1>
-                <div className="mt-1"><CopyableTokenAddress address={detail.tokenAddress} /></div>
+                <div className="mt-1"><CopyableTokenAddress address={detail.tokenAddress} copyLabel="Copy header token address" /></div>
                 <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
                   {detail.platform === 'pons' ? (
                     <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1">
@@ -101,7 +112,10 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                       {launchpadName(detail.platform)}
                     </a>
                   ) : <span>{launchpadName(detail.platform)}</span>}
-                  <span>· {detail.protocolVersion} · {chainName(detail.chainId)}</span>
+                  <span>· {detail.protocolVersion} · {chainName(detail.chainId)}
+                    {detail.quoteAsset.symbol !== null && <> · Quote asset: {displaySymbol(detail.quoteAsset.symbol)}</>}
+                  </span>
+                  <span className="rounded-full border border-border px-2 py-0.5">{formatLifecycleStatus(detail.lifecycleStatus)}</span>
                 </p>
               </div>
             </div>
@@ -112,19 +126,21 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
         <div className="flex flex-col gap-4">
-          <section aria-label="Official trading venues">
-            <Card>
-              <CardContent className="pt-4">
-                <ul className="flex flex-wrap gap-2">
-                  {detail.officialVenues.map((venue) => (
-                <li key={venue.id} className="rounded-md border border-border bg-accent px-2 py-1 text-xs text-accent-foreground">
-                      {formatVenueKind(venue.kind)}
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          </section>
+          {visibleOfficialVenues.length > 0 && (
+            <section aria-label="Official trading venues">
+              <Card>
+                <CardContent className="pt-4">
+                  <ul className="flex flex-wrap gap-2">
+                    {visibleOfficialVenues.map((venue) => (
+                      <li key={venue.id} className="rounded-md border border-border bg-accent px-2 py-1 text-xs text-accent-foreground">
+                        {formatVenueKind(venue.kind)}
+                      </li>
+                    ))}
+                  </ul>
+                </CardContent>
+              </Card>
+            </section>
+          )}
 
           <Card className="border-0 bg-transparent">
             <CardContent className="pt-4">
@@ -139,11 +155,12 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                 intervalSeconds={chartInterval}
                 tokenSymbol={detail.symbol}
                 source={{ launch: { chainId: detail.chainId, tokenAddress: detail.tokenAddress } }}
+                showCurrencyToggle={detail.platform !== 'pons'}
               />
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-4 lg:max-w-2xl">
+          <div className="flex flex-col gap-4 px-4 lg:max-w-2xl">
             <section aria-label="Stats">
           <h2 className="text-2xl font-semibold">Stats</h2>
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
@@ -233,7 +250,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
         )}
       </div>
 
-      <Card>
+      <Card className="border-0 bg-transparent">
         <CardContent className="pt-4">
           <Tabs
             tabs={[
@@ -260,11 +277,10 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
               {
                 value: 'pools',
                 label: 'Pools',
-                content: pools ? (
-                      <PoolList page={pools} tokenAddress={detail.tokenAddress} chainId={detail.chainId}
-                    displayedToken={{ address: detail.tokenAddress, symbol: displaySymbol(detail.symbol), logoUri: detail.logoUri }} />
-                ) : (
-                  <p role="status">Could not load pools.</p>
+                content: (
+                      <PoolList page={pools ?? null} error={pools == null} tokenAddress={detail.tokenAddress} chainId={detail.chainId}
+                    displayedToken={{ address: detail.tokenAddress, symbol: displaySymbol(detail.symbol), logoUri: detail.logoUri }}
+                    primaryVenue={ponsPrimaryVenue} />
                 ),
               },
             ]}

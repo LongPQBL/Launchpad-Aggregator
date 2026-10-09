@@ -1,11 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chainName } from '@/api/chains';
 import { formatPercent } from '@/api/format';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { PercentChange } from '@/components/percent-change';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
 import { cn } from '@/lib/utils';
 import { formatPoolUsd, poolAge, short } from './pool-format';
@@ -13,6 +14,27 @@ import { formatPoolUsd, poolAge, short } from './pool-format';
 function side(address: string): string { return address.toLowerCase(); }
 
 export interface PoolListDisplayedToken { address: string; symbol: string; logoUri: string | null }
+export type PrimaryLaunchVenue =
+  | { kind: 'curve'; token: PoolListDisplayedToken; quoteSymbol: string; chainId: number }
+  | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
+
+type PoolSort = 'fdvUsd' | 'volume24hUsd' | 'tvlUsd' | 'change1h' | 'change1d' | 'age';
+const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc' }[] = [
+  { label: 'FDV', sort: 'fdvUsd', defaultDirection: 'desc' },
+  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc' },
+  { label: 'Liquidity', sort: 'tvlUsd', defaultDirection: 'desc' },
+  { label: '1H', sort: 'change1h', defaultDirection: 'desc' },
+  { label: '1D', sort: 'change1d', defaultDirection: 'desc' },
+  { label: 'Age', sort: 'age', defaultDirection: 'asc' },
+];
+
+function poolSortValue(pool: PoolSummary, sort: PoolSort): number | null {
+  if (sort === 'age') return pool.createdTimestamp === null ? null : -pool.createdTimestamp;
+  const value = pool[sort];
+  if (value === null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
 
 // currencyXSymbol/currencyXLogoUri come from the backend's token-metadata resolver (RPC name/
 // symbol + Robinhood asset-directory logo for non-Pons tokens); when one side is the launch token
@@ -30,16 +52,31 @@ function pairLabel(pool: PoolSummary, displayedToken?: PoolListDisplayedToken): 
     displayedToken && side(address) === side(displayedToken.address) ? displayedToken.symbol : (symbol ?? short(address));
   return `${label(pool.currency0, pool.currency0Symbol)} / ${label(pool.currency1, pool.currency1Symbol)}`;
 }
-export function PoolList({ page, error = false, tokenAddress, chainId, displayedToken }: {
+export function PoolList({ page, error = false, tokenAddress, chainId, displayedToken, primaryVenue }: {
   page: PoolPage | null; error?: boolean; tokenAddress?: string; chainId?: number;
   displayedToken?: PoolListDisplayedToken;
+  primaryVenue?: PrimaryLaunchVenue | null;
 }) {
   const [items, setItems] = useState<readonly PoolSummary[]>(page?.items ?? []);
   const [nextCursor, setNextCursor] = useState<string | null>(page?.nextCursor ?? null);
+  const [sortBy, setSortBy] = useState<PoolSort | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
+  const sortedItems = useMemo(() => {
+    if (sortBy === null) return items;
+    return [...items].sort((a, b) => {
+      const left = poolSortValue(a, sortBy);
+      const right = poolSortValue(b, sortBy);
+      if (left === null && right === null) return 0;
+      if (left === null) return 1;
+      if (right === null) return -1;
+      const comparison = left - right;
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [items, sortBy, sortDirection]);
 
   useEffect(() => {
     setItems(page?.items ?? []);
@@ -76,19 +113,65 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     return () => observer.disconnect();
   }, [loadError, loadMore, nextCursor]);
 
-  if (error || !page) return <p role="alert">Could not load pools. Please try again.</p>;
   return <section aria-label={tokenAddress ? 'Other pools for this token' : 'Pools'} className="space-y-4">
-    {!tokenAddress && <div><h1 className="text-2xl font-semibold">Pools</h1>
+    {primaryVenue && <section aria-label="Pons primary venue"><Card>
+      <CardContent className="flex flex-wrap items-center gap-3 pt-4">
+        {primaryVenue.kind === 'curve' ? <>
+          <PoolLogo token0={{ symbol: primaryVenue.token.symbol, logoUri: primaryVenue.token.logoUri }}
+            token1={{ symbol: primaryVenue.quoteSymbol, logoUri: null }} chainId={primaryVenue.chainId} />
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">{primaryVenue.token.symbol} / {primaryVenue.quoteSymbol}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <Badge variant="secondary">Pons bonding curve</Badge>
+              <span className="text-xs text-muted-foreground">Primary venue</span>
+            </div>
+          </div>
+        </> : <>
+          {primaryVenue.pool ? <PoolLogo
+            token0={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency0, primaryVenue.pool.currency0Symbol, primaryVenue.pool.currency0LogoUri, displayedToken)}
+            token1={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency1, primaryVenue.pool.currency1Symbol, primaryVenue.pool.currency1LogoUri, displayedToken)}
+            chainId={primaryVenue.pool.chainId}
+          /> : <span aria-hidden="true" className="h-9 w-9 rounded-full bg-accent" />}
+          <div className="min-w-0">
+            {primaryVenue.pool
+              ? <a className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</a>
+              : <p className="text-sm font-semibold">Pons Uniswap V4 pool</p>}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <Badge variant="secondary">{primaryVenue.protocol.replace('uniswap_', '').toUpperCase()}</Badge>
+              <span className="text-xs text-muted-foreground">Pons primary venue</span>
+            </div>
+          </div>
+          {!primaryVenue.pool && <span className="ml-auto max-w-full truncate text-xs text-muted-foreground" title={primaryVenue.poolId}>{primaryVenue.poolId}</span>}
+        </>}
+      </CardContent>
+    </Card></section>}
+    {(error || !page) && <p role="alert">Could not load pools.</p>}
+    {!tokenAddress && page && <div><h1 className="text-2xl font-semibold">Pools</h1>
       <p className="text-sm text-muted-foreground">Verified indexed Uniswap pools on Robinhood Chain. Supported sources: {page.supportedProtocols.map((p) => p.replace('uniswap_', '')).join(', ')}.</p></div>}
-    {items.length === 0 && <p>No verified indexed pools found.</p>}
-    {tokenAddress ? <div role="table" aria-label="Pools for this token" className="w-full overflow-hidden rounded-lg border border-border md:table md:border-separate md:border-spacing-0">
-      <div role="rowgroup" className="hidden bg-muted md:table-header-group">
-        <div role="row" className="md:table-row">
-          {['#', 'Pool', 'FDV', '24H volume', 'Liquidity', '1H', '1D', 'Age'].map((label, index) => <div key={label} role="columnheader" className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide', index > 1 && 'md:text-right')}>{label}</div>)}
+    {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
+    {page && tokenAddress ? <div role="table" aria-label="Pools for this token" className="w-full overflow-hidden rounded-lg md:table md:border-separate md:border-spacing-0">
+      <div role="rowgroup" className="hidden md:table-header-group">
+        <div role="row" className="md:table-row md:h-10 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">#</div>
+          <div role="columnheader" className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide">Pool</div>
+          {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection }) => {
+            const active = sortBy === sort;
+            return <div key={sort} role="columnheader" aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
+              className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide md:text-right', active && 'text-foreground dark:text-white')}>
+              <button type="button" className={cn('inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
+                onClick={() => {
+                  const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection;
+                  setSortBy(sort);
+                  setSortDirection(direction);
+                }}>
+                {active && <span aria-hidden="true">{sortDirection === 'asc' ? '↑' : '↓'}</span>} {label}
+              </button>
+            </div>;
+          })}
         </div>
       </div>
       <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-        {items.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg border border-border bg-card p-3 md:table-row md:rounded-none md:border-0 md:border-b md:border-border md:bg-transparent md:p-0 md:transition-colors md:hover:bg-muted/60">
+        {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
           <div role="cell" className="pointer-events-none text-foreground md:table-cell md:p-4 md:align-middle">
             <a href={poolHref(pool, tokenAddress)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
             {index + 1}
@@ -99,15 +182,15 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
               <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Pons designated'}</span></span>
             </span>
           </div>
-          {[
+          {([
             ['FDV', formatPoolUsd(pool.fdvUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)], ['Liquidity', formatPoolUsd(pool.tvlUsd)],
-            ['1H', formatPercent(pool.change1h).text], ['1D', formatPercent(pool.change1d).text], ['Age', poolAge(pool.createdTimestamp)],
-          ].map(([label, value], metricIndex) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
-            <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span className={metricIndex === 3 ? formatPercent(pool.change1h).className : metricIndex === 4 ? formatPercent(pool.change1d).className : undefined}>{value}</span>
+            ['1H', <PercentChange key="change1h" value={pool.change1h} />], ['1D', <PercentChange key="change1d" value={pool.change1d} />], ['Age', poolAge(pool.createdTimestamp)],
+          ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-4 md:text-right md:align-middle">
+            <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
           </div>)}
         </div>)}
       </div>
-    </div> : <div className="grid gap-3 md:grid-cols-2">{items.map((pool) => <Card key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`}>
+    </div> : page && <div className="grid gap-3 md:grid-cols-2">{items.map((pool) => <Card key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`}>
       <CardHeader className={cn('flex-row items-center gap-3', tokenAddress && 'w-52 shrink-0')}>
         <PoolLogo
           token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)}

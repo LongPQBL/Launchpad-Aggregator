@@ -6,7 +6,7 @@ import { useAccount, useConnect, useConnectors, useDisconnect, useSwitchChain } 
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { robinhoodChain } from './config';
-import { OPEN_WALLET_DIALOG_EVENT } from './open-wallet-dialog';
+import { OPEN_WALLET_DIALOG_EVENT, SWITCH_WALLET_NETWORK_EVENT } from './open-wallet-dialog';
 
 const walletOptions = [
   { name: 'MetaMask', key: 'metamask' },
@@ -51,6 +51,15 @@ export function WalletControl() {
     return () => window.removeEventListener(OPEN_WALLET_DIALOG_EVENT, handler);
   }, [isConnected]);
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const { chainId: requestedChainId } = (event as CustomEvent<{ chainId: number }>).detail;
+      switchChain({ chainId: requestedChainId });
+    };
+    window.addEventListener(SWITCH_WALLET_NETWORK_EVENT, handler);
+    return () => window.removeEventListener(SWITCH_WALLET_NETWORK_EVENT, handler);
+  }, [switchChain]);
+
   if (status === 'reconnecting') return <Button type="button" variant="outline" disabled>Restoring wallet…</Button>;
 
   if (isConnected && address) {
@@ -78,7 +87,7 @@ export function WalletControl() {
         className="cursor-pointer bg-[#ccff00] text-[#151515] hover:bg-[#bff000]">
         {connectPending ? 'Connecting…' : 'Connect'}
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title="Connect a wallet">
+      <Dialog open={open} onClose={() => setOpen(false)} title="Connect a wallet" className="z-[60]">
         <div className="grid gap-2">
           {walletOptions.map((wallet) => {
             const connector = connectorForWallet(wallet);

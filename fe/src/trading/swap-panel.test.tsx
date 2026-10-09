@@ -165,6 +165,21 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
   });
 
+  it('tracks the selected ETH or WETH balance and red warning on the Sell side', () => {
+    hooks.nativeBalance = 2_000_000_000_000_000_000n;
+    hooks.balanceB = 4_000_000_000_000_000_000n;
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    expect(screen.getByText('Balance: 2 ETH')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
+    expect(screen.getByText('Balance: 2 ETH')).toHaveClass('text-destructive');
+    fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
+    fireEvent.click(screen.getByRole('option', { name: 'WETH' }));
+    expect(screen.getByText('Balance: 4 WETH')).not.toHaveClass('text-destructive');
+    expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
+  });
+
   it('every side renders the token-selector chrome even when a pool has no WETH leg at all', () => {
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenNoWeth} explorerBase={null} />);
     expect(screen.getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
@@ -285,12 +300,12 @@ describe('SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
-  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('offers switching to Robinhood Chain when the wallet is connected to another network', () => {
     hooks.account.chainId = 1;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 0n, 1, 96_633n] };
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Switch to Robinhood Chain' })).toBeEnabled();
   });
 
   it('shows a "Not enough {symbol}" label when the input-side balance is insufficient (native-ETH balance, the default WETH-leg choice)', () => {
@@ -545,6 +560,27 @@ describe('SwapPanel', () => {
     const [, inputs] = hooks.writeContract.mock.calls[0][0].args;
     const [, amountIn] = decodeAbiParameters(parseAbiParameters('address recipient, uint256 amountIn, uint256 amountOutMin, bytes path, bool payerIsUser'), inputs[0]);
     expect(amountIn).toBe(2_000_000_000_000_000_000n);
+  });
+
+  it('after flipping, typing Buy token A derives Sell token B with its own decimals and reversed path', async () => {
+    vi.useFakeTimers();
+    const sixDecimalTokenB = { ...tokenNoWeth, decimals: 6 };
+    reverse.solve.mockResolvedValue(2_000_000n);
+    hooks.simulateData = { result: [3_000_000_000_000_000_000n, 0n, 1, 1n] };
+    render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={sixDecimalTokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.makeV3).toHaveBeenLastCalledWith({}, { tokenIn: tokenNoWeth.address, tokenOut: tokenA.address, fee: 10000 });
+    expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.writeContract).toHaveBeenCalledTimes(1);
+    const [, inputs] = hooks.writeContract.mock.calls[0][0].args;
+    const swap = decodeV3SwapInput(inputs[0]);
+    expect(swap.amount).toBe(2_000_000n);
+    expect(pathTokens(swap.path)).toEqual({ tokenIn: tokenNoWeth.address.toLowerCase(), tokenOut: tokenA.address.toLowerCase() });
   });
 
   it('shows "Quote unavailable" and disables Swap when the reverse quote has no answer', async () => {

@@ -26,7 +26,7 @@ import { useSwapAmounts } from './use-swap-amounts';
 import { TradeCard } from './trade-card';
 import { SwapShell } from './swap-shell';
 import { usdText, usdPriceFor, type UsdPrices } from './trade-usd';
-import { minReceivedText } from './trade-amount-format';
+import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
 import { encodePermit2PermitInput } from './v4SwapEncoding';
 import {
@@ -49,13 +49,14 @@ export interface SwapPanelProps {
   tokenB: SwapToken;
   explorerBase: string | null;
   usdPrices?: UsdPrices;
+  targetChainName?: string;
 }
 
 function isWeth(token: SwapToken): boolean {
   return token.address.toLowerCase() === WETH_ADDRESS.toLowerCase();
 }
 
-export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices }: SwapPanelProps) {
+export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices, targetChainName }: SwapPanelProps) {
   const [direction, setDirection] = useState<'aToB' | 'bToA'>('aToB');
   // Governs the ETH/WETH choice on whichever side currently holds the WETH leg (if any) — a
   // single boolean, not per-direction, since flipping direction only changes whether that leg
@@ -117,9 +118,8 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
     wasConfirmed.current = submission.status === 'confirmed';
   }, [submission.status, erc20Allowance]);
 
-  const hasInsufficientBalance = nativeIn
-    ? (nativeBalance.data?.value ?? 0n) < amountIn
-    : (tokenInBalance ?? 0n) < amountIn;
+  const sellBalance = isConnected ? (nativeIn ? nativeBalance.data?.value : tokenInBalance) : undefined;
+  const hasInsufficientBalance = sellBalance !== undefined && sellBalance < amountIn;
   const needsErc20Approval = !nativeIn && amountIn > 0n && !hasInsufficientBalance && erc20Allowance.allowance < amountIn;
 
   function displaySymbol(token: SwapToken, isCurrentlyNative: boolean): string {
@@ -229,6 +229,8 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
           selector: (<TokenSelector options={sideOptions(tokenIn)} selected={selectedOption(tokenIn)} onSelect={(key) => handleSelect(tokenIn, key)} chainId={robinhoodChain.id} />),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
+          balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${displaySymbol(tokenIn, nativeIn)}`,
+          insufficientBalance: hasInsufficientBalance,
         }}
         buy={{
           value: buyText, onChange: amounts.onBuyChange, ariaLabel: 'Buy amount',
@@ -253,12 +255,13 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
             canBatchApprove={canBatch}
             quoteState={amountIn > 0n && erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}
             isConnected={isConnected}
-            balanceKnown={nativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
+            balanceKnown={sellBalance !== undefined}
             onConnect={openWalletDialog}
             isSubmitting={isSubmitting || permit2.isSigning}
             allowance={erc20Allowance}
             actionLabel="Swap"
             onAction={() => { void submitSwap(); }}
+            targetChainName={targetChainName}
           />
           <TradeStatus status={submission.status} txHash={submission.txHash} errorMessage={submission.errorMessage} explorerBase={explorerBase} />
         </>}

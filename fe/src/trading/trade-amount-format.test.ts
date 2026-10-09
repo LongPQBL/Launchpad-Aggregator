@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { applySlippage } from './amount';
-import { formatTokenAmount, minReceivedText } from './trade-amount-format';
+import { formatBalanceAmount, formatTokenAmount, minReceivedText } from './trade-amount-format';
+
+describe('formatBalanceAmount', () => {
+  it('truncates instead of rounding up a balance near the entered amount', () => {
+    expect(formatBalanceAmount(999_999_999_999_999_999n, 18)).toBe('0.999999');
+    expect(formatBalanceAmount(1n, 18)).toBe('<0.000001');
+    expect(formatBalanceAmount(1_234_567_890_000_000_000_000n, 18)).toBe('1,234.56789');
+  });
+});
 
 describe('formatTokenAmount', () => {
   it('formats millions compactly with up to 4 fraction digits', () => {

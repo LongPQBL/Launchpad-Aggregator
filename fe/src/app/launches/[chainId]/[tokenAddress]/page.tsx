@@ -22,7 +22,7 @@ function isTokenAddress(value: string): boolean {
 export default async function LaunchDetailPage({ params, searchParams }: LaunchDetailPageProps) {
   const { chainId: chainIdParam, tokenAddress } = await params;
   const search = await searchParams;
-  const chartCurrency: 'quote' | 'usd' = search.currency === 'usd' ? 'usd' : 'quote';
+  const requestedChartCurrency: 'quote' | 'usd' = search.currency === 'usd' ? 'usd' : 'quote';
   const intervalParam = Number(search.interval);
   const chartInterval = [60, 300, 900, 3600, 86400].includes(intervalParam) ? intervalParam : 3600;
   const showSwapPreview = process.env.NODE_ENV !== 'production' && search.previewSwap === 'true';
@@ -43,6 +43,8 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
     );
   }
   if (detail === null) notFound();
+
+  const chartCurrency: 'quote' | 'usd' = detail.platform === 'pons' ? 'usd' : requestedChartCurrency;
 
   const activeV4Venue = findActiveVenue(detail.officialVenues, 'v4_pool');
 

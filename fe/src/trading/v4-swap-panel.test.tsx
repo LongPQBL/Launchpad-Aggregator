@@ -136,6 +136,27 @@ describe('V4SwapPanel', () => {
     expect(card('Sell').queryByRole('button', { name: /ROBIN/ })).not.toBeInTheDocument();
   });
 
+  it('shows the Sell token balance and highlights an amount above it, then follows the token after flipping', () => {
+    hooks.balanceA = 2_000_000_000_000_000_000n;
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.getByText('Balance: 2 LAUNCH')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
+    expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
+    expect(screen.getByText('Balance: 2 LAUNCH')).toHaveClass('text-destructive');
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '2' } });
+    expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    expect(screen.getByText('Balance: 10 ROBIN')).not.toHaveClass('text-destructive');
+    expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
+  });
+
+  it('hides the Sell balance until a wallet is connected', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.queryByText(/^Balance:/)).not.toBeInTheDocument();
+  });
+
   it('encodes the real zeroForOne bit matching the UI direction, not just the displayed label', async () => {
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
@@ -226,12 +247,12 @@ describe('V4SwapPanel', () => {
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
-  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('offers switching to Robinhood Chain when the wallet is connected to another network', () => {
     hooks.account.chainId = 1;
     hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Switch to Robinhood Chain' })).toBeEnabled();
   });
 
   it('shows a "Not enough {symbol}" label when the input-side balance is insufficient', () => {
@@ -418,6 +439,31 @@ describe('V4SwapPanel', () => {
     const [, params] = decodeAbiParameters(parseAbiParameters('bytes actions, bytes[] params'), swapInput);
     const [swapParams] = decodeAbiParameters(SWAP_PARAMS_ABI, params[0]);
     expect(swapParams.amountIn).toBe(2_000_000_000_000_000_000n);
+  });
+
+  it('after flipping, typing Buy token A derives Sell token B and submits the reversed pool direction', async () => {
+    vi.useFakeTimers();
+    const sixDecimalTokenB = { ...tokenB, decimals: 6 };
+    reverse.solve.mockResolvedValue(2_000_000n);
+    hooks.simulateData = { result: [3_000_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={sixDecimalTokenB} explorerBase={null} />);
+    fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
+    expect(card('Sell').getByRole('button', { name: /ROBIN/ })).toBeInTheDocument();
+    expect(card('Buy').getByRole('button', { name: /LAUNCH/ })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Buy amount'), { target: { value: '1' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(400); });
+    expect(reverse.makeV4).toHaveBeenLastCalledWith({}, { poolKey, zeroForOne: false });
+    expect(reverse.solve).toHaveBeenCalledWith(1_000_000_000_000_000_000n, expect.anything());
+    expect(screen.getByLabelText('Sell amount')).toHaveValue(2);
+    vi.useRealTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.writeContract).toHaveBeenCalledTimes(1);
+    const [{ args }] = hooks.writeContract.mock.calls[0] as [{ args: readonly [`0x${string}`, readonly `0x${string}`[], bigint] }];
+    const swapInput = args[1][args[1].length - 1];
+    const [, params] = decodeAbiParameters(parseAbiParameters('bytes actions, bytes[] params'), swapInput);
+    const [swapParams] = decodeAbiParameters(SWAP_PARAMS_ABI, params[0]);
+    expect(swapParams.zeroForOne).toBe(false);
+    expect(swapParams.amountIn).toBe(2_000_000n);
   });
 
   it('shows "Quote unavailable" and disables Swap when the reverse quote has no answer', async () => {

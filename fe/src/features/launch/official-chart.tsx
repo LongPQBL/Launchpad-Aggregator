@@ -135,7 +135,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   useEffect(() => {
     const handlePopState = () => {
       const params = new URLSearchParams(window.location.search);
-      const nextCurrency = params.get('currency') === 'usd' ? 'usd' : 'quote';
+      const nextCurrency = showCurrencyToggle ? params.get('currency') === 'usd' ? 'usd' : 'quote' : currency;
       const requestedInterval = Number(params.get('interval'));
       const nextInterval = CHART_INTERVALS.some((item) => item.seconds === requestedInterval)
         ? requestedInterval
@@ -144,7 +144,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
-  }, [selectChart]);
+  }, [selectChart, showCurrencyToggle, currency]);
 
   useEffect(() => {
     setActiveCurrency(currency);

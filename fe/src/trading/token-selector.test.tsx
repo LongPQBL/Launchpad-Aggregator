@@ -9,7 +9,9 @@ const fixedOption = { key: '0x1111111111111111111111111111111111111111', symbol:
 describe('TokenSelector', () => {
   it("shows the selected option's symbol on the trigger button", () => {
     render(<TokenSelector options={[ethOption, wethOption]} selected={ethOption} onSelect={vi.fn()} />);
-    expect(screen.getByRole('button', { name: /ETH/ })).toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: /ETH/ });
+    expect(trigger).toHaveClass('bg-black');
+    expect(trigger.querySelector('svg path')).toHaveAttribute('d', 'M4 6l4 4 4-4');
   });
 
   it('opens a dropdown listing every option when clicked', () => {

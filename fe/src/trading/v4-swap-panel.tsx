@@ -25,7 +25,7 @@ import { useSwapAmounts } from './use-swap-amounts';
 import { TradeCard } from './trade-card';
 import { SwapShell } from './swap-shell';
 import { usdText, usdPriceFor, type UsdPrices } from './trade-usd';
-import { minReceivedText } from './trade-amount-format';
+import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
 import { encodeExecuteCommands, encodePermit2PermitInput, encodeV4SwapInput, type V4PoolKey } from './v4SwapEncoding';
 
@@ -42,10 +42,11 @@ export interface V4SwapPanelProps {
   tokenA: V4SwapToken;
   tokenB: V4SwapToken;
   explorerBase: string | null;
+  targetChainName?: string;
   usdPrices?: UsdPrices;
 }
 
-export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }: V4SwapPanelProps) {
+export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices, targetChainName }: V4SwapPanelProps) {
   const [direction, setDirection] = useState<'aToB' | 'bToA'>('aToB');
   const { address: account, chainId, isConnected } = useAccount();
   const { settings, update } = useTradeSettings();
@@ -100,9 +101,8 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }
     wasConfirmed.current = submission.status === 'confirmed';
   }, [submission.status, erc20Allowance]);
 
-  const hasInsufficientBalance = isNativeIn
-    ? (nativeBalance.data?.value ?? 0n) < amountIn
-    : (tokenInBalance ?? 0n) < amountIn;
+  const sellBalance = isConnected ? (isNativeIn ? nativeBalance.data?.value : tokenInBalance) : undefined;
+  const hasInsufficientBalance = sellBalance !== undefined && sellBalance < amountIn;
   const needsErc20Approval = !isNativeIn && amountIn > 0n && !hasInsufficientBalance && erc20Allowance.allowance < amountIn;
 
   async function submitSwap() {
@@ -177,6 +177,8 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
           selector: fixedSelector(tokenIn),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
+          balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${tokenIn.symbol ?? 'token'}`,
+          insufficientBalance: hasInsufficientBalance,
         }}
         buy={{
           value: buyText, onChange: amounts.onBuyChange, ariaLabel: 'Buy amount',
@@ -204,12 +206,13 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices }
             // still reads "Enter an amount".
             quoteState={amountIn > 0n && erc20Allowance.isAllowanceLoading ? 'loading' : quoteState}
             isConnected={isConnected}
-            balanceKnown={isNativeIn ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
+            balanceKnown={sellBalance !== undefined}
             onConnect={openWalletDialog}
             isSubmitting={isSubmitting || permit2.isSigning}
             allowance={erc20Allowance}
             actionLabel="Swap"
             onAction={() => { void submitSwap(); }}
+            targetChainName={targetChainName}
           />
           <TradeStatus status={submission.status} txHash={submission.txHash} errorMessage={submission.errorMessage} explorerBase={explorerBase} />
         </>}

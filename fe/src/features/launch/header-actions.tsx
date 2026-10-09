@@ -27,7 +27,7 @@ function ShareIcon() {
 }
 
 export function HeaderActions({ twitterUrl }: HeaderActionsProps) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');
   const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => {
@@ -38,16 +38,23 @@ export function HeaderActions({ twitterUrl }: HeaderActionsProps) {
     if (resetRef.current) clearTimeout(resetRef.current);
     setCopyState('idle');
     try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
-      await navigator.clipboard.writeText(window.location.href);
-      setCopyState('copied');
+      const url = window.location.href;
+      if (navigator.share) {
+        await navigator.share({ title: document.title, url });
+        setCopyState('shared');
+      } else {
+        if (!navigator.clipboard?.writeText) throw new Error('Share and Clipboard APIs unavailable');
+        await navigator.clipboard.writeText(url);
+        setCopyState('copied');
+      }
       resetRef.current = setTimeout(() => setCopyState('idle'), 2000);
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
       setCopyState('error');
     }
   }
 
-  const iconButtonClass = 'flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground';
+  const iconButtonClass = 'flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/5 hover:text-foreground';
 
   return (
     <div className="flex items-center gap-1">
@@ -56,10 +63,10 @@ export function HeaderActions({ twitterUrl }: HeaderActionsProps) {
           <TwitterIcon />
         </a>
       )}
-      <button type="button" onClick={share} aria-label={copyState === 'copied' ? 'Link copied' : 'Share'} className={iconButtonClass}>
+      <button type="button" onClick={share} aria-label={copyState === 'copied' ? 'Link copied' : copyState === 'shared' ? 'Shared' : 'Share'} className={iconButtonClass}>
         <ShareIcon />
       </button>
-      {copyState === 'error' && <span role="alert" className="text-xs text-destructive">Could not copy link</span>}
+      {copyState === 'error' && <span role="alert" className="text-xs text-destructive">Could not copy or share link</span>}
     </div>
   );
 }

@@ -100,6 +100,7 @@ export function PoolDetail({ pool, trades, candles }: { pool: PoolSummary; trade
             tickSpacing={pool.tickSpacing}
             hooks={pool.hooks as `0x${string}`}
             explorerBase={explorerBase ?? null}
+            targetChainName={chainName(pool.chainId)}
           />
         )}
         <PoolStats

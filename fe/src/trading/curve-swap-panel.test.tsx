@@ -116,6 +116,15 @@ const flip = () => fireEvent.click(screen.getByRole('button', { name: /flip swap
 const typeSell = (value: string) => fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value } });
 
 describe('CurveSwapPanel - buy direction (default)', () => {
+  it('shows the native Sell balance in red when exceeded and updates the balance after flipping', () => {
+    render(panel(nativeQuote, { tokenSymbol: 'PROM' }));
+    expect(screen.getByText('Balance: 0.01 ETH')).toBeInTheDocument();
+    typeSell('0.02');
+    expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
+    expect(screen.getByText('Balance: 0.01 ETH')).toHaveClass('text-destructive');
+    flip();
+    expect(screen.getByText('Balance: 2 PROM')).not.toHaveClass('text-destructive');
+  });
   it('shows an "Enter an amount" label when the amount is empty', () => {
     render(panel(nativeQuote));
     expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
@@ -180,11 +189,11 @@ describe('CurveSwapPanel - buy direction (default)', () => {
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
-  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('offers switching to Robinhood Chain when the wallet is connected to another network', () => {
     hooks.account.chainId = 1;
     render(panel(nativeQuote));
     typeSell('0.001');
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Switch to Robinhood Chain' })).toBeEnabled();
   });
 
   it('shows a "Not enough {symbol}" label when the ERC20 quote-asset balance is insufficient', () => {
@@ -440,12 +449,12 @@ describe('CurveSwapPanel - sell direction (after flip)', () => {
     expect(screen.getByRole('button', { name: 'Getting quote…' })).toBeDisabled();
   });
 
-  it('shows a "Switch network" label when the wallet is connected to a chain other than Robinhood Chain', () => {
+  it('offers switching to Robinhood Chain when the wallet is connected to another network', () => {
     hooks.account.chainId = 1;
     hooks.allowance = 2000000000000000000n;
     renderSell();
     typeSell('1');
-    expect(screen.getByRole('button', { name: 'Switch network' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Switch to Robinhood Chain' })).toBeEnabled();
   });
 
   it('shows a decoded approval error message when the approval fails', () => {

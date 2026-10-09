@@ -26,6 +26,22 @@ describe('TradeCard', () => {
     expect(sell.onChange).not.toHaveBeenCalled();
   });
 
+  it('moves the dark background to the input the user focuses', () => {
+    render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} />);
+    const sellCard = screen.getByLabelText('Sell amount').closest('.rounded-2xl');
+    const buyInput = screen.getByLabelText('Buy amount');
+    const buyCard = buyInput.closest('.rounded-2xl');
+    expect(sellCard).toHaveClass('isolate');
+    expect(sellCard?.querySelector('[aria-hidden="true"]')).toHaveClass('bg-black');
+    expect(buyCard).toHaveClass('isolate');
+    expect(buyCard?.querySelector('[aria-hidden="true"]')).toHaveClass('absolute', '-z-10', 'bg-[#1b1d23]/70');
+    expect(buyCard?.querySelector('.relative')).toContainElement(buyInput);
+
+    fireEvent.focus(buyInput);
+    expect(buyCard?.querySelector('[aria-hidden="true"]')).toHaveClass('bg-black');
+    expect(sellCard?.querySelector('[aria-hidden="true"]')).toHaveClass('bg-[#1b1d23]/70');
+  });
+
   it('shows the $ line only when usdText is set — never a placeholder', () => {
     const { rerender } = render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} />);
     expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
@@ -36,6 +52,19 @@ describe('TradeCard', () => {
   it('shows a hint under the side it belongs to', () => {
     render(<TradeCard sell={side({ hint: 'Quote unavailable' })} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} />);
     expect(screen.getByText('Quote unavailable')).toBeInTheDocument();
+  });
+
+  it('shows the Sell balance under its token selector and turns the amount and balance red when insufficient', () => {
+    const buy = side({ ariaLabel: 'Buy amount', selector: <button type="button">ETH</button> });
+    const { rerender } = render(<TradeCard sell={side({ balanceText: 'Balance: 2 TOK', insufficientBalance: true })} buy={buy} onFlip={vi.fn()} />);
+    const balance = screen.getByText('Balance: 2 TOK');
+    expect(balance).toHaveClass('text-destructive');
+    expect(balance.parentElement).toContainElement(screen.getByRole('button', { name: 'TOK' }));
+    expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
+    expect(screen.getByLabelText('Buy amount')).not.toHaveClass('text-destructive');
+    rerender(<TradeCard sell={side({ balanceText: 'Balance: 2 TOK', insufficientBalance: false })} buy={buy} onFlip={vi.fn()} />);
+    expect(screen.getByText('Balance: 2 TOK')).not.toHaveClass('text-destructive');
+    expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
   });
 
   it('shows the Min received row only when provided', () => {

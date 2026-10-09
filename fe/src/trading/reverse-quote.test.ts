@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  CallExecutionError, HttpRequestError, InvalidAddressError, TimeoutError, decodeFunctionData, encodeFunctionData, parseAbi,
+  CallExecutionError, HttpRequestError, InvalidAddressError, RpcRequestError, TimeoutError, decodeFunctionData, encodeFunctionData, parseAbi,
   type Address, type Hex,
 } from 'viem';
 import { curveStateAbi, curveTradeAbi } from './curveAbi';
@@ -15,6 +15,7 @@ import { encodeResult, makeFakeClient, type FakeCallRequest } from './test-suppo
 
 const signal = new AbortController().signal;
 const transport = () => new CallExecutionError(new TimeoutError({ body: {}, url: 'https://rpc.example' }), {});
+const revert = (message = 'execution reverted') => new RpcRequestError({ body: {}, url: 'https://rpc.example', error: { code: 3, message } });
 const curve = '0x4444444444444444444444444444444444444444' as Address;
 const launched = '0x2222222222222222222222222222222222222222' as Address;
 const quoteToken = '0x5fc5360d0400a0fd4f2af552add042d716f1d168' as Address;
@@ -41,7 +42,7 @@ describe('makeV3ReverseSolve', () => {
   });
 
   it('returns null when the quoter reverts', async () => {
-    const solve = makeV3ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { tokenIn: launched, tokenOut, fee: 10000 });
+    const solve = makeV3ReverseSolve(makeFakeClient(() => { throw revert(); }), { tokenIn: launched, tokenOut, fee: 10000 });
     expect(await solve(1n, signal)).toBeNull();
   });
 
@@ -73,7 +74,7 @@ describe('makeV4ReverseSolve', () => {
   });
 
   it('returns null when every simulation reverts', async () => {
-    const solve = makeV4ReverseSolve(makeFakeClient(() => { throw new Error('revert'); }), { poolKey, zeroForOne: true });
+    const solve = makeV4ReverseSolve(makeFakeClient(() => { throw revert(); }), { poolKey, zeroForOne: true });
     expect(await solve(1000n, signal)).toBeNull();
   });
 
@@ -101,15 +102,15 @@ function curveWorld(options: { quoteBalanceBase?: bigint; native?: boolean; stat
       const diff = req.stateOverride?.flatMap((o) => o.stateDiff ?? []) ?? [];
       const has = (slot: Hex) => diff.some((d) => d.slot.toLowerCase() === slot.toLowerCase() && BigInt(d.value) >= amount);
       if (functionName === 'buy') {
-        if (options.native) { if (!(req.value === amount && (req.stateOverride?.[0]?.balance ?? 0n) >= amount)) throw new Error('insufficient ETH'); }
-        else if (!has(balanceSlotAt(1n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(3n)(SIMULATION_ACCOUNT, curve))) throw new Error('InsufficientAllowance');
-        if (curveBuyOutput(state, amount) === 0n) throw new Error('ZeroOutput');
+        if (options.native) { if (!(req.value === amount && (req.stateOverride?.[0]?.balance ?? 0n) >= amount)) throw revert('insufficient ETH'); }
+        else if (!has(balanceSlotAt(1n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(3n)(SIMULATION_ACCOUNT, curve))) throw revert('InsufficientAllowance');
+        if (curveBuyOutput(state, amount) === 0n) throw revert('ZeroOutput');
         return encodeResult(curveTradeAbi, 'buy', curveBuyOutput(state, amount));
       }
-      if (!has(balanceSlotAt(0n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(1n)(SIMULATION_ACCOUNT, curve))) throw new Error('InsufficientAllowance');
-      if (amount > 5n * 10n ** 22n) throw new Error('underflow'); // cannot sell more than has been sold
+      if (!has(balanceSlotAt(0n)(SIMULATION_ACCOUNT)) || !has(allowanceSlotAt(1n)(SIMULATION_ACCOUNT, curve))) throw revert('InsufficientAllowance');
+      if (amount > 5n * 10n ** 22n) throw revert('underflow'); // cannot sell more than has been sold
       const out = curveSellOutput(state, amount);
-      if (out === 0n) throw new Error('ZeroOutput'); // dust sells revert
+      if (out === 0n) throw revert('ZeroOutput'); // dust sells revert
       return encodeResult(curveTradeAbi, 'sell', out);
     }
     // token contracts: only the discovery probes reach here

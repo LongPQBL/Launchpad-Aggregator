@@ -24,7 +24,7 @@ import { SwapShell } from './swap-shell';
 import { TradeCard } from './trade-card';
 import { TokenSelector } from './token-selector';
 import { usdPriceFor, usdText, type UsdPrices } from './trade-usd';
-import { minReceivedText } from './trade-amount-format';
+import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
 
 export interface CurveSwapPanelProps {
@@ -102,9 +102,8 @@ export function CurveSwapPanel({
   const paymasterCapable = usePaymasterCapability();
   const isSubmitting = submission.status === 'pending' || submission.status === 'confirming';
 
-  const hasInsufficientBalance = sellsNative
-    ? (nativeBalance.data?.value ?? 0n) < amountIn
-    : (tokenInBalance ?? 0n) < amountIn;
+  const sellBalance = isConnected ? (sellsNative ? nativeBalance.data?.value : tokenInBalance) : undefined;
+  const hasInsufficientBalance = sellBalance !== undefined && sellBalance < amountIn;
   // Don't prompt the user to approve an amount they're already known not to hold.
   const needsApproval = !sellsNative && amountIn > 0n && !hasInsufficientBalance && allowance.allowance < amountIn;
 
@@ -159,6 +158,8 @@ export function CurveSwapPanel({
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
           selector: fixedSelector(tokenIn),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
+          balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${tokenIn.symbol ?? 'token'}`,
+          insufficientBalance: hasInsufficientBalance,
         }}
         buy={{
           value: buyText, onChange: amounts.onBuyChange, ariaLabel: 'Buy amount',
@@ -177,7 +178,7 @@ export function CurveSwapPanel({
             canBatchApprove={canBatch}
             quoteState={quoteState}
             isConnected={isConnected}
-            balanceKnown={sellsNative ? nativeBalance.data !== undefined : tokenInBalance !== undefined}
+            balanceKnown={sellBalance !== undefined}
             onConnect={openWalletDialog}
             isSubmitting={isSubmitting}
             allowance={allowance}

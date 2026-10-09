@@ -80,6 +80,8 @@ describe('formatPrice', () => {
   it('rounds to exactly 3 significant (non-zero-leading) digits below 1 unit', () => {
     expect(formatPrice('0.00312344', 'ETH')).toBe('0.00312 ETH');
     expect(formatPrice('0.0003426', 'ETH')).toBe('0.000343 ETH');
+    expect(formatPrice('0.08', 'ROBIN')).toBe('0.0800 ROBIN');
+    expect(formatPrice('0.001', 'ROBIN')).toBe('0.00100 ROBIN');
   });
 
   it('shows exactly 0 at the standard 2 decimal places, not an unbounded number of zeros', () => {

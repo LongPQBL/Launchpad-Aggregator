@@ -72,9 +72,9 @@ export function PoolTransactionList({ trades, displayedSymbol, otherSymbol, disp
         <TableRow className="border-0 bg-card/55 backdrop-blur-sm [&>th]:border-y [&>th]:border-border [&>th:first-child]:rounded-l-lg [&>th:first-child]:border-l [&>th:last-child]:rounded-r-lg [&>th:last-child]:border-r">
           <TableHead>Time</TableHead>
           <TableHead>Type</TableHead>
-          <TableHead className="text-right">{displaySymbol(displayedSymbol)}</TableHead>
-          <TableHead className="text-right">For</TableHead>
           <TableHead className="text-right">USD</TableHead>
+          <TableHead className="text-right">{displaySymbol(displayedSymbol)}</TableHead>
+          <TableHead className="text-right">{displaySymbol(otherSymbol)}</TableHead>
           <TableHead className="text-right">Wallet</TableHead>
           <TableHead className="text-right">Explorer</TableHead>
         </TableRow>
@@ -91,17 +91,17 @@ export function PoolTransactionList({ trades, displayedSymbol, otherSymbol, disp
               </TableCell>
               <TableCell className="text-base font-semibold">
                 <span className={cn('font-semibold', side === 'buy' && 'text-success', side === 'sell' && 'text-destructive')}>
-                  {formatSide(side)}
+                  {side === 'buy' || side === 'sell' ? `${formatSide(side)} ${displaySymbol(displayedSymbol)}` : formatSide(side)}
                 </span>
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatRawAmount(displayedRaw, displayedDecimals)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatRawAmount(otherRaw, otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
               <TableCell
                 className="text-right text-base font-semibold"
                 title={trade.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
                 {trade.usdValueStatus === 'pending' ? 'Calculating…' : trade.usdValue === null ? '—' : `$${formatAmount(trade.usdValue, 2)}`}
               </TableCell>
+              <TableCell className="text-right text-base font-semibold">{formatRawAmount(displayedRaw, displayedDecimals)}</TableCell>
+              <TableCell className="text-right text-base font-semibold">{formatRawAmount(otherRaw, otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
               <TableCell className="text-right text-base font-semibold">
                 {explorerBase ? (
                   <a href={`${explorerBase}/address/${trade.traderAddress}`} target="_blank" rel="noreferrer noopener">

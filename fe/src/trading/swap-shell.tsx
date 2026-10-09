@@ -15,11 +15,11 @@ export interface SwapShellProps {
 
 export function SwapShell({ venueLabel, settings, onSettingsChange, venueKind, children }: SwapShellProps) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="rounded-full bg-muted px-4 py-1.5 text-base font-semibold">Swap</span>
-          <Badge variant="outline">{venueLabel}</Badge>
+          <span className="rounded-full bg-muted px-5 py-2 text-lg font-semibold">Swap</span>
+          <Badge variant="outline" className="px-3 py-1 text-sm">{venueLabel}</Badge>
         </div>
         <TradeSettingsPopover settings={settings} onChange={onSettingsChange} venueKind={venueKind} />
       </div>

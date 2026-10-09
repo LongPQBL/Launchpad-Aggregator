@@ -297,8 +297,10 @@ export function startMockApi(port: number): Server {
         logIndex: index, blockNumber: String(300 + index), timestamp: 1_780_000_000 - index * 600,
         traderAddress: `0x${(index + 200).toString(16).padStart(40, '0')}`,
         side: index % 2 === 0 ? 'buy' : 'sell',
-        amount0Raw: String(BigInt(1000 + index * 50) * 10n ** 18n), amount1Raw: String(BigInt(10 + index) * 10n ** 14n),
-        priceInQuote: '0.0001', usdValue: (10 + index).toFixed(2), usdValueStatus: 'priced',
+        // Large values make it easy to review transaction column widths in the mock detail page.
+        amount0Raw: String(BigInt(1_234_567 + index * 234_567) * 10n ** 18n),
+        amount1Raw: String(BigInt(98_765 + index * 12_345) * 10n ** 18n),
+        priceInQuote: '0.0001', usdValue: (1_234_567 + index * 123_456).toFixed(2), usdValueStatus: 'priced',
       }));
       res.end(JSON.stringify({ items, nextCursor: null }));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+$/.test(url.pathname)) {

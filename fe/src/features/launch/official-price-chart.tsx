@@ -27,6 +27,7 @@ export function OfficialPriceChart({
   intervalSeconds,
   tokenSymbol,
   source,
+  showCurrencyToggle = true,
 }: {
   priceText: string;
   priceStale: boolean;
@@ -38,6 +39,7 @@ export function OfficialPriceChart({
   intervalSeconds: number;
   tokenSymbol: string | null;
   source: OfficialChartSource;
+  showCurrencyToggle?: boolean;
 }) {
   const [hover, setHover] = useState<OfficialChartHoverPoint | null>(null);
   const [range, setRange] = useState<OfficialChartRange | null>(null);
@@ -64,6 +66,7 @@ export function OfficialPriceChart({
           intervalSeconds={intervalSeconds}
           tokenSymbol={tokenSymbol}
           source={source}
+          showCurrencyToggle={showCurrencyToggle}
           onHoverPoint={setHover}
           onRangeChange={setRange}
         />

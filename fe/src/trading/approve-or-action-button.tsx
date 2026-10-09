@@ -1,6 +1,8 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
+import { robinhoodChain } from '@/wallet/config';
+import { requestWalletNetworkSwitch } from '@/wallet/open-wallet-dialog';
 import { resolveTradeButton, type QuoteState } from './trade-button-state';
 
 export interface ApproveOrActionAllowance {
@@ -35,6 +37,7 @@ export interface ApproveOrActionButtonProps {
   allowance: ApproveOrActionAllowance;
   actionLabel: string;
   onAction: () => void;
+  targetChainName?: string;
 }
 
 // Shared by curve-swap-panel.tsx, swap-panel.tsx, and v4-swap-panel.tsx: each pairs a
@@ -46,7 +49,7 @@ export interface ApproveOrActionButtonProps {
 // paragraph for those same three conditions above this button.
 export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
   const { needsApproval, amountIn, approveAmount, isWrongChain, hasInsufficientBalance, tokenInSymbol, canBatchApprove,
-    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, onAction } = props;
+    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, onAction, targetChainName = 'Robinhood Chain' } = props;
   const state = resolveTradeButton({ isConnected, isWrongChain, amountIn, quoteState, balanceKnown, hasInsufficientBalance,
     needsApproval, canBatchApprove: Boolean(canBatchApprove), tokenInSymbol });
   const approveError = allowance.approveError && (
@@ -54,13 +57,19 @@ export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
   );
 
   if (state.kind === 'connect') {
-    return <Button type="button" className="cursor-pointer" onClick={onConnect}>{state.label}</Button>;
+    return <Button type="button" className="h-12 rounded-full cursor-pointer bg-[#ccff00] text-base text-[#151515] hover:bg-[#bff000]" onClick={onConnect}>{state.label}</Button>;
+  }
+  if (state.kind === 'switch-network') {
+    return <Button type="button" className="h-12 rounded-full cursor-pointer bg-[#ccff00] text-base text-[#151515] hover:bg-[#bff000]"
+      onClick={() => requestWalletNetworkSwitch(robinhoodChain.id)}>Switch to {targetChainName}</Button>;
   }
   if (state.kind === 'approve') {
     return (
       <>
         {approveError}
-        <Button type="button" className="cursor-pointer"
+        <Button type="button" className={`h-12 rounded-full text-base ${allowance.isApproving || allowance.isConfirmingApproval
+          ? 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'
+          : 'cursor-pointer bg-[#ccff00] text-[#151515] hover:bg-[#bff000]'}`}
           disabled={allowance.isApproving || allowance.isConfirmingApproval}
           onClick={() => allowance.approve(approveAmount ?? amountIn)}>
           {allowance.isApproving ? 'Approving…' : allowance.isConfirmingApproval ? 'Confirming approval…' : state.label}
@@ -71,7 +80,9 @@ export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
   return (
     <>
       {approveError}
-      <Button type="button" className="cursor-pointer" disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
+      <Button type="button"
+        className={`h-12 rounded-full text-base ${state.kind === 'swap' && !isSubmitting ? 'cursor-pointer bg-[#ccff00] text-[#151515] hover:bg-[#bff000]' : 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'}`}
+        disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
         onClick={state.kind === 'swap' ? onAction : undefined}>
         {state.kind === 'swap' ? actionLabel : state.label}
       </Button>
