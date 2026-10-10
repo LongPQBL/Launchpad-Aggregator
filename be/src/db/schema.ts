@@ -438,6 +438,25 @@ export const launchVolumeBuckets = pgTable('launch_volume_buckets', {
   index('launch_volume_unpriced_idx').on(table.chainId, table.tokenAddress).where(sql`${table.unpricedCount} > 0`),
 ]);
 
+// Launch-wide USD OHLC per bucket (no venue column: open/close need one order across venues). Prices are null when no trade
+// in the bucket could be priced; a bucket with unpriced_count > 0 is not readable as a candle.
+export const launchUsdCandleBuckets = pgTable('launch_usd_candle_buckets', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
+  open: numeric('open', { precision: 40, scale: 20 }),
+  high: numeric('high', { precision: 40, scale: 20 }),
+  low: numeric('low', { precision: 40, scale: 20 }),
+  close: numeric('close', { precision: 40, scale: 20 }),
+  volumeUsd: numeric('volume_usd', { precision: 40, scale: 6 }).notNull(),
+  tradeCount: integer('trade_count').notNull(),
+  unpricedCount: integer('unpriced_count').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart] }),
+  check('launch_usd_candle_buckets_interval_valid', sql`${table.intervalSeconds} IN (60, 300, 3600, 14400, 86400)`),
+]);
+
 // Decimals-free USD volume per pool side (sum of |raw amount| * oracle answer / 10^feed decimals); the reader divides by the side's token decimals.
 export const poolVolumeBuckets = pgTable('pool_volume_buckets', {
   chainId: integer('chain_id').notNull(),

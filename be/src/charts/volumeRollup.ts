@@ -8,18 +8,18 @@ const MAX_PRICE_AGE_SECONDS = 86_400;
 interface LaunchMinute { chainId: number; tokenAddress: string; bucketStart: number }
 interface PoolMinute { chainId: number; protocol: string; poolId: string; bucketStart: number }
 
-function finerOf(interval: number): number {
+export function finerOf(interval: number): number {
   const index = VOLUME_INTERVALS.indexOf(interval as (typeof VOLUME_INTERVALS)[number]);
   return VOLUME_INTERVALS[index - 1]!;
 }
 
-function distinct<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
+export function distinct<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
   const byKey = new Map<string, T>();
   for (const item of items) byKey.set(keyOf(item), item);
   return [...byKey.values()];
 }
 
-function valuesList(rows: readonly (readonly unknown[])[], casts: readonly string[]): { sql: string; params: unknown[] } {
+export function valuesList(rows: readonly (readonly unknown[])[], casts: readonly string[]): { sql: string; params: unknown[] } {
   const params: unknown[] = [];
   const sql = rows.map((row) => {
     const placeholders = row.map((value, column) => { params.push(value); return `$${params.length}::${casts[column]}`; });
