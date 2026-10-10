@@ -42,6 +42,7 @@ afterAll(async () => {
   await pool.query('DELETE FROM candle_unpriced_buckets WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM candles WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM launch_volume_buckets WHERE chain_id = 4663 AND token_address = $1', [token]);
+  await pool.query('DELETE FROM launch_usd_candle_buckets WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM venues WHERE id = $1', [venue]);
   await pool.query('DELETE FROM launches WHERE chain_id = 4663 AND token_address = $1', [token]);
   await pool.query('DELETE FROM sources WHERE id = $1', [source]);
@@ -60,6 +61,8 @@ describe('precomputed official candles', () => {
     const volume = (await pool.query(`SELECT interval_seconds, trade_count FROM launch_volume_buckets WHERE chain_id = 4663 AND token_address = $1 ORDER BY interval_seconds`, [token])).rows;
     expect(volume.map((row) => row.interval_seconds)).toEqual([60, 300, 3600, 14400, 86400]);
     expect(volume.every((row) => row.trade_count === 2)).toBe(true);
+    const usd = (await pool.query(`SELECT interval_seconds FROM launch_usd_candle_buckets WHERE chain_id = 4663 AND token_address = $1 ORDER BY interval_seconds`, [token])).rows;
+    expect(usd.map((row) => row.interval_seconds)).toEqual([60, 300, 3600, 14400, 86400]);
     expect(rows[0]).toMatchObject({ open: '2', high: '4', low: '2', close: '4', quote_volume_raw: '2000000000000000000' });
     await pool.query('DELETE FROM trades WHERE chain_id = 4663 AND tx_hash = $1', [`0x${'2'.repeat(64)}`]);
     await refreshDirtyCandles(pool, 1000);

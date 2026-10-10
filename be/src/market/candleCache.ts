@@ -2,6 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import type { Address, Hash } from 'viem';
 import type { Trade } from '../domain/types.js';
 import { rebuildLaunchVolume } from '../charts/volumeRollup.js';
+import { rebuildUsdCandles } from '../charts/usdCandleRollup.js';
 import { buildOfficialCandles, type Candle } from './aggregate.js';
 
 export const CANDLE_INTERVALS = [60, 300, 900, 3600, 14400, 86400] as const;
@@ -134,6 +135,7 @@ export async function refreshDirtyCandles(pool: Pool, limit = 100): Promise<numb
     }
     for (const intervalSeconds of CANDLE_INTERVALS) await rebuildInterval(client, dirty, intervalSeconds);
     await rebuildLaunchVolume(client, dirty);
+    await rebuildUsdCandles(client, dirty);
     const { placeholders, params } = values(dirty);
     await client.query(`WITH completed(chain_id, token_address, bucket_start) AS (VALUES ${placeholders})
       DELETE FROM candle_dirty_buckets d USING completed c

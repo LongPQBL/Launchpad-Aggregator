@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { backfillLaunchVolume, backfillPoolVolume } from './backfillVolume.js';
+import { backfillLaunchVolume, backfillPoolVolume, backfillUsdCandles } from './backfillVolume.js';
 import { isRollupBackfilled } from './rollupState.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -19,7 +19,7 @@ const minute = 1_800_000_000;
 const e18 = 10n ** 18n;
 
 beforeAll(async () => {
-  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume','launch_volume_done','pool_volume_done')");
+  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume','launch_usd_candles','launch_volume_done','pool_volume_done','launch_usd_candles_done')");
   await pool.query(`INSERT INTO sources (id, chain_id, version, factory_address, start_block, scanned_to_block, confirmed_to_block, status)
     VALUES ($1,$2,'v2',$3,0,0,0,'caught_up') ON CONFLICT DO NOTHING`, [source, chainId, `0x${'f5'.repeat(20)}`]);
   await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, name, symbol, token_decimals, platform, protocol_version,
@@ -55,6 +55,7 @@ afterAll(async () => {
   await pool.query('DELETE FROM candle_dirty_buckets WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM pool_candle_dirty_buckets WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM launch_volume_buckets WHERE chain_id = $1', [chainId]);
+  await pool.query('DELETE FROM launch_usd_candle_buckets WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM pool_volume_buckets WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM venues WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM launches WHERE chain_id = $1', [chainId]);
@@ -79,6 +80,11 @@ describe('volume bucket backfill', () => {
     expect(poolDaily.rows).toEqual([{ trade_count: 1 }]);
     expect(await isRollupBackfilled(pool, 'launch_volume')).toBe(true);
     expect(await isRollupBackfilled(pool, 'pool_volume')).toBe(true);
+    expect(await isRollupBackfilled(pool, 'launch_usd_candles')).toBe(false);
+    expect(await backfillUsdCandles(pool)).toBeGreaterThan(0);
+    expect(await isRollupBackfilled(pool, 'launch_usd_candles')).toBe(true);
+    const usdHourly = await pool.query('SELECT trade_count FROM launch_usd_candle_buckets WHERE chain_id = $1 AND interval_seconds = 3600 ORDER BY bucket_start', [chainId]);
+    expect(usdHourly.rows).toEqual([{ trade_count: 1 }, { trade_count: 1 }]);
     expect(await backfillLaunchVolume(pool)).toBe(0);
     expect(await backfillPoolVolume(pool)).toBe(0);
   });

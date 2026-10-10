@@ -1,5 +1,6 @@
-import type { Pool } from 'pg';
-import { markRollupBackfilled } from './rollupState.js';
+import type { Pool, PoolClient } from 'pg';
+import { markRollupBackfilled, type RollupName } from './rollupState.js';
+import { rebuildUsdCandles } from './usdCandleRollup.js';
 import { rebuildLaunchVolume, rebuildPoolVolume } from './volumeRollup.js';
 
 const MINUTES_PER_TRANSACTION = 500;
@@ -39,7 +40,18 @@ function chunks<T>(items: readonly T[], size: number): T[][] {
  * is idempotent (and safe next to the live worker), so repeating work is harmless.
  */
 export async function backfillLaunchVolume(pool: Pool, log: (message: string) => void = () => {}): Promise<number> {
-  const name = 'launch_volume';
+  return backfillLaunches(pool, 'launch_volume', rebuildLaunchVolume, log);
+}
+
+/** Same loop for the launch-wide USD candles, with its own cursor so it can run after (or beside) the volume pass. */
+export async function backfillUsdCandles(pool: Pool, log: (message: string) => void = () => {}): Promise<number> {
+  return backfillLaunches(pool, 'launch_usd_candles', rebuildUsdCandles, log);
+}
+
+type LaunchRebuild = (client: PoolClient, minutes: readonly { chainId: number; tokenAddress: string; bucketStart: number }[]) => Promise<void>;
+
+async function backfillLaunches(pool: Pool, name: Extract<RollupName, 'launch_volume' | 'launch_usd_candles'>, rebuild: LaunchRebuild,
+  log: (message: string) => void): Promise<number> {
   let cursor = await readCursor(pool, name);
   let launches = 0;
   for (;;) {
@@ -52,16 +64,16 @@ export async function backfillLaunchVolume(pool: Pool, log: (message: string) =>
         JOIN venues v ON v.id = t.venue_id AND v.official = true WHERE t.chain_id = $1 AND t.token_address = $2 ORDER BY 1`,
       [launch.chain_id, launch.token_address])).rows.map((row) => Number(row.bucket_start));
       for (const slice of chunks(minutes, MINUTES_PER_TRANSACTION)) {
-        await inTransaction(pool, (client) => rebuildLaunchVolume(client, slice.map((bucketStart) => ({
+        await inTransaction(pool, (client) => rebuild(client, slice.map((bucketStart) => ({
           chainId: Number(launch.chain_id), tokenAddress: String(launch.token_address), bucketStart }))));
       }
       launches += 1;
     }
     cursor = upper;
     await writeCursor(pool, name, cursor);
-    log(`launch volume: through launch block ${cursor} (${launches} launches)`);
+    log(`${name}: through launch block ${cursor} (${launches} launches)`);
   }
-  await markRollupBackfilled(pool, 'launch_volume');
+  await markRollupBackfilled(pool, name);
   return launches;
 }
 

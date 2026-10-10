@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 
-export type RollupName = 'launch_volume' | 'pool_volume';
+export type RollupName = 'launch_volume' | 'pool_volume' | 'launch_usd_candles';
 
 // The volume rollups only describe history once the backfill has covered it; until then a bucket with no row could be
 // an unprocessed day, not a real zero, so the readers report the series as incomplete.
