@@ -68,7 +68,7 @@ export function PoolDetail({ pool, trades, candles, history = null, chartRange }
     </CardHeader></Card>
     </StickyDetailHeader>
 
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
       <div className="flex flex-col gap-4">
         <PoolChartPanel pool={pool} candles={candles} history={history} coverageStatus={pool.coverageStatus} quoteSymbol={quote} tokenSymbol={displayedSymbol} initialRange={chartRange} />
         <section aria-labelledby="pool-transactions-heading" className="space-y-3">

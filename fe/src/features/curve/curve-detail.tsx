@@ -71,7 +71,7 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
         </Card>
       </StickyDetailHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
         <div className="flex flex-col gap-4">
           <LaunchChartPanel
             chainId={detail.chainId}

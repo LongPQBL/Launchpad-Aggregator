@@ -74,6 +74,7 @@ test('shows no Show more for a short description that does not overflow, at both
 });
 
 test('returns not-found for an invalid token route', async ({ page }) => {
-  const response = await page.goto(`/launches/${CHAIN_ID}/not-an-address`);
-  expect(response?.status()).toBe(404);
+  // The route has a loading.tsx, so the response streams as 200 and the not-found page renders inside it.
+  await page.goto(`/launches/${CHAIN_ID}/not-an-address`);
+  await expect(page.getByText(/could not be found/i)).toBeVisible();
 });

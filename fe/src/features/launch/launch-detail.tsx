@@ -129,7 +129,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
       </Card>
       </StickyDetailHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
         <div className="flex flex-col gap-4">
           <Card className="border-0 bg-transparent">
             <CardContent className="px-0 pt-4">

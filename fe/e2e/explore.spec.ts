@@ -37,17 +37,22 @@ test('choosing a chain filters the transactions to that chain and is kept in the
 
 test('the header search finds a launch and navigates to it', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Search tokens and pools' }).click();
   const box = page.getByRole('combobox', { name: 'Search tokens and pools' });
   await box.fill('E2E');
   const option = page.getByRole('option', { name: /E2E Launch/ });
   await expect(option).toBeVisible();
-  await expect(page.getByRole('option', { name: /pool/ })).toBeVisible();
+  // Pools have their own tab in the search popup.
+  await page.getByRole('tab', { name: /Pools/ }).click();
+  await expect(page.getByRole('option').first()).toBeVisible();
+  await page.getByRole('tab', { name: /Tokens/ }).click();
   await option.click();
   await expect(page).toHaveURL(new RegExp(`/launches/${CHAIN_ID}/`));
 });
 
 test('the header search closes on Escape and says when nothing matches', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'Search tokens and pools' }).click();
   const box = page.getByRole('combobox', { name: 'Search tokens and pools' });
   await box.fill('zzzzzz');
   await expect(page.getByText(/No results for/)).toBeVisible();
@@ -89,6 +94,7 @@ test('moving between pages keeps the header and does not reload the browser page
   await expect(page.getByRole('table', { name: 'Launch list' })).toBeVisible();
   await nav.getByRole('link', { name: 'Pools' }).click();
   await page.getByRole('link', { name: /View pool MOCK1/ }).first().click();
+  await page.getByRole('tab', { name: 'Volume' }).click();
   await expect(page.getByRole('region', { name: 'Pool history' })).toBeVisible();
 
   expect(await page.evaluate(() => document.querySelector('header')?.dataset.keep)).toBe('1');
