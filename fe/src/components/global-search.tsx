@@ -7,6 +7,7 @@ import { ROADMAP_CHAIN_IDS, chainName } from '@/api/chains';
 import { launchHref, poolHref, searchAll, type SearchResults } from '@/api/client';
 import { displayName, displaySymbol } from '@/api/format';
 import { ChainFilterIcon, ChevronIcon, SelectedCheck, toggleValue } from '@/components/chain-filter';
+import { demoSearchResults } from '@/components/global-search-demo';
 import { Dialog } from '@/components/ui/dialog';
 import { PercentChange } from '@/components/percent-change';
 import { TokenImage } from '@/features/launches/token-logo';
@@ -125,6 +126,8 @@ export function GlobalSearch() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const query = text.trim();
+  const demoEnabled = process.env.NODE_ENV !== 'production' && typeof window !== 'undefined'
+    && new URLSearchParams(window.location.search).get('searchDemo') === '1';
   const resultKey = `${query}:${selectedChains.join(',')}`;
   const results = resultState?.key === resultKey ? resultState.data : null;
 
@@ -135,7 +138,10 @@ export function GlobalSearch() {
     const timer = setTimeout(() => {
       setStatus('loading');
       setLoadingMore(false);
-      searchAll(query, controller.signal, selectedChains.length ? selectedChains : undefined, PAGE_SIZE, 0)
+      const chains = selectedChains.length ? selectedChains : undefined;
+      const request = demoEnabled ? Promise.resolve(demoSearchResults(query, chains, PAGE_SIZE, 0))
+        : searchAll(query, controller.signal, chains, PAGE_SIZE, 0);
+      request
         .then((next) => { if (!controller.signal.aborted) {
           setResultState({ key: resultKey, data: next, offset: PAGE_SIZE,
             moreTokens: next.tokens.length === PAGE_SIZE, morePools: next.pools.length === PAGE_SIZE });
@@ -144,7 +150,7 @@ export function GlobalSearch() {
         .catch(() => { if (!controller.signal.aborted) setStatus('error'); });
     }, query ? DEBOUNCE_MS : 0);
     return () => { clearTimeout(timer); controller.abort(); pageControllerRef.current?.abort(); pageControllerRef.current = null; loadingMoreRef.current = false; };
-  }, [open, query, resultKey, selectedChains]);
+  }, [open, query, resultKey, selectedChains, demoEnabled]);
 
   const groups = results ? buildOptions(results) : { tokens: [], pools: [] };
   const tokens = tab === 'pools' ? [] : tab === 'all' ? groups.tokens.slice(0, PREVIEW_COUNT) : groups.tokens;
@@ -196,7 +202,7 @@ export function GlobalSearch() {
     triggerRef.current?.focus();
   }
 
-  function choose(option: Option) { close(); router.push(option.href); }
+  function choose(option: Option) { if (demoEnabled) return; close(); router.push(option.href); }
 
   function onKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === 'Escape') { event.stopPropagation(); close(); return; }
@@ -211,11 +217,13 @@ export function GlobalSearch() {
       <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm text-muted-foreground">
         <SectionIcon kind={kind} />{label}
       </div>
-      {group.map((option, index) => <Link key={option.key} id={`${listId}-${offset + index}`} role="option"
-        aria-selected={activeIndex === offset + index} href={option.href} onClick={close}
-        className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-muted', activeIndex === offset + index && 'bg-muted')}>
-        {option.node}
-      </Link>)}
+      {group.map((option, index) => {
+        const className = cn('flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-muted', activeIndex === offset + index && 'bg-muted');
+        return demoEnabled
+          ? <div key={option.key} id={`${listId}-${offset + index}`} role="option" aria-selected={activeIndex === offset + index} className={className}>{option.node}</div>
+          : <Link key={option.key} id={`${listId}-${offset + index}`} role="option" aria-selected={activeIndex === offset + index}
+            href={option.href} onClick={close} className={className}>{option.node}</Link>;
+      })}
       {tab === 'all' && hasMore && <button type="button" aria-label={`View all ${label}`}
         onClick={() => selectTab(kind)} className="flex w-full items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
         View all <ViewAllIcon />
@@ -272,7 +280,6 @@ export function GlobalSearch() {
       <div ref={listRef} id={listId} role="listbox" aria-label="Search results" className="min-h-0 flex-1 overflow-y-auto p-2"
         onScroll={(event) => { const list = event.currentTarget;
           if (list.scrollTop + list.clientHeight >= list.scrollHeight - 100) void loadMore(); }}>
-        {!query && results && tab === 'all' && <p className="px-3 pt-2 text-xs text-muted-foreground">Recently added</p>}
         {renderGroup('Tokens', 'tokens', tokens, 0, !!resultState?.moreTokens || groups.tokens.length > PREVIEW_COUNT)}
         {renderGroup('Pools', 'pools', pools, tokens.length, !!resultState?.morePools || groups.pools.length > PREVIEW_COUNT)}
         {!results && status !== 'error' && <p role="status" className="px-3 py-5 text-sm text-muted-foreground">Searching…</p>}

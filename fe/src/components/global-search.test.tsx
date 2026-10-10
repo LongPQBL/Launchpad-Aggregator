@@ -24,7 +24,7 @@ async function typeQuery(value: string) {
 
 describe('GlobalSearch', () => {
   beforeEach(() => { vi.useFakeTimers(); push.mockReset(); vi.mocked(searchAll).mockReset(); });
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => { vi.useRealTimers(); window.history.replaceState({}, '', '/'); });
 
   it('opens a centered search dialog from the icon button and focuses its input', () => {
     render(<GlobalSearch />);
@@ -46,7 +46,7 @@ describe('GlobalSearch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(searchAll).toHaveBeenCalledWith('', expect.any(AbortSignal), undefined, 10, 0);
-    expect(screen.getByText('Recently added')).toBeInTheDocument();
+    expect(screen.queryByText('Recently added')).not.toBeInTheDocument();
     const tokenGroup = screen.getByRole('group', { name: 'Tokens' });
     const poolGroup = screen.getByRole('group', { name: 'Pools' });
     expect(within(tokenGroup).getAllByRole('option')).toHaveLength(6);
@@ -59,6 +59,36 @@ describe('GlobalSearch', () => {
     expect(screen.queryByRole('group', { name: 'Pools' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
     expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(8);
+  });
+
+  it('hides View all when a group has six or fewer results', async () => {
+    vi.mocked(searchAll).mockResolvedValue({
+      tokens: Array.from({ length: 6 }, (_, index) => ({ ...results.tokens[0]!, tokenAddress: `0x${index}`, name: `Token ${index}` })),
+      pools: Array.from({ length: 6 }, (_, index) => ({ ...results.pools[0]!, poolId: `0x${index}` })),
+    });
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    const tokenGroup = screen.getByRole('group', { name: 'Tokens' });
+    const poolGroup = screen.getByRole('group', { name: 'Pools' });
+    expect(within(tokenGroup).queryByRole('button', { name: 'View all Tokens' })).not.toBeInTheDocument();
+    expect(within(poolGroup).queryByRole('button', { name: 'View all Pools' })).not.toBeInTheDocument();
+  });
+
+  it('can preview eight sample tokens and pools without querying the API', async () => {
+    window.history.replaceState({}, '', '/?searchDemo=1');
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(searchAll).not.toHaveBeenCalled();
+    expect(screen.queryByText('Recently added')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(6);
+    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(6);
+    fireEvent.click(within(screen.getByRole('group', { name: 'Pools' })).getByRole('button', { name: 'View all Pools' }));
+    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(8);
+    expect(screen.getByText('DEMO7 / ETH')).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')[0]!);
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('loads additional matching results while scrolling a dedicated tab', async () => {
