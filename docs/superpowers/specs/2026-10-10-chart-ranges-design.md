@@ -25,8 +25,9 @@ One mapping, owned by the backend (`be/src/charts/ranges.ts`); the frontend only
 | `1m` | 30 days | 14400 s | 180 |
 | `1y` | 365 days | 86400 s | 365 |
 
-- Query param `range` replaces `interval` on the launch/pool candle and history endpoints (solo project,
-  no external API consumers; OpenAPI and `fe/src/api/schema.ts` regenerate).
+- Query param `range` replaces `intervalSeconds`/`days` on the launch/pool **history** endpoints. The **candle**
+  endpoints gain `range` (the frontend uses only it) and keep `intervalSeconds`/`before` for existing tests and
+  the USD path. OpenAPI and `fe/src/api/schema.ts` regenerate. History responses also return `intervalSeconds`.
 - Responses return the whole window in one page (no `before` pagination). Zooming/panning past the window is out of scope.
 - `HISTORY_INTERVALS` gains 14400; `MAX_HISTORY_BUCKETS` rises to 400.
 
@@ -47,8 +48,10 @@ New tables (additive migration):
 - `launch_volume_buckets(chain_id, token_address, venue_kind, interval_seconds, bucket_start, volume_usd, trade_count, unpriced_count)`
   PK `(chain_id, token_address, venue_kind, interval_seconds, bucket_start)`. `venue_kind` ('curve' | 'v4_pool')
   lets the curve-only chart and the all-official chart both read it (all-official = sum of kinds at read time).
-- `pool_volume_buckets(chain_id, protocol, pool_id, interval_seconds, bucket_start, volume_usd, trade_count, unpriced_count)`
-  PK `(chain_id, protocol, pool_id, interval_seconds, bucket_start)`.
+- `pool_volume_buckets(chain_id, protocol, pool_id, interval_seconds, bucket_start, trade_count, usd_scaled0, unpriced0, usd_scaled1, unpriced1)`
+  PK `(chain_id, protocol, pool_id, interval_seconds, bucket_start)`. A pool's token decimals are only known via
+  RPC, which the rollup worker does not have, so each side stores `sum(abs(amount_raw) * answer_raw / 10^feed_decimals)`
+  (decimals-free); the reader divides by `10^decimals` of whichever side it prices (same side choice as today).
 - `unpriced_count > 0` ⇒ the API returns `volumeUsd = null` for that bucket (same rule as today).
   Partial index on `unpriced_count > 0` lets a new oracle round re-dirty only buckets that were waiting for a price.
 
@@ -73,7 +76,9 @@ Retention (new tables only; they are rebuildable from trades): 60 s kept 24 h, 5
   Venue-scoped (curve) price requests currently fall back to raw trades; they use a venue-keyed read of
   the same rollup if the existing cache is extended with `venue_kind`, otherwise stay on the bounded trades
   path (window ≤ 1 y of one token's curve trades, which stop at sweep). Decide during planning after measuring.
-- Candle rebuilds also derive each interval from the next finer one.
+- Candle rebuilds keep today's per-interval rebuild from trades (only interval 14400 is added, and the
+  existing 900 stays so old data and tests are untouched). Deriving candles from finer intervals is a
+  measured follow-up, not part of this change.
 - USD price candles (`usd_candles`) keep today's path for this change; its whole-token rebuild is a known cost
   to address as a separate work unit (flag in plan).
 
