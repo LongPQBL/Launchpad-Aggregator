@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { refreshDirtyCandles } from './candleCache.js';
+import { insertTvlSnapshot } from '../pools/tvlSnapshots.js';
 import { readLaunchHistory } from './launchHistory.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -14,6 +16,10 @@ const feed = `0x${'d6'.repeat(20)}`;
 const venueId = 'launch-history-test-venue';
 const base = 1_800_000_000; // divisible by 60, so buckets start on the minute
 const e18 = 10n ** 18n;
+
+async function settle() {
+  while ((await refreshDirtyCandles(pool, 1000)) > 0);
+}
 
 beforeAll(async () => {
   await pool.query(`INSERT INTO sources (id, chain_id, version, factory_address, start_block, scanned_to_block, confirmed_to_block, status)
@@ -42,10 +48,12 @@ beforeAll(async () => {
   await trade(601, 1, base + 20, 1n, 2n);  // minute 1: price 4.00 USD per token
   await trade(602, 1, base + 70, 2n, 1n);  // minute 2: price 1.00 USD per token
   await trade(300, 1, base + 130, 1n, 1n); // before the round's block: unpriced, so its minute is omitted
+  await settle();
 });
 
 afterAll(async () => {
     await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query('DELETE FROM launch_volume_buckets WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM venues WHERE id = $1', [venueId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = $1 AND feed_address = $2', [chainId, feed]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = $1 AND quote_asset_address = $2', [chainId, quote]);
@@ -70,7 +78,16 @@ describe('readLaunchHistory', () => {
 
   it('rejects an unsupported interval or bucket count', async () => {
     await expect(readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 7, buckets: 3, asOf: 1, complete: true })).rejects.toThrow('Invalid launch history window');
-    await expect(readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 201, asOf: 1, complete: true })).rejects.toThrow('Invalid launch history window');
+    await expect(readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 401, asOf: 1, complete: true })).rejects.toThrow('Invalid launch history window');
+  });
+
+  it('is not complete while a minute in the window still waits for its rollup', async () => {
+    await pool.query(`INSERT INTO candle_dirty_buckets (chain_id, token_address, bucket_start) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [chainId, token, base]);
+    const stale = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
+    expect(stale.complete).toBe(false);
+    await settle();
+    const fresh = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
+    expect(fresh).toMatchObject({ complete: true, intervalSeconds: 60 });
   });
 });
 
@@ -86,9 +103,11 @@ describe('readLaunchHistory venueKind scoping', () => {
       side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
       VALUES ($1, $2, $3, 700, $4, $5, 1, $6, 'buy', $7, $8, $9, 'Swap', 'user_trade', $2)`,
     [chainId, token, v4VenueId, `0x${'70'.repeat(32)}`, `0x${'71'.repeat(32)}`, base + 10, e18.toString(), (3n * e18).toString(), quote]);
+    await settle();
   }
   afterEach(async () => {
     await pool.query('DELETE FROM trades WHERE venue_id = $1', [v4VenueId]);
+    await settle();
     await pool.query('DELETE FROM venues WHERE id = $1', [v4VenueId]);
   });
 
@@ -98,5 +117,31 @@ describe('readLaunchHistory venueKind scoping', () => {
     expect(all.items[0]).toMatchObject({ day: base, tradeCount: 3, volumeUsd: '12' });
     const curveOnly = await readLaunchHistory(pool, { ...options, venueKind: 'curve' });
     expect(curveOnly.items[0]).toEqual({ day: base, tradeCount: 2, volumeUsd: '6', tvlUsd: null });
+  });
+});
+
+describe('readLaunchHistory TVL', () => {
+  const tvlVenue = 'launch-history-test-tvl-venue';
+  const poolId = `0x${'da'.repeat(32)}`;
+  const hour = Math.floor(base / 3600) * 3600;
+  afterEach(async () => {
+    await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id = $1', [poolId]);
+    await pool.query('DELETE FROM venues WHERE id = $1', [tvlVenue]);
+  });
+
+  it('reads the official V4 pool TVL from raw snapshots for fine buckets and from the rollup for hourly and coarser', async () => {
+    await pool.query(`INSERT INTO venues (id, chain_id, token_address, kind, ref, source_id, effective_from_block, official)
+      VALUES ($1, $2, $3, 'v4_pool', $4, $5, 2, true)`, [tvlVenue, chainId, token, poolId, source]);
+    for (const [seconds, tvl, block] of [[base + 5, '100', 1], [base + 25, '140', 2]] as const) {
+      await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: BigInt(block), capturedAtSeconds: seconds,
+        coreAmount0Raw: 1n, coreAmount1Raw: 1n, sqrtPriceX96: 1n, quoteAddress: quote, tvlUsd: tvl });
+    }
+    const fine = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 70, complete: true });
+    expect(fine.items.map((item) => item.tvlUsd)).toEqual(['140', null]);
+    const hourly = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 3600, buckets: 2, asOf: hour + 3700, complete: true });
+    expect(hourly.items.map((item) => item.tvlUsd)).toEqual(['140', null]);
+    const daily = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 86_400, buckets: 1, asOf: base, complete: true });
+    expect(daily.items.map((item) => item.tvlUsd)).toEqual(['140']);
   });
 });

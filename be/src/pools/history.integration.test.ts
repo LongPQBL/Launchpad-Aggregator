@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { readPoolDailyHistory, readPoolHistory } from './history.js';
+import { refreshDirtyPoolCandles } from './candleCache.js';
 import { insertTvlSnapshot } from './tvlSnapshots.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -25,6 +26,10 @@ const rpcClient = {
     throw new Error(`Unexpected ${functionName}`);
   },
 };
+
+async function settle() {
+  while ((await refreshDirtyPoolCandles(pool, 1000)) > 0);
+}
 
 async function swap(digit: string, block: number, timestamp: number, quoteRaw: string) {
   await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,
@@ -50,6 +55,7 @@ beforeAll(async () => {
   await swap('3', 101, 10 * DAY + 100, (10n ** 18n).toString());
   await swap('4', 102, 10 * DAY + 200, (2n * 10n ** 18n).toString());
   await swap('6', 201, 11 * DAY + 100, (10n ** 18n).toString());
+  await settle();
   await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 150n, capturedAtSeconds: 10 * DAY + 50,
     coreAmount0Raw: 1n, coreAmount1Raw: 1n, sqrtPriceX96: 1n, quoteAddress: b, tvlUsd: '100' });
   await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 160n, capturedAtSeconds: 10 * DAY + 5000,
@@ -58,6 +64,9 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]);
+  await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id=$1', [poolId]);
+  await pool.query('DELETE FROM pool_volume_buckets WHERE pool_id=$1', [poolId]);
+  await pool.query('DELETE FROM pool_trades WHERE pool_id=$1', [poolId]);
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, poolId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id=$1 AND feed_address=$2', [chainId, feed]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id=$1 AND quote_asset_address=$2', [chainId, b]);
@@ -77,6 +86,7 @@ describe('readPoolDailyHistory', () => {
 
   it('reports a day as unavailable, not zero, when one of its swaps predates any oracle round', async () => {
     await swap('7', 50, 9 * DAY + 100, (10n ** 18n).toString());
+    await settle();
     const history = await readPoolDailyHistory(pool, key, { days: 4, asOf: 12 * DAY + 3600, rpcClient });
     expect(history.items[0]).toMatchObject({ day: 9 * DAY, tradeCount: 1, volumeUsd: null });
     expect(history.items[1]).toMatchObject({ day: 10 * DAY, volumeUsd: '6' });
@@ -110,6 +120,16 @@ describe('readPoolDailyHistory', () => {
 
   it('rejects an unsupported interval or bucket count', async () => {
     await expect(readPoolHistory(pool, key, { intervalSeconds: 7, buckets: 4, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
-    await expect(readPoolHistory(pool, key, { intervalSeconds: 60, buckets: 201, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
+    await expect(readPoolHistory(pool, key, { intervalSeconds: 60, buckets: 401, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
+  });
+
+  it('is not complete while a minute in the window still waits for its rollup', async () => {
+    await swap('8', 210, 11 * DAY + 500, (10n ** 18n).toString());
+    const stale = await readPoolHistory(pool, key, { intervalSeconds: 3600, buckets: 2, asOf: 11 * DAY + 3600, rpcClient });
+    expect(stale.complete).toBe(false);
+    await settle();
+    const fresh = await readPoolHistory(pool, key, { intervalSeconds: 3600, buckets: 2, asOf: 11 * DAY + 3600, rpcClient });
+    expect(fresh.complete).toBe(true);
+    expect(fresh.intervalSeconds).toBe(3600);
   });
 });
