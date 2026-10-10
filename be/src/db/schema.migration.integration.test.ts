@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDatabase } from './client.js';
 
@@ -63,5 +64,38 @@ describe('envio_chain_progress table (final review, Important 3)', () => {
     const result = await pool.query('SELECT head_block FROM envio_chain_progress WHERE chain_id = 9999');
     expect(result.rows[0].head_block).toBe('200');
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 9999');
+  });
+});
+
+describe('migration 0050 chart rollups', () => {
+  const chainId = 990050;
+  const rollupToken = '0x5050505050505050505050505050505050505050';
+  const statements = readFileSync(new URL('../../drizzle/0050_jazzy_stick.sql', import.meta.url), 'utf8').split('--> statement-breakpoint');
+  const find = (needle: string) => statements.find((statement) => statement.includes(needle))!;
+
+  it('creates the rollup tables and accepts 4h USD candles', async () => {
+    for (const table of ['launch_volume_buckets', 'pool_volume_buckets', 'pool_tvl_buckets', 'chart_rollup_state']) {
+      const result = await pool.query('SELECT to_regclass($1) AS name', [table]);
+      expect(result.rows[0].name).toBe(table);
+    }
+    await expect(pool.query(`SELECT 1 FROM pg_constraint WHERE conname = 'usd_candles_interval_valid'
+      AND pg_get_constraintdef(oid) LIKE '%14400%'`).then((r) => r.rowCount)).resolves.toBe(1);
+  });
+
+  it('derives a 4h candle from hourly candles with the right open/high/low/close/volume', async () => {
+    await pool.query('DELETE FROM candles WHERE chain_id = $1', [chainId]);
+    const rows = [[0, '1', '3', '0.5', '2', '10'], [3600, '2', '9', '1.5', '4', '20'], [7200, '4', '5', '0.25', '3', '30'], [14400, '3', '3', '3', '3', '5']];
+    for (const [start, open, high, low, close, volume] of rows) {
+      await pool.query(`INSERT INTO candles (chain_id, token_address, interval_seconds, bucket_start, open, high, low, close, quote_volume_raw)
+        VALUES ($1,$2,3600,$3,$4,$5,$6,$7,$8)`, [chainId, rollupToken, start, open, high, low, close, volume]);
+    }
+    await pool.query(find('INSERT INTO candles'));
+    const result = await pool.query(`SELECT bucket_start, open, high, low, close, quote_volume_raw FROM candles
+      WHERE chain_id = $1 AND interval_seconds = 14400 ORDER BY bucket_start`, [chainId]);
+    expect(result.rows).toEqual([
+      { bucket_start: 0, open: '1', high: '9', low: '0.25', close: '3', quote_volume_raw: '60' },
+      { bucket_start: 14400, open: '3', high: '3', low: '3', close: '3', quote_volume_raw: '5' },
+    ]);
+    await pool.query('DELETE FROM candles WHERE chain_id = $1', [chainId]);
   });
 });

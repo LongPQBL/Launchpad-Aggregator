@@ -294,7 +294,7 @@ export const usdCandles = pgTable('usd_candles', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart] }),
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
-  check('usd_candles_interval_valid', sql`${table.intervalSeconds} IN (60, 300, 900, 3600, 86400)`),
+  check('usd_candles_interval_valid', sql`${table.intervalSeconds} IN (60, 300, 900, 3600, 14400, 86400)`),
 ]);
 
 export const launchVolume24hState = pgTable('launch_volume24h_state', {
@@ -407,6 +407,56 @@ export const poolTvlSnapshots = pgTable('pool_tvl_snapshots', {
   check('pool_tvl_snapshots_protocol', sql`${table.protocol} = 'uniswap_v4'`),
   index('pool_tvl_snapshots_captured_at_idx').on(table.capturedAt),
 ]);
+
+// Last TVL snapshot per hour / 4 hours / day, kept after the raw hourly-or-finer snapshots are pruned.
+export const poolTvlBuckets = pgTable('pool_tvl_buckets', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
+  tvlUsd: numeric('tvl_usd', { precision: 78, scale: 30 }).notNull(),
+  lastCapturedAt: timestamp('last_captured_at', { withTimezone: true }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.intervalSeconds, table.bucketStart] }),
+  check('pool_tvl_buckets_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+]);
+
+// Official USD volume per launch, venue kind and bucket. unpriced_count > 0 means the bucket's volume is unavailable.
+export const launchVolumeBuckets = pgTable('launch_volume_buckets', {
+  chainId: integer('chain_id').notNull(),
+  tokenAddress: text('token_address').notNull(),
+  venueKind: text('venue_kind').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
+  volumeUsd: numeric('volume_usd', { precision: 40, scale: 6 }).notNull(),
+  tradeCount: integer('trade_count').notNull(),
+  unpricedCount: integer('unpriced_count').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.venueKind, table.intervalSeconds, table.bucketStart] }),
+  index('launch_volume_unpriced_idx').on(table.chainId, table.tokenAddress).where(sql`${table.unpricedCount} > 0`),
+]);
+
+// Decimals-free USD volume per pool side (sum of |raw amount| * oracle answer / 10^feed decimals); the reader divides by the side's token decimals.
+export const poolVolumeBuckets = pgTable('pool_volume_buckets', {
+  chainId: integer('chain_id').notNull(),
+  protocol: text('protocol').notNull(),
+  poolId: text('pool_id').notNull(),
+  intervalSeconds: integer('interval_seconds').notNull(),
+  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
+  tradeCount: integer('trade_count').notNull(),
+  usdScaled0: numeric('usd_scaled0', { precision: 80, scale: 12 }),
+  unpriced0: integer('unpriced0').notNull(),
+  usdScaled1: numeric('usd_scaled1', { precision: 80, scale: 12 }),
+  unpriced1: integer('unpriced1').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.intervalSeconds, table.bucketStart] }),
+]);
+
+export const chartRollupState = pgTable('chart_rollup_state', {
+  name: text('name').primaryKey(),
+  completedThrough: bigint('completed_through', { mode: 'number' }).notNull(),
+});
 
 export const poolTrades = pgTable('pool_trades', {
   chainId: integer('chain_id').notNull(),
