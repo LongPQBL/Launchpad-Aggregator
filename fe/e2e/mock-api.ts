@@ -362,7 +362,8 @@ export function startMockApi(port: number): Server {
           day: Math.floor(1_780_000_000 / intervalSeconds) * intervalSeconds - (count - 1 - index) * intervalSeconds,
           tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
           volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
-          tvlUsd: index % 12 === 0 ? String(40_000 + index * 50) : null,
+          // A continuous TVL line with one missing snapshot, so the area chart shows both a line and a gap.
+          tvlUsd: index === 5 ? null : String(40_000 + index * 50 + (index % 7) * 120),
         })),
         complete: true,
       }));
