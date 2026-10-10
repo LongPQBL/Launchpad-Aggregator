@@ -1,3 +1,4 @@
+import type { PoolDayHistory } from '../pools/history.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import swagger from '@fastify/swagger';
@@ -40,6 +41,18 @@ export interface LaunchDetail extends LaunchSummary {
   priceStale: boolean;
   quotePriceUsd: string | null;
 }
+/** The bonding-curve venue of a launch on its own (the launch endpoints merge the curve with the V4 pool). */
+export interface CurveSummary {
+  venueId: string;
+  curveAddress: string;
+  /** False once the curve has handed over (its venue has an effective_to_block). */
+  active: boolean;
+  /** Quote-asset volume over the last 24h on the curve venue only. */
+  volume24hQuote: string;
+  tradeCount24h: number;
+  lastPriceQuote: string | null;
+}
+
 export interface TradeResponse {
   venueId: string; blockNumber: string; txHash: string; logIndex: number; timestamp: number; side: string;
   // null when the launch's token/quote decimals are still unresolved (core-metadata enrichment
@@ -80,7 +93,7 @@ export interface UsdCandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string;
   volumeUsd: string; tradeCount: number; computedAt: string;
 }
-export interface ListQuery { limit: number; cursor?: string; chainId?: number }
+export interface ListQuery { limit: number; cursor?: string; chainId?: number; venue?: 'curve' }
 export interface LaunchListQuery extends Omit<ListQuery, 'chainId'> { chainId?: number | number[]; search?: string; status?: string; platform?: string | string[]; sort?: LaunchSort; direction?: SortDirection }
 
 // Observability for the near-realtime incremental sync path (be/src/envioSync/incrementalSync.ts),
@@ -116,8 +129,12 @@ export interface ApiDeps {
     listTransactions(chainId: number, tokenAddress: string, query: ListQuery): Promise<Page<TransactionResponse>>;
     // Optional so test doubles that predate the global feed keep compiling; the route answers 503 without it.
     listAllTransactions?(query: GlobalTransactionQuery): Promise<Page<GlobalTransactionResponse>>;
-    listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
+    listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number, venueKind?: string): Promise<{ items: readonly CandleResponse[]; complete: boolean }>;
     listUsdCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly UsdCandleResponse[]; complete: boolean }>;
+    // Optional so test doubles that predate the Volume / TVL charts keep compiling; the route answers 503 without it.
+    // Optional like listLaunchHistory: the route answers 503 without it.
+    getCurveSummary?(chainId: number, tokenAddress: string): Promise<CurveSummary | null>;
+    listLaunchHistory?(chainId: number, tokenAddress: string, window: { intervalSeconds: number; buckets: number; venueKind?: string }): Promise<{ items: PoolDayHistory[]; complete: boolean } | null>;
   };
 }
 

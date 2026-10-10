@@ -983,3 +983,105 @@ describe('listTransactions', () => {
     await pool.query('DELETE FROM pool_catalog WHERE chain_id = $1 AND pool_id = $2', [otherChainId, poolId]);
   });
 });
+
+// A launch with trades on both its bonding curve and its V4 pool, shared by the curve-scoped tests below.
+describe('venue=curve scoping', () => {
+  const scopedToken = '0x1717171717171717171717171717171717171717';
+  const scopedSource = 'store-test-curve-scope';
+  const curveVenueId = `pons-v2-curve:${scopedToken}`;
+  const v4VenueId = `pons-v2-v4:${scopedToken}`;
+  const curveTx = '0x' + 'd'.repeat(64);
+  const v4Tx = '0x' + 'e'.repeat(64);
+
+  async function seedTwoVenues(options: { curveEnded?: boolean } = {}) {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ($1,4663,'v2',$2,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [scopedSource, scopedToken]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'Scoped','SCP',18,'pons','v2',$1,$1,1,$3,0,$1,'ROBIN',18,'graduated') ON CONFLICT DO NOTHING`,
+    [scopedToken, scopedSource, curveTx]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,effective_to_block,official)
+      VALUES ($1,4663,$2,'curve',$2,$3,NULL,1,$4,true) ON CONFLICT (id) DO NOTHING`,
+    [curveVenueId, scopedToken, scopedSource, options.curveEnded ? 2 : null]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v4_pool',$3,$4,NULL,2,true) ON CONFLICT (id) DO NOTHING`,
+    [v4VenueId, scopedToken, '0x' + '9'.repeat(64), scopedSource]);
+    const now = Math.floor(Date.now() / 1000);
+    for (const [venueId, tx, block, timestamp, quoteRaw] of [
+      [curveVenueId, curveTx, 1, now - 60, '2000000000000000000'],
+      [v4VenueId, v4Tx, 2, now - 30, '5000000000000000000'],
+    ] as const) {
+      await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+        side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address,
+        price_numerator_raw,price_denominator_raw)
+        VALUES (4663,$1,$2,$3,$4,$5,0,$6,'buy','1000000000000000000',$7::numeric,$1,'Swap','user_trade',$1,$7::numeric,'1000000000000000000')
+        ON CONFLICT DO NOTHING`, [scopedToken, venueId, block, blockHash, tx, timestamp, quoteRaw]);
+    }
+  }
+
+  afterEach(async () => {
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [scopedToken]);
+    await pool.query('DELETE FROM venues WHERE token_address = $1', [scopedToken]);
+    await pool.query('DELETE FROM launches WHERE token_address = $1', [scopedToken]);
+    await pool.query('DELETE FROM sources WHERE id = $1', [scopedSource]);
+  });
+
+  it('listTrades returns every official trade unscoped, and only the curve venue\'s with venue=curve', async () => {
+    await seedTwoVenues();
+    const all = await store.listTrades(4663, scopedToken, { limit: 10 });
+    expect(all.items.map((item) => item.venueId).sort()).toEqual([curveVenueId, v4VenueId].sort());
+    const curveOnly = await store.listTrades(4663, scopedToken, { limit: 10, venue: 'curve' });
+    expect(curveOnly.items.map((item) => item.venueId)).toEqual([curveVenueId]);
+  });
+
+  it('listCandles with venue=curve is built from curve trades only and ignores the pre-aggregated cache', async () => {
+    await seedTwoVenues();
+    const bucket = Math.floor(Date.now() / 1000 / 3600) * 3600;
+    const previous = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0] as { backfill_complete: boolean } | undefined;
+    await pool.query(`INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, true)
+      ON CONFLICT (id) DO UPDATE SET backfill_complete = true`);
+    // A cached row that disagrees with the trades: if the curve-scoped call read the cache it would report 999 ROBIN.
+    // Inserting trades marks their buckets dirty, which makes the cache skip them; clear that so the cached row is readable.
+    await pool.query('DELETE FROM candle_dirty_buckets WHERE token_address = $1', [scopedToken]);
+    await pool.query(`INSERT INTO candles (chain_id, token_address, interval_seconds, bucket_start, open, high, low, close, quote_volume_raw)
+      VALUES (4663, $1, 3600, $2, '1', '1', '1', '1', '999000000000000000000') ON CONFLICT DO NOTHING`, [scopedToken, bucket]);
+    try {
+      const cached = await store.listCandles(4663, scopedToken, 3600);
+      expect(cached.items.map((candle) => candle.quoteVolume)).toContain('999');
+      const curveOnly = await store.listCandles(4663, scopedToken, 3600, undefined, 'curve');
+      expect(curveOnly.items.reduce((sum, candle) => sum + Number(candle.quoteVolume), 0)).toBe(2);
+    } finally {
+      await pool.query('DELETE FROM candles WHERE token_address = $1', [scopedToken]);
+      await pool.query('DELETE FROM candle_dirty_buckets WHERE token_address = $1', [scopedToken]);
+      await pool.query('UPDATE candle_cache_state SET backfill_complete = $1 WHERE id = 1', [previous?.backfill_complete ?? false]);
+    }
+  });
+
+  it('getCurveSummary counts only the curve venue\'s last-24h trades and reports whether the curve is still active', async () => {
+    await seedTwoVenues();
+    const old = Math.floor(Date.now() / 1000) - 3 * 86_400;
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,0,$3,$4,1,$5,'buy','1000000000000000000','7000000000000000000',$1,'Swap','user_trade',$1)`,
+    [scopedToken, curveVenueId, blockHash, '0x' + 'f'.repeat(64), old]);
+    const summary = await store.getCurveSummary!(4663, scopedToken);
+    expect(summary).toMatchObject({ venueId: curveVenueId, curveAddress: scopedToken, active: true, volume24hQuote: '2', tradeCount24h: 1, lastPriceQuote: '2' });
+    await pool.query('UPDATE venues SET effective_to_block = 2 WHERE id = $1', [curveVenueId]);
+    expect((await store.getCurveSummary!(4663, scopedToken))?.active).toBe(false);
+  });
+
+  it('getCurveSummary is null for a launch with no curve venue', async () => {
+    await seedTwoVenues();
+    await pool.query('DELETE FROM trades WHERE venue_id = $1', [curveVenueId]);
+    await pool.query('DELETE FROM venues WHERE id = $1', [curveVenueId]);
+    expect(await store.getCurveSummary!(4663, scopedToken)).toBeNull();
+  });
+
+  it('listTransactions with venue=curve returns only curve official rows and never other-pool swaps', async () => {
+    await seedTwoVenues();
+    const page = await store.listTransactions(4663, scopedToken, { limit: 10, venue: 'curve' });
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0]).toMatchObject({ source: 'official', venueId: curveVenueId });
+  });
+});

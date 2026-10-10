@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
-import { readPoolDailyHistory } from './history.js';
+import { readPoolDailyHistory, readPoolHistory } from './history.js';
 import { insertTvlSnapshot } from './tvlSnapshots.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -96,5 +96,20 @@ describe('readPoolDailyHistory', () => {
   it('rejects an out-of-range window', async () => {
     await expect(readPoolDailyHistory(pool, key, { days: 0, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
     await expect(readPoolDailyHistory(pool, key, { days: 91, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
+  });
+
+  it('buckets the same series by an hour: volume per hour and the last TVL snapshot taken inside each hour', async () => {
+    const history = await readPoolHistory(pool, key, { intervalSeconds: 3600, buckets: 4, asOf: 10 * DAY + 3 * 3600 + 10, rpcClient });
+    expect(history.items).toEqual([
+      { day: 10 * DAY, tradeCount: 2, volumeUsd: '6', tvlUsd: '100' },
+      { day: 10 * DAY + 3600, tradeCount: 0, volumeUsd: '0', tvlUsd: '120.5' },
+      { day: 10 * DAY + 7200, tradeCount: 0, volumeUsd: '0', tvlUsd: null },
+      { day: 10 * DAY + 10_800, tradeCount: 0, volumeUsd: '0', tvlUsd: null },
+    ]);
+  });
+
+  it('rejects an unsupported interval or bucket count', async () => {
+    await expect(readPoolHistory(pool, key, { intervalSeconds: 7, buckets: 4, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
+    await expect(readPoolHistory(pool, key, { intervalSeconds: 60, buckets: 201, asOf: 1, rpcClient })).rejects.toThrow('Invalid pool history window');
   });
 });

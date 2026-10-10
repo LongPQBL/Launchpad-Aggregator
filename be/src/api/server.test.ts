@@ -165,6 +165,49 @@ describe('read-only API', () => {
     await app.close();
   });
 
+  it('passes venue=curve to trades and transactions, and rejects any other venue with 400', async () => {
+    const seen: Array<{ route: string; venue?: string }> = [];
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(),
+      listTrades: async (_chainId, _tokenAddress, query) => { seen.push({ route: 'trades', venue: query.venue }); return { items: [], nextCursor: null }; },
+      listTransactions: async (_chainId, _tokenAddress, query) => { seen.push({ route: 'transactions', venue: query.venue }); return { items: [], nextCursor: null }; } } });
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/trades?venue=curve` })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/transactions?venue=curve` })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/transactions` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ route: 'trades', venue: 'curve' }, { route: 'transactions', venue: 'curve' }, { route: 'transactions', venue: undefined }]);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/trades?venue=pool` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/transactions?venue=pool` })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('forwards venue=curve to history and candles, and rejects other venues and USD-per-venue candles', async () => {
+    const seen: Array<{ route: string; venue?: string }> = [];
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(),
+      listLaunchHistory: async (_chainId, _token, window) => { seen.push({ route: 'history', venue: window.venueKind }); return { items: [], complete: true }; },
+      listCandles: async (_chainId, _token, _interval, _before, venueKind) => { seen.push({ route: 'candles', venue: venueKind }); return { items: [], complete: true }; } } });
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/history?venue=curve` })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/history` })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?venue=curve` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ route: 'history', venue: 'curve' }, { route: 'history', venue: undefined }, { route: 'candles', venue: 'curve' }]);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/history?venue=pool` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?venue=pool` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/candles?venue=curve&currency=usd` })).statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('serves the curve summary, 404s when there is no curve venue, and 503s without the data method', async () => {
+    const summary = { venueId: `pons-v2-curve:${address}`, curveAddress: address, active: true, volume24hQuote: '2', tradeCount24h: 1, lastPriceQuote: null };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(), getCurveSummary: async (_chainId, token) => (token === address ? summary : null) } });
+    const found = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/curve` });
+    expect(found.statusCode).toBe(200);
+    expect(found.json()).toEqual(summary);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/0x${'2'.repeat(40)}/curve` })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/v1/launches/4663/not-an-address/curve' })).statusCode).toBe(404);
+    await app.close();
+    const bare = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    expect((await bare.inject({ method: 'GET', url: `/v1/launches/4663/${address}/curve` })).statusCode).toBe(503);
+    await bare.close();
+  });
+
   it('accepts an exclusive candle page boundary and rejects malformed boundaries', async () => {
     const beforeValues: Array<number | undefined> = [];
     const source = data();
@@ -182,6 +225,21 @@ describe('read-only API', () => {
       url: `/v1/launches/4663/${address}/candles?before=not-a-time` });
     expect(invalid.statusCode).toBe(400);
     await app.close();
+  });
+
+  it('serves launch Volume / TVL history per interval, and validates the interval', async () => {
+    const seen: unknown[] = [];
+    const history = { items: [{ day: 1_700_000_000, tradeCount: 2, volumeUsd: '6', tvlUsd: null }], complete: true };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(), listLaunchHistory: async (_c, _t, window) => { seen.push(window); return history; } } });
+    const url = `/v1/launches/4663/${address}/history`;
+    const daily = await app.inject({ method: 'GET', url });
+    expect(daily.statusCode).toBe(200);
+    expect(daily.json()).toEqual(history);
+    expect((await app.inject({ method: 'GET', url: `${url}?intervalSeconds=300` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ intervalSeconds: 86_400, buckets: 30 }, { intervalSeconds: 300, buckets: 144 }]);
+    expect((await app.inject({ method: 'GET', url: `${url}?intervalSeconds=7` })).statusCode).toBe(400);
+    const without = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
   });
 
   it('serves USD candles only when currency=usd, and rejects an unknown currency', async () => {

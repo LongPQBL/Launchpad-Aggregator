@@ -894,6 +894,122 @@
         }
       }
     },
+    "/v1/launches/{chainId}/{tokenAddress}/history": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "tokenAddress",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "day": {
+                            "type": "integer"
+                          },
+                          "tradeCount": {
+                            "type": "integer"
+                          },
+                          "volumeUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "tvlUsd": {
+                            "type": "string",
+                            "nullable": true
+                          }
+                        }
+                      }
+                    },
+                    "complete": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/launches/{chainId}/{tokenAddress}/curve": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "tokenAddress",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "venueId": {
+                      "type": "string"
+                    },
+                    "curveAddress": {
+                      "type": "string"
+                    },
+                    "active": {
+                      "type": "boolean"
+                    },
+                    "volume24hQuote": {
+                      "type": "string"
+                    },
+                    "tradeCount24h": {
+                      "type": "integer"
+                    },
+                    "lastPriceQuote": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/launches/{chainId}/{tokenAddress}/candles": {
       "get": {
         "parameters": [

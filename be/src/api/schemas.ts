@@ -178,6 +178,12 @@ export const poolHistory = { type: 'object', properties: {
   complete: { type: 'boolean' },
 } } as const;
 
+export const curveSummary = { type: 'object', properties: {
+  venueId: { type: 'string' }, curveAddress: { type: 'string' }, active: { type: 'boolean' },
+  volume24hQuote: { type: 'string' }, tradeCount24h: { type: 'integer' },
+  lastPriceQuote: { type: 'string', nullable: true },
+} } as const;
+
 export const walletPositions = { type: 'object', properties: {
   items: { type: 'array', items: { type: 'object', properties: {
     token: { type: 'object', properties: {

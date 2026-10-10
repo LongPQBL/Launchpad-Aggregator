@@ -3,7 +3,7 @@ import type { UsdPriceClient } from '../market/usdPricing.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { readPoolCandles, type PoolCandleResponse } from '../pools/candleCache.js';
 import { assetDecimals, readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
-import { readPoolDailyHistory, type PoolDayHistory } from '../pools/history.js';
+import { readPoolDailyHistory, readPoolHistory, type PoolDayHistory } from '../pools/history.js';
 import { sumUsdValues } from '../pools/valuation.js';
 import { ttlMemo } from './ttlMemo.js';
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
@@ -31,7 +31,7 @@ export interface PoolApiStore {
   listPoolTrades(key: PoolKey, displayedToken: string, query: { limit: number; cursor?: string }): Promise<{ items: PoolTradeResponse[]; nextCursor: string | null }>;
   listPoolCandles(key: PoolKey, displayedToken: string, intervalSeconds: number, before?: number): Promise<{ items: PoolCandleResponse[]; complete: boolean }>;
   // Optional so test doubles that predate the daily history keep compiling; the route answers 503 without it.
-  listPoolHistory?(key: PoolKey, days: number): Promise<{ items: PoolDayHistory[]; complete: boolean }>;
+  listPoolHistory?(key: PoolKey, window: { days: number } | { intervalSeconds: number; buckets: number }): Promise<{ items: PoolDayHistory[]; complete: boolean }>;
 }
 
 interface Row { chain_id: number; protocol: PoolKey['protocol']; pool_id: string; currency0: string; currency1: string;
@@ -176,6 +176,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     },
     listPoolTrades: (key, token, query) => readPoolTrades(pool, key, token, { ...query, rpcClient }),
     listPoolCandles: (key, token, interval, before) => readPoolCandles(pool, key, token, interval, before, { rpcClient }),
-    listPoolHistory: (key, days) => readPoolDailyHistory(pool, key, { days, asOf: Math.floor(Date.now() / 1000), rpcClient }),
+    listPoolHistory: (key, window) => 'days' in window
+      ? readPoolDailyHistory(pool, key, { days: window.days, asOf: Math.floor(Date.now() / 1000), rpcClient })
+      : readPoolHistory(pool, key, { ...window, asOf: Math.floor(Date.now() / 1000), rpcClient }),
   };
 }

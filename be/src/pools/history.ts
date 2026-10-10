@@ -5,14 +5,16 @@ import { assetDecimals, type PoolKey } from './stats.js';
 
 const DAY_SECONDS = 86_400;
 export const MAX_HISTORY_DAYS = 90;
+export const HISTORY_INTERVALS = [60, 300, 900, 3600, DAY_SECONDS] as const;
+export const MAX_HISTORY_BUCKETS = 200;
 
 export interface PoolDayHistory {
-  /** Start of the UTC day, unix seconds. */
+  /** Start of the bucket, unix seconds (the UTC day for the daily interval). */
   day: number;
   tradeCount: number;
   /** null = unavailable (incomplete coverage or an unpriced trade that day) — never a silent zero. */
   volumeUsd: string | null;
-  /** Last TVL snapshot taken that day; null when no snapshot exists (V3/V2 pools have none, and snapshots are only retained for a limited window). */
+  /** Last TVL snapshot taken in the bucket; null when none exists (V3/V2 pools have none, snapshots are hourly so finer buckets are mostly empty, and they are only retained for a limited window). */
   tvlUsd: string | null;
 }
 
@@ -27,6 +29,14 @@ function trimFractionZeros(value: string): string {
  */
 export async function readPoolDailyHistory(pool: Pool, key: PoolKey, options: { days: number; asOf: number; rpcClient?: UsdPriceClient }): Promise<{ items: PoolDayHistory[]; complete: boolean }> {
   if (!Number.isSafeInteger(options.days) || options.days < 1 || options.days > MAX_HISTORY_DAYS) throw new Error('Invalid pool history window');
+  return readPoolHistory(pool, key, { intervalSeconds: DAY_SECONDS, buckets: options.days, asOf: options.asOf, rpcClient: options.rpcClient });
+}
+
+/** Same series at any chart interval: `buckets` buckets of `intervalSeconds`, oldest first, ending at the bucket containing `asOf`. */
+export async function readPoolHistory(pool: Pool, key: PoolKey, options: { intervalSeconds: number; buckets: number; asOf: number; rpcClient?: UsdPriceClient }): Promise<{ items: PoolDayHistory[]; complete: boolean }> {
+  const step = options.intervalSeconds;
+  if (!(HISTORY_INTERVALS as readonly number[]).includes(step)) throw new Error('Invalid pool history window');
+  if (!Number.isSafeInteger(options.buckets) || options.buckets < 1 || options.buckets > MAX_HISTORY_BUCKETS) throw new Error('Invalid pool history window');
   if (!Number.isSafeInteger(options.asOf) || options.asOf < 0) throw new Error('Invalid pool history time');
   const poolId = key.poolId.toLowerCase();
   const found = await pool.query('SELECT currency0, currency1, coverage_status FROM pool_catalog WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND verified=true',
@@ -35,8 +45,8 @@ export async function readPoolDailyHistory(pool: Pool, key: PoolKey, options: { 
   if (!catalog) throw new Error('Pool not found');
   const complete = catalog.coverage_status === 'caught_up';
 
-  const lastDay = Math.floor(options.asOf / DAY_SECONDS) * DAY_SECONDS;
-  const firstDay = lastDay - (options.days - 1) * DAY_SECONDS;
+  const lastDay = Math.floor(options.asOf / step) * step;
+  const firstDay = lastDay - (options.buckets - 1) * step;
 
   const [decimals0, decimals1] = await Promise.all([
     assetDecimals(options.rpcClient, catalog.currency0), assetDecimals(options.rpcClient, catalog.currency1),
@@ -55,7 +65,7 @@ export async function readPoolDailyHistory(pool: Pool, key: PoolKey, options: { 
   const volumeByDay = new Map<number, { tradeCount: number; volumeUsd: string | null }>();
   if (priced) {
     const result = await pool.query(`
-      SELECT (pt.timestamp / ${DAY_SECONDS}) * ${DAY_SECONDS} AS day, count(*)::int AS trade_count,
+      SELECT (pt.timestamp / ${step}) * ${step} AS day, count(*)::int AS trade_count,
         bool_or(r.answer_raw IS NULL OR pt.timestamp < r.updated_at OR pt.timestamp - r.updated_at > ${DAY_SECONDS}) AS has_unpriced,
         sum(abs(pt.${priced.column}::numeric) * r.answer_raw / power(10::numeric, $4::int + r.decimals))::text AS volume_usd
       FROM pool_trades pt
@@ -66,7 +76,7 @@ export async function readPoolDailyHistory(pool: Pool, key: PoolKey, options: { 
       ) r ON true
       WHERE pt.chain_id = $1 AND pt.protocol = $2 AND pt.pool_id = $3 AND pt.timestamp >= $6 AND pt.timestamp < $7
       GROUP BY 1`,
-    [key.chainId, key.protocol, poolId, priced.decimals, priced.feedAddress, firstDay, lastDay + DAY_SECONDS]);
+    [key.chainId, key.protocol, poolId, priced.decimals, priced.feedAddress, firstDay, lastDay + step]);
     for (const row of result.rows) {
       volumeByDay.set(Number(row.day), {
         tradeCount: Number(row.trade_count),
@@ -75,24 +85,24 @@ export async function readPoolDailyHistory(pool: Pool, key: PoolKey, options: { 
     }
   } else {
     // Counts only: with no verified feed the volume stays unavailable.
-    const result = await pool.query(`SELECT (timestamp / ${DAY_SECONDS}) * ${DAY_SECONDS} AS day, count(*)::int AS trade_count FROM pool_trades
+    const result = await pool.query(`SELECT (timestamp / ${step}) * ${step} AS day, count(*)::int AS trade_count FROM pool_trades
       WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND timestamp >= $4 AND timestamp < $5 GROUP BY 1`,
-    [key.chainId, key.protocol, poolId, firstDay, lastDay + DAY_SECONDS]);
+    [key.chainId, key.protocol, poolId, firstDay, lastDay + step]);
     for (const row of result.rows) volumeByDay.set(Number(row.day), { tradeCount: Number(row.trade_count), volumeUsd: null });
   }
 
   const tvlByDay = new Map<number, string>();
   if (key.protocol === 'uniswap_v4') {
     const result = await pool.query(`SELECT DISTINCT ON (day) day, tvl_usd FROM (
-        SELECT (floor(extract(epoch FROM captured_at))::bigint / ${DAY_SECONDS}) * ${DAY_SECONDS} AS day, tvl_usd, captured_at
+        SELECT (floor(extract(epoch FROM captured_at))::bigint / ${step}) * ${step} AS day, tvl_usd, captured_at
         FROM pool_tvl_snapshots WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3
           AND captured_at >= to_timestamp($4) AND captured_at < to_timestamp($5)
-      ) s ORDER BY day, captured_at DESC`, [key.chainId, key.protocol, poolId, firstDay, lastDay + DAY_SECONDS]);
+      ) s ORDER BY day, captured_at DESC`, [key.chainId, key.protocol, poolId, firstDay, lastDay + step]);
     for (const row of result.rows) tvlByDay.set(Number(row.day), trimFractionZeros(String(row.tvl_usd)));
   }
 
   const items: PoolDayHistory[] = [];
-  for (let day = firstDay; day <= lastDay; day += DAY_SECONDS) {
+  for (let day = firstDay; day <= lastDay; day += step) {
     const volume = volumeByDay.get(day);
     items.push({
       day,

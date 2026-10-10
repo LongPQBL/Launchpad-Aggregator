@@ -4,7 +4,8 @@ import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { InvalidMetricCursorError, type LaunchSort, type SortDirection } from '../metricCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
-import { candle, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
+import { HISTORY_INTERVALS } from '../../pools/history.js';
+import { candle, curveSummary, poolHistory, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
 const LIFECYCLE_STATUSES = new Set(['trading', 'swept', 'graduated', 'rescued']);
@@ -14,7 +15,7 @@ function chainId(value: string): number | null {
   return /^\d+$/.test(value) && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function listQuery(value: Record<string, string | undefined>): { limit: number; cursor?: string; chainId?: number } | null {
+function listQuery(value: Record<string, string | undefined>): { limit: number; cursor?: string; chainId?: number; venue?: 'curve' } | null {
   const requested = value.limit === undefined ? 50 : Number(value.limit);
   if (!Number.isSafeInteger(requested) || requested < 1) return null;
   const id = value.chainId === undefined ? undefined : chainId(value.chainId);
@@ -22,7 +23,9 @@ function listQuery(value: Record<string, string | undefined>): { limit: number; 
   if (value.cursor) {
     try { decodeCursor(value.cursor); } catch { return null; }
   }
-  return { limit: Math.min(requested, 100), ...(value.cursor ? { cursor: value.cursor } : {}), ...(id ? { chainId: id } : {}) };
+  if (value.venue !== undefined && value.venue !== 'curve') return null;
+  return { limit: Math.min(requested, 100), ...(value.cursor ? { cursor: value.cursor } : {}), ...(id ? { chainId: id } : {}),
+    ...(value.venue === 'curve' ? { venue: 'curve' as const } : {}) };
 }
 
 function launchListQuery(value: Record<string, string | undefined>): LaunchListQuery | null {
@@ -118,6 +121,32 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
     },
   );
 
+  // How many buckets each interval's Volume / TVL chart shows (same table as the pool history route).
+  const HISTORY_BUCKETS: Record<number, number> = { 60: 120, 300: 144, 900: 96, 3600: 96, 86_400: 30 };
+  app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
+    '/v1/launches/:chainId/:tokenAddress/history', { schema: { response: { 200: poolHistory } } }, async (request, reply) => {
+      const identity = tokenParams(request.params);
+      if (!identity) return reply.code(404).send({ error: 'Launch not found' });
+      const interval = request.query.intervalSeconds === undefined ? 86_400 : Number(request.query.intervalSeconds);
+      if (!(HISTORY_INTERVALS as readonly number[]).includes(interval)) return reply.code(400).send({ error: 'Invalid history interval' });
+      if (request.query.venue !== undefined && request.query.venue !== 'curve') return reply.code(400).send({ error: 'Invalid venue' });
+      if (!deps.data.listLaunchHistory) { reply.code(503); return { error: 'History unavailable' }; }
+      const history = await deps.data.listLaunchHistory(identity.chainId, identity.tokenAddress, { intervalSeconds: interval, buckets: HISTORY_BUCKETS[interval]!, ...(request.query.venue === 'curve' ? { venueKind: 'curve' } : {}) });
+      if (!history) return reply.code(404).send({ error: 'Launch not found' });
+      return history;
+    },
+  );
+
+  app.get<{ Params: { chainId: string; tokenAddress: string } }>(
+    '/v1/launches/:chainId/:tokenAddress/curve', { schema: { response: { 200: curveSummary } } }, async (request, reply) => {
+      const identity = tokenParams(request.params);
+      if (!identity) return reply.code(404).send({ error: 'Launch not found' });
+      if (!deps.data.getCurveSummary) { reply.code(503); return { error: 'Curve summary unavailable' }; }
+      const summary = await deps.data.getCurveSummary(identity.chainId, identity.tokenAddress);
+      return summary ?? reply.code(404).send({ error: 'No bonding-curve venue for this launch' });
+    },
+  );
+
   app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
     '/v1/launches/:chainId/:tokenAddress/candles', { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: candle }, complete: { type: 'boolean' } } } } } }, async (request, reply) => {
       const identity = tokenParams(request.params);
@@ -130,8 +159,11 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       }
       const currency = request.query.currency ?? 'quote';
       if (currency !== 'quote' && currency !== 'usd') return reply.code(400).send({ error: 'Invalid candle currency' });
+      if (request.query.venue !== undefined && request.query.venue !== 'curve') return reply.code(400).send({ error: 'Invalid venue' });
+      // USD candles come from the launch-wide cache, which has no venue dimension.
+      if (request.query.venue !== undefined && currency === 'usd') return reply.code(400).send({ error: 'USD candles are not available per venue' });
       if (currency === 'usd') return deps.data.listUsdCandles(identity.chainId, identity.tokenAddress, interval, before);
-      return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before);
+      return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before, request.query.venue === 'curve' ? 'curve' : undefined);
     },
   );
 }

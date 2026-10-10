@@ -12,6 +12,7 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
 import { assetDecimals } from '../pools/stats.js';
+import type { PoolDayHistory } from '../pools/history.js';
 import { createTokenMetadataResolver } from '../pools/tokenMetadata.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
@@ -20,13 +21,14 @@ import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { ttlMemo } from './ttlMemo.js';
 import { readLaunchStats } from './launchStatsStore.js';
+import { readLaunchHistory } from '../market/launchHistory.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import { readMetricRankingPage } from './metricRanking.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
 import { readRepairState } from '../envioSync/incrementalRepair.js';
-import type { ApiDeps, CandleResponse, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, GlobalTransactionQuery, GlobalTransactionResponse, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
+import type { ApiDeps, CandleResponse, CurveSummary, UsdCandleResponse, IncrementalSyncCoverage, LaunchDetail, LaunchListQuery, GlobalTransactionQuery, GlobalTransactionResponse, LaunchSummary, ListQuery, Page, TradeResponse, TransactionResponse } from './server.js';
 
 type Row = Record<string, unknown>;
 const baseSourceIds = [...getPonsFactorySources().map((source) => source.id),
@@ -437,10 +439,11 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         FROM trades t JOIN venues v ON v.id = t.venue_id
         JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+          AND ($7::text IS NULL OR v.kind = $7)
           AND ($3::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($3::bigint, $4::text, $5::integer))
         ORDER BY t.block_number DESC, t.tx_hash DESC, t.log_index DESC LIMIT $6`,
       [chainId, tokenAddress.toLowerCase(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
-        cursor?.logIndex ?? null, query.limit + 1]);
+        cursor?.logIndex ?? null, query.limit + 1, query.venue ?? null]);
       const rows = result.rows as Row[];
       // Every row on one launch's trade page shares the same quote asset, so this calls
       // resolveVerifiedFeed (inside valueTradeUsd) once per row redundantly — bounded by
@@ -509,6 +512,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           JOIN venues v ON v.id = t.venue_id
           JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
           WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+            AND ($7::text IS NULL OR v.kind = $7)
             AND ($3::bigint IS NULL OR (t.block_number, t.tx_hash, t.log_index) < ($3::bigint, $4::text, $5::integer))
           ORDER BY t.block_number DESC, t.tx_hash DESC, t.log_index DESC
           LIMIT $6
@@ -525,6 +529,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           FROM pool_trades pt
           JOIN pool_catalog pc ON pc.chain_id = pt.chain_id AND pc.protocol = pt.protocol AND pc.pool_id = pt.pool_id
           WHERE pt.chain_id = $1 AND pc.verified = true
+            AND $7::text IS NULL
             AND EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id = pc.chain_id AND m.protocol = pc.protocol
               AND m.pool_id = pc.pool_id AND m.token_address = $2)
             AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
@@ -537,7 +542,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         ORDER BY block_number DESC, tx_hash DESC, log_index DESC
         LIMIT $6`,
       [chainId, token, cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null,
-        cursor?.logIndex ?? null, query.limit + 1]);
+        cursor?.logIndex ?? null, query.limit + 1, query.venue ?? null]);
       const rows = result.rows as Row[];
       const visible = rows.slice(0, query.limit);
 
@@ -772,7 +777,33 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         })),
       };
     },
-    async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
+    async listLaunchHistory(chainId: number, tokenAddress: string, window: { intervalSeconds: number; buckets: number; venueKind?: string }): Promise<{ items: PoolDayHistory[]; complete: boolean } | null> {
+      const head = await safeHead();
+      const launch = (await pool.query(`SELECT ${launchCoverageSql(3)} AS launch_coverage_complete
+        FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
+      [chainId, tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
+      if (!launch) return null;
+      return readLaunchHistory(pool, { chainId, tokenAddress, ...window, asOf: Math.floor(Date.now() / 1000), complete: Boolean(launch.launch_coverage_complete) });
+    },
+    async getCurveSummary(chainId: number, tokenAddress: string): Promise<CurveSummary | null> {
+      const token = tokenAddress.toLowerCase();
+      const venue = (await pool.query(`SELECT v.id, v.ref, v.effective_to_block, l.quote_asset_decimals FROM venues v
+        JOIN launches l ON l.chain_id = v.chain_id AND l.token_address = v.token_address
+        WHERE v.chain_id = $1 AND v.token_address = $2 AND v.kind = 'curve' AND v.official = true LIMIT 1`, [chainId, token])).rows[0] as Row | undefined;
+      if (!venue) return null;
+      const since = Math.floor(Date.now() / 1000) - 86_400;
+      const volume = (await pool.query(`SELECT COALESCE(sum(quote_amount_raw), 0)::text AS raw, count(*)::int AS trades FROM trades
+        WHERE venue_id = $1 AND timestamp >= $2`, [string(venue.id), since])).rows[0] as Row;
+      const last = (await pool.query(`SELECT price_numerator_raw, price_denominator_raw FROM trades WHERE venue_id = $1
+        AND price_numerator_raw IS NOT NULL AND price_denominator_raw IS NOT NULL
+        ORDER BY block_number DESC, log_index DESC LIMIT 1`, [string(venue.id)])).rows[0] as Row | undefined;
+      return {
+        venueId: string(venue.id), curveAddress: string(venue.ref), active: venue.effective_to_block === null,
+        volume24hQuote: formatUnits(BigInt(string(volume.raw)), number(venue.quote_asset_decimals)), tradeCount24h: number(volume.trades),
+        lastPriceQuote: last ? formatRational(BigInt(string(last.price_numerator_raw)), BigInt(string(last.price_denominator_raw)), 18) : null,
+      };
+    },
+    async listCandles(chainId: number, tokenAddress: string, intervalSeconds: number, before?: number, venueKind?: string): Promise<{ items: readonly CandleResponse[]; complete: boolean }> {
       const head = await safeHead();
       const launchResult = await pool.query(`SELECT quote_asset_address, quote_asset_decimals,
         ${launchCoverageSql(3)} AS launch_coverage_complete
@@ -783,7 +814,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
       const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
       const cacheState = await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1');
-      if (cacheState.rows[0]?.backfill_complete === true) {
+      // The pre-aggregated cache has no venue dimension, so a venue-scoped request always reads trades directly.
+      if (venueKind === undefined && cacheState.rows[0]?.backfill_complete === true) {
         const [cached, pending] = await Promise.all([
           pool.query(`SELECT c.bucket_start, c.open, c.high, c.low, c.close, c.quote_volume_raw
             FROM candles c WHERE c.chain_id = $1 AND c.token_address = $2 AND c.interval_seconds = $3
@@ -809,8 +841,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       }
       const result = await pool.query(`SELECT t.* FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+          AND ($5::text IS NULL OR v.kind = $5)
           AND t.timestamp >= $3 AND t.timestamp < $4
-        ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), start, end]);
+        ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), start, end, venueKind ?? null]);
       const rows = result.rows as Row[];
       const mapped: Trade[] = rows.map((row) => ({ chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
         venueId: string(row.venue_id), blockNumber: BigInt(string(row.block_number)), blockHash: string(row.block_hash) as Hash,

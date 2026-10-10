@@ -66,6 +66,12 @@ describe('pool API', () => {
     expect(ok.json()).toEqual(history);
     expect((await app.inject({ method: 'GET', url: `${url}?days=0` })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: `${url}?days=91` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${url}?intervalSeconds=7` })).statusCode).toBe(400);
+    const seen: unknown[] = [];
+    const spy = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools: { ...pools, listPoolHistory: async (_key, window) => { seen.push(window); return history; } } });
+    expect((await spy.inject({ method: 'GET', url: `${url}?intervalSeconds=300` })).statusCode).toBe(200);
+    expect((await spy.inject({ method: 'GET', url: `${url}?days=7` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ intervalSeconds: 300, buckets: 144 }, { days: 7 }]);
     const without = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });
     expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
   });
