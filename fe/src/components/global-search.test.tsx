@@ -33,6 +33,42 @@ describe('GlobalSearch', () => {
     const dialog = screen.getByRole('dialog', { name: 'Search tokens and pools' });
     expect(dialog.parentElement).toHaveClass('items-center');
     expect(screen.getByRole('combobox')).toHaveFocus();
+    expect(dialog).toHaveClass('flex-col');
+  });
+
+  it('shows recent suggestions before typing and previews three of each kind in All', async () => {
+    const many: SearchResults = {
+      tokens: Array.from({ length: 5 }, (_, index) => ({ ...results.tokens[0]!, tokenAddress: `0x${index}`, name: `Token ${index}` })),
+      pools: Array.from({ length: 5 }, (_, index) => ({ ...results.pools[0]!, poolId: `0x${index}` })),
+    };
+    vi.mocked(searchAll).mockResolvedValue(many);
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(searchAll).toHaveBeenCalledWith('', expect.any(AbortSignal), undefined, 10, 0);
+    expect(screen.getByText('Recently added')).toBeInTheDocument();
+    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(3);
+    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(3);
+    fireEvent.click(within(screen.getByRole('group', { name: 'Tokens' })).getByRole('button', { name: 'View all Tokens' }));
+    expect(screen.getByRole('tab', { name: 'Tokens' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(5);
+    expect(screen.queryByRole('group', { name: 'Pools' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
+    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(5);
+  });
+
+  it('loads additional matching results while scrolling a dedicated tab', async () => {
+    const first: SearchResults = { tokens: Array.from({ length: 10 }, (_, index) => ({ ...results.tokens[0]!, tokenAddress: `0x${index}`, name: `Token ${index}` })), pools: [] };
+    const second: SearchResults = { tokens: [{ ...results.tokens[0]!, tokenAddress: '0x10', name: 'Token 10' }], pools: [] };
+    vi.mocked(searchAll).mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole('tab', { name: 'Tokens' }));
+    fireEvent.scroll(screen.getByRole('listbox', { name: 'Search results' }));
+    await act(async () => { await Promise.resolve(); });
+    expect(searchAll).toHaveBeenLastCalledWith('', expect.any(AbortSignal), undefined, 10, 10);
+    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(11);
   });
 
   it('finds tokens and pools from one character and displays market figures in separate sections', async () => {
@@ -40,7 +76,7 @@ describe('GlobalSearch', () => {
     render(<GlobalSearch />);
     fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
     await typeQuery('z');
-    expect(searchAll).toHaveBeenCalledWith('z', expect.any(AbortSignal), undefined);
+    expect(searchAll).toHaveBeenCalledWith('z', expect.any(AbortSignal), undefined, 10, 0);
     expect(screen.getByRole('group', { name: 'Tokens' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Pools' })).toBeInTheDocument();
     const token = screen.getByRole('option', { name: /Zorb/ });
@@ -103,11 +139,11 @@ describe('GlobalSearch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filter by network' }));
     fireEvent.click(screen.getByRole('button', { name: 'Robinhood Chain' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(searchAll).toHaveBeenLastCalledWith('z', expect.any(AbortSignal), [4663]);
+    expect(searchAll).toHaveBeenLastCalledWith('z', expect.any(AbortSignal), [4663], 10, 0);
     fireEvent.click(screen.getByRole('button', { name: 'Filter by network' }));
     fireEvent.click(screen.getByRole('button', { name: 'All networks' }));
     await act(async () => { await vi.advanceTimersByTimeAsync(300); });
-    expect(searchAll).toHaveBeenLastCalledWith('z', expect.any(AbortSignal), undefined);
+    expect(searchAll).toHaveBeenLastCalledWith('z', expect.any(AbortSignal), undefined, 10, 0);
   });
 
   it('keeps keyboard navigation and closes after selecting a result', async () => {
@@ -120,5 +156,16 @@ describe('GlobalSearch', () => {
     fireEvent.keyDown(screen.getByRole('combobox'), { key: 'Enter' });
     expect(push).toHaveBeenCalledWith(expect.stringContaining('/pools/4663/uniswap_v4/0xbbb'));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('opens on All again after being closed from a dedicated tab', async () => {
+    vi.mocked(searchAll).mockResolvedValue(results);
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    expect(screen.getByRole('tab', { name: 'All' })).toHaveAttribute('aria-selected', 'true');
   });
 });

@@ -8,16 +8,18 @@ const MAX_LIMIT = 10;
 const MAX_QUERY_LENGTH = 100;
 
 export function registerSearchRoutes(app: FastifyInstance, deps: ApiDeps): void {
-  app.get<{ Querystring: { q?: string; limit?: string } }>('/v1/search', { schema: { response: { 200: searchResults } } }, async (request, reply) => {
+  app.get<{ Querystring: { q?: string; limit?: string; offset?: string } }>('/v1/search', { schema: { response: { 200: searchResults } } }, async (request, reply) => {
     const query = request.query.q?.trim() ?? '';
     const chainId = (request.query as { chainId?: string }).chainId;
     const chains = chainId === undefined ? undefined : chainId.split(',').map(Number);
     const requested = request.query.limit === undefined ? DEFAULT_LIMIT : Number(request.query.limit);
+    const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
     if (query.length < MIN_SEARCH_LENGTH || query.length > MAX_QUERY_LENGTH || !Number.isSafeInteger(requested) || requested < 1
+      || !Number.isSafeInteger(offset) || offset < 0
       || (chains !== undefined && (chains.length === 0 || chains.some((id) => !Number.isSafeInteger(id) || id < 1)))) {
       return reply.code(400).send({ error: 'Invalid search query' });
     }
     if (!deps.search) return reply.code(503).send({ error: 'Search unavailable' });
-    return deps.search.search(query, Math.min(requested, MAX_LIMIT), chains);
+    return deps.search.search(query, Math.min(requested, MAX_LIMIT), chains, offset);
   });
 }

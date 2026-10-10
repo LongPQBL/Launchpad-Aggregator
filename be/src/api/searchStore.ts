@@ -23,9 +23,9 @@ export interface SearchPoolHit {
   ponsDesignated: boolean;
 }
 export interface SearchResults { tokens: SearchTokenHit[]; pools: SearchPoolHit[] }
-export interface SearchStore { search(query: string, limit: number, chainIds?: readonly number[]): Promise<SearchResults> }
+export interface SearchStore { search(query: string, limit: number, chainIds?: readonly number[], offset?: number): Promise<SearchResults> }
 
-export const MIN_SEARCH_LENGTH = 1;
+export const MIN_SEARCH_LENGTH = 0;
 
 // `%`, `_` and `\` are LIKE wildcards: a user typing "50%" must match the literal text, not "50<anything>".
 function escapeLike(value: string): string {
@@ -50,9 +50,9 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
     } catch { return null; }
   }, 30_000);
   return {
-    async search(rawQuery: string, limit: number, chainIds?: readonly number[]): Promise<SearchResults> {
+    async search(rawQuery: string, limit: number, chainIds?: readonly number[], offset = 0): Promise<SearchResults> {
       const query = rawQuery.trim();
-      if (query.length < MIN_SEARCH_LENGTH) return { tokens: [], pools: [] };
+      const browsing = query.length === 0;
       const contains = query.length === 1 ? `${escapeLike(query)}%` : `%${escapeLike(query)}%`;
       const prefix = `${escapeLike(query)}%`;
       const lowered = query.toLowerCase();
@@ -67,11 +67,14 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
       const [tokens, pools] = await Promise.all([
         pool.query(`SELECT l.chain_id, l.token_address, l.name, l.symbol, l.logo_uri, l.platform,
             ${launchCoverageSql(7)} AS coverage_complete FROM launches l
-          WHERE ${launchMatch} AND ($6::integer[] IS NULL OR l.chain_id = ANY($6))
-          ORDER BY ${matchRank}, l.launch_block DESC LIMIT $2`,
-        [contains, limit, prefix, lowered, tokenAddress, chainIds ?? null, safeHead?.toString() ?? null]),
-        pool.query(`SELECT pc.chain_id, pc.protocol, pc.pool_id, pc.fee, pc.currency0, pc.currency1,
+          WHERE ($8::boolean OR ${launchMatch}) AND ($6::integer[] IS NULL OR l.chain_id = ANY($6))
+          ORDER BY CASE WHEN $8::boolean THEN 0 ELSE ${matchRank} END, l.launch_block DESC, l.chain_id, l.token_address
+          LIMIT $2 OFFSET $9`,
+        [contains, limit, prefix, lowered, tokenAddress, chainIds ?? null, safeHead?.toString() ?? null, browsing, offset]),
+        pool.query(`SELECT * FROM (SELECT DISTINCT ON (pc.chain_id, pc.protocol, pc.pool_id)
+            pc.chain_id, pc.protocol, pc.pool_id, pc.fee, pc.currency0, pc.currency1, pc.block_number AS sort_block,
             l.token_address, l.name, l.symbol, l.logo_uri,
+            CASE WHEN $8::boolean THEN 0 ELSE ${matchRank} END AS match_rank,
             COALESCE(c0.symbol, CASE WHEN pc.currency0 = l.quote_asset_address THEN l.quote_asset_symbol END) AS currency0_symbol,
             c0.logo_uri AS currency0_logo_uri,
             COALESCE(c1.symbol, CASE WHEN pc.currency1 = l.quote_asset_address THEN l.quote_asset_symbol END) AS currency1_symbol,
@@ -83,11 +86,11 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
           JOIN launches l ON l.chain_id = m.chain_id AND l.token_address = m.token_address
           LEFT JOIN launches c0 ON c0.chain_id = pc.chain_id AND c0.token_address = pc.currency0
           LEFT JOIN launches c1 ON c1.chain_id = pc.chain_id AND c1.token_address = pc.currency1
-          WHERE pc.verified = true AND (${launchMatch} OR pc.pool_id = $6)
+          WHERE pc.verified = true AND ($8::boolean OR ${launchMatch} OR pc.pool_id = $6)
             AND ($7::integer[] IS NULL OR pc.chain_id = ANY($7))
-          ORDER BY ${matchRank}, pc.block_number DESC LIMIT $2`,
-        // A pool whose two members are both launches matches twice; fetch extra so de-duplication can still fill `limit`.
-        [contains, limit * 2, prefix, lowered, tokenAddress, poolId, chainIds ?? null]),
+          ORDER BY pc.chain_id, pc.protocol, pc.pool_id, match_rank, l.launch_block DESC
+          ) ranked ORDER BY match_rank, sort_block DESC, chain_id, protocol, pool_id LIMIT $2 OFFSET $9`,
+        [contains, limit, prefix, lowered, tokenAddress, poolId, chainIds ?? null, browsing, offset]),
       ]);
 
       const stats = await readLaunchStats(pool, tokens.rows.map((row) => ({ chainId: Number(row.chain_id), tokenAddress: String(row.token_address) })));

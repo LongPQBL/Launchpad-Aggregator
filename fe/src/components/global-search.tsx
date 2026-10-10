@@ -14,12 +14,21 @@ import { formatPoolUsd } from '@/features/pools/pool-format';
 import { cn } from '@/lib/utils';
 
 const DEBOUNCE_MS = 250;
+const PAGE_SIZE = 10;
+const PREVIEW_COUNT = 3;
 type SearchTab = 'all' | 'tokens' | 'pools';
 interface Option { key: string; href: string; node: React.ReactNode }
+interface SearchPage { key: string; data: SearchResults; offset: number; moreTokens: boolean; morePools: boolean }
 
 function SearchIcon({ size = 20 }: { size?: number }) {
   return <svg aria-hidden="true" viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
     <circle cx="10.8" cy="10.8" r="6.8" /><path d="m16 16 4.3 4.3" />
+  </svg>;
+}
+
+function ViewAllIcon() {
+  return <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 8h10m-4-4 4 4-4 4" />
   </svg>;
 }
 
@@ -103,13 +112,17 @@ export function GlobalSearch() {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const pageControllerRef = useRef<AbortController | null>(null);
+  const loadingMoreRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [tab, setTab] = useState<SearchTab>('all');
   const [networkMenuOpen, setNetworkMenuOpen] = useState(false);
   const [selectedChains, setSelectedChains] = useState<number[]>([]);
-  const [resultState, setResultState] = useState<{ key: string; data: SearchResults } | null>(null);
+  const [resultState, setResultState] = useState<SearchPage | null>(null);
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [loadingMore, setLoadingMore] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const query = text.trim();
   const resultKey = `${query}:${selectedChains.join(',')}`;
@@ -117,28 +130,68 @@ export function GlobalSearch() {
 
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
   useEffect(() => {
-    if (!open || !query) return;
+    if (!open) return;
     const controller = new AbortController();
     const timer = setTimeout(() => {
       setStatus('loading');
-      searchAll(query, controller.signal, selectedChains.length ? selectedChains : undefined)
-        .then((next) => { if (!controller.signal.aborted) { setResultState({ key: resultKey, data: next }); setStatus('idle'); setActiveIndex(-1); } })
+      setLoadingMore(false);
+      searchAll(query, controller.signal, selectedChains.length ? selectedChains : undefined, PAGE_SIZE, 0)
+        .then((next) => { if (!controller.signal.aborted) {
+          setResultState({ key: resultKey, data: next, offset: PAGE_SIZE,
+            moreTokens: next.tokens.length === PAGE_SIZE, morePools: next.pools.length === PAGE_SIZE });
+          setStatus('idle'); setActiveIndex(-1);
+        } })
         .catch(() => { if (!controller.signal.aborted) setStatus('error'); });
-    }, DEBOUNCE_MS);
-    return () => { clearTimeout(timer); controller.abort(); };
+    }, query ? DEBOUNCE_MS : 0);
+    return () => { clearTimeout(timer); controller.abort(); pageControllerRef.current?.abort(); pageControllerRef.current = null; loadingMoreRef.current = false; };
   }, [open, query, resultKey, selectedChains]);
 
   const groups = results ? buildOptions(results) : { tokens: [], pools: [] };
-  const tokens = tab === 'pools' ? [] : groups.tokens;
-  const pools = tab === 'tokens' ? [] : groups.pools;
+  const tokens = tab === 'pools' ? [] : tab === 'all' ? groups.tokens.slice(0, PREVIEW_COUNT) : groups.tokens;
+  const pools = tab === 'tokens' ? [] : tab === 'all' ? groups.pools.slice(0, PREVIEW_COUNT) : groups.pools;
   const options = [...tokens, ...pools];
 
+  function selectTab(next: SearchTab) {
+    setTab(next);
+    setActiveIndex(-1);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }
+
+  async function loadMore() {
+    const page = resultState;
+    if (!page || page.key !== resultKey || tab === 'all' || loadingMoreRef.current
+      || !(tab === 'tokens' ? page.moreTokens : page.morePools)) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const controller = new AbortController();
+    pageControllerRef.current = controller;
+    try {
+      const next = await searchAll(query, controller.signal, selectedChains.length ? selectedChains : undefined, PAGE_SIZE, page.offset);
+      if (!controller.signal.aborted) setResultState((current) => current?.key === resultKey && current.offset === page.offset
+        ? { key: resultKey, offset: page.offset + PAGE_SIZE,
+          data: { tokens: [...current.data.tokens, ...next.tokens], pools: [...current.data.pools, ...next.pools] },
+          moreTokens: next.tokens.length === PAGE_SIZE, morePools: next.pools.length === PAGE_SIZE }
+        : current);
+    } catch {
+      if (!controller.signal.aborted) setStatus('error');
+    } finally {
+      if (pageControllerRef.current === controller) {
+        pageControllerRef.current = null;
+        loadingMoreRef.current = false;
+        setLoadingMore(false);
+      }
+    }
+  }
+
   function close() {
+    pageControllerRef.current?.abort();
     setOpen(false);
+    setTab('all');
     setNetworkMenuOpen(false);
     setText('');
     setResultState(null);
     setStatus('idle');
+    setLoadingMore(false);
     setActiveIndex(-1);
     triggerRef.current?.focus();
   }
@@ -152,10 +205,16 @@ export function GlobalSearch() {
     else if (event.key === 'Enter' && activeIndex >= 0) { event.preventDefault(); choose(options[activeIndex]!); }
   }
 
-  function renderGroup(label: 'Tokens' | 'Pools', kind: 'tokens' | 'pools', group: Option[], offset: number) {
+  function renderGroup(label: 'Tokens' | 'Pools', kind: 'tokens' | 'pools', group: Option[], offset: number, hasMore: boolean) {
     if (!group.length) return null;
     return <div role="group" aria-label={label}>
-      <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm text-muted-foreground"><SectionIcon kind={kind} />{label}</div>
+      <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm text-muted-foreground">
+        <SectionIcon kind={kind} />{label}
+        {tab === 'all' && hasMore && <button type="button" aria-label={`View all ${label}`}
+          onClick={() => selectTab(kind)} className="ml-auto flex items-center gap-1 text-foreground hover:text-primary">
+          View all <ViewAllIcon />
+        </button>}
+      </div>
       {group.map((option, index) => <Link key={option.key} id={`${listId}-${offset + index}`} role="option"
         aria-selected={activeIndex === offset + index} href={option.href} onClick={close}
         className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-muted', activeIndex === offset + index && 'bg-muted')}>
@@ -170,11 +229,11 @@ export function GlobalSearch() {
       <SearchIcon />
     </button>
     <Dialog open={open} onClose={close} title="Search tokens and pools" showHeader={false}
-      className="z-[60]" contentClassName="max-w-[680px] p-0">
+      className="z-[60]" contentClassName="flex h-[min(660px,calc(100dvh-32px))] max-w-[680px] flex-col overflow-hidden p-0">
       <div className="flex items-center gap-2 border-b border-border px-4 py-3">
         <SearchIcon size={21} />
         <input ref={inputRef} type="search" role="combobox" aria-label="Search tokens and pools"
-          aria-expanded={!!query} aria-controls={listId} aria-autocomplete="list"
+          aria-expanded={open} aria-controls={listId} aria-autocomplete="list"
           aria-activedescendant={activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
           placeholder="Search tokens and pools" value={text}
           onChange={(event) => { setText(event.target.value); setActiveIndex(-1); setStatus('idle'); }}
@@ -203,20 +262,23 @@ export function GlobalSearch() {
       </div>
       <div role="tablist" aria-label="Search result type" className="flex gap-5 border-b border-border px-4 pt-3">
         {(['all', 'tokens', 'pools'] as const).map((value) => <button key={value} type="button" role="tab"
-          aria-selected={tab === value} onClick={() => { setTab(value); setActiveIndex(-1); }}
+          aria-selected={tab === value} onClick={() => selectTab(value)}
           className={cn('border-b-2 pb-2 text-sm transition-colors', tab === value
             ? 'border-foreground text-foreground dark:border-white dark:text-white'
             : 'border-transparent text-foreground/50 hover:text-foreground dark:text-white/50 dark:hover:text-white')}>
           {value === 'all' ? 'All' : value === 'tokens' ? 'Tokens' : 'Pools'}
         </button>)}
       </div>
-      <div id={listId} role="listbox" aria-label="Search results" className="max-h-[min(60vh,520px)] overflow-y-auto p-2">
-        {query && renderGroup('Tokens', 'tokens', tokens, 0)}
-        {query && renderGroup('Pools', 'pools', pools, tokens.length)}
-        {!query && <p className="px-3 py-5 text-sm text-muted-foreground">Search tokens and pools</p>}
-        {query && !results && status !== 'error' && <p role="status" className="px-3 py-5 text-sm text-muted-foreground">Searching…</p>}
-        {query && status === 'error' && <p role="alert" className="px-3 py-5 text-sm text-muted-foreground">Search is unavailable right now.</p>}
-        {query && results && options.length === 0 && <p className="px-3 py-5 text-sm text-muted-foreground">No results for “{query}”.</p>}
+      <div ref={listRef} id={listId} role="listbox" aria-label="Search results" className="min-h-0 flex-1 overflow-y-auto p-2"
+        onScroll={(event) => { const list = event.currentTarget;
+          if (list.scrollTop + list.clientHeight >= list.scrollHeight - 100) void loadMore(); }}>
+        {!query && results && tab === 'all' && <p className="px-3 pt-2 text-xs text-muted-foreground">Recently added</p>}
+        {renderGroup('Tokens', 'tokens', tokens, 0, !!resultState?.moreTokens || groups.tokens.length > PREVIEW_COUNT)}
+        {renderGroup('Pools', 'pools', pools, tokens.length, !!resultState?.morePools || groups.pools.length > PREVIEW_COUNT)}
+        {!results && status !== 'error' && <p role="status" className="px-3 py-5 text-sm text-muted-foreground">Searching…</p>}
+        {status === 'error' && <p role="alert" className="px-3 py-5 text-sm text-muted-foreground">Search is unavailable right now.</p>}
+        {results && options.length === 0 && <p className="px-3 py-5 text-sm text-muted-foreground">{query ? `No results for “${query}”.` : 'No recent tokens or pools.'}</p>}
+        {loadingMore && <p role="status" className="px-3 py-3 text-sm text-muted-foreground">Loading more…</p>}
       </div>
     </Dialog>
   </>;

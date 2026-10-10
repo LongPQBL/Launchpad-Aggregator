@@ -223,8 +223,8 @@ export interface SearchPoolHit {
   launchToken: { address: string; name: string | null; symbol: string | null; logoUri: string | null };
 }
 export interface SearchResults { tokens: readonly SearchTokenHit[]; pools: readonly SearchPoolHit[] }
-export async function searchAll(query: string, signal?: AbortSignal, chainIds?: readonly number[]): Promise<SearchResults> {
-  return request<SearchResults>('/v1/search', { q: query, chainId: chainIds }, signal);
+export async function searchAll(query: string, signal?: AbortSignal, chainIds?: readonly number[], limit?: number, offset?: number): Promise<SearchResults> {
+  return request<SearchResults>('/v1/search', { q: query, chainId: chainIds, limit, offset }, signal);
 }
 
 type GlobalTransactionsBody = paths['/v1/transactions']['get']['responses'][200]['content']['application/json'];

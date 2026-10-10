@@ -76,6 +76,34 @@ describe('search store', () => {
     expect(result.pools).toEqual(expect.arrayContaining([expect.objectContaining({ poolId })]));
   });
 
+  it('suggests recent launches and verified pools before typing, with network filtering and paging', async () => {
+    const first = await store.search('', 1);
+    expect(first.tokens.map((token) => token.tokenAddress)).toEqual([tokenB]);
+    expect(first.pools.map((hit) => hit.poolId)).toEqual([poolId]);
+    expect((await store.search('', 1, undefined, 1)).tokens.map((token) => token.tokenAddress)).toEqual([tokenA]);
+    expect(await store.search('', 5, [8453])).toEqual({ tokens: [], pools: [] });
+  });
+
+  it('pages distinct pools even when both currencies are indexed launches', async () => {
+    const otherPoolId = `0x${'5f'.repeat(32)}`;
+    try {
+      await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+        block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+        VALUES ($1,'uniswap_v4',$2,$3,$4,3000,60,$3,900000011,$5,$5,0,true,'backfilling')`,
+      [chainId, otherPoolId, tokenA, tokenB, hash('8')]);
+      for (const token of [tokenA, tokenB]) {
+        await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address)
+          VALUES ($1,'uniswap_v4',$2,$3)`, [chainId, otherPoolId, token]);
+      }
+      const first = await store.search('', 1);
+      const second = await store.search('', 1, undefined, 1);
+      expect(first.pools.map((hit) => hit.poolId)).toEqual([otherPoolId]);
+      expect(second.pools.map((hit) => hit.poolId)).toEqual([poolId]);
+    } finally {
+      await pool.query('DELETE FROM pool_catalog WHERE pool_id = $1', [otherPoolId]);
+    }
+  });
+
   it('filters before limiting results to the selected networks', async () => {
     expect(await store.search('z', 5, [8453])).toEqual({ tokens: [], pools: [] });
     expect((await store.search('z', 5, [4663])).tokens[0]).toMatchObject({ tokenAddress: tokenA });

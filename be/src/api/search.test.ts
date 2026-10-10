@@ -23,7 +23,16 @@ describe('search API', () => {
     const search: SearchStore = { async search(...args) { calls.push(args); return { tokens: [], pools: [] }; } };
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, search });
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=z&chainId=4663,8453' })).statusCode).toBe(200);
-    expect(calls).toEqual([['z', 5, [4663, 8453]]]);
+    expect(calls).toEqual([['z', 5, [4663, 8453], 0]]);
+  });
+
+  it('accepts an empty query for suggestions and a page offset', async () => {
+    const calls: unknown[] = [];
+    const search: SearchStore = { async search(...args) { calls.push(args); return { tokens: [], pools: [] }; } };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, search });
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=&limit=10&offset=10' })).statusCode).toBe(200);
+    expect(calls).toEqual([['', 10, undefined, 10]]);
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=x&offset=-1' })).statusCode).toBe(400);
   });
 
   it('keeps market figures and both pool logos in the API response', async () => {
@@ -43,7 +52,7 @@ describe('search API', () => {
 
   it('rejects an empty query or invalid network and limit, and reports 503 when no store is configured', async () => {
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data });
-    expect((await app.inject({ method: 'GET', url: '/v1/search?q=%20' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=%20' })).statusCode).toBe(503);
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=p&chainId=bad' })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=pons&limit=x' })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=pons' })).statusCode).toBe(503);
