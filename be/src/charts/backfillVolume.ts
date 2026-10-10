@@ -48,6 +48,16 @@ export async function backfillUsdCandles(pool: Pool, log: (message: string) => v
   return backfillLaunches(pool, 'launch_usd_candles', rebuildUsdCandles, log);
 }
 
+/** Rebuilds one launch's buckets for every minute it traded in. */
+export async function rebuildLaunchHistory(pool: Pool, chainId: number, tokenAddress: string, rebuild: LaunchRebuild): Promise<void> {
+  const minutes = (await pool.query(`SELECT DISTINCT (t.timestamp / 60) * 60 AS bucket_start FROM trades t
+    JOIN venues v ON v.id = t.venue_id AND v.official = true WHERE t.chain_id = $1 AND t.token_address = $2 ORDER BY 1`,
+  [chainId, tokenAddress])).rows.map((row) => Number(row.bucket_start));
+  for (const slice of chunks(minutes, MINUTES_PER_TRANSACTION)) {
+    await inTransaction(pool, (client) => rebuild(client, slice.map((bucketStart) => ({ chainId, tokenAddress, bucketStart }))));
+  }
+}
+
 type LaunchRebuild = (client: PoolClient, minutes: readonly { chainId: number; tokenAddress: string; bucketStart: number }[]) => Promise<void>;
 
 async function backfillLaunches(pool: Pool, name: Extract<RollupName, 'launch_volume' | 'launch_usd_candles'>, rebuild: LaunchRebuild,
@@ -60,13 +70,7 @@ async function backfillLaunches(pool: Pool, name: Extract<RollupName, 'launch_vo
     const upper = Number(blocks.rows.at(-1)!.launch_block);
     const batch = await pool.query('SELECT chain_id, token_address FROM launches WHERE launch_block > $1 AND launch_block <= $2', [cursor, upper]);
     for (const launch of batch.rows) {
-      const minutes = (await pool.query(`SELECT DISTINCT (t.timestamp / 60) * 60 AS bucket_start FROM trades t
-        JOIN venues v ON v.id = t.venue_id AND v.official = true WHERE t.chain_id = $1 AND t.token_address = $2 ORDER BY 1`,
-      [launch.chain_id, launch.token_address])).rows.map((row) => Number(row.bucket_start));
-      for (const slice of chunks(minutes, MINUTES_PER_TRANSACTION)) {
-        await inTransaction(pool, (client) => rebuild(client, slice.map((bucketStart) => ({
-          chainId: Number(launch.chain_id), tokenAddress: String(launch.token_address), bucketStart }))));
-      }
+      await rebuildLaunchHistory(pool, Number(launch.chain_id), String(launch.token_address), rebuild);
       launches += 1;
     }
     cursor = upper;
