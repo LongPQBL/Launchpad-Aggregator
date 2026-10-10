@@ -5,8 +5,8 @@ import { assetDecimals, type PoolKey } from './stats.js';
 
 const DAY_SECONDS = 86_400;
 export const MAX_HISTORY_DAYS = 90;
-export const HISTORY_INTERVALS = [60, 300, 900, 3600, DAY_SECONDS] as const;
-export const MAX_HISTORY_BUCKETS = 200;
+export const HISTORY_INTERVALS = [60, 300, 900, 3600, 14400, DAY_SECONDS] as const;
+export const MAX_HISTORY_BUCKETS = 400;
 
 export interface PoolDayHistory {
   /** Start of the bucket, unix seconds (the UTC day for the daily interval). */
