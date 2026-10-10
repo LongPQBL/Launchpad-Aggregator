@@ -69,10 +69,13 @@ export async function rebuildLaunchVolume(client: PoolClient, dirty: readonly La
     } else {
       await client.query(`WITH keys(chain_id, token_address, bucket_start) AS (VALUES ${list.sql})
         INSERT INTO launch_volume_buckets (chain_id, token_address, venue_kind, interval_seconds, bucket_start, volume_usd, trade_count, unpriced_count)
-        SELECT k.chain_id, k.token_address, b.venue_kind, ${interval}, k.bucket_start, sum(b.volume_usd), sum(b.trade_count)::int, sum(b.unpriced_count)::int
-        FROM keys k JOIN launch_volume_buckets b ON b.chain_id = k.chain_id AND b.token_address = k.token_address
-          AND b.interval_seconds = ${finerOf(interval)} AND b.bucket_start >= k.bucket_start AND b.bucket_start < k.bucket_start + ${interval}
-        GROUP BY k.chain_id, k.token_address, b.venue_kind, k.bucket_start
+        SELECT k.chain_id, k.token_address, x.venue_kind, ${interval}, k.bucket_start, x.volume_usd, x.trade_count, x.unpriced_count
+        FROM keys k CROSS JOIN LATERAL (
+          SELECT b.venue_kind, sum(b.volume_usd) AS volume_usd, sum(b.trade_count)::int AS trade_count, sum(b.unpriced_count)::int AS unpriced_count
+          FROM launch_volume_buckets b WHERE b.chain_id = k.chain_id AND b.token_address = k.token_address
+            AND b.interval_seconds = ${finerOf(interval)} AND b.bucket_start >= k.bucket_start AND b.bucket_start < k.bucket_start + ${interval}
+          GROUP BY b.venue_kind
+        ) x
         ON CONFLICT (chain_id, token_address, venue_kind, interval_seconds, bucket_start) DO UPDATE SET
           volume_usd = EXCLUDED.volume_usd, trade_count = EXCLUDED.trade_count, unpriced_count = EXCLUDED.unpriced_count`, list.params);
     }
@@ -128,11 +131,14 @@ export async function rebuildPoolVolume(client: PoolClient, dirty: readonly Pool
     } else {
       await client.query(`WITH keys(chain_id, protocol, pool_id, bucket_start) AS (VALUES ${list.sql})
         INSERT INTO pool_volume_buckets (chain_id, protocol, pool_id, interval_seconds, bucket_start, trade_count, usd_scaled0, unpriced0, usd_scaled1, unpriced1)
-        SELECT k.chain_id, k.protocol, k.pool_id, ${interval}, k.bucket_start, sum(b.trade_count)::int,
-          sum(b.usd_scaled0), sum(b.unpriced0)::int, sum(b.usd_scaled1), sum(b.unpriced1)::int
-        FROM keys k JOIN pool_volume_buckets b ON b.chain_id = k.chain_id AND b.protocol = k.protocol AND b.pool_id = k.pool_id
-          AND b.interval_seconds = ${finerOf(interval)} AND b.bucket_start >= k.bucket_start AND b.bucket_start < k.bucket_start + ${interval}
-        GROUP BY k.chain_id, k.protocol, k.pool_id, k.bucket_start
+        SELECT k.chain_id, k.protocol, k.pool_id, ${interval}, k.bucket_start, x.trade_count, x.usd_scaled0, x.unpriced0, x.usd_scaled1, x.unpriced1
+        FROM keys k CROSS JOIN LATERAL (
+          SELECT sum(b.trade_count)::int AS trade_count, sum(b.usd_scaled0) AS usd_scaled0, sum(b.unpriced0)::int AS unpriced0,
+            sum(b.usd_scaled1) AS usd_scaled1, sum(b.unpriced1)::int AS unpriced1
+          FROM pool_volume_buckets b WHERE b.chain_id = k.chain_id AND b.protocol = k.protocol AND b.pool_id = k.pool_id
+            AND b.interval_seconds = ${finerOf(interval)} AND b.bucket_start >= k.bucket_start AND b.bucket_start < k.bucket_start + ${interval}
+          HAVING count(*) > 0
+        ) x
         ON CONFLICT (chain_id, protocol, pool_id, interval_seconds, bucket_start) DO UPDATE SET
           trade_count = EXCLUDED.trade_count, usd_scaled0 = EXCLUDED.usd_scaled0, unpriced0 = EXCLUDED.unpriced0,
           usd_scaled1 = EXCLUDED.usd_scaled1, unpriced1 = EXCLUDED.unpriced1`, list.params);

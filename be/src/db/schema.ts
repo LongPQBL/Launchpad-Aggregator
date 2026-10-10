@@ -433,7 +433,8 @@ export const launchVolumeBuckets = pgTable('launch_volume_buckets', {
   tradeCount: integer('trade_count').notNull(),
   unpricedCount: integer('unpriced_count').notNull(),
 }, (table) => [
-  primaryKey({ columns: [table.chainId, table.tokenAddress, table.venueKind, table.intervalSeconds, table.bucketStart] }),
+  // venue_kind last: reads and rebuilds are a tight range on (token, interval, bucket_start); the venue is a cheap filter.
+  primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart, table.venueKind] }),
   index('launch_volume_unpriced_idx').on(table.chainId, table.tokenAddress).where(sql`${table.unpricedCount} > 0`),
 ]);
 

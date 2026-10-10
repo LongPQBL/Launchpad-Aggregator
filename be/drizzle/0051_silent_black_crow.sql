@@ -1,0 +1,2 @@
+ALTER TABLE "launch_volume_buckets" DROP CONSTRAINT "launch_volume_buckets_chain_id_token_address_venue_kind_interval_seconds_bucket_start_pk";--> statement-breakpoint
+ALTER TABLE "launch_volume_buckets" ADD CONSTRAINT "launch_volume_buckets_chain_id_token_address_interval_seconds_bucket_start_venue_kind_pk" PRIMARY KEY("chain_id","token_address","interval_seconds","bucket_start","venue_kind");
