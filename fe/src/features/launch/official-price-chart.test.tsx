@@ -21,7 +21,7 @@ const candle = (bucketStart: number, close: string) => ({
 });
 const baseProps = {
   priceText: '0.0108', priceStale: false, graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'caught_up',
-  currency: 'quote' as const, intervalSeconds: 60, tokenSymbol: 'E2E', source: {},
+  currency: 'quote' as const, range: '1d' as const, tokenSymbol: 'E2E', source: {},
 };
 
 // jsdom makes React listen for the vendor-prefixed event name, so that is what ends a roll in tests.

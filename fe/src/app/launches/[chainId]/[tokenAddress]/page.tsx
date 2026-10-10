@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { parseChartRange } from '@/features/chart/ranges';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { LaunchDetail } from '@/features/launch/launch-detail';
 import { findActiveVenue, getLaunchCandles, getLaunchDetail, getLaunchPools, getLaunchTransactions, getPoolDetail, getLaunchHistory } from '@/api/client';
@@ -22,8 +23,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
   const { chainId: chainIdParam, tokenAddress } = await params;
   const search = await searchParams;
   const requestedChartCurrency: 'quote' | 'usd' = search.currency === 'usd' ? 'usd' : 'quote';
-  const intervalParam = Number(search.interval);
-  const chartInterval = [60, 300, 900, 3600, 86400].includes(intervalParam) ? intervalParam : 3600;
+  const chartRange = parseChartRange(search.range);
   const showSwapPreview = process.env.NODE_ENV !== 'production' && search.previewSwap === 'true';
   const chainId = parseChainId(chainIdParam);
   if (chainId === null || !isTokenAddress(tokenAddress)) notFound();
@@ -49,10 +49,10 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
 
   const [transactions, candles, pools, v4Pool, history] = await Promise.all([
     getLaunchTransactions(chainId, tokenAddress).catch(() => null),
-    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, intervalSeconds: chartInterval }).catch(() => null),
+    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, range: chartRange }).catch(() => null),
     getLaunchPools(chainId, tokenAddress, { excludeOfficial: true }).catch(() => null),
     activeV4Venue ? getPoolDetail(chainId, 'uniswap_v4', activeV4Venue.ref, tokenAddress).catch(() => null) : Promise.resolve(null),
-    getLaunchHistory(chainId, tokenAddress).catch(() => null),
+    getLaunchHistory(chainId, tokenAddress, chartRange).catch(() => null),
   ]);
   const hasPendingTrade = transactions?.items.some((trade) => trade.usdValueStatus === 'pending') ?? false;
 
@@ -62,7 +62,7 @@ export default async function LaunchDetailPage({ params, searchParams }: LaunchD
           through for chain-wide events with no tokenAddress, so this page won't refetch on
           every other token's trade — see the Task 4 review-fix ruling in the plan ledger. */}
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} retryWhilePending={hasPendingTrade} />
-      <LaunchDetail detail={detail} transactions={transactions} candles={candles} pools={pools} v4Pool={v4Pool} history={history} chartCurrency={chartCurrency} chartInterval={chartInterval} showSwapPreview={showSwapPreview} />
+      <LaunchDetail detail={detail} transactions={transactions} candles={candles} pools={pools} v4Pool={v4Pool} history={history} chartCurrency={chartCurrency} chartRange={chartRange} showSwapPreview={showSwapPreview} />
     </>
   );
 }

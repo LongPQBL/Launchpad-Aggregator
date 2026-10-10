@@ -6,6 +6,7 @@ import { ChevronRight } from '@/components/chevron-right';
 import { StickyDetailHeader } from '@/components/sticky-detail-header';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import type { ChartRangeId } from '@/features/chart/ranges';
 import { LaunchChartPanel } from '@/features/launch/launch-chart-panel';
 import { TransactionList } from '@/features/launch/transaction-list';
 import { PoolLogo } from '@/features/pools/pool-logo';
@@ -19,12 +20,12 @@ export interface CurveDetailProps {
   transactions: TransactionPage | null;
   candles: CandlePage | null;
   history: PoolHistory | null;
-  chartInterval: number;
+  chartRange: ChartRangeId;
 }
 
 // A Pons launch's bonding curve on its own, shaped like the pool page: unlike the launch page, whose chart
 // and trade list merge the curve with the V4 pool, everything here is scoped to the curve venue.
-export function CurveDetail({ detail, summary, transactions, candles, history, chartInterval }: CurveDetailProps) {
+export function CurveDetail({ detail, summary, transactions, candles, history, chartRange }: CurveDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
   const tokenSymbol = displaySymbol(detail.symbol);
   const quoteSymbol = displaySymbol(detail.quoteAsset.symbol);
@@ -84,7 +85,7 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
             quoteSymbol={quoteSymbol}
             coverageStatus={chartCoverageStatus}
             currency="quote"
-            intervalSeconds={chartInterval}
+            initialRange={chartRange}
             tokenSymbol={detail.symbol}
             source={{ launch: { chainId: detail.chainId, tokenAddress: detail.tokenAddress, venue: 'curve' } }}
             showCurrencyToggle={false}

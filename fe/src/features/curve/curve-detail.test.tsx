@@ -33,7 +33,7 @@ const candles: CandlePage = { items: [], complete: true };
 const history = { items: [], complete: true };
 
 function renderDetail(props: Partial<React.ComponentProps<typeof CurveDetail>> = {}) {
-  return render(<CurveDetail detail={detail()} summary={summary()} transactions={emptyTransactions} candles={candles} history={history} chartInterval={3600} {...props} />);
+  return render(<CurveDetail detail={detail()} summary={summary()} transactions={emptyTransactions} candles={candles} history={history} chartRange="1d" {...props} />);
 }
 
 describe('CurveDetail', () => {

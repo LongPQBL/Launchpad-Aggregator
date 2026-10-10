@@ -1,6 +1,7 @@
 import { notFound } from 'next/navigation';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { CurveDetail } from '@/features/curve/curve-detail';
+import { parseChartRange } from '@/features/chart/ranges';
 import { getCurveSummary, getLaunchCandles, getLaunchDetail, getLaunchHistory, getLaunchTransactions } from '@/api/client';
 import { launchResourceKey } from '@/hooks/resource-keys';
 
@@ -21,8 +22,7 @@ function isTokenAddress(value: string): boolean {
 export default async function CurveDetailPage({ params, searchParams }: CurveDetailPageProps) {
   const { chainId: chainIdParam, tokenAddress } = await params;
   const search = await searchParams;
-  const intervalParam = Number(search.interval);
-  const chartInterval = [60, 300, 900, 3600, 86400].includes(intervalParam) ? intervalParam : 3600;
+  const chartRange = parseChartRange(search.range);
   const chainId = parseChainId(chainIdParam);
   if (chainId === null || !isTokenAddress(tokenAddress)) notFound();
 
@@ -43,14 +43,14 @@ export default async function CurveDetailPage({ params, searchParams }: CurveDet
 
   const [transactions, candles, history] = await Promise.all([
     getLaunchTransactions(chainId, tokenAddress, { venue: 'curve' }).catch(() => null),
-    getLaunchCandles(chainId, tokenAddress, { currency: 'quote', intervalSeconds: chartInterval, venue: 'curve' }).catch(() => null),
-    getLaunchHistory(chainId, tokenAddress, 86_400, 'curve').catch(() => null),
+    getLaunchCandles(chainId, tokenAddress, { currency: 'quote', range: chartRange, venue: 'curve' }).catch(() => null),
+    getLaunchHistory(chainId, tokenAddress, chartRange, 'curve').catch(() => null),
   ]);
 
   return (
     <>
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} />
-      <CurveDetail detail={detail} summary={summary} transactions={transactions} candles={candles} history={history} chartInterval={chartInterval} />
+      <CurveDetail detail={detail} summary={summary} transactions={transactions} candles={candles} history={history} chartRange={chartRange} />
     </>
   );
 }

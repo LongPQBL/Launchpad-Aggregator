@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react';
 import type { CandlePage } from '@/api/client';
 import { formatPrice, formatUsd } from '@/api/format';
 import { PercentChange, RollingText } from '@/components/percent-change';
+import type { ChartRangeId } from '@/features/chart/ranges';
 import { OfficialChart, type OfficialChartHoverPoint, type OfficialChartRange, type OfficialChartSource } from './official-chart';
 
 // Uniswap-style: change from the first point of the visible range to the latest price, or to the
@@ -25,7 +26,8 @@ export function OfficialPriceChart({
   quoteSymbol,
   coverageStatus,
   currency,
-  intervalSeconds,
+  range,
+  onSelectRange,
   tokenSymbol,
   source,
   showCurrencyToggle = true,
@@ -39,16 +41,17 @@ export function OfficialPriceChart({
   quoteSymbol: string | null;
   coverageStatus: string;
   currency: 'quote' | 'usd';
-  intervalSeconds: number;
+  range: ChartRangeId;
+  onSelectRange?: (range: ChartRangeId) => void;
   tokenSymbol: string | null;
   source: OfficialChartSource;
   showCurrencyToggle?: boolean;
-  /** Right side of the interval row (the Price / Volume / TVL switcher). */
+  /** Right side of the range row (the Price / Volume / TVL switcher). */
   trailing?: ReactNode;
 }) {
   const [hover, setHover] = useState<OfficialChartHoverPoint | null>(null);
-  const [range, setRange] = useState<OfficialChartRange | null>(null);
-  const change = range === null ? null : rangeChangePercent(range.startClose, hover?.close ?? range.latestClose);
+  const [visibleRange, setVisibleRange] = useState<OfficialChartRange | null>(null);
+  const change = visibleRange === null ? null : rangeChangePercent(visibleRange.startClose, hover?.close ?? visibleRange.latestClose);
   const hoverText = hover === null
     ? null
     : hover.currency === 'usd' ? formatUsd(String(hover.close), 2) : formatPrice(String(hover.close), quoteSymbol);
@@ -68,12 +71,13 @@ export function OfficialPriceChart({
           quoteSymbol={quoteSymbol}
           coverageStatus={coverageStatus}
           currency={currency}
-          intervalSeconds={intervalSeconds}
+          range={range}
+          onSelectRange={onSelectRange}
           tokenSymbol={tokenSymbol}
           source={source}
           showCurrencyToggle={showCurrencyToggle}
           onHoverPoint={setHover}
-          onRangeChange={setRange}
+          onRangeChange={setVisibleRange}
           trailing={trailing}
         />
       )}

@@ -10,7 +10,7 @@ import { TokenLogo } from '@/features/launches/token-logo';
 import { AboutSection } from './about-section';
 import { HeaderActions } from './header-actions';
 import { CopyableTokenAddress } from './copyable-token-address';
-import { DEFAULT_CHART_INTERVAL } from './official-chart';
+import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
 import { LaunchChartPanel } from './launch-chart-panel';
 import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
@@ -31,11 +31,11 @@ export interface LaunchDetailProps {
   /** Daily official Volume / TVL series for the chart's Volume and TVL tabs; null hides them. */
   history?: PoolHistory | null;
   chartCurrency?: 'quote' | 'usd';
-  chartInterval?: number;
+  chartRange?: ChartRangeId;
   showSwapPreview?: boolean;
 }
 
-export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = null, history = null, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL, showSwapPreview = false }: LaunchDetailProps) {
+export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = null, history = null, chartCurrency = 'quote', chartRange = DEFAULT_CHART_RANGE, showSwapPreview = false }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -145,7 +145,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                 quoteSymbol={detail.quoteAsset.symbol}
                 coverageStatus={chartCoverageStatus}
                 currency={chartCurrency}
-                intervalSeconds={chartInterval}
+                initialRange={chartRange}
                 tokenSymbol={detail.symbol}
                 source={{ launch: { chainId: detail.chainId, tokenAddress: detail.tokenAddress } }}
                 showCurrencyToggle={detail.platform !== 'pons'}

@@ -4,17 +4,19 @@ import { useState, type ReactNode } from 'react';
 import type { PoolCandlePage, PoolSummary } from '@/api/client';
 import { displaySymbol, formatPrice, formatUsd } from '@/api/format';
 import { PercentChange, RollingText } from '@/components/percent-change';
+import type { ChartRangeId } from '@/features/chart/ranges';
 import { OfficialChart, type OfficialChartHoverPoint, type OfficialChartRange } from '@/features/launch/official-chart';
 import { rangeChangePercent } from '@/features/launch/official-price-chart';
 
-export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSymbol, trailing }: {
+export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSymbol, range, onSelectRange, trailing }: {
   pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken' | 'priceInQuote' | 'priceUsd'>;
-  candles: PoolCandlePage; coverageStatus: string; quoteSymbol: string; tokenSymbol: string | null; trailing?: ReactNode;
+  candles: PoolCandlePage; coverageStatus: string; quoteSymbol: string; tokenSymbol: string | null;
+  range?: ChartRangeId; onSelectRange?: (range: ChartRangeId) => void; trailing?: ReactNode;
 }) {
   const [hover, setHover] = useState<OfficialChartHoverPoint | null>(null);
-  const [range, setRange] = useState<OfficialChartRange | null>(null);
+  const [visibleRange, setVisibleRange] = useState<OfficialChartRange | null>(null);
   // Change across the visible range (to the hovered point while scrubbing); hidden when unavailable.
-  const change = range === null ? null : rangeChangePercent(range.startClose, hover?.close ?? range.latestClose);
+  const change = visibleRange === null ? null : rangeChangePercent(visibleRange.startClose, hover?.close ?? visibleRange.latestClose);
   return <div>
     {/* priceUsd is the USD price of displayedToken specifically (be/src/pools/stats.ts) and is
         null whenever the quote side lacks a verified USD oracle — which is the normal case once
@@ -33,6 +35,6 @@ export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSym
       candles={candles.items}
       graduationTime={null} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
       coverageStatus={candles.complete ? coverageStatus : 'backfilling'}
-      source={{ pool }} showCurrencyToggle={false} onHoverPoint={setHover} onRangeChange={setRange} trailing={trailing} />
+      source={{ pool }} range={range} onSelectRange={onSelectRange} showCurrencyToggle={false} onHoverPoint={setHover} onRangeChange={setVisibleRange} trailing={trailing} />
   </div>;
 }

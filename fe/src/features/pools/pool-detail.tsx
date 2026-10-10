@@ -1,3 +1,4 @@
+import type { ChartRangeId } from '@/features/chart/ranges';
 import { ChevronRight } from '@/components/chevron-right';
 import { poolHref, type PoolCandlePage, type PoolHistory, type PoolSummary, type PoolTradePage } from '@/api/client';
 import { chainExplorerBase, chainIcon, chainName } from '@/api/chains';
@@ -15,7 +16,7 @@ import { SwapTrigger } from './swap-trigger';
 import { short as symbol } from './pool-format';
 import { StickyDetailHeader } from '@/components/sticky-detail-header';
 
-export function PoolDetail({ pool, trades, candles, history = null }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null }) {
+export function PoolDetail({ pool, trades, candles, history = null, chartRange }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null; chartRange?: ChartRangeId }) {
   const displayedIsCurrency0 = pool.displayedToken === pool.currency0;
   const other = displayedIsCurrency0 ? pool.currency1 : pool.currency0;
   const otherSymbol = displayedIsCurrency0 ? pool.currency1Symbol : pool.currency0Symbol;
@@ -69,7 +70,7 @@ export function PoolDetail({ pool, trades, candles, history = null }: { pool: Po
 
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
       <div className="flex flex-col gap-4">
-        <PoolChartPanel pool={pool} candles={candles} history={history} coverageStatus={pool.coverageStatus} quoteSymbol={quote} tokenSymbol={displayedSymbol} />
+        <PoolChartPanel pool={pool} candles={candles} history={history} coverageStatus={pool.coverageStatus} quoteSymbol={quote} tokenSymbol={displayedSymbol} initialRange={chartRange} />
         <section aria-labelledby="pool-transactions-heading" className="space-y-3">
           <h2 id="pool-transactions-heading" className="text-2xl">Transactions</h2>
           {trades ? <>

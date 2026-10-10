@@ -1,3 +1,4 @@
+import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
 import type { paths } from './schema';
 
 type LaunchesBody = paths['/v1/launches']['get']['responses'][200]['content']['application/json'];
@@ -142,6 +143,7 @@ export interface CandlePage {
 }
 
 export interface CandleQuery {
+  range?: ChartRangeId;
   intervalSeconds?: number;
   before?: number;
   currency?: 'quote' | 'usd';
@@ -166,6 +168,7 @@ export async function getLaunchTransactions(chainId: number, tokenAddress: strin
 
 export async function getLaunchCandles(chainId: number, tokenAddress: string, query: CandleQuery = {}): Promise<CandlePage> {
   return request<CandlePage>(`/v1/launches/${chainId}/${tokenAddress}/candles`, {
+    range: query.range,
     intervalSeconds: query.intervalSeconds,
     before: query.before,
     currency: query.currency,
@@ -208,9 +211,9 @@ export async function getPoolTrades(pool: PoolSummary, cursor?: string): Promise
   return request<PoolTradePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/trades`,
     { displayedToken: pool.displayedToken, cursor });
 }
-export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>, intervalSeconds = 3600): Promise<PoolCandlePage> {
+export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>, range: ChartRangeId = DEFAULT_CHART_RANGE): Promise<PoolCandlePage> {
   return request<PoolCandlePage>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/candles`,
-    { displayedToken: pool.displayedToken, intervalSeconds });
+    { displayedToken: pool.displayedToken, range });
 }
 
 // Mirrors be/src/api/searchStore.ts. Lightweight identity-only hits: no market stats, so a dropdown can render fast.
@@ -239,14 +242,14 @@ export async function getAllTransactions(query: { cursor?: string; limit?: numbe
 
 type PoolHistoryBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/history']['get']['responses'][200]['content']['application/json'];
 export type PoolDayHistory = Required<NonNullable<PoolHistoryBody['items']>[number]>;
-export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean }
-export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, intervalSeconds = 86_400, days = 30): Promise<PoolHistory> {
-  return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { intervalSeconds, days });
+export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean; /** Bucket size in seconds, chosen by the server for the requested range. */ intervalSeconds?: number }
+export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, range: ChartRangeId = DEFAULT_CHART_RANGE): Promise<PoolHistory> {
+  return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { range });
 }
 
 type LaunchHistoryBody = paths['/v1/launches/{chainId}/{tokenAddress}/history']['get']['responses'][200]['content']['application/json'];
-export async function getLaunchHistory(chainId: number, tokenAddress: string, intervalSeconds = 86_400, venue?: 'curve'): Promise<PoolHistory> {
-  return request<LaunchHistoryBody & PoolHistory>(`/v1/launches/${chainId}/${tokenAddress}/history`, { intervalSeconds, venue });
+export async function getLaunchHistory(chainId: number, tokenAddress: string, range: ChartRangeId = DEFAULT_CHART_RANGE, venue?: 'curve'): Promise<PoolHistory> {
+  return request<LaunchHistoryBody & PoolHistory>(`/v1/launches/${chainId}/${tokenAddress}/history`, { range, venue });
 }
 
 type CurveSummaryBody = paths['/v1/launches/{chainId}/{tokenAddress}/curve']['get']['responses'][200]['content']['application/json'];

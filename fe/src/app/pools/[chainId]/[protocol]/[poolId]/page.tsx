@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation';
 import { getPoolCandles, getPoolDetail, getPoolHistory, getPoolTrades } from '@/api/client';
+import { parseChartRange } from '@/features/chart/ranges';
 import { PoolDetail } from '@/features/pools/pool-detail';
 import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
 import { chainResourceKey } from '@/hooks/resource-keys';
@@ -20,10 +21,11 @@ export default async function PoolDetailPage({ params, searchParams }: Props) {
   try { detail = await getPoolDetail(chainId, protocol, poolId, first(query.displayedToken)); }
   catch { return <><p role="alert">Could not load this pool. Please try again.</p></>; }
   if (!detail) notFound();
+  const chartRange = parseChartRange(first(query.range));
   const [trades, candles, history] = await Promise.all([
     getPoolTrades(detail, first(query.cursor)).catch(() => null),
-    getPoolCandles(detail).catch(() => null),
-    getPoolHistory(detail).catch(() => null),
+    getPoolCandles(detail, chartRange).catch(() => null),
+    getPoolHistory(detail, chartRange).catch(() => null),
   ]);
-  return <><LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId)]} /><PoolDetail pool={detail} trades={trades} candles={candles} history={history} /></>;
+  return <><LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId)]} /><PoolDetail pool={detail} trades={trades} candles={candles} history={history} chartRange={chartRange} /></>;
 }

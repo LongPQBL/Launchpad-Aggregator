@@ -5,7 +5,7 @@ import { LaunchChartPanel } from './launch-chart-panel';
 vi.mock('./official-price-chart', () => ({ OfficialPriceChart: ({ trailing }: { trailing?: React.ReactNode }) => <div data-testid="launch-price-chart">{trailing}</div> }));
 
 const price = { priceText: '$1', priceStale: false, candles: null, graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'complete',
-  currency: 'quote' as const, intervalSeconds: 3600, tokenSymbol: 'TKN', source: { launch: { chainId: 4663, tokenAddress: '0xabc' } } };
+  currency: 'quote' as const, tokenSymbol: 'TKN', source: { launch: { chainId: 4663, tokenAddress: '0xabc' } } };
 const history = { items: [{ day: 864_000, tradeCount: 1, volumeUsd: '1500', tvlUsd: '40000' }], complete: true };
 
 describe('LaunchChartPanel', () => {

@@ -25,13 +25,13 @@ describe('PoolChartPanel', () => {
     expect(screen.queryByRole('tab', { name: 'TVL' })).not.toBeInTheDocument();
   });
 
-  it('keeps the interval tabs under Volume and refetches the series for the chosen interval', async () => {
+  it('keeps the range tabs under Volume and refetches the series for the chosen range', async () => {
     vi.mocked(getPoolHistory).mockResolvedValue({ items: [{ day: 10 * DAY, tradeCount: 1, volumeUsd: '7', tvlUsd: null }], complete: true });
     render(<PoolChartPanel {...props} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
-    expect(screen.getAllByRole('link', { name: '5m' }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole('link', { name: '5m' }).at(-1)!);
-    expect(getPoolHistory).toHaveBeenCalledWith(pool, 300);
+    expect(screen.getAllByRole('link', { name: '1W' }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('link', { name: '1W' }).at(-1)!);
+    expect(getPoolHistory).toHaveBeenCalledWith(pool, '1w');
     expect(await screen.findByTestId('history-bar')).toBeInTheDocument();
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$7');
   });

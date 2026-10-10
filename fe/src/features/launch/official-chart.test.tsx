@@ -32,44 +32,59 @@ vi.mock('lightweight-charts', () => ({
 
 const props = { candles: [], graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'caught_up' };
 
-describe('OfficialChart interval tabs', () => {
-  it('loads a new interval client-side and updates only the chart data', async () => {
+describe('OfficialChart range tabs', () => {
+  it('loads a new range client-side and updates only the chart data', async () => {
     getLaunchCandlesMock.mockResolvedValueOnce({ items: [{
-      intervalSeconds: 300, bucketStart: 1_700_000_300, open: '0.0005', high: '0.0006', low: '0.0004', close: '0.0005', quoteVolume: '1',
+      intervalSeconds: 3600, bucketStart: 1_700_000_300, open: '0.0005', high: '0.0006', low: '0.0004', close: '0.0005', quoteVolume: '1',
     }], complete: true });
     render(<OfficialChart {...props} candles={[{
       bucketStart: 1_700_000_000, open: '0.00012', high: '0.00014', low: '0.00011', close: '0.00013',
-    }]} source={{ launch: { chainId: 4663, tokenAddress: '0xc9e9ab90654f82893d7fd18b62f694992e8cef29' } }} intervalSeconds={60} tokenSymbol="E2E" />);
+    }]} source={{ launch: { chainId: 4663, tokenAddress: '0xc9e9ab90654f82893d7fd18b62f694992e8cef29' } }} range="1d" tokenSymbol="E2E" />);
 
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chart interval' })).getByRole('link', { name: '5m' }));
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chart range' })).getByRole('link', { name: '1W' }));
 
     // The price itself never reaches the DOM — lightweight-charts is mocked to a no-op above, so
     // the refetch firing with the right params is the only observable, non-canvas effect here.
     await waitFor(() => expect(getLaunchCandlesMock).toHaveBeenCalledWith(4663, '0xc9e9ab90654f82893d7fd18b62f694992e8cef29', {
-      currency: 'quote', intervalSeconds: 300,
+      currency: 'quote', range: '1w',
     }));
   });
 
-  it('places interval tabs below the chart and hides plotting disclaimer and token price', () => {
+  it('reports a picked range to onSelectRange, and loads candles when a sibling chart moves the shared range', async () => {
+    getLaunchCandlesMock.mockResolvedValue({ items: [], complete: true });
+    const onSelectRange = vi.fn();
+    const source = { launch: { chainId: 4663, tokenAddress: '0xabc' } };
+    const { rerender } = render(<OfficialChart {...props} source={source} range="1d" onSelectRange={onSelectRange} />);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chart range' })).getByRole('link', { name: '1Y' }));
+    expect(onSelectRange).toHaveBeenCalledWith('1y');
+    await waitFor(() => expect(getLaunchCandlesMock).toHaveBeenLastCalledWith(4663, '0xabc', { currency: 'quote', range: '1y' }));
+
+    getLaunchCandlesMock.mockClear();
+    rerender(<OfficialChart {...props} source={source} range="1h" onSelectRange={onSelectRange} />);
+    await waitFor(() => expect(getLaunchCandlesMock).toHaveBeenCalledWith(4663, '0xabc', { currency: 'quote', range: '1h' }));
+    expect(within(screen.getByRole('navigation', { name: 'Chart range' })).getByRole('link', { name: '1H' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('places range tabs below the chart and hides plotting disclaimer and token price', () => {
     render(<OfficialChart {...props} candles={[{
       bucketStart: 1_700_000_000, open: '0.00012', high: '0.00014', low: '0.00011', close: '0.00013',
-    }]} intervalSeconds={300} currency="usd" tokenSymbol="E2E" />);
+    }]} range="1w" currency="usd" tokenSymbol="E2E" />);
     const chart = screen.getByTestId('official-chart-container');
-    const intervals = screen.getByRole('navigation', { name: 'Chart interval' });
+    const intervals = screen.getByRole('navigation', { name: 'Chart range' });
 
     expect(chart.compareDocumentPosition(intervals) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/approximate for plotting/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId('chart-token-price')).not.toBeInTheDocument();
-    expect(within(intervals).getByRole('link', { name: '5m' })).toHaveAttribute('aria-current', 'page');
+    expect(within(intervals).getByRole('link', { name: '1W' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('offers 1m, 5m, 15m, 1h, and 1D, and marks the active one', () => {
-    render(<OfficialChart {...props} intervalSeconds={3600} currency="usd" />);
-    const nav = screen.getByRole('navigation', { name: 'Chart interval' });
-    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['1m', '5m', '15m', '1h', '1D']);
+  it('offers 1H, 1D, 1W, 1M, and 1Y, and marks the active one', () => {
+    render(<OfficialChart {...props} range="1d" currency="usd" />);
+    const nav = screen.getByRole('navigation', { name: 'Chart range' });
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['1H', '1D', '1W', '1M', '1Y']);
     expect(nav).toHaveClass('inline-flex', 'flex-wrap');
-    expect(within(nav).getByText('1h')).toHaveAttribute('aria-current', 'page');
-    expect(within(nav).getByText('1m')).toHaveAttribute('href', '?currency=usd&interval=60');
+    expect(within(nav).getByText('1D')).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByText('1H')).toHaveAttribute('href', '?currency=usd&range=1h');
   });
 
   it('does not show a separate latest token price above the chart', () => {
@@ -79,9 +94,9 @@ describe('OfficialChart interval tabs', () => {
     expect(screen.queryByTestId('chart-token-price')).not.toBeInTheDocument();
   });
 
-  it('keeps the selected interval when switching currency', () => {
-    render(<OfficialChart {...props} intervalSeconds={300} currency="quote" />);
-    expect(screen.getByRole('link', { name: 'USD' })).toHaveAttribute('href', '?currency=usd&interval=300');
+  it('keeps the selected range when switching currency', () => {
+    render(<OfficialChart {...props} range="1w" currency="quote" />);
+    expect(screen.getByRole('link', { name: 'USD' })).toHaveAttribute('href', '?currency=usd&range=1w');
   });
 
   it('refetches from getPoolCandles (not getLaunchCandles) when given a pool source', async () => {
@@ -91,12 +106,12 @@ describe('OfficialChart interval tabs', () => {
     render(<OfficialChart {...props} candles={[{
       bucketStart: 1_700_000_000, open: '0.00012', high: '0.00014', low: '0.00011', close: '0.00013',
     }]} source={{ pool: { chainId: 4663, protocol: 'uniswap_v4', poolId: '0xpool', displayedToken: '0xtoken' } }}
-      intervalSeconds={60} tokenSymbol="MOCK1" />);
+      range="1d" tokenSymbol="MOCK1" />);
 
-    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chart interval' })).getByRole('link', { name: '5m' }));
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Chart range' })).getByRole('link', { name: '1W' }));
 
     await waitFor(() => expect(getPoolCandlesMock).toHaveBeenCalledWith(
-      { chainId: 4663, protocol: 'uniswap_v4', poolId: '0xpool', displayedToken: '0xtoken' }, 300,
+      { chainId: 4663, protocol: 'uniswap_v4', poolId: '0xpool', displayedToken: '0xtoken' }, '1w',
     ));
     expect(getLaunchCandlesMock).not.toHaveBeenCalled();
   });
