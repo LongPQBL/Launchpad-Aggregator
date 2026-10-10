@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CurveSwapPanel } from './curve-swap-panel';
 import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
+import { textContent } from '../test-utils/text-content';
 
 // Mock the reverse builder at its module boundary (its own tests cover the builder; here we test wiring).
 const reverse = vi.hoisted(() => ({
@@ -118,12 +119,12 @@ const typeSell = (value: string) => fireEvent.change(screen.getByLabelText('Sell
 describe('CurveSwapPanel - buy direction (default)', () => {
   it('shows the native Sell balance in red when exceeded and updates the balance after flipping', () => {
     render(panel(nativeQuote, { tokenSymbol: 'PROM' }));
-    expect(screen.getByText('Balance: 0.01 ETH')).toBeInTheDocument();
+    expect(screen.getByText(textContent('Balance: 0.01 ETH'))).toBeInTheDocument();
     typeSell('0.02');
     expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
-    expect(screen.getByText('Balance: 0.01 ETH')).toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 0.01 ETH'))).toHaveClass('text-destructive');
     flip();
-    expect(screen.getByText('Balance: 2 PROM')).not.toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 2 PROM'))).not.toHaveClass('text-destructive');
   });
   it('shows an "Enter an amount" label when the amount is empty', () => {
     render(panel(nativeQuote));
@@ -655,7 +656,7 @@ describe('two-way amounts', () => {
     render(panel(nativeQuote));
     typeSell('0.001');
     expect(screen.getByText('Min received')).toBeInTheDocument();
-    expect(screen.getByText(/^990/)).toBeInTheDocument();
+    expect(screen.getByText(textContent(/^990/))).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     // 990e18 raw must equal the minTokensOut argument actually sent to buy()
     expect(hooks.writeContract.mock.calls[0][0].args[1]).toBe(990_000_000_000_000_000_000n);

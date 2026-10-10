@@ -15,6 +15,7 @@ import { TRANSACTION_COLUMNS, transactionColumnWidth } from '@/features/transact
 import { TypeFilter } from '@/features/transactions/type-filter';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
+import { RollingText } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
 
 export interface GlobalTransactionListProps {
@@ -54,9 +55,9 @@ function rowKey(row: GlobalTransaction): string {
 function SkeletonRows({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <TableRow key={index} aria-hidden="true" data-testid="global-transaction-skeleton-row" className="h-[60px] border-0 hover:bg-transparent">
-      {TRANSACTION_COLUMNS.map((_, cell) => (
+      {TRANSACTION_COLUMNS.map((column, cell) => (
         <TableCell key={cell} className={cn(cell === 0 && 'pl-4', cell === TRANSACTION_COLUMNS.length - 1 && 'pr-4')}>
-          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
+          <span className={cn('block h-4 max-w-full animate-pulse rounded bg-muted', column.bar, 'align' in column && column.align === 'right' && 'ml-auto')} />
         </TableCell>
       ))}
     </TableRow>
@@ -68,7 +69,7 @@ function AssetSide({ symbol, logoUri, chainId, address }: { symbol: string; logo
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className="text-foreground">{symbol}</span>
-      <TokenLogo logoUri={address ? quoteLogoUri(address, logoUri) : logoUri} symbol={symbol} chainId={chainId} size="small" />
+      <TokenLogo logoUri={address ? quoteLogoUri(address, logoUri) : logoUri} symbol={symbol} chainId={chainId} size="transaction" />
     </span>
   );
 }
@@ -159,12 +160,12 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
       )}
       <Table aria-label="Latest transactions" className="table-fixed border-separate border-spacing-0">
         <TableHeader className="border-b-0 [&_tr]:!border-0">
-          <TableRow className="h-12 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
+          <TableRow className="h-10 border-0 [&>th]:h-10 [&>th]:bg-muted [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
             <TableHead style={{ width: transactionColumnWidth(0) }} className="pl-4">Time</TableHead>
             <TableHead style={{ width: transactionColumnWidth(1) }}><TypeFilter options={TYPE_OPTIONS} selected={typeFilter} onChange={setTypeFilter} /></TableHead>
             <TableHead style={{ width: transactionColumnWidth(2) }} className="text-right">USD</TableHead>
-            <TableHead style={{ width: transactionColumnWidth(3) }} className="text-right">Token amount</TableHead>
-            <TableHead style={{ width: transactionColumnWidth(4) }} className="text-right">Token amount</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(3) }} className="text-right">Token Amount</TableHead>
+            <TableHead style={{ width: transactionColumnWidth(4) }} className="text-right">Token Amount</TableHead>
             <TableHead style={{ width: transactionColumnWidth(5) }} className="text-right">Wallet</TableHead>
             <TableHead style={{ width: transactionColumnWidth(6) }} className="pr-4 text-right">Explorer</TableHead>
           </TableRow>
@@ -188,7 +189,7 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
             return (
               <TableRow key={rowKey(row)} className="h-[60px] border-0 hover:bg-transparent">
                 <TableCell className="pl-4 text-base text-muted-foreground" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
-                  {formatRelativeTime(row.timestamp, now)}
+                  <RollingText text={formatRelativeTime(row.timestamp, now)} />
                 </TableCell>
                 <TableCell className="text-base">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">

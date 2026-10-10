@@ -23,8 +23,8 @@ export function SwapTrigger({ protocol, poolId, tokenA, tokenB, fee, tickSpacing
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)} className="h-12 w-full cursor-pointer rounded-full bg-brand/20 text-base text-brand hover:bg-brand/25 hover:text-brand">Swap</Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title={`${tokenA.symbol ?? 'Token'} / ${tokenB.symbol ?? 'Token'}`} showHeader={false}>
+      <Button type="button" onClick={() => setOpen(true)} className="mx-px h-12 w-[calc(100%-2px)] cursor-pointer rounded-full bg-brand/20 text-base text-brand hover:bg-brand/25 hover:text-brand">Swap</Button>
+      <Dialog open={open} onClose={() => setOpen(false)} title={`${tokenA.symbol ?? 'Token'} / ${tokenB.symbol ?? 'Token'}`} showHeader={false} contentClassName="max-w-[480px] rounded-2xl">
         {protocol === 'uniswap_v4' ? (
           <V4SwapPanel
             poolKey={{ currency0: tokenA.address, currency1: tokenB.address, fee, tickSpacing, hooks }}

@@ -17,7 +17,7 @@ describe('PoolTransactionList', () => {
   it('formats raw amounts using each side\'s own decimals, displayed side first', () => {
     render(<PoolTransactionList trades={[trade()]} displayedSymbol="SANTACOIN" otherSymbol="ETH"
       displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
-    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getAllByRole('cell').map((c) => c.textContent)).toContain('1');
     expect(screen.getByText(/^2 ETH$/)).toBeInTheDocument();
   });
 

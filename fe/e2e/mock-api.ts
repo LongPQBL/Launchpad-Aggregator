@@ -345,8 +345,22 @@ export function startMockApi(port: number): Server {
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(url.pathname)) {
       const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? 3600);
       res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote')));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(url.pathname)) {
-      res.end(JSON.stringify(poolHistory));
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(url.pathname) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(url.pathname)) {
+      const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? DAY_SECONDS);
+      if (intervalSeconds === DAY_SECONDS) {
+        res.end(JSON.stringify(poolHistory));
+      } else {
+        // Finer buckets: 96 of them ending now, with the same unavailable / real-zero pattern as the daily mock.
+        res.end(JSON.stringify({
+          items: Array.from({ length: 96 }, (_, index) => ({
+            day: Math.floor(1_780_000_000 / intervalSeconds) * intervalSeconds - (95 - index) * intervalSeconds,
+            tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
+            volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
+            tvlUsd: index % 12 === 0 ? String(40_000 + index * 50) : null,
+          })),
+          complete: true,
+        }));
+      }
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
         txHash: `0x${(index + 900).toString(16).padStart(64, '0')}`,

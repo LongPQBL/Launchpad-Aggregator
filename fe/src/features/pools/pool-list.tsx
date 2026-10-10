@@ -3,14 +3,13 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
-import { Card, CardContent } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { PageHeading } from '@/components/page-heading';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 import { poolColumnWidth, type PoolColumnId } from './pool-columns';
 import { formatPoolUsd, formatVolumeToTvl, poolAge, short, volumeToTvl } from './pool-format';
+import { RollingText } from '@/components/percent-change';
 
 function side(address: string): string { return address.toLowerCase(); }
 
@@ -22,8 +21,8 @@ export type PrimaryLaunchVenue =
 type PoolSort = 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
 const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; column: PoolColumnId }[] = [
   { label: 'TVL', sort: 'tvlUsd', defaultDirection: 'desc', column: 'tvl' },
-  { label: '24H volume', sort: 'volume24hUsd', defaultDirection: 'desc', column: 'volume24h' },
-  { label: '30D volume', sort: 'volume30dUsd', defaultDirection: 'desc', column: 'volume30d' },
+  { label: '24H Volume', sort: 'volume24hUsd', defaultDirection: 'desc', column: 'volume24h' },
+  { label: '30D Volume', sort: 'volume30dUsd', defaultDirection: 'desc', column: 'volume30d' },
   { label: '1D Vol/TVL', sort: 'volumeToTvl', defaultDirection: 'desc', column: 'volumeToTvl' },
   { label: 'Age', sort: 'age', defaultDirection: 'asc', column: 'age' },
 ];
@@ -61,16 +60,19 @@ const POOL_SKELETON_NUMERIC_CELLS = 5;
 function PoolRowsSkeleton({ count }: { count: number }) {
   return Array.from({ length: count }, (_, index) => (
     <div key={index} role="row" aria-hidden="true" data-testid="pool-skeleton-row" className="rounded-lg p-3 md:table-row md:h-[60px] md:rounded-none md:p-0">
-      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-full animate-pulse rounded bg-muted" /></div>
+      <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
       <div role="cell" className="md:table-cell md:px-4 md:py-0 md:align-middle">
         <span className="flex items-center gap-3">
           <span className="h-9 w-9 shrink-0 animate-pulse rounded-full bg-muted" />
-          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
+          <span className="flex flex-col gap-1.5">
+            <span className="block h-4 w-36 max-w-full animate-pulse rounded bg-muted" />
+            <span className="block h-3 w-20 max-w-full animate-pulse rounded bg-muted" />
+          </span>
         </span>
       </div>
       {Array.from({ length: POOL_SKELETON_NUMERIC_CELLS }, (_, cell) => (
         <div key={cell} role="cell" className="md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
-          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
+          <span className={`ml-auto block h-4 max-w-full animate-pulse rounded bg-muted ${['w-14', 'w-14', 'w-14', 'w-10', 'w-8'][cell]}`} />
         </div>
       ))}
     </div>
@@ -102,6 +104,19 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       return sortDirection === 'asc' ? comparison : -comparison;
     });
   }, [items, sortBy, sortDirection]);
+  // The launch's official Pons pool is pinned to the top of the list (not shown as a separate card).
+  const rowKey = (pool: PoolSummary) => `${pool.chainId}:${pool.protocol}:${pool.poolId}`;
+  const officialKey = primaryVenue?.kind === 'pool' && primaryVenue.pool ? rowKey(primaryVenue.pool) : null;
+  const isOfficial = (pool: PoolSummary) => pool.ponsDesignated || rowKey(pool) === officialKey;
+  const displayedRows = useMemo(() => {
+    const official = sortedItems.filter(isOfficial);
+    const rest = sortedItems.filter((pool) => !isOfficial(pool));
+    const pinned = primaryVenue?.kind === 'pool' && primaryVenue.pool && !official.some((pool) => rowKey(pool) === officialKey)
+      ? [primaryVenue.pool] : [];
+    return [...pinned, ...official, ...rest];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortedItems, primaryVenue]);
+  const curveRow = primaryVenue?.kind === 'curve' ? primaryVenue : null;
 
   // Merge the server-provided first page when it changes, keeping pages the user already loaded
   // (React's "adjust state during render" pattern).
@@ -145,50 +160,19 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   }, [loadError, loadMore, nextCursor]);
 
   return <section aria-label={tokenAddress ? 'Other pools for this token' : 'Pools'} className="space-y-4">
-    {primaryVenue && <section aria-label="Pons primary venue"><Card>
-      <CardContent className="flex flex-wrap items-center gap-3 pt-4">
-        {primaryVenue.kind === 'curve' ? <>
-          <PoolLogo size="small" token0={{ symbol: primaryVenue.token.symbol, logoUri: primaryVenue.token.logoUri }}
-            token1={{ symbol: primaryVenue.quoteSymbol, logoUri: null }} chainId={primaryVenue.chainId} />
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">{primaryVenue.token.symbol} / {primaryVenue.quoteSymbol}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary">Pons bonding curve</Badge>
-              <span className="text-xs text-muted-foreground">Primary venue</span>
-            </div>
-          </div>
-        </> : <>
-          {primaryVenue.pool ? <PoolLogo size="small"
-            token0={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency0, primaryVenue.pool.currency0Symbol, primaryVenue.pool.currency0LogoUri, displayedToken)}
-            token1={poolLogoToken(primaryVenue.pool, primaryVenue.pool.currency1, primaryVenue.pool.currency1Symbol, primaryVenue.pool.currency1LogoUri, displayedToken)}
-            chainId={primaryVenue.pool.chainId}
-          /> : <span aria-hidden="true" className="h-9 w-9 rounded-full bg-accent" />}
-          <div className="min-w-0">
-            {primaryVenue.pool
-              ? <Link className="text-sm font-semibold" href={poolHref(primaryVenue.pool, tokenAddress)}>{pairLabel(primaryVenue.pool, displayedToken)}</Link>
-              : <p className="text-sm font-semibold">Pons Uniswap V4 pool</p>}
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <Badge variant="secondary">{primaryVenue.protocol.replace('uniswap_', '').toUpperCase()}</Badge>
-              <span className="text-xs text-muted-foreground">Pons primary venue</span>
-            </div>
-          </div>
-          {!primaryVenue.pool && <span className="ml-auto max-w-full truncate text-xs text-muted-foreground" title={primaryVenue.poolId}>{primaryVenue.poolId}</span>}
-        </>}
-      </CardContent>
-    </Card></section>}
     {(error || !page) && <p role="alert">Could not load pools.</p>}
     {!tokenAddress && page && <PageHeading title="Pools" />}
-    {items.length === 0 && page && <p>No other verified indexed pools found.</p>}
+    {items.length === 0 && !primaryVenue && page && <p>No other verified indexed pools found.</p>}
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
-        <div role="row" className="md:table-row md:h-12 md:bg-card/80 md:backdrop-blur-md [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
-          <div role="columnheader" style={{ width: poolColumnWidth('index') }} className="text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium">#</div>
-          <div role="columnheader" style={{ width: poolColumnWidth('pool') }} className="text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium">Pool</div>
+        <div role="row" className="md:table-row md:h-10 md:[&>div]:bg-muted [&>div:first-child]:rounded-l-lg [&>div:last-child]:rounded-r-lg">
+          <div role="columnheader" style={{ width: poolColumnWidth('index') }} className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-sm')}>#</div>
+          <div role="columnheader" style={{ width: poolColumnWidth('pool') }} className="text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-sm  ">Pool</div>
           {POOL_SORT_COLUMNS.map(({ label, sort, defaultDirection, column }) => {
             const active = sortBy === sort;
             return <div key={sort} role="columnheader" style={{ width: poolColumnWidth(column) }} aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-              className={cn('text-muted-foreground md:table-cell md:h-12 md:px-4 md:align-middle md:text-sm md:font-medium md:text-right', active && 'text-foreground dark:text-white')}>
-              <button type="button" className={cn('inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
+              className={cn('text-muted-foreground md:table-cell md:h-10 md:px-4 md:align-middle md:text-sm  md:text-right', active && 'text-foreground dark:text-white')}>
+              <button type="button" className={cn('flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'text-inherit' : 'text-inherit hover:text-foreground', 'md:ml-auto')}
                 onClick={() => {
                   const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection;
                   setSortBy(sort);
@@ -201,22 +185,35 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
         </div>
       </div>
       <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-        {sortedItems.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
+        {curveRow && <div role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:p-0">
           <div role="cell" className="pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle">
+            <Link href={`/launches/${curveRow.chainId}/${curveRow.token.address}/curve`} aria-label={`View bonding curve ${curveRow.token.symbol} / ${curveRow.quoteSymbol}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
+            1
+          </div>
+          <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
+            <span className="flex items-center gap-3">
+              <PoolLogo size="small" token0={{ symbol: curveRow.token.symbol, logoUri: curveRow.token.logoUri }} token1={{ symbol: curveRow.quoteSymbol, logoUri: null }} chainId={curveRow.chainId} />
+              <span className="min-w-0"><span className="block text-base">{curveRow.token.symbol} / {curveRow.quoteSymbol}</span><span className="text-sm text-muted-foreground">Bonding curve · Official Pons pool</span></span>
+            </span>
+          </div>
+          {['TVL', '24H Volume', '30D Volume', '1D Vol/TVL', 'Age'].map((label) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle"><span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>—</span></div>)}
+        </div>}
+        {displayedRows.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
+          <div role="cell" className={cn('pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle')}>
             <Link href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
-            {index + 1}
+            {index + 1 + (curveRow ? 1 : 0)}
           </div>
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
             <span className="flex items-center gap-3">
               <PoolLogo size="small" token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
-              <span className="min-w-0"><span className="block text-sm font-medium">{pairLabel(pool, displayedToken)}</span><span className="text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Official Pons pool'}</span></span>
+              <span className="min-w-0"><span className="block text-base">{pairLabel(pool, displayedToken)}</span><span className="text-sm text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{isOfficial(pool) && ' · Official Pons pool'}</span></span>
             </span>
           </div>
           {([
-            ['TVL', formatPoolUsd(pool.tvlUsd)], ['24H volume', formatPoolUsd(pool.volume24hUsd)],
-            ['30D volume', formatPoolUsd(pool.volume30dUsd)], ['1D Vol/TVL', formatVolumeToTvl(volumeToTvl(pool))], ['Age', poolAge(pool.createdTimestamp)],
-          ] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
-            <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span>
+            ['TVL', formatPoolUsd(pool.tvlUsd), pool.tvlUsd], ['24H Volume', formatPoolUsd(pool.volume24hUsd), pool.volume24hUsd],
+            ['30D Volume', formatPoolUsd(pool.volume30dUsd), pool.volume30dUsd], ['1D Vol/TVL', formatVolumeToTvl(volumeToTvl(pool)), volumeToTvl(pool)], ['Age', poolAge(pool.createdTimestamp), null],
+          ] as const).map(([label, value, raw]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle">
+            <span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span><RollingText text={value} value={raw} flash={label !== 'Age'} /></span>
           </div>)}
         </div>)}
         {loadingMore && <PoolRowsSkeleton count={6} />}

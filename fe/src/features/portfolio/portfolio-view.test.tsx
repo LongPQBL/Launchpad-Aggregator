@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getWalletPositions, type WalletPosition } from '@/api/client';
 import { PortfolioView } from './portfolio-view';
+import { textContent } from '../../test-utils/text-content';
 
 const wagmi = vi.hoisted(() => ({ address: undefined as string | undefined, balances: undefined as unknown }));
 vi.mock('wagmi', async (importOriginal) => ({
@@ -43,7 +44,7 @@ describe('PortfolioView', () => {
     expect(within(row).getByText('1.5K')).toBeInTheDocument();
     expect(within(row).getByText('$3K')).toBeInTheDocument();
     expect(screen.getByTestId('portfolio-total')).toHaveTextContent('$3K');
-    expect(within(row).getByText('4 / 2 ETH')).toBeInTheDocument();
+    expect(within(row).getByText(textContent('4 / 2 ETH'))).toBeInTheDocument();
     expect(screen.queryAllByTestId('portfolio-skeleton-row')).toHaveLength(0);
   });
 

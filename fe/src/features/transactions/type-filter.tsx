@@ -2,20 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { UpDownIcon } from '@/components/up-down-icon';
 
 export type SideFilter = 'buy' | 'sell';
 export const SIDE_OPTIONS: readonly { value: SideFilter; label: string }[] = [
   { value: 'buy', label: 'Buy' },
   { value: 'sell', label: 'Sell' },
 ];
-
-function UpDownIcon() {
-  return (
-    <svg aria-hidden viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-      <path d="M4.5 6.5 8 3l3.5 3.5" /><path d="M4.5 9.5 8 13l3.5-3.5" />
-    </svg>
-  );
-}
 
 // Every type starts selected; clicking an option toggles it. Deselecting everything is allowed and shows nothing.
 export function TypeFilter<T extends string>({ options, selected, onChange }: {
@@ -53,7 +46,7 @@ export function TypeFilter<T extends string>({ options, selected, onChange }: {
           if (rect) setMenuPosition({ top: rect.bottom + 8, left: rect.left });
           setOpen((v) => !v);
         }}
-        className="inline-flex cursor-pointer items-center gap-1.5 font-medium">
+        className="flex cursor-pointer items-center gap-1.5">
         <UpDownIcon />
         Type
       </button>
@@ -62,7 +55,7 @@ export function TypeFilter<T extends string>({ options, selected, onChange }: {
         <div ref={menuRef} role="menu" aria-label="Type filter" style={{ top: menuPosition.top, left: menuPosition.left }} className="fixed z-50 w-40 rounded-lg border border-border bg-card p-1 text-foreground shadow-md">
           {options.map(({ value, label }) => (
             <button key={value} type="button" onClick={() => toggle(value)} aria-pressed={selected.includes(value)}
-              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm font-normal hover:bg-muted">
+              className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted">
               {label} {selected.includes(value) && <TypeCheck />}
             </button>
           ))}

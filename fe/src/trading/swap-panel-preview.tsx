@@ -5,7 +5,7 @@ import { TradeCard } from './trade-card';
 
 const noop = () => {};
 const pill = (symbol: string) => (
-  <span className="rounded-full border border-border px-3 py-1.5 text-sm font-medium">{symbol}</span>
+  <span className="rounded-full border border-border px-3 py-1.5 text-sm">{symbol}</span>
 );
 
 // Fake data on purpose and labeled as such: shown when a launch has no tradable venue yet, so the
@@ -14,7 +14,7 @@ export function SwapPanelPreview({ sellSymbol, buySymbol }: { sellSymbol: string
   return (
     <div className="flex flex-col gap-3" aria-label="Swap panel preview">
       <div className="flex items-center justify-between">
-        <span className="rounded-full bg-muted px-4 py-1.5 text-base font-semibold">Swap</span>
+        <span className="rounded-full bg-muted px-4 py-1.5 text-base">Swap</span>
         <span className="text-xs text-muted-foreground">Sample data</span>
       </div>
       <TradeCard

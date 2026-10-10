@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import { getPoolCandles, getPoolDetail, getPoolHistory, getPoolTrades } from '@/api/client';
 import { PoolDetail } from '@/features/pools/pool-detail';
+import { LiveRefreshIndicator } from '@/components/live-refresh-indicator';
+import { chainResourceKey } from '@/hooks/resource-keys';
 
 interface Props {
   params: Promise<{ chainId: string; protocol: string; poolId: string }>;
@@ -23,5 +25,5 @@ export default async function PoolDetailPage({ params, searchParams }: Props) {
     getPoolCandles(detail).catch(() => null),
     getPoolHistory(detail).catch(() => null),
   ]);
-  return <><PoolDetail pool={detail} trades={trades} candles={candles} history={history} /></>;
+  return <><LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId)]} /><PoolDetail pool={detail} trades={trades} candles={candles} history={history} /></>;
 }

@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { sanitizeAmountInput } from './amount';
+import { RollingText } from '@/components/percent-change';
 
 export interface TradeCardSide {
   value: string;
@@ -33,7 +34,7 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: Tra
   const [activeSide, setActiveSide] = useState<'sell' | 'buy'>('sell');
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative flex flex-col gap-2">
+      <div className="relative flex flex-col gap-1.5">
         <Side label="Sell" side={sell} active={activeSide === 'sell'} onFocus={() => setActiveSide('sell')} />
         <Side label="Buy" side={buy} active={activeSide === 'buy'} onFocus={() => setActiveSide('buy')} />
         <Button type="button" variant="outline" size="sm" aria-label="Flip swap direction"
@@ -45,7 +46,7 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: Tra
       {minReceived !== null && (
         <div className="flex items-center justify-between px-1 text-base text-muted-foreground">
           <span>Min received</span>
-          <span>{minReceived}</span>
+          <span><RollingText text={minReceived} /></span>
         </div>
       )}
       {footer}
@@ -55,11 +56,11 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: Tra
 
 function Side({ label, side, active, onFocus }: { label: string; side: TradeCardSide; active: boolean; onFocus: () => void }) {
   return (
-    <div className="relative isolate rounded-2xl p-5 sm:p-6">
-      <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 -z-10 rounded-2xl border',
+    <div className="relative isolate rounded-3xl p-4">
+      <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 -z-10 rounded-3xl border',
         active ? 'border-[#343842] bg-black' : 'border-[#343842] bg-[#1b1d23]/70')} />
       <div className={cn('relative flex flex-col gap-2', active && 'text-white')}>
-        <span className="text-base text-muted-foreground">{label}</span>
+        <span className="text-base leading-5 text-muted-foreground">{label}</span>
         <div className="flex items-center justify-between gap-3">
           <Input
             aria-label={side.ariaLabel}
@@ -72,18 +73,18 @@ function Side({ label, side, active, onFocus }: { label: string; side: TradeCard
             onChange={(event) => side.onChange(sanitizeAmountInput(event.target.value))}
             onFocus={onFocus}
             aria-invalid={side.insufficientBalance || undefined}
-            className={cn('h-14 flex-1 border-0 bg-transparent px-0 text-4xl font-medium shadow-none focus-visible:ring-0 sm:text-5xl', active && 'text-white',
+            className={cn('h-11 flex-1 border-0 bg-transparent px-0 text-4xl leading-10 shadow-none focus-visible:ring-0', active && 'text-white',
               side.insufficientBalance && 'text-destructive')}
           />
           <div className="flex shrink-0 flex-col items-end gap-2">
             {side.selector}
             {side.balanceText && <span title={side.balanceText} className={cn('max-w-40 truncate text-right text-sm text-muted-foreground', side.insufficientBalance && 'text-destructive')}>
-              {side.balanceText}
+              <RollingText text={side.balanceText} />
             </span>}
           </div>
         </div>
-        <div className="flex min-h-6 items-center justify-between text-base text-muted-foreground">
-          <span>{side.usdText}</span>
+        <div className="flex min-h-[18px] items-center justify-between text-sm text-muted-foreground">
+          <span>{side.usdText === null ? null : <RollingText text={side.usdText} />}</span>
           <span>{side.hint}</span>
         </div>
       </div>

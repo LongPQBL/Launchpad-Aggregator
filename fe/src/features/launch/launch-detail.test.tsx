@@ -256,14 +256,14 @@ describe('LaunchDetail', () => {
     expect(screen.queryByRole('link', { name: /explorer/i })).not.toBeInTheDocument();
   });
 
-  it('shows launchpad, protocol version, chain, and quote asset without a header volume line', () => {
+  it('shows launchpad, protocol version and chain without a quote asset or header volume line', () => {
     render(<LaunchDetail detail={detail()} transactions={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
 
     expect(screen.getByRole('link', { name: /pons/i })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
     expect(screen.getByText(/v2/)).toBeInTheDocument();
     const launchpadLine = screen.getByRole('link', { name: /pons/i }).closest('p')!;
     expect(within(launchpadLine).getByText(/Robinhood Chain/)).toBeInTheDocument();
-    expect(screen.getByText(/Quote asset/)).toHaveTextContent('ROBIN');
+    expect(screen.queryByText(/Quote asset/)).not.toBeInTheDocument();
     expect(screen.queryByText(/12\.5 ROBIN/)).not.toBeInTheDocument();
   });
 
@@ -282,7 +282,7 @@ describe('LaunchDetail', () => {
     const definitions = within(stats).getAllByRole('definition');
     expect(terms.map((term) => term.textContent)).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
     expect(terms[0]).toHaveClass('text-sm');
-    expect(definitions[0]).toHaveClass('text-lg', 'font-semibold');
+    expect(definitions[0]).toHaveClass('text-2xl');
     expect(definitions.map((definition) => definition.textContent)).toEqual(['$1.2K', '$269.2', '$269.2', '$10.4', '0.0800 ROBIN', '0.00100 ROBIN']);
     const statLabels = terms.map((el) => el.textContent);
     expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
@@ -311,42 +311,17 @@ describe('LaunchDetail', () => {
     expect(screen.getByText('FDV').closest('div')).toHaveTextContent('—');
   });
 
-  it('shows the swept phase label', () => {
+  it('shows no lifecycle status pill or official-venue card in the header area', () => {
     render(
       <LaunchDetail
-        detail={detail({ lifecycleStatus: 'swept' })}
+        detail={detail({ lifecycleStatus: 'swept', officialVenues: [venue({ kind: 'curve' })] })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
       />,
     );
 
-    expect(screen.getByText(/Swept/)).toBeInTheDocument();
-  });
-
-  it('shows the rescued phase label', () => {
-    render(
-      <LaunchDetail
-        detail={detail({ lifecycleStatus: 'rescued' })}
-        transactions={{ items: [], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    expect(screen.getByText(/Rescued/)).toBeInTheDocument();
-  });
-
-  it('lists official venues by kind', () => {
-    render(
-      <LaunchDetail
-        detail={detail({ officialVenues: [venue({ kind: 'curve' }), venue({ id: 'pons-v2-v4:0xpool', kind: 'v4_pool' })] })}
-        transactions={{ items: [], nextCursor: null }}
-        candles={{ items: [], complete: true }}
-      />,
-    );
-
-    const venueSection = screen.getByRole('region', { name: /official trading venues/i });
-    expect(within(venueSection).getByText('Bonding curve')).toBeInTheDocument();
-    expect(within(venueSection).getByText('Uniswap V4 Pool')).toBeInTheDocument();
+    expect(screen.queryByText(/^Swept$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: /official trading venues/i })).not.toBeInTheDocument();
   });
 
   it('updates data on the existing chart instance instead of recreating it on refresh, so the user\'s zoom/pan is not reset', () => {

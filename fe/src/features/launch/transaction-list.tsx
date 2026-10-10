@@ -9,6 +9,7 @@ import { TokenLogo } from '@/features/launches/token-logo';
 import { SIDE_OPTIONS, TypeFilter, type SideFilter } from '@/features/transactions/type-filter';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
+import { RollingText } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
 
 export interface TransactionListProps {
@@ -20,6 +21,8 @@ export interface TransactionListProps {
   chainId?: number;
   tokenAddress?: string;
   nextCursor?: string | null;
+  /** Load further pages for one venue only (the bonding curve). */
+  venue?: 'curve';
 }
 
 // Mirrors LaunchRowsSkeleton in launches/launch-list.tsx: pulsing placeholder rows in the table's own layout.
@@ -63,7 +66,7 @@ function formatUsdAmount(value: string | null): string {
   return value === null ? formatted : `$${formatted}`;
 }
 
-export function TransactionList({ transactions, tokenSymbol, quoteAsset, explorerBase, chainId, tokenAddress, nextCursor: initialCursor }: TransactionListProps) {
+export function TransactionList({ transactions, tokenSymbol, quoteAsset, explorerBase, chainId, tokenAddress, nextCursor: initialCursor, venue }: TransactionListProps) {
   const now = useNow();
   const [items, setItems] = useState(transactions);
   const [nextCursor, setNextCursor] = useState<string | null>(initialCursor ?? null);
@@ -91,7 +94,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
     setLoadingMore(true);
     setLoadError(false);
     try {
-      const nextPage = await getLaunchTransactions(chainId, tokenAddress, { cursor: nextCursor });
+      const nextPage = await getLaunchTransactions(chainId, tokenAddress, { cursor: nextCursor, venue });
       setItems((current) => [...current, ...nextPage.items]);
       setNextCursor(nextPage.nextCursor);
     } catch {
@@ -100,7 +103,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
       loadingRef.current = false;
       setLoadingMore(false);
     }
-  }, [chainId, nextCursor, tokenAddress]);
+  }, [chainId, nextCursor, tokenAddress, venue]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -133,36 +136,35 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
           const activityLabel = row.source === 'official' ? formatActivityKind(row.activityKind ?? '') : null;
           return (
             <TableRow key={`${row.blockNumber}-${row.txHash}-${row.logIndex}`} className="border-0 hover:bg-transparent">
-              <TableCell className="pl-4 text-base font-semibold text-foreground" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
-                {formatRelativeTime(row.timestamp, now)}
+              <TableCell className="pl-4 text-base text-foreground" title={new Date(row.timestamp * 1000).toLocaleString('en-US')}>
+                <RollingText text={formatRelativeTime(row.timestamp, now)} />
               </TableCell>
-              <TableCell className="text-base font-semibold">
-                <span className={cn('font-semibold', !activityLabel && row.side === 'buy' && 'text-success', !activityLabel && row.side === 'sell' && 'text-destructive')}>
+              <TableCell className="text-base">
+                <span className={cn(!activityLabel && row.side === 'buy' && 'text-success', !activityLabel && row.side === 'sell' && 'text-destructive')}>
                   {activityLabel ?? formatSide(row.side)}
                 </span>
-                {row.source === 'pool' && <span className="ml-1 text-xs text-muted-foreground">(pool)</span>}
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatAmount(row.tokenAmount)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">
+              <TableCell className="text-right text-base">{formatAmount(row.tokenAmount)}</TableCell>
+              <TableCell className="text-right text-base">
                 <span className="inline-flex items-center justify-end gap-1">
                   {formatAmount(row.quoteAmount)} <span className={quoteLabelIsAddress(row, quoteAsset) ? 'cursor-pointer' : undefined}>{quoteLabel(row, quoteAsset)}</span>
-                  <TokenLogo logoUri={null} symbol={quoteLabel(row, quoteAsset)} chainId={chainId} />
+                  <TokenLogo logoUri={null} symbol={quoteLabel(row, quoteAsset)} chainId={chainId} size="transaction" />
                 </span>
               </TableCell>
               <TableCell
-                className="text-right text-base font-semibold"
+                className="text-right text-base"
                 title={row.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
                 {row.usdValueStatus === 'pending' ? 'Calculating…' : formatUsdAmount(row.usdValue)}
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">
+              <TableCell className="text-right text-base">
                 {explorerBase ? (
                   <a href={`${explorerBase}/address/${row.traderAddress}`} target="_blank" rel="noreferrer noopener">
                     <span className="cursor-pointer">{shortAddress(row.traderAddress)}</span>
                   </a>
                 ) : <span className="cursor-pointer">{shortAddress(row.traderAddress)}</span>}
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">
+              <TableCell className="text-right text-base">
                 {explorerBase ? (
                   <a className="cursor-pointer" href={`${explorerBase}/tx/${row.txHash}`} target="_blank" rel="noreferrer noopener">
                     {shortAddress(row.txHash)}

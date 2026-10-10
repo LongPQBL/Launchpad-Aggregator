@@ -61,7 +61,7 @@ function LinkRow({ logo, name, nameHref, address, addressLabel, explorerHref, ex
   return (
     <div className="grid grid-cols-[2rem_minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-2">
       {logo}
-      <div className="min-w-0 truncate text-sm font-medium">
+      <div className="min-w-0 truncate text-sm">
         {nameHref ? <Link href={nameHref} className="hover:underline">{name}</Link> : <span>{name}</span>}
       </div>
       <CopyableTokenAddress address={address} label={addressLabel} showCopyIcon />
@@ -86,8 +86,8 @@ export function PoolLinks({ pool }: { pool: PoolSummary }) {
     : undefined;
 
   return (
-    <section aria-labelledby="pool-links-heading" className="space-y-3">
-      <h2 id="pool-links-heading" className="text-2xl font-semibold">Links</h2>
+    <section aria-labelledby="pool-links-heading" className="space-y-3 px-5">
+      <h2 id="pool-links-heading" className="text-2xl">Links</h2>
       <div className="space-y-3">
         <LinkRow
           logo={<PairLogo pool={pool} token0={displayed} token1={other} />}

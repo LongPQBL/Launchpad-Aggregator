@@ -12,27 +12,26 @@ const items: PoolDayHistory[] = [
 
 describe('PoolHistoryChart', () => {
   it('draws a bar for a real value, a flat bar for a real zero, and an "unavailable" slot for null', () => {
-    render(<PoolHistoryChart items={items} complete />);
+    render(<PoolHistoryChart items={items} complete metric="volume" />);
     expect(screen.getAllByTestId('history-bar')).toHaveLength(2);
     expect(screen.getAllByTestId('history-bar-unavailable')).toHaveLength(1);
     expect(screen.getByText('Jan 13: unavailable', { exact: false })).toBeInTheDocument();
   });
 
   it('shows the latest day by default and the hovered day on hover, with a compact USD value', () => {
-    render(<PoolHistoryChart items={items} complete />);
+    render(<PoolHistoryChart items={items} complete metric="volume" />);
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Unavailable');
     fireEvent.mouseEnter(screen.getAllByTestId('history-bar')[0]!);
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$1.5K');
   });
 
-  it('switches to TVL, and says so when no TVL was recorded', () => {
-    render(<PoolHistoryChart items={items.map((day) => ({ ...day, tvlUsd: null }))} complete />);
-    fireEvent.click(screen.getByRole('tab', { name: 'TVL' }));
+  it('says so when no TVL was recorded', () => {
+    render(<PoolHistoryChart items={items.map((day) => ({ ...day, tvlUsd: null }))} complete metric="tvl" />);
     expect(screen.getByRole('status')).toHaveTextContent('No TVL history recorded');
   });
 
   it('warns when the pool is still being indexed', () => {
-    render(<PoolHistoryChart items={items} complete={false} />);
+    render(<PoolHistoryChart items={items} complete={false} metric="volume" />);
     expect(screen.getByText(/still being indexed/)).toBeInTheDocument();
   });
 });

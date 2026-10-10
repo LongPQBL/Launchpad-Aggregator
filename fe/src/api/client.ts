@@ -119,6 +119,8 @@ export interface TradePage {
 export interface TradeQuery {
   cursor?: string;
   limit?: number;
+  /** Only the bonding-curve venue's rows (the launch endpoints otherwise merge every official venue). */
+  venue?: 'curve';
 }
 
 type TransactionsBody = paths['/v1/launches/{chainId}/{tokenAddress}/transactions']['get']['responses'][200]['content']['application/json'];
@@ -143,6 +145,7 @@ export interface CandleQuery {
   intervalSeconds?: number;
   before?: number;
   currency?: 'quote' | 'usd';
+  venue?: 'curve';
 }
 
 export async function getLaunchDetail(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
@@ -154,11 +157,11 @@ export async function getLaunchDetail(chainId: number, tokenAddress: string): Pr
 }
 
 export async function getLaunchTrades(chainId: number, tokenAddress: string, query: TradeQuery = {}): Promise<TradePage> {
-  return request<TradePage>(`/v1/launches/${chainId}/${tokenAddress}/trades`, { cursor: query.cursor, limit: query.limit });
+  return request<TradePage>(`/v1/launches/${chainId}/${tokenAddress}/trades`, { cursor: query.cursor, limit: query.limit, venue: query.venue });
 }
 
 export async function getLaunchTransactions(chainId: number, tokenAddress: string, query: TradeQuery = {}): Promise<TransactionPage> {
-  return request<TransactionPage>(`/v1/launches/${chainId}/${tokenAddress}/transactions`, { cursor: query.cursor, limit: query.limit });
+  return request<TransactionPage>(`/v1/launches/${chainId}/${tokenAddress}/transactions`, { cursor: query.cursor, limit: query.limit, venue: query.venue });
 }
 
 export async function getLaunchCandles(chainId: number, tokenAddress: string, query: CandleQuery = {}): Promise<CandlePage> {
@@ -166,6 +169,7 @@ export async function getLaunchCandles(chainId: number, tokenAddress: string, qu
     intervalSeconds: query.intervalSeconds,
     before: query.before,
     currency: query.currency,
+    venue: query.venue,
   });
 }
 
@@ -233,8 +237,25 @@ export async function getAllTransactions(query: { cursor?: string; limit?: numbe
 type PoolHistoryBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/history']['get']['responses'][200]['content']['application/json'];
 export type PoolDayHistory = Required<NonNullable<PoolHistoryBody['items']>[number]>;
 export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean }
-export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, days = 30): Promise<PoolHistory> {
-  return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { days });
+export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, intervalSeconds = 86_400, days = 30): Promise<PoolHistory> {
+  return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { intervalSeconds, days });
+}
+
+type LaunchHistoryBody = paths['/v1/launches/{chainId}/{tokenAddress}/history']['get']['responses'][200]['content']['application/json'];
+export async function getLaunchHistory(chainId: number, tokenAddress: string, intervalSeconds = 86_400, venue?: 'curve'): Promise<PoolHistory> {
+  return request<LaunchHistoryBody & PoolHistory>(`/v1/launches/${chainId}/${tokenAddress}/history`, { intervalSeconds, venue });
+}
+
+type CurveSummaryBody = paths['/v1/launches/{chainId}/{tokenAddress}/curve']['get']['responses'][200]['content']['application/json'];
+export type CurveSummary = Required<Omit<CurveSummaryBody, 'lastPriceQuote'>> & { lastPriceQuote: string | null };
+
+// The curve venue on its own; null (404) when the launch has no bonding-curve venue.
+export async function getCurveSummary(chainId: number, tokenAddress: string): Promise<CurveSummary | null> {
+  const path = `/v1/launches/${chainId}/${tokenAddress}/curve`;
+  const response = await rawFetch(path);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError(`${path} returned error ${response.status}`, undefined, response.status);
+  return (await response.json()) as CurveSummary;
 }
 
 type WalletPositionsBody = paths['/v1/wallets/{address}/positions']['get']['responses'][200]['content']['application/json'];

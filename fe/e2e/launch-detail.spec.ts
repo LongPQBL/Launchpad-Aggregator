@@ -5,11 +5,10 @@ test.beforeEach(async ({ page }) => {
   await page.goto(`/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`);
 });
 
-test('shows launch identity, source, and official venues', async ({ page }) => {
+test('shows launch identity and source', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /E2E Launch/i })).toBeVisible();
   await expect(page.getByRole('link', { name: 'pons' })).toHaveAttribute('href', 'https://docs.ponsfamily.com/');
-  const venueSection = page.getByRole('region', { name: /official trading venues/i });
-  await expect(venueSection.getByText('Bonding curve')).toBeVisible();
+  await expect(page.getByRole('region', { name: /official trading venues/i })).toHaveCount(0);
 });
 
 // The UI deliberately shows no badge while a source is still backfilling (CoverageBadge renders nothing for

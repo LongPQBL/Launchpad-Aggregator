@@ -120,10 +120,10 @@ describe('TransactionList', () => {
     expect(screen.getByText('$5.25')).toBeInTheDocument();
   });
 
-  it('labels a pool-sourced row distinctly from an official trade, without implying an official partnership', () => {
+  it('shows a pool-sourced row like any other swap, with no extra "(pool)" marker', () => {
     render(<TransactionList transactions={[transaction({ source: 'pool', venueId: null,
       pool: { protocol: 'uniswap_v4', poolId: '0xpool' } })]} venues={noVenues} tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
-    expect(screen.getByText(/pool/i)).toBeInTheDocument();
+    expect(screen.queryByText('(pool)')).not.toBeInTheDocument();
   });
 
   it('never shows a protocol activity label for a pool-sourced row, even when activityKind looks like one', () => {
@@ -188,20 +188,20 @@ describe('TransactionList', () => {
     it('shows a seconds-level relative time, not an absolute date/time', () => {
       render(<TransactionList transactions={[transaction({ timestamp: txTimestamp })]} venues={noVenues}
         tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
-      expect(screen.getByText('10s')).toBeInTheDocument();
+      expect(screen.getByLabelText('10s')).toBeInTheDocument();
     });
 
     it('ticks the relative time forward live as time passes, without a new render call', () => {
       render(<TransactionList transactions={[transaction({ timestamp: txTimestamp })]} venues={noVenues}
         tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
-      expect(screen.getByText('10s')).toBeInTheDocument();
+      expect(screen.getByLabelText('10s')).toBeInTheDocument();
 
       act(() => {
         vi.advanceTimersByTime(5_000);
       });
 
-      expect(screen.getByText('15s')).toBeInTheDocument();
-      expect(screen.queryByText('10s')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('15s')).toBeInTheDocument();
+      expect(screen.queryByLabelText('10s')).not.toBeInTheDocument();
     });
 
     it('keeps the exact absolute timestamp available as a tooltip', () => {

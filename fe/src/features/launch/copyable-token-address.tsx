@@ -6,7 +6,7 @@ function shortAddress(address: string): string {
   return `${address.slice(0, 6)}…${address.slice(-4)}`;
 }
 
-export function CopyableTokenAddress({ address, label = 'Token address', copyLabel, showCopyIcon = false }: { address: string; label?: string; copyLabel?: string; showCopyIcon?: boolean }) {
+export function CopyableTokenAddress({ address, label = 'Token address', copyLabel, showCopyIcon = false, addressClassName = '' }: { address: string; label?: string; copyLabel?: string; showCopyIcon?: boolean; addressClassName?: string }) {
   const [copied, setCopied] = useState(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -29,7 +29,7 @@ export function CopyableTokenAddress({ address, label = 'Token address', copyLab
   return (
     <div role="group" aria-label={label} className="group/address inline-flex min-w-0 max-w-full items-center gap-1.5">
       <button type="button" data-testid="header-token-address" onClick={() => void copyAddress()}
-        className="min-w-0 truncate cursor-pointer text-sm text-muted-foreground">
+        className={`min-w-0 truncate cursor-pointer text-sm text-muted-foreground ${addressClassName}`}>
         {shortAddress(address)}
       </button>
       <button

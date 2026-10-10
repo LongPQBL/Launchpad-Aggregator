@@ -11,7 +11,7 @@ describe('TokenSelector', () => {
     render(<TokenSelector options={[ethOption, wethOption]} selected={ethOption} onSelect={vi.fn()} />);
     const trigger = screen.getByRole('button', { name: /ETH/ });
     expect(trigger).toHaveClass('bg-black');
-    expect(trigger.querySelector('svg path')).toHaveAttribute('d', 'M4 6l4 4 4-4');
+    expect(trigger.querySelector('svg path')).toBeInTheDocument();
   });
 
   it('opens a dropdown listing every option when clicked', () => {

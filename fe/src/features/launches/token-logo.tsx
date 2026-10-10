@@ -22,7 +22,7 @@ export function TokenImage({ logoUri, symbol, className }: TokenImageProps) {
   return resolved === null || failed ? (
     <span
       aria-hidden="true"
-      className={cn('flex items-center justify-center bg-primary/10 text-sm font-medium text-primary', className)}
+      className={cn('flex items-center justify-center bg-primary/10 text-sm text-brand-text', className)}
     >
       {symbol.charAt(0).toUpperCase()}
     </span>
@@ -48,12 +48,13 @@ export interface TokenLogoProps {
   logoUri: string | null;
   symbol: string;
   chainId?: number;
-  size?: 'small' | 'default' | 'large';
+  size?: 'small' | 'default' | 'large' | 'swap' | 'detail' | 'transaction';
 }
 
 export function TokenLogo({ logoUri, symbol, chainId, size = 'default' }: TokenLogoProps) {
-  const logoSize = size === 'large' ? 'h-14 w-14' : size === 'small' ? 'h-5 w-5' : 'h-8 w-8';
-  const badgeSize = size === 'large' ? 'h-5 w-5' : size === 'small' ? 'h-2.5 w-2.5' : 'h-4 w-4';
+  const logoSize = size === 'detail' ? 'h-14 w-14 group-data-[compact=true]:h-10 group-data-[compact=true]:w-10' : size === 'large' ? 'h-14 w-14' : size === 'small' ? 'h-5 w-5' : size === 'transaction' ? 'h-[22px] w-[22px]' : size === 'swap' ? 'h-7 w-7' : 'h-8 w-8';
+  const badgeSize = size === 'detail' ? 'h-[23px] w-[23px] group-data-[compact=true]:h-[17px] group-data-[compact=true]:w-[17px]' : size === 'large' ? 'h-5 w-5' : size === 'small' ? 'h-2.5 w-2.5' : size === 'transaction' ? 'h-3 w-3' : size === 'swap' ? 'h-3 w-3' : 'h-4 w-4';
+  const badgeBorder = size === 'swap' ? 'border' : 'border-2';
 
   return (
     <span className={`relative inline-flex ${logoSize} shrink-0`}>
@@ -66,7 +67,7 @@ export function TokenLogo({ logoUri, symbol, chainId, size = 'default' }: TokenL
           width={16}
           height={16}
           unoptimized
-          className={`absolute -bottom-0.5 -right-0.5 ${badgeSize} rounded-full border-2 border-card bg-card`}
+          className={`absolute -bottom-0.5 -right-0.5 ${badgeSize} rounded-full ${badgeBorder} border-card bg-card`}
         />
       )}
     </span>

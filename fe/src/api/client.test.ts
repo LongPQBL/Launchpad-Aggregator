@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ApiError, findActiveVenue, getLaunches, getSources, launchHref, type OfficialVenue } from './client';
+import { ApiError, findActiveVenue, getCurveSummary, getLaunchCandles, getLaunchHistory, getLaunchTransactions, getLaunches, getSources, launchHref, type OfficialVenue } from './client';
 
 function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {}): Response {
   return {
@@ -141,6 +141,36 @@ describe('client', () => {
     expect(hrefOnRobinhood).not.toBe(hrefOnOtherChain);
     expect(hrefOnRobinhood).toBe('/launches/4663/0xabc');
     expect(hrefOnOtherChain).toBe('/launches/1/0xabc');
+  });
+
+  describe('curve-scoped launch requests', () => {
+    const token = '0x1111111111111111111111111111111111111111';
+
+    it('adds venue=curve to transactions, candles and history only when asked', async () => {
+      const fetchMock = vi.mocked(fetch);
+      for (let i = 0; i < 4; i += 1) fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null, complete: true }));
+
+      await getLaunchTransactions(4663, token, { venue: 'curve' });
+      await getLaunchCandles(4663, token, { intervalSeconds: 3600, venue: 'curve' });
+      await getLaunchHistory(4663, token, 86_400, 'curve');
+      await getLaunchTransactions(4663, token);
+
+      const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url)));
+      expect(urls[0]!.searchParams.get('venue')).toBe('curve');
+      expect(urls[1]!.searchParams.get('venue')).toBe('curve');
+      expect(urls[2]!.searchParams.get('venue')).toBe('curve');
+      expect(urls[3]!.searchParams.has('venue')).toBe(false);
+    });
+
+    it('returns the curve summary, and null when the launch has no curve venue (404)', async () => {
+      const fetchMock = vi.mocked(fetch);
+      const summary = { venueId: 'v', curveAddress: token, active: true, volume24hQuote: '2', tradeCount24h: 1, lastPriceQuote: null };
+      fetchMock.mockResolvedValueOnce(jsonResponse(summary));
+      expect(await getCurveSummary(4663, token)).toEqual(summary);
+      expect(new URL(String(fetchMock.mock.calls[0]![0])).pathname).toBe(`/v1/launches/4663/${token}/curve`);
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: false, status: 404 }));
+      expect(await getCurveSummary(4663, token)).toBeNull();
+    });
   });
 });
 

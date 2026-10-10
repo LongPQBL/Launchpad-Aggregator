@@ -12,7 +12,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from 'lightweight-charts';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CoverageBadge } from './coverage-badge';
@@ -34,7 +34,7 @@ export const DEFAULT_CHART_INTERVAL = 3600;
 // client module instead of being injected. Provide at most one; omitting both still renders the
 // initial `candles` prop, just without a working interval switcher.
 export interface OfficialChartSource {
-  launch?: { chainId: number; tokenAddress: string };
+  launch?: { chainId: number; tokenAddress: string; /** Only this venue's candles (the bonding curve). */ venue?: 'curve' };
   pool?: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken'>;
 }
 
@@ -63,9 +63,11 @@ export interface OfficialChartProps {
   showCurrencyToggle?: boolean;
   onHoverPoint?: (point: OfficialChartHoverPoint | null) => void;
   onRangeChange?: (range: OfficialChartRange | null) => void;
+  /** Rendered on the right of the interval-tabs row (e.g. a Price / Volume / TVL switcher). */
+  trailing?: ReactNode;
 }
 
-export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', intervalSeconds = DEFAULT_CHART_INTERVAL, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange }: OfficialChartProps) {
+export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', intervalSeconds = DEFAULT_CHART_INTERVAL, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange, trailing }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
@@ -116,7 +118,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     }
 
     const fetchPage = source?.launch
-      ? getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: nextCurrency, intervalSeconds: nextInterval })
+      ? getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: nextCurrency, intervalSeconds: nextInterval, venue: source.launch.venue })
       : source?.pool
         ? getPoolCandles(source.pool, nextInterval)
         : undefined;
@@ -238,7 +240,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
             {
               time: graduationTime as UTCTimestamp,
               position: 'aboveBar',
-              color: '#22d3ee',
+              color: '#ccff00',
               shape: 'arrowDown',
               text: 'First V4 trade',
             },
@@ -248,7 +250,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle]);
 
   const currencyTabClass = (active: boolean) => active
-    ? 'rounded px-2.5 py-1.5 font-medium text-foreground bg-background shadow-sm'
+    ? 'rounded px-2.5 py-1.5 text-foreground bg-background shadow-sm'
     : 'rounded px-2.5 py-1.5 text-muted-foreground hover:bg-background/70 hover:text-foreground';
 
   return (
@@ -267,13 +269,29 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
         </div>
       </div>
       <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />
-      <nav aria-label="Chart interval" className="chart-interval-tabs mt-2 inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+      <nav aria-label="Chart interval" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
         {CHART_INTERVALS.map((interval) => (
-          <a key={interval.seconds} className="chart-interval-tab rounded px-2.5 py-1.5 font-medium" href={`?currency=${activeCurrency}&interval=${interval.seconds}`}
+          <a key={interval.seconds} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?currency=${activeCurrency}&interval=${interval.seconds}`}
             aria-current={interval.seconds === activeInterval ? 'page' : undefined}
             onClick={(event) => { event.preventDefault(); selectChart(activeCurrency, interval.seconds); }}>{interval.label}</a>
         ))}
       </nav>
+      {trailing}
+      </div>
     </div>
+  );
+}
+
+// The same interval tabs as the chart's own, for charts that fetch a different series (pool Volume / TVL history).
+export function ChartIntervalTabs({ active, onSelect }: { active: number; onSelect: (seconds: number) => void }) {
+  return (
+    <nav aria-label="Chart interval" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+      {CHART_INTERVALS.map((interval) => (
+        <a key={interval.seconds} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?interval=${interval.seconds}`}
+          aria-current={interval.seconds === active ? 'page' : undefined}
+          onClick={(event) => { event.preventDefault(); onSelect(interval.seconds); }}>{interval.label}</a>
+      ))}
+    </nav>
   );
 }

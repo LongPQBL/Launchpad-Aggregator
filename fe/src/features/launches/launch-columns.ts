@@ -6,7 +6,7 @@ export const LAUNCH_COLUMNS = [
   { label: 'Token', width: 22, logo: true },
   { label: 'Launchpad', width: 12 },
   { label: 'FDV', width: 12, align: 'right' },
-  { label: '24H volume', width: 15, align: 'right' },
+  { label: '24H Volume', width: 15, align: 'right' },
   { label: 'Liquidity', width: 12, align: 'right' },
   { label: '1H', width: 8, align: 'right' },
   { label: '1D', width: 8, align: 'right' },

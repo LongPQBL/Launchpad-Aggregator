@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PoolBalances } from './pool-balances';
+import { textContent } from '../../test-utils/text-content';
 
 const hooks = vi.hoisted(() => ({
   nativeBalance: { data: undefined as { value: bigint } | undefined },
@@ -30,8 +31,8 @@ describe('PoolBalances', () => {
       other={token('0x0000000000000000000000000000000000000000', 'ETH')} priceInQuote={null}
       poolBalances={{ displayedAmountRaw: (100_000_000n * 10n ** 18n).toString(),
         otherAmountRaw: (12n * 10n ** 18n).toString(), priceInQuote: '0.0000001' }} />);
-    expect(screen.getByText(/100M SANTACOIN/)).toBeInTheDocument();
-    expect(screen.getByText(/12 ETH/)).toBeInTheDocument();
+    expect(screen.getByText(textContent(/100M SANTACOIN/))).toBeInTheDocument();
+    expect(screen.getByText(textContent(/12 ETH/))).toBeInTheDocument();
     const bar = screen.getByRole('img', { name: 'Pool composition' });
     const displayedSide = bar.firstElementChild as HTMLElement;
     expect(Number.parseFloat(displayedSide.style.width)).toBeCloseTo((10 / 22) * 100);
@@ -54,8 +55,8 @@ describe('PoolBalances', () => {
     render(<PoolBalances protocol="uniswap_v3" poolAddress={poolAddress}
       displayed={token('0xaaaa000000000000000000000000000000aaaa', 'SANTACOIN')}
       other={token('0x0000000000000000000000000000000000000000', 'ETH')} priceInQuote="0.0001" poolBalances={null} />);
-    expect(screen.getByText(/100M SANTACOIN/)).toBeInTheDocument();
-    expect(screen.getByText(/12 ETH/)).toBeInTheDocument();
+    expect(screen.getByText(textContent(/100M SANTACOIN/))).toBeInTheDocument();
+    expect(screen.getByText(textContent(/12 ETH/))).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Pool composition' })).toBeInTheDocument();
   });
 

@@ -57,17 +57,17 @@ export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
   );
 
   if (state.kind === 'connect') {
-    return <Button type="button" className="h-12 rounded-full cursor-pointer bg-brand text-base text-brand-foreground hover:bg-brand-hover" onClick={onConnect}>{state.label}</Button>;
+    return <Button type="button" className="h-14 rounded-[20px] cursor-pointer bg-brand text-base text-brand-foreground hover:bg-brand-hover" onClick={onConnect}>{state.label}</Button>;
   }
   if (state.kind === 'switch-network') {
-    return <Button type="button" className="h-12 rounded-full cursor-pointer bg-brand text-base text-brand-foreground hover:bg-brand-hover"
+    return <Button type="button" className="h-14 rounded-[20px] cursor-pointer bg-brand text-base text-brand-foreground hover:bg-brand-hover"
       onClick={() => requestWalletNetworkSwitch(robinhoodChain.id)}>Switch to {targetChainName}</Button>;
   }
   if (state.kind === 'approve') {
     return (
       <>
         {approveError}
-        <Button type="button" className={`h-12 rounded-full text-base ${allowance.isApproving || allowance.isConfirmingApproval
+        <Button type="button" className={`h-14 rounded-[20px] text-base ${allowance.isApproving || allowance.isConfirmingApproval
           ? 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'
           : 'cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover'}`}
           disabled={allowance.isApproving || allowance.isConfirmingApproval}
@@ -81,7 +81,7 @@ export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
     <>
       {approveError}
       <Button type="button"
-        className={`h-12 rounded-full text-base ${state.kind === 'swap' && !isSubmitting ? 'cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover' : 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'}`}
+        className={`h-14 rounded-[20px] text-base ${state.kind === 'swap' && !isSubmitting ? 'cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover' : 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'}`}
         disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
         onClick={state.kind === 'swap' ? onAction : undefined}>
         {state.kind === 'swap' ? actionLabel : state.label}

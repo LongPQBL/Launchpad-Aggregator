@@ -23,19 +23,12 @@ test('shows no wallet-connect or trade-execution controls on the list page', asy
   await expect(appContent.getByText(/wallet|connect wallet/i)).toHaveCount(0);
 });
 
-test('switches tabs, searches, and filters lifecycle without reloading the page', async ({ page }) => {
+test('switches tabs without reloading the page', async ({ page }) => {
   await page.goto('/');
   await page.evaluate(() => { document.body.dataset.filterPageMarker = 'retained'; });
   await page.getByRole('link', { name: 'Recently launched' }).click();
   await expect(page).toHaveURL(/tab=recent/);
 
-  const form = page.getByRole('search', { name: /search and filter launches/i });
-  await form.getByRole('combobox', { name: /filter by lifecycle/i }).selectOption('trading');
-  await form.getByRole('searchbox').fill('E2E');
-  await form.getByRole('button', { name: /search/i }).click();
-
-  await expect(page).toHaveURL(/search=E2E/);
-  await expect(page).toHaveURL(/status=trading/);
   await expect(page).toHaveURL(/tab=recent/);
   await expect(page.getByRole('link', { name: /E2E Launch/i })).toBeVisible();
   expect(await page.evaluate(() => document.body.dataset.filterPageMarker)).toBe('retained');

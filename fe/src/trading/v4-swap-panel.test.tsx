@@ -6,6 +6,7 @@ import { PERMIT2_ADDRESS } from './permit2Abi';
 import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
 import type { V4PoolKey } from './v4SwapEncoding';
 import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
+import { textContent } from '../test-utils/text-content';
 
 const reverse = vi.hoisted(() => ({
   solve: vi.fn<(target: bigint, signal: AbortSignal) => Promise<bigint | null>>(),
@@ -139,14 +140,14 @@ describe('V4SwapPanel', () => {
   it('shows the Sell token balance and highlights an amount above it, then follows the token after flipping', () => {
     hooks.balanceA = 2_000_000_000_000_000_000n;
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
-    expect(screen.getByText('Balance: 2 LAUNCH')).toBeInTheDocument();
+    expect(screen.getByText(textContent('Balance: 2 LAUNCH'))).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
     expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
-    expect(screen.getByText('Balance: 2 LAUNCH')).toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 2 LAUNCH'))).toHaveClass('text-destructive');
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '2' } });
     expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
     fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
-    expect(screen.getByText('Balance: 10 ROBIN')).not.toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 10 ROBIN'))).not.toHaveClass('text-destructive');
     expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
   });
 
@@ -550,7 +551,7 @@ describe('V4SwapPanel', () => {
     const { unmount } = render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByText('Min received')).toBeInTheDocument();
-    expect(screen.getByText(/^990 /)).toBeInTheDocument();
+    expect(screen.getByText(textContent(/^990 /))).toBeInTheDocument();
     unmount();
     hooks.simulateData = undefined;
     render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);

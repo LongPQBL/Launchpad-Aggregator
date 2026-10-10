@@ -1,6 +1,6 @@
 import type { Address } from 'viem';
 import type { PoolSummary } from '@/api/client';
-import { PercentChange } from '@/components/percent-change';
+import { PercentChange, RollingText } from '@/components/percent-change';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { formatPoolUsd, isYoungerThan24h, poolAge } from './pool-format';
 import { PoolBalances } from './pool-balances';
@@ -35,9 +35,9 @@ function feesUsd(volume24hUsd: string | null, fee: number): string | null {
 
 export function PoolStats({ protocol, poolAddress, fee, tvlUsd, volume24hUsd, volume24hChange = null, tvlChange = null, createdTimestamp, priceInQuote, poolBalances, displayed, other }: PoolStatsProps) {
   return (
-    <Card>
-      <CardHeader><h2 className="text-2xl font-semibold">Stats</h2></CardHeader>
-      <CardContent className="grid gap-x-4 gap-y-5 sm:grid-cols-2">
+    <Card className="rounded-[20px] border-0 bg-muted">
+      <CardHeader className="p-5 pb-0"><h2 className="text-2xl">Stats</h2></CardHeader>
+      <CardContent className="mt-6 grid gap-x-4 gap-y-5 p-5 pt-0 sm:grid-cols-2">
         <div className="col-span-full">
           <h3 className="text-sm text-muted-foreground">Pool balances</h3>
           <div className="mt-1">
@@ -45,13 +45,13 @@ export function PoolStats({ protocol, poolAddress, fee, tvlUsd, volume24hUsd, vo
               priceInQuote={priceInQuote} poolBalances={poolBalances} />
           </div>
         </div>
-        <div><dt className="text-sm text-muted-foreground">TVL</dt><dd className="text-lg font-semibold">{formatPoolUsd(tvlUsd)}{tvlChange !== null && <span data-testid="tvl-change" className="ml-2 text-sm font-normal"><PercentChange value={tvlChange} /></span>}</dd></div>
-        <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="text-lg font-semibold">{formatPoolUsd(volume24hUsd)}{volume24hChange !== null
-            ? <span data-testid="volume-24h-change" className="ml-2 text-sm font-normal"><PercentChange value={volume24hChange} /></span>
+        <div><dt className="text-sm text-muted-foreground">TVL</dt><dd className="flex flex-wrap items-baseline gap-x-2 text-lg"><RollingText text={formatPoolUsd(tvlUsd)} value={tvlUsd} flash />{tvlChange !== null && <span data-testid="tvl-change" className="text-sm"><PercentChange value={tvlChange} /></span>}</dd></div>
+        <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="flex flex-wrap items-baseline gap-x-2 text-lg"><RollingText text={formatPoolUsd(volume24hUsd)} value={volume24hUsd} flash />{volume24hChange !== null
+            ? <span data-testid="volume-24h-change" className="text-sm"><PercentChange value={volume24hChange} /></span>
             : volume24hUsd !== null && isYoungerThan24h(createdTimestamp)
-              && <span data-testid="volume-24h-change" className="ml-2 text-sm font-normal text-muted-foreground">New</span>}</dd></div>
-        <div><dt className="text-sm text-muted-foreground">24H fees</dt><dd className="text-lg font-semibold">{formatPoolUsd(feesUsd(volume24hUsd, fee))}</dd></div>
-        <div><dt className="text-sm text-muted-foreground">Age</dt><dd className="text-lg font-semibold">{poolAge(createdTimestamp)}</dd></div>
+              && <span data-testid="volume-24h-change" className="text-sm text-muted-foreground">New</span>}</dd></div>
+        <div><dt className="text-sm text-muted-foreground">24H fees</dt><dd className="text-lg"><RollingText text={formatPoolUsd(feesUsd(volume24hUsd, fee))} value={feesUsd(volume24hUsd, fee)} flash /></dd></div>
+        <div><dt className="text-sm text-muted-foreground">Age</dt><dd className="text-lg"><RollingText text={poolAge(createdTimestamp)} /></dd></div>
       </CardContent>
     </Card>
   );

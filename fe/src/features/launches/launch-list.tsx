@@ -4,11 +4,9 @@ import { launchColumnWidth } from './launch-columns';
 import { ChainFilter, ChevronIcon, SelectedCheck, SelectionIcons, toggleValue } from '@/components/chain-filter';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { chainIcon, chainName, ROADMAP_CHAIN_IDS } from '@/api/chains';
-import { formatLifecycleStatus, formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
+import { formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { PercentChange } from '@/components/percent-change';
+import { PercentChange, RollingText } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
 import { launchpadName, launchpadIconSrc, LaunchpadIcon } from './launchpad-icon';
 import { TokenCell } from './token-cell';
@@ -25,9 +23,10 @@ export interface LaunchListProps {
   tab?: string;
   sort?: LaunchQuery['sort'];
   direction?: LaunchQuery['direction'];
+  /** The route's loading state: the real toolbar and header with placeholder rows instead of data. */
+  loading?: boolean;
 }
 
-const LIFECYCLE_STATUSES = ['trading', 'swept', 'graduated', 'rescued'] as const;
 const TABS = [
   { value: 'all', label: 'All' },
   { value: 'recent', label: 'Recently launched' },
@@ -46,7 +45,7 @@ interface CurrentFilters {
 
 const SORT_COLUMNS = [
   { label: 'FDV', sort: 'fdvUsd' },
-  { label: '24H volume', sort: 'volume24hUsd' },
+  { label: '24H Volume', sort: 'volume24hUsd' },
   { label: 'Liquidity', sort: 'tvlUsd' },
   { label: '1H', sort: 'change1h' },
   { label: '1D', sort: 'change1d' },
@@ -127,7 +126,7 @@ function GridIcon() {
 
 function LaunchpadFilterIcon({ platform }: { platform: string }) {
   return launchpadIconSrc(platform) ? <LaunchpadIcon platform={platform} decorative /> : (
-    <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase">{launchpadName(platform).slice(0, 2)}</span>
+    <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] uppercase">{launchpadName(platform).slice(0, 2)}</span>
   );
 }
 
@@ -160,27 +159,36 @@ function LaunchpadFilter({ platforms, selected, onChange, open, onToggle }: { pl
 
 
 function LaunchRowsSkeleton({ count }: { count: number }) {
-  // Every bar spans its column (the widths come from the header row, like the real rows).
+  // Bars are sized like the real values (name over symbol, short right-aligned numbers).
   return Array.from({ length: count }, (_, index) => (
     <div key={index} role="row" aria-hidden="true" data-testid="launch-skeleton-row"
       className="min-h-[266px] rounded-lg border border-border bg-card p-3 md:table-row md:h-[76px] md:min-h-0 md:rounded-none md:border-0 md:border-b md:bg-transparent md:p-0">
-      <div role="cell" className="md:table-cell md:p-4"><span className="block h-4 w-full animate-pulse rounded bg-muted" /></div>
+      <div role="cell" className="md:table-cell md:p-4"><span className="block h-4 w-4 animate-pulse rounded bg-muted" /></div>
       <div role="cell" className="md:table-cell md:p-4">
         <span className="flex items-center gap-2">
           <span className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-muted" />
-          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
+          <span className="flex flex-col gap-1.5">
+            <span className="block h-4 w-28 max-w-full animate-pulse rounded bg-muted" />
+            <span className="block h-3 w-16 max-w-full animate-pulse rounded bg-muted" />
+          </span>
         </span>
       </div>
-      {Array.from({ length: 7 }, (_, cell) => (
+      <div role="cell" className="md:table-cell md:p-4">
+        <span className="flex items-center gap-2">
+          <span className="h-5 w-5 shrink-0 animate-pulse rounded-full bg-muted" />
+          <span className="block h-4 w-14 max-w-full animate-pulse rounded bg-muted" />
+        </span>
+      </div>
+      {['w-14', 'w-14', 'w-14', 'w-10', 'w-10', 'w-8'].map((width, cell) => (
         <div key={cell} role="cell" className="md:table-cell md:p-4 md:text-right">
-          <span className="block h-4 w-full animate-pulse rounded bg-muted" />
+          <span className={`ml-auto block h-4 max-w-full animate-pulse rounded bg-muted ${width}`} />
         </div>
       ))}
     </div>
   ));
 }
 
-export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab, sort: initialSort, direction: initialDirection }: LaunchListProps) {
+export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab, sort: initialSort, direction: initialDirection, loading = false }: LaunchListProps) {
   const [items, setItems] = useState<readonly LaunchSummary[]>(page?.items ?? []);
   const [nextCursor, setNextCursor] = useState<string | null>(page?.nextCursor ?? null);
   const [selectedChains, setSelectedChains] = useState<readonly number[]>(selectedValues(chainId));
@@ -189,7 +197,6 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
   const [sortBy, setSortBy] = useState<NonNullable<LaunchQuery['sort']>>(initialSort ?? defaultSort(tab));
   const [sortDirection, setSortDirection] = useState<NonNullable<LaunchQuery['direction']>>(initialDirection ?? defaultDirection(initialSort ?? defaultSort(tab)));
   const [appliedSearch, setAppliedSearch] = useState(search);
-  const [searchDraft, setSearchDraft] = useState(search ?? '');
   const [selectedStatus, setSelectedStatus] = useState(status);
   const [filtering, setFiltering] = useState(false);
   const [filterError, setFilterError] = useState(false);
@@ -270,7 +277,6 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
     setSortBy(initialSort ?? defaultSort(tab));
     setSortDirection(initialDirection ?? defaultDirection(initialSort ?? defaultSort(tab)));
     setAppliedSearch(search);
-    setSearchDraft(search ?? '');
     setSelectedStatus(status);
     setFilterError(false);
     setFiltering(false);
@@ -279,7 +285,6 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
   useEffect(() => {
     const onPopState = () => {
       const next = filtersFromUrl();
-      setSearchDraft(next.search ?? '');
       void refreshFilters(next, false);
     };
     window.addEventListener('popstate', onPopState);
@@ -325,43 +330,10 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
 
   return (
     <div className="flex flex-col gap-4">
-      <form method="get" role="search" aria-label="Search and filter launches" onSubmit={(event) => {
-        event.preventDefault();
-        void refreshFilters({ ...current, search: searchDraft.trim() || undefined });
-      }} className="flex flex-wrap gap-2">
-        <Input
-          type="search"
-          name="search"
-          value={searchDraft}
-          onChange={(event) => setSearchDraft(event.target.value)}
-          placeholder="Search by name or symbol"
-          aria-label="Search launches"
-          className="max-w-xs"
-        />
-        <select
-          name="status"
-          value={selectedStatus ?? ''}
-          onChange={(event) => { void refreshFilters({ ...current, status: event.target.value || undefined }); }}
-          aria-label="Filter by lifecycle"
-          className="h-9 rounded-md border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <option value="">All statuses</option>
-          {LIFECYCLE_STATUSES.map((value) => (
-            <option key={value} value={value}>
-              {formatLifecycleStatus(value)}
-            </option>
-          ))}
-        </select>
-        {selectedChains.length > 0 && <input type="hidden" name="chainId" value={selectedChains.join(',')} />}
-        {selectedPlatforms.length > 0 && <input type="hidden" name="platform" value={selectedPlatforms.join(',')} />}
-        {activeTab !== 'all' && <input type="hidden" name="tab" value={activeTab} />}
-        <Button type="submit">Search</Button>
-      </form>
-
       {activeTab === 'all' && freshestAsOf !== null && (
-        <p className="text-xs text-muted-foreground">Official 24h volume as of {freshestAsOf.replace('T', ' ').slice(0, 16)} UTC</p>
+        <p className="text-xs text-muted-foreground">Official 24h volume as of <RollingText text={freshestAsOf.replace('T', ' ').slice(0, 16)} /> UTC</p>
       )}
-      <div className="relative z-20 flex flex-wrap items-center justify-between gap-2">
+      <div className="relative z-20 flex min-h-10 flex-wrap items-center justify-between gap-2">
         <nav aria-label="Filter by tab" className="flex gap-2">
           {TABS.map(({ value, label }) => (
             <a
@@ -389,19 +361,19 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
       {filtering && <p role="status" className="sr-only">Updating launches…</p>}
       {filterError && <div role="alert" className="text-sm">Could not update launches. <button type="button" className="underline" onClick={() => { void refreshFilters(current, false); }}>Retry</button></div>}
 
-      <div role="table" aria-label="Launch list" aria-busy={filtering || loadingMore} className="relative z-0 w-full overflow-hidden rounded-lg border border-border md:table md:table-fixed md:border-separate md:border-spacing-0">
+      <div role="table" aria-label="Launch list" aria-busy={filtering || loadingMore} className="relative z-0 w-full md:table md:table-fixed md:border-separate md:border-spacing-0">
         <div role="rowgroup" className="hidden bg-muted md:table-header-group">
-          <div role="row" className="md:table-row">
-            <div role="columnheader" style={{ width: launchColumnWidth(0) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">#</div>
-            <div role="columnheader" style={{ width: launchColumnWidth(1) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">Token</div>
-            <div role="columnheader" style={{ width: launchColumnWidth(2) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4">Launchpad</div>
+          <div role="row" className="md:table-row md:[&>div:first-child]:rounded-l-lg md:[&>div:last-child]:rounded-r-lg">
+            <div role="columnheader" style={{ width: launchColumnWidth(0) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-sm md: lg:px-4">#</div>
+            <div role="columnheader" style={{ width: launchColumnWidth(1) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-sm md: lg:px-4">Token</div>
+            <div role="columnheader" style={{ width: launchColumnWidth(2) }} className="text-muted-foreground md:table-cell md:h-10 md:px-2 md:align-middle md:text-sm md: lg:px-4">Launchpad</div>
             {SORT_COLUMNS.map(({ label, sort }, index) => {
               const active = sortBy === sort;
               return (
                 <div key={sort} role="columnheader" style={{ width: launchColumnWidth(index + 3) }} aria-sort={active ? sortDirection === 'asc' ? 'ascending' : 'descending' : undefined}
-                  className={cn('text-muted-foreground md:table-cell md:h-10 md:px-2 md:text-right md:align-middle md:text-xs md:font-medium md:uppercase md:tracking-wide lg:px-4',
+                  className={cn('text-muted-foreground md:table-cell md:h-10 md:px-2 md:text-right md:align-middle md:text-sm md: lg:px-4',
                     active && 'text-white')}>
-                  <button type="button" className={cn('inline-flex items-center gap-1 text-inherit focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'hover:text-white' : 'hover:text-foreground')}
+                  <button type="button" className={cn('ml-auto flex items-center gap-1 text-inherit focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', active ? 'hover:text-white' : 'hover:text-foreground')}
                     onClick={() => {
                       const direction = active ? sortDirection === 'asc' ? 'desc' : 'asc' : defaultDirection(sort);
                       void refreshFilters({ ...current, tab: sort === 'recent' ? 'recent' : 'all', sort, direction });
@@ -414,7 +386,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
           </div>
         </div>
         <div role="rowgroup" className="flex flex-col gap-3 p-3 md:table-row-group md:gap-0 md:p-0">
-          {filtering && items.length === 0 ? <LaunchRowsSkeleton count={8} /> : items.map((launch, index) => {
+          {loading || filtering ? <LaunchRowsSkeleton count={8} /> : items.map((launch, index) => {
             return (
               <div
                 key={`${launch.chainId}-${launch.tokenAddress}`}
@@ -444,17 +416,17 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">FDV</span>
-                  <span>{formatUsdCompact(launch.fdvUsd, 1)}</span>
+                  <span><RollingText text={formatUsdCompact(launch.fdvUsd, 1)} value={launch.fdvUsd} flash /></span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
-                  <span className="mr-1 text-xs text-muted-foreground md:hidden">24H volume</span>
+                  <span className="mr-1 text-xs text-muted-foreground md:hidden">24H Volume</span>
                   <span title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
-                    {launch.officialVolume24hUsd !== null ? `~${formatUsdCompact(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}
+                    <RollingText text={launch.officialVolume24hUsd !== null ? `~${formatUsdCompact(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} value={launch.officialVolume24hUsd ?? launch.officialVolume24h} flash />
                   </span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>
-                  <span title={tvlTooltip(launch)}>{formatUsdCompact(launch.tvlUsd, 1)}</span>
+                  <span title={tvlTooltip(launch)}><RollingText text={formatUsdCompact(launch.tvlUsd, 1)} value={launch.tvlUsd} flash /></span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">1H</span>
@@ -466,7 +438,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 </div>
                 <div role="cell" className="md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Age</span>
-                  <span className="text-muted-foreground">{formatAge(launch.launchTimestamp)}</span>
+                  <span className="text-muted-foreground"><RollingText text={formatAge(launch.launchTimestamp)} /></span>
                 </div>
               </div>
             );
@@ -475,7 +447,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
         </div>
       </div>
 
-      {!filtering && !filterError && items.length === 0 && <p role="status" className="text-center text-sm text-muted-foreground">No launches match these filters yet.</p>}
+      {!loading && !filtering && !filterError && items.length === 0 && <p role="status" className="text-center text-sm text-muted-foreground">No launches match these filters yet.</p>}
 
       {nextCursor && <div ref={sentinelRef} aria-hidden="true" className="h-px" />}
       {loadingMore && <p role="status" className="sr-only">Loading more launches…</p>}

@@ -7,6 +7,7 @@ import { PERMIT2_ADDRESS } from './permit2Abi';
 import { UNIVERSAL_ROUTER_ADDRESS } from './universalRouterAbi';
 import { MSG_SENDER, ADDRESS_THIS } from './v3SwapEncoding';
 import { OPEN_WALLET_DIALOG_EVENT } from '@/wallet/open-wallet-dialog';
+import { textContent } from '../test-utils/text-content';
 
 const SWAP_INPUT_ABI = parseAbiParameters(
   'address recipient, uint256 amount, uint256 amountOutMin, bytes path, bool payerIsUser, uint256[] minHopPriceX36',
@@ -170,13 +171,13 @@ describe('SwapPanel', () => {
     hooks.balanceB = 4_000_000_000_000_000_000n;
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.click(screen.getByRole('button', { name: /flip swap direction/i }));
-    expect(screen.getByText('Balance: 2 ETH')).toBeInTheDocument();
+    expect(screen.getByText(textContent('Balance: 2 ETH'))).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '3' } });
     expect(screen.getByLabelText('Sell amount')).toHaveClass('text-destructive');
-    expect(screen.getByText('Balance: 2 ETH')).toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 2 ETH'))).toHaveClass('text-destructive');
     fireEvent.click(screen.getByRole('button', { name: /^ETH$/ }));
     fireEvent.click(screen.getByRole('option', { name: 'WETH' }));
-    expect(screen.getByText('Balance: 4 WETH')).not.toHaveClass('text-destructive');
+    expect(screen.getByText(textContent('Balance: 4 WETH'))).not.toHaveClass('text-destructive');
     expect(screen.getByLabelText('Sell amount')).not.toHaveClass('text-destructive');
   });
 
@@ -653,7 +654,7 @@ describe('SwapPanel', () => {
     const { unmount } = render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
     fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
     expect(screen.getByText('Min received')).toBeInTheDocument();
-    expect(screen.getByText(/^990 /)).toBeInTheDocument();
+    expect(screen.getByText(textContent(/^990 /))).toBeInTheDocument();
     unmount();
     hooks.simulateData = undefined;
     render(<SwapPanel poolAddress={poolAddress} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);

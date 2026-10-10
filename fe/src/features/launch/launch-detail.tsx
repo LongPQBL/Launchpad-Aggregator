@@ -1,7 +1,8 @@
+import { ChevronRight } from '@/components/chevron-right';
 import Link from 'next/link';
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { displayName, displaySymbol, formatLifecycleStatus, formatPrice, formatUsd, formatUsdCompact, formatVenueKind, tvlTooltip } from '@/api/format';
-import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
+import { displayName, displaySymbol, formatPrice, formatUsd, formatUsdCompact, tvlTooltip } from '@/api/format';
+import { findActiveVenue, type CandlePage, type LaunchDetail as LaunchDetailData, type PoolHistory, type PoolPage, type PoolSummary, type TransactionPage } from '@/api/client';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Tabs } from '@/components/ui/tabs';
 import { launchpadName, LaunchpadIcon } from '@/features/launches/launchpad-icon';
@@ -10,7 +11,7 @@ import { AboutSection } from './about-section';
 import { HeaderActions } from './header-actions';
 import { CopyableTokenAddress } from './copyable-token-address';
 import { DEFAULT_CHART_INTERVAL } from './official-chart';
-import { OfficialPriceChart } from './official-price-chart';
+import { LaunchChartPanel } from './launch-chart-panel';
 import { TransactionList } from './transaction-list';
 import { PoolList } from '@/features/pools/pool-list';
 import { CurveSwapPanel } from '@/trading/curve-swap-panel';
@@ -18,6 +19,8 @@ import type { UsdPrices } from '@/trading/trade-usd';
 import { SwapPanel } from '@/trading/swap-panel';
 import { V4SwapPanel } from '@/trading/v4-swap-panel';
 import { SwapPanelPreview } from '@/trading/swap-panel-preview';
+import { StickyDetailHeader } from '@/components/sticky-detail-header';
+import { RollingText } from '@/components/percent-change';
 
 export interface LaunchDetailProps {
   detail: LaunchDetailData;
@@ -25,12 +28,14 @@ export interface LaunchDetailProps {
   candles: CandlePage | null;
   pools?: PoolPage | null;
   v4Pool?: PoolSummary | null;
+  /** Daily official Volume / TVL series for the chart's Volume and TVL tabs; null hides them. */
+  history?: PoolHistory | null;
   chartCurrency?: 'quote' | 'usd';
   chartInterval?: number;
   showSwapPreview?: boolean;
 }
 
-export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = null, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL, showSwapPreview = false }: LaunchDetailProps) {
+export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = null, history = null, chartCurrency = 'quote', chartInterval = DEFAULT_CHART_INTERVAL, showSwapPreview = false }: LaunchDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
 
   const v4Venue = detail.officialVenues.find((venue) => venue.kind === 'v4_pool');
@@ -73,7 +78,6 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
       : activeV4Venue ? { kind: 'pool' as const, pool: v4Pool, poolId: activeV4Venue.ref, protocol: 'uniswap_v4' }
         : activeV3Venue ? { kind: 'pool' as const, pool: null, poolId: activeV3Venue.ref, protocol: 'uniswap_v3' }
         : null;
-  const visibleOfficialVenues = detail.officialVenues;
 
   // V4SwapPanel's tokenA/tokenB props are a presentation default (which side starts as "being
   // sold"), independent of zeroForOne — V4SwapPanel derives that itself from address comparison
@@ -90,21 +94,23 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
     <article className="flex flex-col gap-4">
       <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-base text-muted-foreground">
         <Link href="/launches">Launches</Link>
-        <span aria-hidden="true">›</span>
-        <span className="font-medium text-foreground">{displaySymbol(detail.symbol)}</span>
+        <ChevronRight />
+        <span className="text-foreground">{displaySymbol(detail.symbol)}</span>
       </nav>
 
-      <Card className="border-0 bg-transparent">
-        <CardHeader className="border-b border-border">
+      <StickyDetailHeader>
+      <Card className="border-0 bg-background">
+        <CardHeader className="border-b border-border px-0 py-4 transition-[padding] duration-200 group-data-[compact=true]:py-2">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <TokenLogo logoUri={detail.logoUri} symbol={displaySymbol(detail.symbol)} chainId={detail.chainId} size="large" />
+            <div className="flex flex-wrap items-center gap-3 group-data-[compact=true]:gap-2">
+              <TokenLogo logoUri={detail.logoUri} symbol={displaySymbol(detail.symbol)} chainId={detail.chainId} size="detail" />
               <div>
-                <h1 className="text-2xl font-semibold leading-none">
-                  {displayName(detail.name, detail.tokenAddress)} <span className="text-lg text-muted-foreground">{displaySymbol(detail.symbol)}</span>
+                <h1 className="text-2xl leading-none transition-[font-size] duration-200 group-data-[compact=true]:text-base">
+                  {displayName(detail.name, detail.tokenAddress)} <span className="text-lg text-muted-foreground group-data-[compact=true]:hidden">{displaySymbol(detail.symbol)}</span>
                 </h1>
-                <div className="mt-1"><CopyableTokenAddress address={detail.tokenAddress} copyLabel="Copy header token address" /></div>
-                <p className="mt-1 flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <CopyableTokenAddress address={detail.tokenAddress} copyLabel="Copy header token address" addressClassName="!text-base" />
+                  <p className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
                   {detail.platform === 'pons' ? (
                     <a href="https://docs.ponsfamily.com/" target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1">
                       <LaunchpadIcon platform={detail.platform} />
@@ -112,39 +118,27 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
                     </a>
                   ) : <span>{launchpadName(detail.platform)}</span>}
                   <span>· {detail.protocolVersion} · {chainName(detail.chainId)}
-                    {detail.quoteAsset.symbol !== null && <> · Quote asset: {displaySymbol(detail.quoteAsset.symbol)}</>}
                   </span>
-                  <span className="rounded-full border border-border px-2 py-0.5">{formatLifecycleStatus(detail.lifecycleStatus)}</span>
-                </p>
+                  </p>
+                </div>
               </div>
             </div>
             <HeaderActions twitterUrl={detail.twitterUrl} />
           </div>
         </CardHeader>
       </Card>
+      </StickyDetailHeader>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start lg:gap-x-[7.143%]">
         <div className="flex flex-col gap-4">
-          {visibleOfficialVenues.length > 0 && (
-            <section aria-label="Official trading venues">
-              <Card>
-                <CardContent className="pt-4">
-                  <ul className="flex flex-wrap gap-2">
-                    {visibleOfficialVenues.map((venue) => (
-                      <li key={venue.id} className="rounded-md border border-border bg-accent px-2 py-1 text-xs text-accent-foreground">
-                        {formatVenueKind(venue.kind)}
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            </section>
-          )}
-
           <Card className="border-0 bg-transparent">
-            <CardContent className="pt-4">
-              <OfficialPriceChart
+            <CardContent className="px-0 pt-4">
+              <LaunchChartPanel
+                chainId={detail.chainId}
+                tokenAddress={detail.tokenAddress}
+                history={history}
                 priceText={priceText}
+                priceValue={detail.priceUsd ?? detail.priceQuote}
                 priceStale={detail.priceStale}
                 candles={candles}
                 graduationTime={graduationTime}
@@ -159,21 +153,21 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             </CardContent>
           </Card>
 
-          <div className="flex flex-col gap-4 px-4 lg:max-w-2xl">
+          <div className="flex flex-col gap-4 lg:max-w-2xl">
             <section aria-label="Stats">
-          <h2 className="text-2xl font-semibold">Stats</h2>
+          <h2 className="text-2xl">Stats</h2>
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
-            <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.tvlUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.marketCapUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.fdvUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-lg font-semibold">{formatUsdCompact(detail.officialVolume24hUsd, 1)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">52W High</dt><dd className="mt-0.5 text-lg font-semibold">{formatPrice(detail.week52High, detail.quoteAsset.symbol)}</dd></div>
-            <div><dt className="text-sm text-muted-foreground">52W Low</dt><dd className="mt-0.5 text-lg font-semibold">{formatPrice(detail.week52Low, detail.quoteAsset.symbol)}</dd></div>
+            <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.tvlUsd, 1)} value={detail.tvlUsd} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.marketCapUsd, 1)} value={detail.marketCapUsd} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.fdvUsd, 1)} value={detail.fdvUsd} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.officialVolume24hUsd, 1)} value={detail.officialVolume24hUsd} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">52W High</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatPrice(detail.week52High, detail.quoteAsset.symbol)} value={detail.week52High} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">52W Low</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatPrice(detail.week52Low, detail.quoteAsset.symbol)} value={detail.week52Low} flash /></dd></div>
               </dl>
             </section>
 
             <section aria-label="Description">
-              <h2 className="text-2xl font-semibold">Description</h2>
+              <h2 className="text-2xl">Description</h2>
               <div className="mt-3">
                 <AboutSection
                   description={detail.description}
@@ -192,14 +186,14 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
         {(showSwapPreview || activeCurveVenue || activeV3Venue || activeV4Venue) && (
           <div className="flex flex-col gap-4">
             {showSwapPreview ? (
-              <div className="min-w-0"><SwapPanelPreview
+              <div className="min-w-0 px-px"><SwapPanelPreview
                 sellSymbol={displaySymbol(detail.symbol)}
                 buySymbol={displaySymbol(detail.quoteAsset.symbol)}
               /></div>
             ) : <>
             {activeCurveVenue && detail.tokenDecimals !== null && detail.quoteAsset.decimals !== null && (
               <Card className="border-0 bg-transparent">
-                <CardContent className="pt-4">
+                <CardContent className="px-px pt-4">
                   <CurveSwapPanel
                     curveAddress={activeCurveVenue.ref as `0x${string}`}
                     tokenAddress={detail.tokenAddress as `0x${string}`}
@@ -215,7 +209,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             )}
             {activeV3Venue && detail.tokenDecimals !== null && detail.quoteAsset.decimals !== null && (
               <Card className="border-0 bg-transparent">
-                <CardContent className="pt-4">
+                <CardContent className="px-px pt-4">
                   <SwapPanel
                     poolAddress={activeV3Venue.ref as `0x${string}`}
                     tokenA={{ address: detail.tokenAddress as `0x${string}`, symbol: displaySymbol(detail.symbol), decimals: detail.tokenDecimals, logoUri: detail.logoUri }}
@@ -228,7 +222,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             )}
             {activeV4Venue && v4Pool && v4Pool.currency0Decimals !== null && v4Pool.currency1Decimals !== null && (
               <Card className="border-0 bg-transparent">
-                <CardContent className="pt-4">
+                <CardContent className="px-px pt-4">
                   <V4SwapPanel
                     poolKey={{ currency0: v4Pool.currency0 as `0x${string}`, currency1: v4Pool.currency1 as `0x${string}`,
                       fee: v4Pool.fee, tickSpacing: v4Pool.tickSpacing, hooks: v4Pool.hooks as `0x${string}` }}
@@ -250,7 +244,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
       </div>
 
       <Card className="border-0 bg-transparent">
-        <CardContent className="pt-4">
+        <CardContent className="px-0 pt-4">
           <Tabs
             tabs={[
               {

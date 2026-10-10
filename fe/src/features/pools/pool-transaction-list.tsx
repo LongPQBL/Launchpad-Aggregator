@@ -6,6 +6,7 @@ import { displaySymbol, formatAmount, formatSide } from '@/api/format';
 import type { PoolTrade } from '@/api/client';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
+import { RollingText } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
 
 function shortAddress(address: string): string {
@@ -47,9 +48,9 @@ export function PoolTransactionList({ trades, displayedSymbol, otherSymbol, disp
   return (
     <Table aria-label="Transactions" className="border-separate border-spacing-y-2">
       <TableHeader>
-        <TableRow className="border-0 bg-card/55 backdrop-blur-sm [&>th]:border-y [&>th]:border-border [&>th:first-child]:rounded-l-lg [&>th:first-child]:border-l [&>th:last-child]:rounded-r-lg [&>th:last-child]:border-r">
-          <TableHead>Time</TableHead>
-          <TableHead>Type</TableHead>
+        <TableRow className="h-10 border-0 bg-card/80 backdrop-blur-md [&>th:first-child]:rounded-l-lg [&>th:last-child]:rounded-r-lg">
+          <TableHead className="pl-4">Time</TableHead>
+          <TableHead >Type</TableHead>
           <TableHead className="text-right">USD</TableHead>
           <TableHead className="text-right">{displaySymbol(displayedSymbol)}</TableHead>
           <TableHead className="text-right">{displaySymbol(otherSymbol)}</TableHead>
@@ -64,30 +65,30 @@ export function PoolTransactionList({ trades, displayedSymbol, otherSymbol, disp
           const side = displayedSide(trade.side, displayedIsCurrency0);
           return (
             <TableRow key={`${trade.blockNumber}-${trade.txHash}-${trade.logIndex}`} className="border-0 hover:bg-transparent">
-              <TableCell className="text-base font-semibold text-foreground" title={new Date(trade.timestamp * 1000).toLocaleString('en-US')}>
-                {formatRelativeTime(trade.timestamp, now)}
+              <TableCell className="pl-4 text-base text-foreground" title={new Date(trade.timestamp * 1000).toLocaleString('en-US')}>
+                <RollingText text={formatRelativeTime(trade.timestamp, now)} />
               </TableCell>
-              <TableCell className="text-base font-semibold">
-                <span className={cn('font-semibold', side === 'buy' && 'text-success', side === 'sell' && 'text-destructive')}>
+              <TableCell className="text-base">
+                <span className={cn(side === 'buy' && 'text-success', side === 'sell' && 'text-destructive')}>
                   {side === 'buy' || side === 'sell' ? `${formatSide(side)} ${displaySymbol(displayedSymbol)}` : formatSide(side)}
                 </span>
               </TableCell>
               <TableCell
-                className="text-right text-base font-semibold"
+                className="text-right text-base"
                 title={trade.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
                 {trade.usdValueStatus === 'pending' ? 'Calculating…' : trade.usdValue === null ? '—' : `$${formatAmount(trade.usdValue, 2)}`}
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatRawAmount(displayedRaw, displayedDecimals)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">{formatRawAmount(otherRaw, otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">
+              <TableCell className="text-right text-base">{formatRawAmount(displayedRaw, displayedDecimals)}</TableCell>
+              <TableCell className="text-right text-base">{formatRawAmount(otherRaw, otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
+              <TableCell className="text-right text-base">
                 {explorerBase ? (
                   <a href={`${explorerBase}/address/${trade.traderAddress}`} target="_blank" rel="noreferrer noopener">
                     <span className="cursor-pointer">{shortAddress(trade.traderAddress)}</span>
                   </a>
                 ) : <span className="cursor-pointer">{shortAddress(trade.traderAddress)}</span>}
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">
+              <TableCell className="text-right text-base">
                 {explorerBase ? (
                   <a className="cursor-pointer" href={`${explorerBase}/tx/${trade.txHash}`} target="_blank" rel="noreferrer noopener">
                     {shortAddress(trade.txHash)}

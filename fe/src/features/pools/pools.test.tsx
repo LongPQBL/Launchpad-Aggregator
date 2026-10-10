@@ -124,16 +124,16 @@ describe('Pools UI', () => {
     expect(screen.queryByText('backfilling')).not.toBeInTheDocument();
     expect(screen.queryByText(/APR/i)).not.toBeInTheDocument();
   });
-  it('shows 30D volume and 1D Vol/TVL columns instead of the 1H/1D price changes, with an em dash for unknown values', () => {
+  it('shows 30D Volume and 1D Vol/TVL columns instead of the 1H/1D price changes, with an em dash for unknown values', () => {
     const known: PoolSummary = { ...pool, volume30dUsd: '1200000', volume24hUsd: '300000', tvlUsd: '100000' };
     const unknown: PoolSummary = { ...pool, poolId: `0x${'c'.repeat(64)}`, volume30dUsd: null, volume24hUsd: '5', tvlUsd: null };
     render(<PoolList page={{ items: [known, unknown], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
-    expect(screen.getByRole('columnheader', { name: /30D volume/ })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /30D Volume/ })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: /^TVL$/ })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /FDV|Liquidity/ })).not.toBeInTheDocument();
     // TVL leads the numeric columns, straight after the pool name.
     const headers = screen.getAllByRole('columnheader').map((header) => header.textContent?.trim());
-    expect(headers.slice(0, 4)).toEqual(['#', 'Pool', 'TVL', '24H volume']);
+    expect(headers.slice(0, 4)).toEqual(['#', 'Pool', 'TVL', '24H Volume']);
     expect(screen.getByRole('columnheader', { name: /1D Vol\/TVL/ })).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: /^1H$/ })).not.toBeInTheDocument();
     const [, knownRow, unknownRow] = screen.getAllByRole('row');
@@ -163,7 +163,7 @@ describe('Pools UI', () => {
     expect(screen.getByText('v4', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
     expect(screen.getByText('0.3%', { selector: '[data-slot="badge"]' })).toBeInTheDocument();
   });
-  it('PoolDetail shows the 24H volume change vs the previous 24h, and hides it when unavailable', () => {
+  it('PoolDetail shows the 24H Volume change vs the previous 24h, and hides it when unavailable', () => {
     const { unmount } = render(<PoolDetail pool={{ ...pool, volume24hUsd: '323000', volume24hChange: '-62.38' }} trades={{ items: [], nextCursor: null }} candles={null} />);
     expect(screen.getByTestId('volume-24h-change').textContent).toContain('62.38%');
     expect(screen.getByTestId('volume-24h-change').textContent).toContain('▼');
@@ -220,7 +220,8 @@ describe('Pools UI', () => {
   it('shows the price-ratio header with a USD reading when the quote side has a verified USD feed', () => {
     const priced: PoolSummary = { ...pool, currency0Symbol: 'CASHCAT', currency1Symbol: 'ETH', priceInQuote: '0.044714', priceUsd: '0.119' };
     render(<PoolDetail pool={priced} trades={{ items: [], nextCursor: null }} candles={{ items: [], complete: true }} />);
-    expect(screen.getByText((_, node) => node?.textContent === '1 CASHCAT = 0.0447 ETH ($0.1)')).toBeInTheDocument();
+    expect(screen.getByLabelText('0.0447 ETH')).toBeInTheDocument();
+    expect(screen.getByLabelText('$0.1')).toBeInTheDocument();
   });
   it('omits USD from the price-ratio header when priceUsd is unavailable, e.g. after flipping to a quote with no verified feed', () => {
     const flipped: PoolSummary = { ...pool, currency0Symbol: 'CASHCAT', currency1Symbol: 'ETH', priceInQuote: '21211.57', priceUsd: null };
@@ -238,10 +239,34 @@ describe('Pools UI', () => {
     });
     // Local-time formatting, so derive the expected stamp instead of hardcoding one timezone.
     const stamp = new Date(1_700_000_300 * 1000).toLocaleString('en-US');
-    expect(screen.getByText((_, node) => node?.tagName === 'P' && (node.textContent ?? '').startsWith('1 CASHCAT = 0.0500 ETH')
-      && (node.textContent ?? '').endsWith(`· ${stamp}`) && !(node.textContent ?? '').includes('$'))).toBeInTheDocument();
-
+    // Digits mid-roll also hold the outgoing glyphs in textContent, so read each rolling value's settled aria-label.
+    expect(screen.getByLabelText('0.0500 ETH')).toBeInTheDocument();
+    expect(screen.getByLabelText(stamp)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/\$/)).not.toBeInTheDocument();
     act(() => { handler({ seriesData: new Map() }); });
-    expect(screen.getByText((_, node) => node?.textContent === '1 CASHCAT = 0.0447 ETH ($0.1)')).toBeInTheDocument();
+    expect(screen.getByLabelText('0.0447 ETH')).toBeInTheDocument();
+    expect(screen.getByLabelText('$0.1')).toBeInTheDocument();
+  });
+
+  describe('pinned Pons primary venue', () => {
+    const launchToken = { address: b, symbol: 'TKN', logoUri: null };
+
+    it('links the bonding-curve row to its own page', () => {
+      render(<PoolList page={{ items: [], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} tokenAddress={b} chainId={4663}
+        displayedToken={launchToken} primaryVenue={{ kind: 'curve', token: launchToken, quoteSymbol: 'ETH', chainId: 4663 }} />);
+      const link = screen.getByRole('link', { name: /bonding curve/i });
+      expect(link).toHaveAttribute('href', `/launches/4663/${b}/curve`);
+      expect(screen.getByText('Bonding curve · Official Pons pool')).toBeInTheDocument();
+    });
+
+    it('lists the official V4 pool first, ahead of other pools, with the Official Pons pool caption', () => {
+      const other: PoolSummary = { ...pool, poolId: `0x${'b'.repeat(64)}`, ponsDesignated: false, tvlUsd: '999999' };
+      render(<PoolList page={{ items: [other], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} tokenAddress={b} chainId={4663}
+        displayedToken={launchToken} primaryVenue={{ kind: 'pool', pool: { ...pool, ponsDesignated: true }, poolId: pool.poolId, protocol: 'uniswap_v4' }} />);
+      const rows = screen.getAllByRole('row').slice(1);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toHaveTextContent('Official Pons pool');
+      expect(rows[1]).not.toHaveTextContent('Official Pons pool');
+    });
   });
 });

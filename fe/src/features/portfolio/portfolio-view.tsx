@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TokenLogo } from '@/features/launches/token-logo';
 import { erc20Abi } from '@/trading/erc20Abi';
 import { cn } from '@/lib/utils';
+import { RollingText } from '@/components/percent-change';
 
 const SKELETON_CELLS = [0, 1, 2, 3, 4, 5] as const;
 
@@ -79,7 +80,7 @@ export function PortfolioView() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">Total value</p>
-          <p className="text-3xl font-semibold" data-testid="portfolio-total">{priced.length > 0 ? formatUsdCompact(String(totalUsd), 2) : '—'}</p>
+          <p className="text-3xl" data-testid="portfolio-total"><RollingText text={priced.length > 0 ? formatUsdCompact(String(totalUsd), 2) : '—'} value={priced.length > 0 ? totalUsd : null} /></p>
           {unpricedHeld && <p className="text-xs text-muted-foreground">Excludes tokens without a USD price.</p>}
         </div>
         <label className="flex cursor-pointer items-center gap-2 text-sm">
@@ -102,20 +103,20 @@ export function PortfolioView() {
         <TableBody>
           {shown.map(({ position, balance, valueUsd }) => (
             <TableRow key={`${position.token.chainId}:${position.token.tokenAddress}`} className="border-0 hover:bg-transparent">
-              <TableCell className="pl-4 text-base font-semibold">
+              <TableCell className="pl-4 text-base">
                 <Link href={launchHref(position.token.chainId, position.token.tokenAddress)} className="flex items-center gap-2 hover:underline">
                   <TokenLogo logoUri={position.token.logoUri} symbol={displaySymbol(position.token.symbol)} chainId={position.token.chainId} />
                   <span className="min-w-0"><span className="block truncate">{displayName(position.token.name, position.token.tokenAddress)}</span>
-                    <span className="block text-xs font-normal text-muted-foreground">{displaySymbol(position.token.symbol)}</span></span>
+                    <span className="block text-xs text-muted-foreground">{displaySymbol(position.token.symbol)}</span></span>
                 </Link>
               </TableCell>
-              <TableCell className="text-right text-base font-semibold">{balance === null ? '—' : formatAmount(balance)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">{position.priceUsd === null ? '—' : formatUsdCompact(position.priceUsd, 2)}</TableCell>
-              <TableCell className="text-right text-base font-semibold">{valueUsd === null ? '—' : formatUsdCompact(String(valueUsd), 2)}</TableCell>
-              <TableCell className="text-right text-base font-semibold" title={`${position.buyCount} buys, ${position.sellCount} sells`}>{position.tradeCount}</TableCell>
-              <TableCell className="text-right text-sm font-semibold">
+              <TableCell className="text-right text-base"><RollingText text={balance === null ? '—' : formatAmount(balance)} value={balance} /></TableCell>
+              <TableCell className="text-right text-base"><RollingText text={position.priceUsd === null ? '—' : formatUsdCompact(position.priceUsd, 2)} value={position.priceUsd} /></TableCell>
+              <TableCell className="text-right text-base"><RollingText text={valueUsd === null ? '—' : formatUsdCompact(String(valueUsd), 2)} value={valueUsd} /></TableCell>
+              <TableCell className="text-right text-base" title={`${position.buyCount} buys, ${position.sellCount} sells`}><RollingText text={String(position.tradeCount)} value={position.tradeCount} /></TableCell>
+              <TableCell className="text-right text-sm">
                 {position.quoteSpent === null || position.quoteReceived === null ? '—'
-                  : `${formatAmount(position.quoteSpent)} / ${formatAmount(position.quoteReceived)} ${displaySymbol(position.quoteAsset.symbol)}`}
+                  : <><RollingText text={formatAmount(position.quoteSpent)} value={position.quoteSpent} /> / <RollingText text={formatAmount(position.quoteReceived)} value={position.quoteReceived} /> {displaySymbol(position.quoteAsset.symbol)}</>}
               </TableCell>
             </TableRow>
           ))}

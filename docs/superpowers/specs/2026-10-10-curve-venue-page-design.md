@@ -65,14 +65,14 @@ needs that the existing endpoints do not give for the curve alone:
 
 - `venueId`, `curveAddress` (the venue `ref`), `active` (`effectiveToBlock === null`), `graduatedAtTimestamp`
   (or null),
-- `volume24hQuote` / `volume24hUsd` over the curve venue's trades only (USD is `null`, never 0, when
-  any trade in the window is unpriced),
+- `volume24hQuote` — quote-asset volume over the last 24h on the curve venue only (quote units, not USD: the
+  existing USD valuation is launch-wide and per-trade, and curve-only USD volume was not needed for the page),
 - `tradeCount24h`,
 - `lastPrice` of the curve venue.
 
 `404` when the launch has no curve venue (non-Pons launches, or a launch whose venue list has none).
-TVL is not part of this response: while the curve is active the page shows the launch's existing
-current-reserve TVL from `getLaunch`; after graduation that stat shows `—`.
+TVL is not part of this response and is not shown on the page (decided with the user: no TVL chart, and the
+stat was dropped with it).
 
 ### OpenAPI / types
 
@@ -95,11 +95,12 @@ Regenerate `be/openapi.json` and `fe/src/api/schema.ts` with the existing `opena
 Built from the pool page's pieces, in the same 680 / 360 two-column layout:
 
 - **Header:** pair logo, `SYMBOL / QUOTE`, a "Bonding curve" badge and the caption "Official Pons pool".
-- **Chart (left):** price chart (curve-scoped candles) with Price / Volume tabs. If the curve has
-  graduated, a marker shows the graduation time and the chart ends there.
+- **Chart (left):** price chart (curve-scoped candles) with Price / Volume tabs. Curve-scoped data ends at
+  graduation by construction. No graduation marker is drawn: the marker needs the first V4 trade's time, which
+  curve-scoped data deliberately does not contain.
 - **Transactions (left):** the pool page's transaction list, fed by `venue=curve`.
-- **Right column:** Stats card (24H volume, age, current TVL while active, 24H trades) and the Swap
-  area.
+- **Right column:** Stats card (24H volume in the quote asset, 24H trades, current price, age) and the Swap
+  area. There is no TVL stat.
   - Launch still on the curve: the existing curve swap panel.
   - Launch graduated: no swap panel; a short note and a link to the launch's official V4 pool page.
 
@@ -122,10 +123,14 @@ Built from the pool page's pieces, in the same 680 / 360 two-column layout:
   Price and Volume.
 - No Playwright run is required for this change; note it as not run, as for earlier work.
 
+## Resolved during implementation
+
+- Curve fee rate: no verified rate is exposed by indexed data, so there is no 24H fees stat.
+- Sibling hardening: `ChartTypePanel` gained a `showTvl` prop (default true). The pool page passes false; the launch
+  page keeps its TVL tab; a curve-scoped launch chart passes false.
+
 ## Open questions
 
-1. Curve fee rate: derive 24H fees from indexed data or leave the stat out. Decide while implementing,
-   after checking what the Pons curve events and `curve.ts` actually expose. Default is to omit.
-2. Whether a graduated launch's curve page stays reachable from the Pools tab (the pinned row then
+1. Whether a graduated launch's curve page stays reachable from the Pools tab (the pinned row then
    points at the V4 pool). Default: the pinned row is the V4 pool, and the curve page stays reachable
    only by URL and from the V4 pool page's own link back to it, if one is added later.

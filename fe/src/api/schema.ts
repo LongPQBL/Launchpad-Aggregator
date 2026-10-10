@@ -464,6 +464,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/launches/{chainId}/{tokenAddress}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    tokenAddress: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            items?: {
+                                day?: number;
+                                tradeCount?: number;
+                                volumeUsd?: string | null;
+                                tvlUsd?: string | null;
+                            }[];
+                            complete?: boolean;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/launches/{chainId}/{tokenAddress}/curve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    tokenAddress: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            venueId?: string;
+                            curveAddress?: string;
+                            active?: boolean;
+                            volume24hQuote?: string;
+                            tradeCount24h?: number;
+                            lastPriceQuote?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/launches/{chainId}/{tokenAddress}/candles": {
         parameters: {
             query?: never;

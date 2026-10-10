@@ -64,7 +64,7 @@ export function TokenCell({ chainId, tokenAddress, name, symbol, logoUri }: Toke
         <TokenLogo logoUri={logoUri} symbol={displaySymbol(symbol)} chainId={chainId} />
       </div>
       <div className="pointer-events-none relative z-10 flex flex-col">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-sm text-foreground">
           {displayName(name, tokenAddress)}
         </span>
         <div className="relative h-6 overflow-hidden text-xs leading-4">

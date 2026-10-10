@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getLaunches, type LaunchSummary, type Source } from '@/api/client';
 import { LaunchList } from './launch-list';
+import { textContent } from '../../test-utils/text-content';
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/api/client')>(),
@@ -200,10 +201,10 @@ describe('LaunchList', () => {
       sources={oneChainOneSource} error={false} />);
     const table = screen.getByRole('table', { name: /launch list/i });
     expect(within(table).getByRole('columnheader', { name: 'Liquidity' })).toBeInTheDocument();
-    expect(within(table).getByText('$15.7')).toHaveAttribute('title', expect.stringContaining('real quote'));
+    expect(within(table).getByText('$15.7').closest('[title]')).toHaveAttribute('title', expect.stringContaining('real quote'));
   });
 
-  it('renders FDV, 24H volume, Liquidity, 1H%, 1D%, and Age columns with real values', () => {
+  it('renders FDV, 24H Volume, Liquidity, 1H%, 1D%, and Age columns with real values', () => {
     const twoDaysAgo = Math.floor(Date.now() / 1000) - 2 * 86_400;
     render(
       <LaunchList
@@ -220,7 +221,7 @@ describe('LaunchList', () => {
     );
     const table = screen.getByRole('table', { name: /launch list/i });
     expect(within(table).getByRole('columnheader', { name: 'FDV' })).toBeInTheDocument();
-    expect(within(table).getByRole('columnheader', { name: '24H volume' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '24H Volume' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: 'Liquidity' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: '1H' })).toBeInTheDocument();
     expect(within(table).getByRole('columnheader', { name: '1D' })).toBeInTheDocument();
@@ -228,7 +229,7 @@ describe('LaunchList', () => {
     expect(within(table).getByText('$1K')).toBeInTheDocument();
     expect(within(table).getAllByText((_, el) => el?.textContent === '▲12.50%').length).toBeGreaterThan(0);
     expect(within(table).getAllByText((_, el) => el?.textContent === '▼5.00%').length).toBeGreaterThan(0);
-    expect(within(table).getByText('2d')).toBeInTheDocument();
+    expect(within(table).getByLabelText('2d')).toBeInTheDocument();
   });
 
   it('renders a dash for null 1H/1D change instead of 0% or blank', () => {
@@ -255,7 +256,7 @@ describe('LaunchList', () => {
     const table = screen.getByRole('table', { name: /launch list/i });
     const row = within(table).getAllByRole('row')[1];
     expect(within(row).getByText('FDV')).toBeInTheDocument();
-    expect(within(row).getByText('24H volume')).toBeInTheDocument();
+    expect(within(row).getByText('24H Volume')).toBeInTheDocument();
     expect(within(row).getByText('Liquidity')).toBeInTheDocument();
     expect(within(row).getByText('1H')).toBeInTheDocument();
     expect(within(row).getByText('1D')).toBeInTheDocument();
@@ -394,7 +395,7 @@ describe('LaunchList', () => {
     const page = { items: [launch()], nextCursor: null };
     const { rerender } = render(<LaunchList page={page} sources={oneChainOneSource} error={false} />);
     const table = screen.getByRole('table', { name: /launch list/i });
-    const volume = within(table).getByRole('columnheader', { name: /24H volume/i });
+    const volume = within(table).getByRole('columnheader', { name: /24H Volume/i });
     const age = within(table).getByRole('columnheader', { name: /Age/i });
     expect(volume).toHaveAttribute('aria-sort', 'descending');
     expect(volume).toHaveTextContent('↓');
@@ -424,7 +425,7 @@ describe('LaunchList', () => {
   });
 
   it.each([
-    ['24H volume', 'volume24hUsd', 'asc'],
+    ['24H Volume', 'volume24hUsd', 'asc'],
     ['Liquidity', 'tvlUsd', 'desc'],
     ['1H', 'change1h', 'desc'],
     ['1D', 'change1d', 'desc'],
@@ -439,7 +440,7 @@ describe('LaunchList', () => {
     expect(header).toHaveAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
   });
 
-  it('shows the approximate USD 24H volume when available, with the quote amount still accessible', () => {
+  it('shows the approximate USD 24H Volume when available, with the quote amount still accessible', () => {
     render(
       <LaunchList
         page={{ items: [launch({ officialVolume24hUsd: '1234.56', officialVolume24hUsdApprox: true, officialVolume24h: '0.5' })], nextCursor: null }}
@@ -463,7 +464,7 @@ describe('LaunchList', () => {
       launch({ officialVolume24hUsdAsOf: '2026-10-05T11:00:00.000Z' }),
       launch({ tokenAddress: '0x2222222222222222222222222222222222222222', officialVolume24hUsdAsOf: '2026-10-05T11:30:00.000Z' }),
     ], nextCursor: null }} sources={oneChainOneSource} error={false} />);
-    expect(screen.getByText('Official 24h volume as of 2026-10-05 11:30 UTC')).toBeInTheDocument();
+    expect(screen.getByText(textContent('Official 24h volume as of 2026-10-05 11:30 UTC'))).toBeInTheDocument();
   });
 
   it('shows the honest unavailable state (not a fabricated zero) when officialVolume24hUsd is null', () => {
@@ -488,11 +489,10 @@ describe('LaunchList', () => {
       />,
     );
 
-    const form = screen.getByRole('search', { name: /search and filter launches/i });
-    expect(within(form).getByDisplayValue('recent')).toHaveAttribute('type', 'hidden');
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
   });
 
-  it('switches tabs and submits search and lifecycle filters without navigating', async () => {
+  it('switches tabs without navigating', async () => {
     vi.mocked(getLaunches).mockResolvedValue({ items: [launch({ name: 'Filtered token' })], nextCursor: null });
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false}
       chainId={[4663]} platform={['pons']} />);
@@ -502,14 +502,6 @@ describe('LaunchList', () => {
     expect(screen.getByRole('link', { name: 'Recently launched' })).toHaveAttribute('aria-current', 'page');
     expect(window.location.search).toContain('tab=recent');
 
-    const form = screen.getByRole('search', { name: /search and filter launches/i });
-    fireEvent.change(within(form).getByRole('combobox', { name: /filter by lifecycle/i }), { target: { value: 'trading' } });
-    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'trading', sort: 'recent' }));
-    fireEvent.change(within(form).getByRole('searchbox'), { target: { value: 'demo' } });
-    fireEvent.submit(form);
-    expect(getLaunches).toHaveBeenLastCalledWith(expect.objectContaining({ search: 'demo', status: 'trading', sort: 'recent' }));
-    expect(window.location.search).toContain('search=demo');
-    expect(window.location.search).toContain('status=trading');
     await screen.findByText('Filtered token');
   });
 
@@ -556,12 +548,9 @@ describe('LaunchList', () => {
     expect(chainFilter.querySelector('[data-filter-menu]')).toHaveClass('bg-card');
     expect(getLaunches).toHaveBeenLastCalledWith({ cursor: undefined, chainId: [4663, 1, 10], platform: ['pons', 'other', 'third'], search: undefined, status: undefined, sort: 'volume24hUsd' });
     expect(window.location.search).toContain('chainId=4663%2C1%2C10');
-    const form = screen.getByRole('search', { name: /search and filter launches/i });
-    expect(within(form).getByDisplayValue('4663,1,10')).toHaveAttribute('name', 'chainId');
-    expect(within(form).getByDisplayValue('pons,other,third')).toHaveAttribute('name', 'platform');
   });
 
-  it('keeps the current rows visible while a filter request is pending and replaces them with results', async () => {
+  it('shows skeleton rows while a filter or sort request is pending and replaces them with results', async () => {
     let resolvePage!: (page: { items: LaunchSummary[]; nextCursor: null }) => void;
     vi.mocked(getLaunches).mockReturnValueOnce(new Promise((resolve) => { resolvePage = resolve; }));
     render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
@@ -569,8 +558,8 @@ describe('LaunchList', () => {
     const filter = screen.getByRole('navigation', { name: /filter by launchpad/i });
     fireEvent.click(within(filter).getByRole('button', { name: 'NOXA' }));
     expect(screen.getByRole('table', { name: /launch list/i })).toHaveAttribute('aria-busy', 'true');
-    expect(screen.queryByTestId('launch-skeleton-row')).not.toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /view token a details/i })).toBeInTheDocument();
+    expect(screen.getAllByTestId('launch-skeleton-row').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: /view token a details/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/no launches match/i)).not.toBeInTheDocument();
 
     await act(async () => resolvePage({ items: [launch({ name: 'Filtered token' })], nextCursor: null }));
@@ -627,23 +616,19 @@ describe('LaunchList', () => {
     expect(screen.queryByRole('link', { name: /next page/i })).not.toBeInTheDocument();
   });
 
-  it('shows a search box and status filter that submit as a GET form, preserving the current values', () => {
-    render(
-      <LaunchList
-        page={{ items: [launch()], nextCursor: null }}
-        sources={oneChainOneSource}
-        error={false}
-        search="demo"
-        status="swept"
-      />,
-    );
+  it('has no search box or lifecycle select (the header search covers it)', () => {
+    render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={oneChainOneSource} error={false} />);
+    expect(screen.queryByRole('search')).not.toBeInTheDocument();
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /filter by lifecycle/i })).not.toBeInTheDocument();
+  });
 
-    const form = screen.getByRole('search', { name: /search and filter launches/i });
-    expect(form).toHaveAttribute('method', 'get');
-    const searchBox = within(form).getByRole('searchbox');
-    expect(searchBox).toHaveValue('demo');
-    const statusSelect = within(form).getByRole('combobox', { name: /filter by lifecycle/i });
-    expect(statusSelect).toHaveValue('swept');
+  it('in the loading state shows the real tabs and column header with placeholder rows and no empty message', () => {
+    render(<LaunchList page={{ items: [], nextCursor: null }} sources={[]} error={false} loading />);
+    expect(screen.getByRole('link', { name: 'Recently launched' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /24H Volume/ })).toBeInTheDocument();
+    expect(screen.getAllByTestId('launch-skeleton-row').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/no launches match/i)).not.toBeInTheDocument();
   });
 
   it('hides the next-page link when there is no further cursor', () => {

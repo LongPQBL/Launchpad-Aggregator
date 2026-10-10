@@ -33,7 +33,7 @@ export default async function TransactionsPage({ searchParams }: TransactionsPag
       <div className="space-y-4">
         {page
           ? <GlobalTransactionList heading="Transactions" transactions={page.items} nextCursor={page.nextCursor} chainIds={chainIds} selectedChainIds={selectedChainIds} />
-          : <div role="alert"><h1 className="text-2xl font-semibold">Transactions</h1><p>Could not load transactions from the server. Please try again.</p><a href="/transactions">Retry</a></div>}
+          : <div role="alert"><h1 className="text-2xl">Transactions</h1><p>Could not load transactions from the server. Please try again.</p><a href="/transactions">Retry</a></div>}
       </div>
     </>
   );

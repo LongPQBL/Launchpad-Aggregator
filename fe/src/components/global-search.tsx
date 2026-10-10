@@ -22,7 +22,7 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
         <>
           <TokenLogo logoUri={token.logoUri} symbol={displaySymbol(token.symbol)} chainId={token.chainId} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{displayName(token.name, token.tokenAddress)}</span>
+            <span className="block truncate text-sm">{displayName(token.name, token.tokenAddress)}</span>
             <span className="block text-xs text-muted-foreground">{displaySymbol(token.symbol)} · {token.platform}</span>
           </span>
         </>
@@ -35,7 +35,7 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
         <>
           <TokenLogo logoUri={pool.launchToken.logoUri} symbol={displaySymbol(pool.launchToken.symbol)} chainId={pool.chainId} />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium">{displaySymbol(pool.launchToken.symbol)} pool</span>
+            <span className="block truncate text-sm">{displaySymbol(pool.launchToken.symbol)} pool</span>
             <span className="block text-xs text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%</span>
           </span>
         </>
@@ -101,7 +101,7 @@ export function GlobalSearch() {
     if (group.length === 0) return null;
     return (
       <div role="group" aria-label={label}>
-        <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="px-3 pb-1 pt-2 text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
         {group.map((option, index) => {
           const active = offset + index === activeIndex;
           return (

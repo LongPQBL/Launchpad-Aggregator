@@ -5,6 +5,7 @@ import { useBalance, useReadContract } from 'wagmi';
 import type { PoolSummary } from '@/api/client';
 import { erc20Abi } from '@/trading/erc20Abi';
 import { robinhoodChain } from '@/wallet/config';
+import { RollingText } from '@/components/percent-change';
 
 const compactAmount = new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 });
 
@@ -72,15 +73,15 @@ export function PoolBalances({ protocol, poolAddress, displayed, other, priceInQ
     : total === 0 ? 50 : Math.min(100, Math.max(0, (displayedValue! / total) * 100));
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-lg font-semibold">
-        <span>{compactAmount.format(displayedAmount)} {displayed.symbol ?? ''}</span>
-        <span>{compactAmount.format(otherAmount)} {other.symbol ?? ''}</span>
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-base">
+        <span><RollingText text={compactAmount.format(displayedAmount)} value={displayedAmount} /> {displayed.symbol ?? ''}</span>
+        <span><RollingText text={compactAmount.format(otherAmount)} value={otherAmount} /> {other.symbol ?? ''}</span>
       </div>
       {displayedPercent !== null && (
-        <div className="flex h-1.5 overflow-hidden rounded-full bg-muted" role="img" aria-label="Pool composition">
-          <div className="h-full bg-lime-400" style={{ width: `${displayedPercent}%` }} />
-          <div className="h-full bg-indigo-400" style={{ width: `${100 - displayedPercent}%` }} />
+        <div className="flex h-2 overflow-hidden rounded-full bg-muted" role="img" aria-label="Pool composition">
+          <div className="h-full bg-teal-500" style={{ width: `${displayedPercent}%` }} />
+          <div className="h-full bg-purple-400" style={{ width: `${100 - displayedPercent}%` }} />
         </div>
       )}
     </div>

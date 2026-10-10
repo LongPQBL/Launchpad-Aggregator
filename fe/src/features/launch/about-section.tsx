@@ -131,7 +131,7 @@ export function AboutSection({ description, tokenAddress, explorerUrl, explorerL
             {description}
           </p>
           {(canExpand || expanded) && (
-            <button type="button" onClick={() => setExpanded((value) => !value)} className="text-sm font-medium">
+            <button type="button" onClick={() => setExpanded((value) => !value)} className="text-base">
               {expanded ? 'Show less' : 'Show more'}
             </button>
           )}

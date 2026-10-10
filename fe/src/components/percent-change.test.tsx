@@ -38,7 +38,8 @@ describe('PercentChange rolling digits', () => {
     expect(rolls).toHaveLength(1);
     expect(rolls[0].getAttribute('data-direction')).toBe('up');
     expect(rolls[0].textContent).toBe('45');
-    expect(container.querySelector('[aria-hidden="true"]:not(.text-xs)')?.textContent).toBe('4');
+    // The outgoing glyph leaves aria-hidden inside the roll; the settled value is the wrapper's aria-label.
+    expect(rolls[0].querySelector('[aria-hidden="true"]')?.textContent).toBe('4');
   });
   it('rolls downward when the value fell', () => {
     const { rerender } = render(<PercentChange value="25.78" />);

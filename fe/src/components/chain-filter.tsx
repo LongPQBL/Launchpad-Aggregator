@@ -31,12 +31,12 @@ export function SelectionIcons({ values, icon }: { values: readonly (string | nu
   return (
     <span className="inline-flex items-center pl-1.5" aria-hidden="true">
       {values.slice(0, 3).map((value) => (
-        <span key={value} className="-ml-1.5 flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full border border-background bg-muted text-[10px] font-semibold">
+        <span key={value} className="-ml-1.5 flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full border border-background bg-muted text-[10px]">
           {icon(value)}
         </span>
       ))}
       {values.length > 3 && (
-        <span className="-ml-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold">+{values.length - 3}</span>
+        <span className="-ml-1.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-background bg-muted text-[10px]">+{values.length - 3}</span>
       )}
     </span>
   );
@@ -46,7 +46,7 @@ export function ChainFilterIcon({ id }: { id: number }) {
   return chainIcon(id) ? (
     // eslint-disable-next-line @next/next/no-img-element -- fixed-size chain logo
     <img src={chainIcon(id)} alt="" width={20} height={20} className="h-5 w-5 rounded-full" />
-  ) : <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold uppercase">{chainName(id).slice(0, 2)}</span>;
+  ) : <span aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] uppercase">{chainName(id).slice(0, 2)}</span>;
 }
 
 export function ChainFilter({ chainIds, selected, onChange, open, onToggle }: { chainIds: readonly number[]; selected: readonly number[]; onChange: (values: number[]) => void; open: boolean; onToggle: () => void }) {
