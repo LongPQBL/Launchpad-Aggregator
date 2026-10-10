@@ -20,9 +20,12 @@ describe('AppShell', () => {
     expect(screen.getByTestId('app-shell')).not.toHaveClass('dark');
   });
 
-  it('puts the unified token and pool search in the header', () => {
+  it('puts the search button immediately before the theme toggle in the header', () => {
     render(<AppShell><p>Content</p></AppShell>);
-    expect(screen.getByRole('banner')).toContainElement(screen.getByRole('combobox', { name: 'Search tokens and pools' }));
+    const search = screen.getByRole('button', { name: 'Search tokens and pools' });
+    const theme = screen.getByRole('button', { name: /Switch to .* theme/ });
+    expect(search.parentElement).toBe(theme.parentElement);
+    expect(search.nextElementSibling).toBe(theme);
   });
 
   it('places wallet access in the header without adding trading controls', () => {

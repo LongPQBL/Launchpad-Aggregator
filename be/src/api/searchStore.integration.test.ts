@@ -33,6 +33,9 @@ beforeAll(async () => {
     await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES ($1,'uniswap_v4',$2,$3) ON CONFLICT DO NOTHING`,
       [chainId, poolId, token]);
   }
+  await pool.query(`INSERT INTO launch_stats (chain_id, token_address, stats, computed_at)
+    VALUES ($1, $2, $3, now()) ON CONFLICT (chain_id, token_address) DO UPDATE SET stats=EXCLUDED.stats`,
+  [chainId, tokenA, JSON.stringify({ priceUsd: '0.05', change1d: '12.5' })]);
 });
 
 afterAll(async () => {
@@ -67,7 +70,29 @@ describe('search store', () => {
     expect((await store.search('z_rb', 5)).tokens).toEqual([]);
   });
 
-  it('returns nothing for a query shorter than two characters', async () => {
-    expect(await store.search('z', 5)).toEqual({ tokens: [], pools: [] });
+  it('returns matching token and pool from the first character', async () => {
+    const result = await store.search('z', 5);
+    expect(result.tokens).toEqual(expect.arrayContaining([expect.objectContaining({ tokenAddress: tokenA })]));
+    expect(result.pools).toEqual(expect.arrayContaining([expect.objectContaining({ poolId })]));
+  });
+
+  it('filters before limiting results to the selected networks', async () => {
+    expect(await store.search('z', 5, [8453])).toEqual({ tokens: [], pools: [] });
+    expect((await store.search('z', 5, [4663])).tokens[0]).toMatchObject({ tokenAddress: tokenA });
+  });
+
+  it('returns market fields and both sides of each pool for search rows', async () => {
+    const result = await store.search('zorbtoken', 5);
+    expect(result.tokens[0]).toHaveProperty('priceUsd');
+    expect(result.tokens[0]).toHaveProperty('change1d');
+    expect(result.pools[0]).toHaveProperty('currency0Symbol');
+    expect(result.pools[0]).toHaveProperty('currency1Symbol', 'ZRBA');
+    expect(result.pools[0]).toHaveProperty('volume24hUsd');
+    expect(result.pools[0]).toHaveProperty('ponsDesignated', false);
+  });
+
+  it('withholds cached token price and change when the launch coverage is incomplete', async () => {
+    const result = await store.search('zorbtoken', 5);
+    expect(result.tokens[0]).toMatchObject({ priceUsd: null, change1d: null });
   });
 });

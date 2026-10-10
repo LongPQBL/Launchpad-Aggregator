@@ -18,9 +18,33 @@ describe('search API', () => {
     expect(calls).toEqual([['pons', 10]]);
   });
 
-  it('rejects a too-short query or a non-numeric limit, and reports 503 when no store is configured', async () => {
+  it('accepts a single character and forwards selected networks', async () => {
+    const calls: unknown[] = [];
+    const search: SearchStore = { async search(...args) { calls.push(args); return { tokens: [], pools: [] }; } };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, search });
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=z&chainId=4663,8453' })).statusCode).toBe(200);
+    expect(calls).toEqual([['z', 5, [4663, 8453]]]);
+  });
+
+  it('keeps market figures and both pool logos in the API response', async () => {
+    const search: SearchStore = { async search() { return {
+      tokens: [{ chainId: 4663, tokenAddress: '0xaaa', name: 'Zorb', symbol: 'ZRB', logoUri: null,
+        platform: 'pons', priceUsd: '0.05', change1d: '12.5' }],
+      pools: [{ chainId: 4663, protocol: 'uniswap_v4' as const, poolId: '0xbbb', fee: 3000,
+        currency0: '0xaaa', currency1: '0x0', currency0Symbol: 'ZRB', currency0LogoUri: 'zorb.png',
+        currency1Symbol: 'ETH', currency1LogoUri: 'eth.png', volume24hUsd: '1234', ponsDesignated: false,
+        launchToken: { address: '0xaaa', name: 'Zorb', symbol: 'ZRB', logoUri: null } }],
+    }; } };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, search });
+    const response = await app.inject({ method: 'GET', url: '/v1/search?q=z' });
+    expect(response.json().tokens[0]).toMatchObject({ priceUsd: '0.05', change1d: '12.5' });
+    expect(response.json().pools[0]).toMatchObject({ currency0Symbol: 'ZRB', currency1Symbol: 'ETH', volume24hUsd: '1234' });
+  });
+
+  it('rejects an empty query or invalid network and limit, and reports 503 when no store is configured', async () => {
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data });
-    expect((await app.inject({ method: 'GET', url: '/v1/search?q=p' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=%20' })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/v1/search?q=p&chainId=bad' })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=pons&limit=x' })).statusCode).toBe(400);
     expect((await app.inject({ method: 'GET', url: '/v1/search?q=pons' })).statusCode).toBe(503);
   });

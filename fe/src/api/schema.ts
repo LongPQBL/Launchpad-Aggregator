@@ -1027,6 +1027,8 @@ export interface paths {
                                 symbol?: string | null;
                                 logoUri?: string | null;
                                 platform?: string;
+                                priceUsd?: string | null;
+                                change1d?: string | null;
                             }[];
                             pools?: {
                                 chainId?: number;
@@ -1035,6 +1037,12 @@ export interface paths {
                                 fee?: number;
                                 currency0?: string;
                                 currency1?: string;
+                                currency0Symbol?: string | null;
+                                currency0LogoUri?: string | null;
+                                currency1Symbol?: string | null;
+                                currency1LogoUri?: string | null;
+                                volume24hUsd?: string | null;
+                                ponsDesignated?: boolean;
                                 launchToken?: {
                                     address?: string;
                                     name?: string | null;

@@ -159,10 +159,14 @@ export const searchResults = { type: 'object', properties: {
   tokens: { type: 'array', items: { type: 'object', properties: {
     chainId: { type: 'integer' }, tokenAddress: { type: 'string' }, name: { type: 'string', nullable: true },
     symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true }, platform: { type: 'string' },
+    priceUsd: nullableMetric, change1d: nullableMetric,
   } } },
   pools: { type: 'array', items: { type: 'object', properties: {
     chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' }, fee: { type: 'integer' },
     currency0: { type: 'string' }, currency1: { type: 'string' },
+    currency0Symbol: nullableMetric, currency0LogoUri: nullableMetric,
+    currency1Symbol: nullableMetric, currency1LogoUri: nullableMetric, volume24hUsd: nullableMetric,
+    ponsDesignated: { type: 'boolean' },
     launchToken: { type: 'object', properties: {
       address: { type: 'string' }, name: { type: 'string', nullable: true },
       symbol: { type: 'string', nullable: true }, logoUri: { type: 'string', nullable: true },

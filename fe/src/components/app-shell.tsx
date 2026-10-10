@@ -13,8 +13,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-5"><span className="text-lg">Launchpad Aggregator</span>
             <MainNav /></div>
-          <div className="order-last w-full md:order-none md:w-auto md:flex-1 md:px-6"><GlobalSearch /></div>
           <div className="flex items-center gap-3">
+            <GlobalSearch />
             <ThemeToggle />
             <WalletControl />
           </div>

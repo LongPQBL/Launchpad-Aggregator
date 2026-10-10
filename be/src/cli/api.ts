@@ -15,7 +15,7 @@ const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
 const app = await createApiServer({ feOrigin: config.feOrigin, data: createApiStore(pool, rpcClient),
-  pools: createPoolApiStore(pool, rpcClient), search: createSearchStore(pool), wallets: createWalletStore(pool), events });
+  pools: createPoolApiStore(pool, rpcClient), search: createSearchStore(pool, rpcClient), wallets: createWalletStore(pool), events });
 
 try {
   await app.listen({ host: config.host, port: config.port });

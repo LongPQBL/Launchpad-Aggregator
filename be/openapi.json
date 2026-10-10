@@ -1918,6 +1918,14 @@
                           },
                           "platform": {
                             "type": "string"
+                          },
+                          "priceUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "change1d": {
+                            "type": "string",
+                            "nullable": true
                           }
                         }
                       }
@@ -1944,6 +1952,29 @@
                           },
                           "currency1": {
                             "type": "string"
+                          },
+                          "currency0Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency0LogoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1Symbol": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "currency1LogoUri": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "volume24hUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "ponsDesignated": {
+                            "type": "boolean"
                           },
                           "launchToken": {
                             "type": "object",

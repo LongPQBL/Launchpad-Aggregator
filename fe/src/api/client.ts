@@ -214,14 +214,17 @@ export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protoc
 }
 
 // Mirrors be/src/api/searchStore.ts. Lightweight identity-only hits: no market stats, so a dropdown can render fast.
-export interface SearchTokenHit { chainId: number; tokenAddress: string; name: string | null; symbol: string | null; logoUri: string | null; platform: string }
+export interface SearchTokenHit { chainId: number; tokenAddress: string; name: string | null; symbol: string | null; logoUri: string | null; platform: string;
+  priceUsd: string | null; change1d: string | null }
 export interface SearchPoolHit {
   chainId: number; protocol: string; poolId: string; fee: number; currency0: string; currency1: string;
+  currency0Symbol: string | null; currency0LogoUri: string | null;
+  currency1Symbol: string | null; currency1LogoUri: string | null; volume24hUsd: string | null; ponsDesignated: boolean;
   launchToken: { address: string; name: string | null; symbol: string | null; logoUri: string | null };
 }
 export interface SearchResults { tokens: readonly SearchTokenHit[]; pools: readonly SearchPoolHit[] }
-export async function searchAll(query: string, signal?: AbortSignal): Promise<SearchResults> {
-  return request<SearchResults>('/v1/search', { q: query }, signal);
+export async function searchAll(query: string, signal?: AbortSignal, chainIds?: readonly number[]): Promise<SearchResults> {
+  return request<SearchResults>('/v1/search', { q: query, chainId: chainIds }, signal);
 }
 
 type GlobalTransactionsBody = paths['/v1/transactions']['get']['responses'][200]['content']['application/json'];
