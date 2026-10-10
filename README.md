@@ -123,6 +123,35 @@ cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill ho
 nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
 nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
+**Chart theo khoảng thời gian (1H / 1D / 1W / 1M / 1Y):** các tab của chart giá, Volume và TVL là
+khoảng thời gian xem, server tự chọn cỡ nến/cột (bảng nằm ở `be/src/charts/ranges.ts`):
+
+| Tab | Khoảng | Bucket |
+|---|---|---|
+| 1H | 1 giờ | 1 phút |
+| 1D | 24 giờ | 5 phút |
+| 1W | 7 ngày | 1 giờ |
+| 1M | 30 ngày | 4 giờ |
+| 1Y | 365 ngày | 1 ngày |
+
+API nhận `?range=1h|1d|1w|1m|1y` (mặc định `1d`). Volume và TVL được tính sẵn thay vì quét giao dịch
+mỗi lần xem:
+
+- `launch_volume_buckets` / `pool_volume_buckets`: do `candles:worker` và `pools:candles:worker` cập
+  nhật trong cùng giao dịch với nến (bucket 1 phút từ giao dịch, các bucket lớn hơn gộp từ bucket nhỏ
+  hơn liền kề). Bucket có giao dịch chưa định giá được thì volume là `null`, không phải 0.
+- `pool_tvl_buckets`: giá trị cuối cùng mỗi giờ / 4 giờ / ngày, ghi cùng lúc với mỗi snapshot TVL và
+  giữ sau khi snapshot thô bị xoá. 1W/1M/1Y đọc bảng này; 1H/1D đọc snapshot thô, nên cần chụp dày
+  hơn mặc định. Gợi ý: `POOL_TVL_SNAPSHOT_INTERVAL_SECONDS=60` (mặc định 3600). Đây chỉ là gợi ý, chưa
+  áp dụng cho worker nào đang chạy. Lịch sử TVL chỉ bắt đầu từ lúc bắt đầu chụp.
+
+Sau migration `0050`, chạy một lần để dựng lại volume lịch sử (tiếp tục được nếu bị dừng):
+
+```sh
+npm run -w be charts:backfill-volume
+```
+
+
 **Snapshot TVL của pool V4:** `%` thay đổi TVL so với 24h trước cần lịch sử TVL, mà chain chỉ
 trả TVL tại block hiện tại, nên có một worker chụp TVL mỗi giờ vào bảng `pool_tvl_snapshots`
 (migration `0047`):

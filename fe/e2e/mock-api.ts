@@ -126,6 +126,12 @@ const transactions = {
   nextCursor: null,
 };
 
+// Mirrors be/src/charts/ranges.ts: the server picks the bucket size for each range.
+const RANGE_INTERVAL_SECONDS: Record<string, number> = { '1h': 60, '1d': 300, '1w': 3600, '1m': 14_400, '1y': 86_400 };
+function rangeInterval(url: URL): number {
+  return RANGE_INTERVAL_SECONDS[url.searchParams.get('range') ?? '1d'] ?? 300;
+}
+
 function mockCandles(intervalSeconds: number, currency: 'quote' | 'usd') {
   const base = currency === 'usd' ? 0.00012 : 0.0001;
   const items = Array.from({ length: 60 }, (_, index) => {
@@ -331,7 +337,7 @@ export function startMockApi(port: number): Server {
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/pools`) {
       res.end(JSON.stringify({ items: launchPools, nextCursor: null, supportedProtocols: ['uniswap_v4'] }));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/candles`) {
-      const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? 3600);
+      const intervalSeconds = rangeInterval(url);
       const currency = url.searchParams.get('currency') === 'usd' ? 'usd' : 'quote';
       res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`) {
@@ -339,28 +345,27 @@ export function startMockApi(port: number): Server {
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/trades`) {
       res.end(JSON.stringify(trades));
     } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/candles`) {
-      const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? 3600);
+      const intervalSeconds = rangeInterval(url);
       const currency = url.searchParams.get('currency') === 'usd' ? 'usd' : 'quote';
       res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(url.pathname)) {
-      const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? 3600);
+      const intervalSeconds = rangeInterval(url);
       res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote')));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(url.pathname) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(url.pathname)) {
-      const intervalSeconds = Number(url.searchParams.get('intervalSeconds') ?? DAY_SECONDS);
-      if (intervalSeconds === DAY_SECONDS) {
-        res.end(JSON.stringify(poolHistory));
-      } else {
-        // Finer buckets: 96 of them ending now, with the same unavailable / real-zero pattern as the daily mock.
-        res.end(JSON.stringify({
-          items: Array.from({ length: 96 }, (_, index) => ({
-            day: Math.floor(1_780_000_000 / intervalSeconds) * intervalSeconds - (95 - index) * intervalSeconds,
-            tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
-            volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
-            tvlUsd: index % 12 === 0 ? String(40_000 + index * 50) : null,
-          })),
-          complete: true,
-        }));
-      }
+      const intervalSeconds = rangeInterval(url);
+      const rangeBuckets: Record<number, number> = { 60: 60, 300: 288, 3600: 168, 14_400: 180, 86_400: 365 };
+      const count = rangeBuckets[intervalSeconds] ?? 96;
+      // `count` buckets ending now, with an unavailable bucket and real zeros among them.
+      res.end(JSON.stringify({
+        intervalSeconds,
+        items: Array.from({ length: count }, (_, index) => ({
+          day: Math.floor(1_780_000_000 / intervalSeconds) * intervalSeconds - (count - 1 - index) * intervalSeconds,
+          tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
+          volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
+          tvlUsd: index % 12 === 0 ? String(40_000 + index * 50) : null,
+        })),
+        complete: true,
+      }));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
         txHash: `0x${(index + 900).toString(16).padStart(64, '0')}`,

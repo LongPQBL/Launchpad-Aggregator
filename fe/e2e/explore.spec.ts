@@ -61,14 +61,18 @@ test('the Portfolio page asks for a wallet instead of showing anything when none
   await expect(page.getByText(/Connect your wallet/)).toBeVisible();
 });
 
-test('the pool page shows daily Volume and TVL bars, with an unavailable day drawn as unavailable', async ({ page }) => {
+test('the pool page draws Volume for the selected range, and the range tabs switch the series', async ({ page }) => {
   await page.goto('/pools');
   await page.getByRole('link', { name: /View pool MOCK1/ }).first().click();
+  await page.getByRole('tab', { name: 'Volume' }).click();
   const history = page.getByRole('region', { name: 'Pool history' });
   await expect(history).toBeVisible();
-  await expect(history.getByTestId('history-bar-unavailable')).toHaveCount(1);
-  await history.getByRole('tab', { name: 'TVL' }).click();
-  await expect(history.getByTestId('history-bar')).not.toHaveCount(0);
+  await expect(history.getByTestId('history-chart-container')).toBeVisible();
+  // One bucket in the mock is unavailable, so no window total is claimed.
+  await expect(history.getByTestId('pool-history-readout')).toContainText('Unavailable');
+  await history.getByRole('link', { name: '1H' }).click();
+  await expect(history.getByRole('link', { name: '1H' })).toHaveAttribute('aria-current', 'page');
+  await expect(page).toHaveURL(/range=1h/);
 });
 
 test('moving between pages keeps the header and does not reload the browser page', async ({ page }) => {
