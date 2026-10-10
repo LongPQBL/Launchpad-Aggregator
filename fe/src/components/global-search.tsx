@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 const DEBOUNCE_MS = 250;
 const PAGE_SIZE = 10;
-const PREVIEW_COUNT = 3;
+const PREVIEW_COUNT = 6;
 type SearchTab = 'all' | 'tokens' | 'pools';
 interface Option { key: string; href: string; node: React.ReactNode }
 interface SearchPage { key: string; data: SearchResults; offset: number; moreTokens: boolean; morePools: boolean }
@@ -210,16 +210,16 @@ export function GlobalSearch() {
     return <div role="group" aria-label={label}>
       <div className="flex items-center gap-2 px-3 pb-1 pt-3 text-sm text-muted-foreground">
         <SectionIcon kind={kind} />{label}
-        {tab === 'all' && hasMore && <button type="button" aria-label={`View all ${label}`}
-          onClick={() => selectTab(kind)} className="ml-auto flex items-center gap-1 text-foreground hover:text-primary">
-          View all <ViewAllIcon />
-        </button>}
       </div>
       {group.map((option, index) => <Link key={option.key} id={`${listId}-${offset + index}`} role="option"
         aria-selected={activeIndex === offset + index} href={option.href} onClick={close}
         className={cn('flex items-center gap-3 rounded-lg px-3 py-2.5 hover:bg-muted', activeIndex === offset + index && 'bg-muted')}>
         {option.node}
       </Link>)}
+      {tab === 'all' && hasMore && <button type="button" aria-label={`View all ${label}`}
+        onClick={() => selectTab(kind)} className="flex w-full items-center justify-center gap-1 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground">
+        View all <ViewAllIcon />
+      </button>}
     </div>;
   }
 

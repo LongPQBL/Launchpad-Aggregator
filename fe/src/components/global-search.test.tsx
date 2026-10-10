@@ -36,10 +36,10 @@ describe('GlobalSearch', () => {
     expect(dialog).toHaveClass('flex-col');
   });
 
-  it('shows recent suggestions before typing and previews three of each kind in All', async () => {
+  it('previews six recent results per group with View all below the last result', async () => {
     const many: SearchResults = {
-      tokens: Array.from({ length: 5 }, (_, index) => ({ ...results.tokens[0]!, tokenAddress: `0x${index}`, name: `Token ${index}` })),
-      pools: Array.from({ length: 5 }, (_, index) => ({ ...results.pools[0]!, poolId: `0x${index}` })),
+      tokens: Array.from({ length: 8 }, (_, index) => ({ ...results.tokens[0]!, tokenAddress: `0x${index}`, name: `Token ${index}` })),
+      pools: Array.from({ length: 8 }, (_, index) => ({ ...results.pools[0]!, poolId: `0x${index}` })),
     };
     vi.mocked(searchAll).mockResolvedValue(many);
     render(<GlobalSearch />);
@@ -47,14 +47,18 @@ describe('GlobalSearch', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(searchAll).toHaveBeenCalledWith('', expect.any(AbortSignal), undefined, 10, 0);
     expect(screen.getByText('Recently added')).toBeInTheDocument();
-    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(3);
-    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(3);
+    const tokenGroup = screen.getByRole('group', { name: 'Tokens' });
+    const poolGroup = screen.getByRole('group', { name: 'Pools' });
+    expect(within(tokenGroup).getAllByRole('option')).toHaveLength(6);
+    expect(within(poolGroup).getAllByRole('option')).toHaveLength(6);
+    expect(tokenGroup.lastElementChild).toBe(within(tokenGroup).getByRole('button', { name: 'View all Tokens' }));
+    expect(poolGroup.lastElementChild).toBe(within(poolGroup).getByRole('button', { name: 'View all Pools' }));
     fireEvent.click(within(screen.getByRole('group', { name: 'Tokens' })).getByRole('button', { name: 'View all Tokens' }));
     expect(screen.getByRole('tab', { name: 'Tokens' })).toHaveAttribute('aria-selected', 'true');
-    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(5);
+    expect(within(screen.getByRole('group', { name: 'Tokens' })).getAllByRole('option')).toHaveLength(8);
     expect(screen.queryByRole('group', { name: 'Pools' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Pools' }));
-    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(5);
+    expect(within(screen.getByRole('group', { name: 'Pools' })).getAllByRole('option')).toHaveLength(8);
   });
 
   it('loads additional matching results while scrolling a dedicated tab', async () => {
