@@ -592,8 +592,6 @@ export interface paths {
                                 quoteVolume?: string;
                                 volumeUsd?: string;
                                 tradeCount?: number;
-                                /** Format: date-time */
-                                computedAt?: string;
                             }[];
                             complete?: boolean;
                         };

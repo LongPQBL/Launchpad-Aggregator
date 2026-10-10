@@ -1072,10 +1072,6 @@
                           },
                           "tradeCount": {
                             "type": "integer"
-                          },
-                          "computedAt": {
-                            "type": "string",
-                            "format": "date-time"
                           }
                         }
                       }

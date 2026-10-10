@@ -112,7 +112,7 @@ export const globalTransaction = { type: 'object', properties: {
 export const candle = { type: 'object', properties: {
   intervalSeconds: { type: 'integer' }, bucketStart: { type: 'integer' },
   open: { type: 'string' }, high: { type: 'string' }, low: { type: 'string' }, close: { type: 'string' },
-  quoteVolume: { type: 'string' }, volumeUsd: { type: 'string' }, tradeCount: { type: 'integer' }, computedAt: { type: 'string', format: 'date-time' },
+  quoteVolume: { type: 'string' }, volumeUsd: { type: 'string' }, tradeCount: { type: 'integer' },
 } } as const;
 
 export function pageSchema(item: object) {

@@ -91,7 +91,7 @@ export interface CandleResponse {
 }
 export interface UsdCandleResponse {
   intervalSeconds: number; bucketStart: number; open: string; high: string; low: string; close: string;
-  volumeUsd: string; tradeCount: number; computedAt: string;
+  volumeUsd: string; tradeCount: number;
 }
 export interface ListQuery { limit: number; cursor?: string; chainId?: number; venue?: 'curve' }
 export interface LaunchListQuery extends Omit<ListQuery, 'chainId'> { chainId?: number | number[]; search?: string; status?: string; platform?: string | string[]; sort?: LaunchSort; direction?: SortDirection }

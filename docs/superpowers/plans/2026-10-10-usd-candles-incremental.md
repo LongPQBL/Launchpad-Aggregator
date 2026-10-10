@@ -1,5 +1,7 @@
 # Incremental USD candles — Implementation Plan
 
+> **Status: executed 2026-10-10** (tasks 1-5; see the spec's Measurement section). The old `usd_candles` table, `refreshUsdCandles` and `usd-candles:worker` are intentionally still present.
+
 > **For agentic workers:** Execute task-by-task on `main` (solo project; no worktree, no sub-agents). Steps use checkbox syntax. Do not start before the chart-ranges work is verified and the user has reviewed this plan.
 
 **Goal:** Replace the whole-token delete+re-insert of `usd_candles` with incremental, dirty-minute rollups that the USD chart reads by primary-key range.

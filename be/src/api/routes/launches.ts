@@ -160,6 +160,8 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       }
       const currency = request.query.currency ?? 'quote';
       if (currency !== 'quote' && currency !== 'usd') return reply.code(400).send({ error: 'Invalid candle currency' });
+      // USD candles are stored for the five range buckets only; the legacy 15-minute size is not carried over.
+      if (currency === 'usd' && interval === 900) return reply.code(400).send({ error: 'Invalid candle interval' });
       if (request.query.venue !== undefined && request.query.venue !== 'curve') return reply.code(400).send({ error: 'Invalid venue' });
       // USD candles come from the launch-wide cache, which has no venue dimension.
       if (request.query.venue !== undefined && currency === 'usd') return reply.code(400).send({ error: 'USD candles are not available per venue' });

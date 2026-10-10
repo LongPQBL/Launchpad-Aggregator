@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
+import { createApiStore } from '../api/store.js';
+import { markRollupBackfilled } from './rollupState.js';
 import { rebuildUsdCandles } from './usdCandleRollup.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -64,6 +66,7 @@ afterAll(async () => {
   await pool.query('DELETE FROM trades WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM candle_dirty_buckets WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM launch_usd_candle_buckets WHERE chain_id = $1', [chainId]);
+  await pool.query("DELETE FROM chart_rollup_state WHERE name = 'launch_usd_candles_done'");
   await pool.query('DELETE FROM venues WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM launches WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = $1', [chainId]);
@@ -79,6 +82,17 @@ describe('USD candle rollup', () => {
     await addTrade(curveVenue, 601, 1, minute + 20, 1n, 3n); // $6/token
     await rebuild([minute]);
     expect(await rows(60)).toEqual([{ bucket_start: minute, open: 2, high: 6, low: 2, close: 4, volume_usd: 12, trade_count: 3, unpriced_count: 0 }]);
+  });
+
+  it('serves priced buckets newest first without the unpriced ones, and reports incomplete until the backfill ran', async () => {
+    await pool.query("DELETE FROM chart_rollup_state WHERE name = 'launch_usd_candles_done'");
+    const store = createApiStore(pool);
+    const before = await store.listUsdCandles(chainId, token, 60, minute + 600);
+    expect(before.complete).toBe(false);
+    expect(before.items).toEqual([{ intervalSeconds: 60, bucketStart: minute, open: '2.00000000000000000000', high: '6.00000000000000000000',
+      low: '2.00000000000000000000', close: '4.00000000000000000000', volumeUsd: '12.000000', tradeCount: 3 }]);
+    await markRollupBackfilled(pool, 'launch_usd_candles');
+    expect((await store.listUsdCandles(chainId, token, 60, minute + 600)).items).toHaveLength(1);
   });
 
   it('derives every coarser bucket from the finer ones', async () => {

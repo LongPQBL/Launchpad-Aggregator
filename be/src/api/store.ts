@@ -19,6 +19,7 @@ import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { intervalTtlMemo } from '../charts/intervalMemo.js';
+import { isRollupBackfilled } from '../charts/rollupState.js';
 import { ttlMemo } from './ttlMemo.js';
 import { readLaunchStats } from './launchStatsStore.js';
 import { readLaunchHistory } from '../market/launchHistory.js';
@@ -775,16 +776,18 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       if (!launch) return { items: [], complete: false };
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
       const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
-      const rows = (await pool.query(`SELECT bucket_start, open, high, low, close, volume_usd, trade_count, computed_at
-        FROM usd_candles WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = $3
-          AND bucket_start >= $4 AND bucket_start < $5
+      // A bucket with any unpriced trade is not a candle (a gap, never an invented price).
+      const rows = (await pool.query(`SELECT bucket_start, open, high, low, close, volume_usd, trade_count
+        FROM launch_usd_candle_buckets WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = $3
+          AND bucket_start >= $4 AND bucket_start < $5 AND unpriced_count = 0
         ORDER BY bucket_start DESC LIMIT 500`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end])).rows as Row[];
+      // Until the backfill has covered history, a missing bucket may just be unprocessed.
+      const backfilled = await isRollupBackfilled(pool, 'launch_usd_candles');
       return {
-        complete: Boolean(launch.launch_coverage_complete),
+        complete: Boolean(launch.launch_coverage_complete) && backfilled,
         items: rows.map((row) => ({
           intervalSeconds, bucketStart: number(row.bucket_start), open: string(row.open), high: string(row.high),
           low: string(row.low), close: string(row.close), volumeUsd: string(row.volume_usd), tradeCount: number(row.trade_count),
-          computedAt: new Date(row.computed_at as string | Date).toISOString(),
         })),
       };
     },

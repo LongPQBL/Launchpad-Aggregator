@@ -68,6 +68,19 @@ Same as the volume rollups: 60 s kept 24 h, 5 m 3 d, 1 h 14 d, 4 h 60 d, 1 d for
 - Measurement: cost of one new trade on a token with >100k trades, before (full rebuild) and after (one minute and its
   containing buckets), recorded in the plan.
 
+## Measurement and parity (2026-10-10, local dev DB)
+
+- Cost of keeping one token's USD candles current (token with 129,173 official trades, DB busy with two backfills):
+  old `refreshUsdCandles` over the 5 intervals 184,288 ms; new `rebuildUsdCandles` for one dirty minute and its 4 containing
+  buckets 297 ms.
+- Parity: `be/src/charts/usdCandleParity.integration.test.ts` runs the old full rebuild and the new rollup on the same
+  five hours of two-venue trades (price moving across three oracle rounds, one unpriced minute, spanning midnight UTC) and
+  requires the same buckets with the same OHLC, volume and trade count for all five intervals. The dev DB had no
+  `usd_candles` rows to compare against, so `npm run -w be usd-candles:compare` (same check on real launches) is for
+  environments where the old worker has run.
+- Reader: `listUsdCandles` now reads `launch_usd_candle_buckets` (`unpriced_count = 0`), drops `computedAt`, and reports
+  `complete: false` until the `launch_usd_candles` backfill has finished. USD + the legacy 900 s interval is rejected (400).
+
 ## Out of scope
 
 Per-venue USD candles; changing the price-validity rules; pool USD candles (pools have no USD candle series).

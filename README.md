@@ -151,7 +151,12 @@ Sau migration `0050`, chạy một lần để dựng lại volume lịch sử (
 npm run -w be charts:backfill-volume
 ```
 
-Khi backfill chạy xong, nó ghi `chart_rollup_state` (`launch_volume_done`, `pool_volume_done`). Trước đó API trả
+Nến USD (chế độ USD của chart giá) cũng được tính sẵn theo từng phút trong `launch_usd_candle_buckets`
+(cùng worker, cùng giao dịch). Dựng lại lịch sử bằng `npm run -w be charts:backfill-volume` (hoặc chỉ phần này:
+`... charts:backfill-volume -- --only usd`). `usd-candles:worker` cũ không còn cần thiết sau khi backfill xong; bảng
+`usd_candles` được giữ lại để so sánh (`npm run -w be usd-candles:compare`) và sẽ gỡ ở một thay đổi riêng.
+
+Khi backfill chạy xong, nó ghi `chart_rollup_state` (`launch_volume_done`, `pool_volume_done`, `launch_usd_candles_done`). Trước đó API trả
 `complete: false` và bucket không có dòng là `null` (không phải $0), vì có thể chỉ là chưa dựng lại.
 
 
