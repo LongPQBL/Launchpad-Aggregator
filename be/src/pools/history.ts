@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import type { UsdPriceClient } from '../market/usdPricing.js';
 import { assetDecimals, type PoolKey } from './stats.js';
+import { isRollupBackfilled } from '../charts/rollupState.js';
 import { TVL_BUCKET_INTERVALS } from './tvlSnapshots.js';
 
 const DAY_SECONDS = 86_400;
@@ -46,7 +47,8 @@ export async function readPoolHistory(pool: Pool, key: PoolKey, options: { inter
     [key.chainId, key.protocol, poolId]);
   const catalog = found.rows[0] as { currency0: string; currency1: string; coverage_status: string } | undefined;
   if (!catalog) throw new Error('Pool not found');
-  const complete = catalog.coverage_status === 'caught_up';
+  // Until the backfill has covered history, a bucket without a row may just be unprocessed — not a real zero.
+  const complete = catalog.coverage_status === 'caught_up' && await isRollupBackfilled(pool, 'pool_volume');
 
   const lastDay = Math.floor(options.asOf / step) * step;
   const firstDay = lastDay - (options.buckets - 1) * step;

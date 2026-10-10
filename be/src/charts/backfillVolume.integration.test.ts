@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { backfillLaunchVolume, backfillPoolVolume } from './backfillVolume.js';
+import { isRollupBackfilled } from './rollupState.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -18,7 +19,7 @@ const minute = 1_800_000_000;
 const e18 = 10n ** 18n;
 
 beforeAll(async () => {
-  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume')");
+  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume','launch_volume_done','pool_volume_done')");
   await pool.query(`INSERT INTO sources (id, chain_id, version, factory_address, start_block, scanned_to_block, confirmed_to_block, status)
     VALUES ($1,$2,'v2',$3,0,0,0,'caught_up') ON CONFLICT DO NOTHING`, [source, chainId, `0x${'f5'.repeat(20)}`]);
   await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, name, symbol, token_decimals, platform, protocol_version,
@@ -61,12 +62,13 @@ afterAll(async () => {
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM sources WHERE id = $1', [source]);
-  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume')");
+  await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume','launch_volume_done','pool_volume_done')");
   await pool.end();
 });
 
 describe('volume bucket backfill', () => {
   it('rebuilds launch and pool buckets from trades, then resumes as a no-op', async () => {
+    expect(await isRollupBackfilled(pool, 'launch_volume')).toBe(false);
     expect(await backfillLaunchVolume(pool)).toBeGreaterThan(0);
     expect(await backfillPoolVolume(pool)).toBeGreaterThan(0);
     const hourly = (await pool.query(`SELECT bucket_start::int, volume_usd, trade_count FROM launch_volume_buckets
@@ -75,6 +77,8 @@ describe('volume bucket backfill', () => {
     expect(hourly.map((row) => [row.trade_count, Number(row.volume_usd)])).toEqual([[1, 2], [1, 2]]);
     const poolDaily = await pool.query('SELECT trade_count FROM pool_volume_buckets WHERE chain_id = $1 AND interval_seconds = 86400', [chainId]);
     expect(poolDaily.rows).toEqual([{ trade_count: 1 }]);
+    expect(await isRollupBackfilled(pool, 'launch_volume')).toBe(true);
+    expect(await isRollupBackfilled(pool, 'pool_volume')).toBe(true);
     expect(await backfillLaunchVolume(pool)).toBe(0);
     expect(await backfillPoolVolume(pool)).toBe(0);
   });

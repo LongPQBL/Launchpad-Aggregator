@@ -151,6 +151,9 @@ Sau migration `0050`, chạy một lần để dựng lại volume lịch sử (
 npm run -w be charts:backfill-volume
 ```
 
+Khi backfill chạy xong, nó ghi `chart_rollup_state` (`launch_volume_done`, `pool_volume_done`). Trước đó API trả
+`complete: false` và bucket không có dòng là `null` (không phải $0), vì có thể chỉ là chưa dựng lại.
+
 
 **Snapshot TVL của pool V4:** `%` thay đổi TVL so với 24h trước cần lịch sử TVL, mà chain chỉ
 trả TVL tại block hiện tại, nên có một worker chụp TVL mỗi giờ vào bảng `pool_tvl_snapshots`

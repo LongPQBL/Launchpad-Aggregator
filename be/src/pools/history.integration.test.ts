@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { readPoolDailyHistory, readPoolHistory } from './history.js';
+import { markRollupBackfilled } from '../charts/rollupState.js';
 import { refreshDirtyPoolCandles } from './candleCache.js';
 import { insertTvlSnapshot } from './tvlSnapshots.js';
 
@@ -56,6 +57,7 @@ beforeAll(async () => {
   await swap('4', 102, 10 * DAY + 200, (2n * 10n ** 18n).toString());
   await swap('6', 201, 11 * DAY + 100, (10n ** 18n).toString());
   await settle();
+  await markRollupBackfilled(pool, 'pool_volume');
   await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 150n, capturedAtSeconds: 10 * DAY + 50,
     coreAmount0Raw: 1n, coreAmount1Raw: 1n, sqrtPriceX96: 1n, quoteAddress: b, tvlUsd: '100' });
   await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 160n, capturedAtSeconds: 10 * DAY + 5000,
@@ -66,6 +68,7 @@ afterAll(async () => {
   await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]);
   await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id=$1', [poolId]);
   await pool.query('DELETE FROM pool_volume_buckets WHERE pool_id=$1', [poolId]);
+  await pool.query("DELETE FROM chart_rollup_state WHERE name = 'pool_volume_done'");
   await pool.query('DELETE FROM pool_trades WHERE pool_id=$1', [poolId]);
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, poolId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id=$1 AND feed_address=$2', [chainId, feed]);

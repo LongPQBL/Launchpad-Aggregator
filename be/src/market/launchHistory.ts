@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { HISTORY_INTERVALS, MAX_HISTORY_BUCKETS, type PoolDayHistory, type PoolHistoryResult } from '../pools/history.js';
+import { isRollupBackfilled } from '../charts/rollupState.js';
 import { TVL_BUCKET_INTERVALS } from '../pools/tvlSnapshots.js';
 
 function trimFractionZeros(value: string): string {
@@ -59,15 +60,17 @@ export async function readLaunchHistory(pool: Pool, options: {
   const tvlByBucket = new Map<number, string>();
   for (const row of tvl.rows) tvlByBucket.set(Number(row.bucket), trimFractionZeros(String(row.tvl_usd)));
 
+  // Until the backfill has covered history, a bucket without a row may just be unprocessed — not a real zero.
+  const complete = options.complete && await isRollupBackfilled(pool, 'launch_volume');
   const items: PoolDayHistory[] = [];
   for (let bucket = first; bucket <= last; bucket += step) {
     const traded = volumeByBucket.get(bucket);
     items.push({
       day: bucket,
       tradeCount: traded?.tradeCount ?? 0,
-      volumeUsd: traded ? traded.volumeUsd : options.complete ? '0' : null,
+      volumeUsd: traded ? traded.volumeUsd : complete ? '0' : null,
       tvlUsd: tvlByBucket.get(bucket) ?? null,
     });
   }
-  return { items, complete: options.complete && pending.rowCount === 0, intervalSeconds: step };
+  return { items, complete: complete && pending.rowCount === 0, intervalSeconds: step };
 }

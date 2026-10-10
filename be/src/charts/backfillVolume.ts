@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { markRollupBackfilled } from './rollupState.js';
 import { rebuildLaunchVolume, rebuildPoolVolume } from './volumeRollup.js';
 
 const MINUTES_PER_TRANSACTION = 500;
@@ -60,6 +61,7 @@ export async function backfillLaunchVolume(pool: Pool, log: (message: string) =>
     await writeCursor(pool, name, cursor);
     log(`launch volume: through launch block ${cursor} (${launches} launches)`);
   }
+  await markRollupBackfilled(pool, 'launch_volume');
   return launches;
 }
 
@@ -86,5 +88,6 @@ export async function backfillPoolVolume(pool: Pool, log: (message: string) => v
     await writeCursor(pool, name, cursor);
     log(`pool volume: through pool block ${cursor} (${pools} pools)`);
   }
+  await markRollupBackfilled(pool, 'pool_volume');
   return pools;
 }

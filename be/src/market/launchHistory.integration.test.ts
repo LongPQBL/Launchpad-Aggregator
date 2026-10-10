@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { refreshDirtyCandles } from './candleCache.js';
+import { markRollupBackfilled } from '../charts/rollupState.js';
 import { insertTvlSnapshot } from '../pools/tvlSnapshots.js';
 import { readLaunchHistory } from './launchHistory.js';
 
@@ -49,11 +50,13 @@ beforeAll(async () => {
   await trade(602, 1, base + 70, 2n, 1n);  // minute 2: price 1.00 USD per token
   await trade(300, 1, base + 130, 1n, 1n); // before the round's block: unpriced, so its minute is omitted
   await settle();
+  await markRollupBackfilled(pool, 'launch_volume');
 });
 
 afterAll(async () => {
     await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM launch_volume_buckets WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query("DELETE FROM chart_rollup_state WHERE name = 'launch_volume_done'");
   await pool.query('DELETE FROM venues WHERE id = $1', [venueId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = $1 AND feed_address = $2', [chainId, feed]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = $1 AND quote_asset_address = $2', [chainId, quote]);
@@ -79,6 +82,15 @@ describe('readLaunchHistory', () => {
   it('rejects an unsupported interval or bucket count', async () => {
     await expect(readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 7, buckets: 3, asOf: 1, complete: true })).rejects.toThrow('Invalid launch history window');
     await expect(readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 401, asOf: 1, complete: true })).rejects.toThrow('Invalid launch history window');
+  });
+
+  it('is not complete, and quiet buckets are unavailable rather than $0, until the volume backfill has run', async () => {
+    await pool.query("DELETE FROM chart_rollup_state WHERE name = 'launch_volume_done'");
+    try {
+      const result = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 4, asOf: base + 190, complete: true });
+      expect(result.complete).toBe(false);
+      expect(result.items.at(-1)).toMatchObject({ day: base + 180, volumeUsd: null });
+    } finally { await markRollupBackfilled(pool, 'launch_volume'); }
   });
 
   it('is not complete while a minute in the window still waits for its rollup', async () => {
