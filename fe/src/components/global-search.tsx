@@ -40,9 +40,9 @@ function SearchLogo({ chainId, token0, token1 }: {
 }) {
   return <span className="relative h-10 w-10 shrink-0">
     {token1 ? <span className="flex h-10 w-10 overflow-hidden rounded-full">
-      <TokenImage logoUri={token0.logoUri} symbol={token0.symbol} className="h-10 w-5 shrink-0 bg-primary/10" />
-      <TokenImage logoUri={token1.logoUri} symbol={token1.symbol} className="h-10 w-5 shrink-0 border-l border-card bg-primary/20" />
-    </span> : <TokenImage logoUri={token0.logoUri} symbol={token0.symbol} className="h-10 w-10 rounded-full" />}
+      <TokenImage logoUri={token0.logoUri ?? null} symbol={token0.symbol} className="h-10 w-5 shrink-0 bg-primary/10" />
+      <TokenImage logoUri={token1.logoUri ?? null} symbol={token1.symbol} className="h-10 w-5 shrink-0 border-l border-card bg-primary/20" />
+    </span> : <TokenImage logoUri={token0.logoUri ?? null} symbol={token0.symbol} className="h-10 w-10 rounded-full" />}
     <span className="absolute -bottom-1 -right-1 flex h-[19px] w-[19px] items-center justify-center overflow-hidden rounded-full border-2 border-card bg-card">
       <ChainFilterIcon id={chainId} />
     </span>
@@ -63,8 +63,8 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
           <span className="block truncate text-[14px] text-muted-foreground">{displaySymbol(token.symbol)}</span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="block text-[18px] leading-6">{formatPoolUsd(token.priceUsd)}</span>
-          <span className="flex justify-end text-[14px]"><PercentChange value={token.change1d} /></span>
+          <span className="block text-[18px] leading-6">{formatPoolUsd(token.priceUsd ?? null)}</span>
+          <span className="flex justify-end text-[14px]"><PercentChange value={token.change1d ?? null} /></span>
         </span>
       </>,
     })),
@@ -82,7 +82,7 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
             <span className="block truncate text-[14px] text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Official Pons pool'}</span>
           </span>
           <span className="shrink-0 text-right">
-            <span className="block text-[18px] leading-6">{formatPoolUsd(pool.volume24hUsd)}</span>
+            <span className="block text-[18px] leading-6">{formatPoolUsd(pool.volume24hUsd ?? null)}</span>
             <span className="block text-[14px] text-muted-foreground">24h Vol</span>
           </span>
         </>,

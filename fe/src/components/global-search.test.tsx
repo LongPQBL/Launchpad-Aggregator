@@ -53,6 +53,19 @@ describe('GlobalSearch', () => {
     expect(within(pool).getByText('$1.23K')).toBeInTheDocument();
   });
 
+  it('shows fallback logos and unavailable figures when a search response omits optional fields', async () => {
+    const incomplete = {
+      tokens: results.tokens.map((token) => ({ ...token, logoUri: undefined, priceUsd: undefined, change1d: undefined })),
+      pools: results.pools.map((pool) => ({ ...pool, currency0LogoUri: undefined, currency1LogoUri: undefined, volume24hUsd: undefined })),
+    } as unknown as SearchResults;
+    vi.mocked(searchAll).mockResolvedValue(incomplete);
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await typeQuery('z');
+    expect(within(screen.getByRole('option', { name: /Zorb/ })).getAllByText('—')).toHaveLength(2);
+    expect(within(screen.getByRole('option', { name: /ZRB \/ ETH/ })).getByText('—')).toBeInTheDocument();
+  });
+
   it('filters the displayed result groups with All, Tokens and Pools tabs', async () => {
     vi.mocked(searchAll).mockResolvedValue(results);
     render(<GlobalSearch />);
