@@ -17,7 +17,10 @@ async function snap(secondsFromMark: number, tvlUsd: string, quoteAddress = quot
     coreAmount0Raw: 1n, coreAmount1Raw: 2n, sqrtPriceX96: 3n, quoteAddress, tvlUsd,
   });
 }
-afterEach(async () => { await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]); });
+afterEach(async () => {
+  await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [poolId]);
+  await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id=$1', [poolId]);
+});
 afterAll(async () => { await pool.end(); });
 
 describe('readTvlChange', () => {
@@ -77,5 +80,35 @@ describe('pruneTvlSnapshots', () => {
     expect(deleted).toBe(1);
     const left = await pool.query('SELECT tvl_usd FROM pool_tvl_snapshots WHERE pool_id=$1 ORDER BY captured_at', [poolId]);
     expect(left.rows.map((row) => Number(row.tvl_usd))).toEqual([2, 3]);
+  });
+});
+
+describe('TVL rollup buckets', () => {
+  const bucketAt = async (interval: number) => (await pool.query(
+    'SELECT bucket_start::int, tvl_usd FROM pool_tvl_buckets WHERE pool_id=$1 AND interval_seconds=$2 ORDER BY bucket_start', [poolId, interval])).rows;
+  const hour = Math.floor(asOf / 3600) * 3600;
+  const at = (seconds: number, tvlUsd: string, block: number) => insertTvlSnapshot(pool, {
+    chainId: 4663, protocol: 'uniswap_v4', poolId, blockNumber: BigInt(block), capturedAtSeconds: seconds,
+    coreAmount0Raw: 1n, coreAmount1Raw: 2n, sqrtPriceX96: 3n, quoteAddress: quote, tvlUsd,
+  });
+
+  it('keeps the last value per hour, 4 h and day', async () => {
+    await at(hour + 60, '100', 1);
+    await at(hour + 1800, '150', 2);
+    expect((await bucketAt(3600)).map((r) => [r.bucket_start, Number(r.tvl_usd)])).toEqual([[hour, 150]]);
+    expect((await bucketAt(14_400)).map((r) => Number(r.tvl_usd))).toEqual([150]);
+    expect((await bucketAt(86_400)).map((r) => Number(r.tvl_usd))).toEqual([150]);
+  });
+
+  it('does not let a late older snapshot overwrite a newer bucket value', async () => {
+    await at(hour + 1800, '150', 2);
+    await at(hour + 60, '100', 1);
+    expect((await bucketAt(3600)).map((r) => Number(r.tvl_usd))).toEqual([150]);
+  });
+
+  it('survives pruning of the raw snapshots', async () => {
+    await at(hour + 60, '100', 1);
+    await pruneTvlSnapshots(pool, hour + 3600);
+    expect((await bucketAt(3600)).map((r) => Number(r.tvl_usd))).toEqual([100]);
   });
 });

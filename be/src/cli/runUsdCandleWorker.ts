@@ -4,7 +4,7 @@ import { refreshUsdCandles } from '../market/usdCandleStore.js';
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const pool = new Pool({ connectionString: databaseUrl, max: 2 });
-const intervals = [60, 300, 900, 3600, 86400];
+const intervals = [60, 300, 900, 3600, 14400, 86400];
 const fullSweepEveryMs = 15 * 60_000;
 let lastFullSweepAt = 0;
 let stopping = false;

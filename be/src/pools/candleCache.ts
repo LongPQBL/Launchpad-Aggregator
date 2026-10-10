@@ -1,9 +1,10 @@
 import type { Pool, PoolClient } from 'pg';
 import type { UsdPriceClient } from '../market/usdPricing.js';
+import { rebuildPoolVolume } from '../charts/volumeRollup.js';
 import { poolPriceInQuote } from './valuation.js';
 import { assetDecimals, type PoolKey } from './stats.js';
 
-export const POOL_CANDLE_INTERVALS = [60, 300, 900, 3600, 86400] as const;
+export const POOL_CANDLE_INTERVALS = [60, 300, 900, 3600, 14400, 86400] as const;
 
 interface DirtyKey { chainId: number; protocol: string; poolId: string; bucketStart: number }
 interface CandleKey extends DirtyKey { intervalSeconds: number }
@@ -58,6 +59,7 @@ export async function refreshDirtyPoolCandles(pool: Pool, limit = 100): Promise<
     const dirty: DirtyKey[] = claimed.rows.map((row) => ({ chainId: Number(row.chain_id),
       protocol: String(row.protocol), poolId: String(row.pool_id), bucketStart: Number(row.bucket_start) }));
     for (const key of affected(dirty)) await rebuild(client, key);
+    await rebuildPoolVolume(client, dirty);
     for (const row of dirty) await client.query(`DELETE FROM pool_candle_dirty_buckets
       WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND bucket_start=$4`,
     [row.chainId, row.protocol, row.poolId, row.bucketStart]);

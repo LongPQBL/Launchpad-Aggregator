@@ -7,6 +7,8 @@ export const TVL_CHANGE_TOLERANCE_SECONDS = 7_200;
 // this soon after launch (matches the worker's max interval) — otherwise it is not "since launch".
 export const TVL_LAUNCH_SNAPSHOT_TOLERANCE_SECONDS = 10_800;
 
+export const TVL_BUCKET_INTERVALS = [3600, 14400, 86400] as const;
+
 export interface TvlSnapshotInput {
   chainId: number; protocol: 'uniswap_v4'; poolId: string; blockNumber: bigint; capturedAtSeconds: number;
   coreAmount0Raw: bigint; coreAmount1Raw: bigint; sqrtPriceX96: bigint; quoteAddress: string; tvlUsd: string;
@@ -19,6 +21,15 @@ export async function insertTvlSnapshot(pool: Pool, snapshot: TvlSnapshotInput):
   [snapshot.chainId, snapshot.protocol, snapshot.poolId.toLowerCase(), snapshot.blockNumber.toString(), snapshot.capturedAtSeconds,
     snapshot.coreAmount0Raw.toString(), snapshot.coreAmount1Raw.toString(), snapshot.sqrtPriceX96.toString(),
     snapshot.quoteAddress.toLowerCase(), snapshot.tvlUsd]);
+  // Keep the last value per hour / 4 h / day; these outlive the pruned raw snapshots and back the 1W / 1M / 1Y charts.
+  for (const step of TVL_BUCKET_INTERVALS) {
+    await pool.query(`INSERT INTO pool_tvl_buckets (chain_id, protocol, pool_id, interval_seconds, bucket_start, tvl_usd, last_captured_at)
+      VALUES ($1,$2,$3,$4::int,($5::bigint / $4::int) * $4::int,$6,to_timestamp($5))
+      ON CONFLICT (chain_id, protocol, pool_id, interval_seconds, bucket_start) DO UPDATE
+        SET tvl_usd = EXCLUDED.tvl_usd, last_captured_at = EXCLUDED.last_captured_at
+        WHERE EXCLUDED.last_captured_at >= pool_tvl_buckets.last_captured_at`,
+    [snapshot.chainId, snapshot.protocol, snapshot.poolId.toLowerCase(), step, snapshot.capturedAtSeconds, snapshot.tvlUsd]);
+  }
 }
 
 /** Deletes snapshots captured before `olderThanSeconds` (unix seconds); returns the number deleted. */

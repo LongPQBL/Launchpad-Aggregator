@@ -20,6 +20,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, id]);
   await pool.query('DELETE FROM pool_candle_dirty_buckets WHERE chain_id=$1 AND pool_id=$2', [chainId, id]);
+  await pool.query('DELETE FROM pool_volume_buckets WHERE chain_id=$1', [chainId]);
   await pool.end();
 });
 
@@ -32,8 +33,9 @@ describe('pool candle cache', () => {
     expect((await pool.query('SELECT count(*)::int AS n FROM pool_candle_dirty_buckets WHERE chain_id=$1', [chainId])).rows[0].n).toBe(1);
     expect(await refreshDirtyPoolCandles(pool, 10)).toBeGreaterThan(0);
     const candles = (await pool.query('SELECT interval_seconds,trade_count FROM pool_candles WHERE chain_id=$1', [chainId])).rows;
-    expect(candles).toHaveLength(5);
+    expect(candles).toHaveLength(6);
     expect(candles.every((row) => row.trade_count === 1)).toBe(true);
+    expect((await pool.query('SELECT count(*)::int AS n FROM pool_volume_buckets WHERE chain_id=$1', [chainId])).rows[0].n).toBe(5);
     await pool.query("UPDATE pool_catalog SET coverage_status='caught_up' WHERE chain_id=$1", [chainId]);
     const chart = await readPoolCandles(pool, { chainId, protocol: 'uniswap_v4', poolId: id }, address0, 60, 1800,
       { rpcClient: { readContract: async () => 18 } });

@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
+import { redirtyVolumeForPriceChange } from '../../charts/volumeRollup.js';
 import { invalidateForPriceChange } from '../launchVolume/oracleInvalidation.js';
 
 export interface PriceRound {
@@ -36,6 +37,7 @@ export async function upsertPriceRounds(pool: Pool, chainId: number, feedAddress
       const executor = drizzle(client);
       for (const row of mapped.rows) {
         await invalidateForPriceChange(executor, { chainId, quoteAssetAddress: row.quote_asset_address, feedAddress: feed, fromBlock, toBlock });
+        await redirtyVolumeForPriceChange(client, { chainId, quoteAssetAddress: row.quote_asset_address, fromBlock });
       }
     }
     await client.query('COMMIT');
