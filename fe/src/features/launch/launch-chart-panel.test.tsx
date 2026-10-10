@@ -2,6 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { LaunchChartPanel } from './launch-chart-panel';
 
+vi.mock('lightweight-charts', () => ({
+  HistogramSeries: {}, AreaSeries: {},
+  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
+}));
 vi.mock('./official-price-chart', () => ({ OfficialPriceChart: ({ trailing }: { trailing?: React.ReactNode }) => <div data-testid="launch-price-chart">{trailing}</div> }));
 
 const price = { priceText: '$1', priceStale: false, candles: null, graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'complete',
@@ -13,7 +17,7 @@ describe('LaunchChartPanel', () => {
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
     expect(screen.getByRole('tab', { name: 'Price' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('tab', { name: 'TVL' }));
-    expect(screen.getByRole('img', { name: /daily tvl/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /^tvl over/i })).toBeInTheDocument();
   });
 
   it('scoped to the curve it offers Price and Volume but no TVL tab', () => {

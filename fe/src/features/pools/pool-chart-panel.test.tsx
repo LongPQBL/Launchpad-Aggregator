@@ -1,10 +1,14 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPoolHistory } from '@/api/client';
 import type { PoolDayHistory } from '@/api/client';
 import { PoolChartPanel } from './pool-chart-panel';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolHistory: vi.fn() }));
+vi.mock('lightweight-charts', () => ({
+  HistogramSeries: {}, AreaSeries: {},
+  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
+}));
 vi.mock('./pool-chart', () => ({ PoolChart: ({ trailing }: { trailing?: React.ReactNode }) => <div data-testid="price-chart">{trailing}</div> }));
 
 const DAY = 86_400;
@@ -21,7 +25,7 @@ describe('PoolChartPanel', () => {
     expect(screen.getByRole('tab', { name: 'Price' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
     expect(screen.getByTestId('price-chart').parentElement).toHaveAttribute('hidden');
-    expect(screen.getByRole('img', { name: /daily volume/i })).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /^volume over/i })).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'TVL' })).not.toBeInTheDocument();
   });
 
@@ -32,8 +36,8 @@ describe('PoolChartPanel', () => {
     expect(screen.getAllByRole('link', { name: '1W' }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('link', { name: '1W' }).at(-1)!);
     expect(getPoolHistory).toHaveBeenCalledWith(pool, '1w');
-    expect(await screen.findByTestId('history-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$7');
+    await waitFor(() => expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$7'));
+    expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Volume');
   });
 
   it('shows no switcher when only the price chart is available', () => {

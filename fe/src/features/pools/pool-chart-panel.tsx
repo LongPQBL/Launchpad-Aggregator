@@ -79,6 +79,8 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
     void applyRange(next);
   }, [applyRange]);
 
+  const selectFromChart = useCallback((next: ChartRangeId) => { void applyRange(next); }, [applyRange]);
+
   const previousHistory = useRef(history);
   useEffect(() => {
     if (previousHistory.current === history) return;
@@ -97,7 +99,8 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   const tabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} /> : null;
   return (
     <>
-      {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: (next) => { void applyRange(next); } })}</div>}
+      {/* eslint-disable-next-line react-hooks/refs -- the callback only reads the stale-answer ref when the user clicks, never while rendering */}
+      {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart })}</div>}
       {history && selected !== 'price' && (
         <PoolHistoryChart items={data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
           intervalSeconds={data?.intervalSeconds} loading={loading} error={failed}
