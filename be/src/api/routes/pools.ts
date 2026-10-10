@@ -1,13 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
-import { HISTORY_INTERVALS, MAX_HISTORY_DAYS } from '../../pools/history.js';
+import { DEFAULT_RANGE, parseRange, rangeSpec, trimToRange } from '../../charts/ranges.js';
 import type { PoolKey } from '../../pools/stats.js';
 import { pageSchema, poolCandle, poolHistory, poolPage, poolSummary, poolTrade } from '../schemas.js';
 import type { ApiDeps } from '../server.js';
 
 const poolIdPattern = /^0x[0-9a-fA-F]{64}$/;
-// How many buckets the sub-day history charts show per interval (about the span the price chart covers).
-const HISTORY_BUCKETS: Record<number, number> = { 60: 120, 300: 144, 900: 96, 3600: 96 };
 function chain(value: string): number | null {
   const parsed = Number(value);
   return /^\d+$/.test(value) && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
@@ -90,12 +88,11 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
     { schema: { response: { 200: poolHistory } } }, async (request, reply) => {
       const identity = key(request.params);
       if (!identity) return reply.code(404).send({ error: 'Pool not found' });
-      const interval = request.query.intervalSeconds === undefined ? 86_400 : Number(request.query.intervalSeconds);
-      if (!(HISTORY_INTERVALS as readonly number[]).includes(interval)) return reply.code(400).send({ error: 'Invalid history interval' });
-      const days = request.query.days === undefined ? 30 : Number(request.query.days);
-      if (interval === 86_400 && (!Number.isSafeInteger(days) || days < 1 || days > MAX_HISTORY_DAYS)) return reply.code(400).send({ error: 'Invalid history window' });
+      const range = request.query.range === undefined ? DEFAULT_RANGE : parseRange(request.query.range);
+      if (!range) return reply.code(400).send({ error: 'Invalid history range' });
       if (!deps.pools?.listPoolHistory) return unavailable(reply);
-      const window = interval === 86_400 ? { days } : { intervalSeconds: interval, buckets: HISTORY_BUCKETS[interval] ?? 96 };
+      const { intervalSeconds, buckets } = rangeSpec(range);
+      const window = { intervalSeconds, buckets };
       try { return await deps.pools.listPoolHistory(identity, window); }
       catch (error) { if (error instanceof Error && error.message === 'Pool not found') return reply.code(404).send({ error: 'Pool not found' }); throw error; }
     });
@@ -108,11 +105,14 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
       const displayedToken = await deps.pools.resolvePoolSide(identity,
         request.query.displayedToken ? token(request.query.displayedToken) ?? '' : undefined);
       if (!displayedToken) return reply.code(404).send({ error: 'Pool not found' });
-      const interval = request.query.intervalSeconds === undefined ? 60 : Number(request.query.intervalSeconds);
+      const range = request.query.range === undefined ? null : parseRange(request.query.range);
+      if (request.query.range !== undefined && !range) return reply.code(400).send({ error: 'Invalid candle range' });
+      const interval = range ? rangeSpec(range).intervalSeconds : request.query.intervalSeconds === undefined ? 60 : Number(request.query.intervalSeconds);
       const before = request.query.before === undefined ? undefined : Number(request.query.before);
-      if (![60, 300, 900, 3600, 86400].includes(interval) || (before !== undefined && (!Number.isSafeInteger(before) || before < 1))) {
+      if (![60, 300, 900, 3600, 14400, 86400].includes(interval) || (before !== undefined && (!Number.isSafeInteger(before) || before < 1))) {
         return reply.code(400).send({ error: 'Invalid candle query' });
       }
-      return deps.pools.listPoolCandles(identity, displayedToken, interval, before);
+      const page = await deps.pools.listPoolCandles(identity, displayedToken, interval, before);
+      return range ? { ...page, items: trimToRange(page.items, range, Math.floor(Date.now() / 1000)) } : page;
     });
 }

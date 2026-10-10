@@ -227,7 +227,7 @@ describe('read-only API', () => {
     await app.close();
   });
 
-  it('serves launch Volume / TVL history per interval, and validates the interval', async () => {
+  it('serves launch Volume / TVL history per range, and validates the range', async () => {
     const seen: unknown[] = [];
     const history = { items: [{ day: 1_700_000_000, tradeCount: 2, volumeUsd: '6', tvlUsd: null }], complete: true };
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(), listLaunchHistory: async (_c, _t, window) => { seen.push(window); return history; } } });
@@ -235,11 +235,29 @@ describe('read-only API', () => {
     const daily = await app.inject({ method: 'GET', url });
     expect(daily.statusCode).toBe(200);
     expect(daily.json()).toEqual(history);
-    expect((await app.inject({ method: 'GET', url: `${url}?intervalSeconds=300` })).statusCode).toBe(200);
-    expect(seen).toEqual([{ intervalSeconds: 86_400, buckets: 30 }, { intervalSeconds: 300, buckets: 144 }]);
-    expect((await app.inject({ method: 'GET', url: `${url}?intervalSeconds=7` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1h` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ intervalSeconds: 300, buckets: 288 }, { intervalSeconds: 60, buckets: 60 }]);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=7` })).statusCode).toBe(400);
     const without = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
     expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
+  });
+
+  it('maps candle range to its bucket size, trims to the window, and rejects an unknown range', async () => {
+    const seen: number[] = [];
+    const now = Math.floor(Date.now() / 1000);
+    const candle = (bucketStart: number) => ({ intervalSeconds: 60, bucketStart, open: '1', high: '1', low: '1', close: '1', quoteVolume: '1' });
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(),
+      listCandles: async (_c, _t, interval) => { seen.push(interval); return { items: [candle(now - 60), candle(now - 7200)], complete: true }; },
+    } });
+    const url = `/v1/launches/4663/${address}/candles`;
+    const hour = await app.inject({ method: 'GET', url: `${url}?range=1h` });
+    expect(hour.statusCode).toBe(200);
+    expect(seen).toEqual([60]);
+    expect(hour.json().items).toHaveLength(1); // the two-hour-old candle is outside the 1h window
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1y` })).statusCode).toBe(200);
+    expect(seen).toEqual([60, 86_400]);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=5m` })).statusCode).toBe(400);
+    await app.close();
   });
 
   it('serves USD candles only when currency=usd, and rejects an unknown currency', async () => {

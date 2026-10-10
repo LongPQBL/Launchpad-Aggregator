@@ -19,3 +19,18 @@ export function rangeSpec(range: ChartRange): { windowSeconds: number; intervalS
   const spec = SPECS[range];
   return { ...spec, buckets: spec.windowSeconds / spec.intervalSeconds };
 }
+
+/** Keeps the candles that fall inside the range's window (including the bucket the window starts in). Order is preserved. */
+export function trimToRange<T extends { bucketStart: number }>(items: readonly T[], range: ChartRange, nowSeconds: number): T[] {
+  const { windowSeconds, intervalSeconds } = rangeSpec(range);
+  const oldest = Math.floor((nowSeconds - windowSeconds) / intervalSeconds) * intervalSeconds;
+  return items.filter((item) => item.bucketStart >= oldest);
+}
+
+/** How long a history answer for this bucket size may be reused: fine buckets change fast, coarse ones slowly. */
+export function historyTtlMs(intervalSeconds: number): number {
+  if (intervalSeconds <= 60) return 5_000;
+  if (intervalSeconds <= 300) return 15_000;
+  if (intervalSeconds <= 3_600) return 60_000;
+  return 300_000;
+}

@@ -497,6 +497,7 @@ export interface paths {
                                 tvlUsd?: string | null;
                             }[];
                             complete?: boolean;
+                            intervalSeconds?: number;
                         };
                     };
                 };
@@ -934,6 +935,7 @@ export interface paths {
                                 tvlUsd?: string | null;
                             }[];
                             complete?: boolean;
+                            intervalSeconds?: number;
                         };
                     };
                 };

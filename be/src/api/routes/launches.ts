@@ -4,7 +4,7 @@ import { decodeCursor } from '../cursor.js';
 import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { InvalidMetricCursorError, type LaunchSort, type SortDirection } from '../metricCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
-import { HISTORY_INTERVALS } from '../../pools/history.js';
+import { DEFAULT_RANGE, parseRange, rangeSpec, trimToRange } from '../../charts/ranges.js';
 import { candle, curveSummary, poolHistory, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
@@ -121,17 +121,16 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
     },
   );
 
-  // How many buckets each interval's Volume / TVL chart shows (same table as the pool history route).
-  const HISTORY_BUCKETS: Record<number, number> = { 60: 120, 300: 144, 900: 96, 3600: 96, 86_400: 30 };
   app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
     '/v1/launches/:chainId/:tokenAddress/history', { schema: { response: { 200: poolHistory } } }, async (request, reply) => {
       const identity = tokenParams(request.params);
       if (!identity) return reply.code(404).send({ error: 'Launch not found' });
-      const interval = request.query.intervalSeconds === undefined ? 86_400 : Number(request.query.intervalSeconds);
-      if (!(HISTORY_INTERVALS as readonly number[]).includes(interval)) return reply.code(400).send({ error: 'Invalid history interval' });
+      const range = request.query.range === undefined ? DEFAULT_RANGE : parseRange(request.query.range);
+      if (!range) return reply.code(400).send({ error: 'Invalid history range' });
+      const spec = rangeSpec(range);
       if (request.query.venue !== undefined && request.query.venue !== 'curve') return reply.code(400).send({ error: 'Invalid venue' });
       if (!deps.data.listLaunchHistory) { reply.code(503); return { error: 'History unavailable' }; }
-      const history = await deps.data.listLaunchHistory(identity.chainId, identity.tokenAddress, { intervalSeconds: interval, buckets: HISTORY_BUCKETS[interval]!, ...(request.query.venue === 'curve' ? { venueKind: 'curve' } : {}) });
+      const history = await deps.data.listLaunchHistory(identity.chainId, identity.tokenAddress, { intervalSeconds: spec.intervalSeconds, buckets: spec.buckets, ...(request.query.venue === 'curve' ? { venueKind: 'curve' } : {}) });
       if (!history) return reply.code(404).send({ error: 'Launch not found' });
       return history;
     },
@@ -150,10 +149,12 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
   app.get<{ Params: { chainId: string; tokenAddress: string }; Querystring: Record<string, string | undefined> }>(
     '/v1/launches/:chainId/:tokenAddress/candles', { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: candle }, complete: { type: 'boolean' } } } } } }, async (request, reply) => {
       const identity = tokenParams(request.params);
-      const interval = request.query.intervalSeconds === undefined ? 60 : Number(request.query.intervalSeconds);
+      const range = request.query.range === undefined ? null : parseRange(request.query.range);
+      if (request.query.range !== undefined && !range) return reply.code(400).send({ error: 'Invalid candle range' });
+      const interval = range ? rangeSpec(range).intervalSeconds : request.query.intervalSeconds === undefined ? 60 : Number(request.query.intervalSeconds);
       const before = request.query.before === undefined ? undefined : Number(request.query.before);
       if (!identity) return reply.code(404).send({ error: 'Launch not found' });
-      if (![60, 300, 900, 3600, 86400].includes(interval)) return reply.code(400).send({ error: 'Invalid candle interval' });
+      if (![60, 300, 900, 3600, 14400, 86400].includes(interval)) return reply.code(400).send({ error: 'Invalid candle interval' });
       if (before !== undefined && (!/^\d+$/.test(request.query.before!) || !Number.isSafeInteger(before) || before < 1)) {
         return reply.code(400).send({ error: 'Invalid candle boundary' });
       }
@@ -162,8 +163,11 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       if (request.query.venue !== undefined && request.query.venue !== 'curve') return reply.code(400).send({ error: 'Invalid venue' });
       // USD candles come from the launch-wide cache, which has no venue dimension.
       if (request.query.venue !== undefined && currency === 'usd') return reply.code(400).send({ error: 'USD candles are not available per venue' });
-      if (currency === 'usd') return deps.data.listUsdCandles(identity.chainId, identity.tokenAddress, interval, before);
-      return deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before, request.query.venue === 'curve' ? 'curve' : undefined);
+      const page = currency === 'usd'
+        ? await deps.data.listUsdCandles(identity.chainId, identity.tokenAddress, interval, before)
+        : await deps.data.listCandles(identity.chainId, identity.tokenAddress, interval, before, request.query.venue === 'curve' ? 'curve' : undefined);
+      const items = range ? trimToRange(page.items as readonly { bucketStart: number }[], range, Math.floor(Date.now() / 1000)) as unknown as typeof page.items : page.items;
+      return { ...page, items };
     },
   );
 }

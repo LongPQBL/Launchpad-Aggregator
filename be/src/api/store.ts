@@ -19,6 +19,7 @@ import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
 import { readVolumeRankingPage } from '../market/launchVolume/ranking.js';
 import { assertVolumeRankingAvailable } from '../market/launchVolume/state.js';
 import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
+import { intervalTtlMemo } from '../charts/intervalMemo.js';
 import { ttlMemo } from './ttlMemo.js';
 import { readLaunchStats } from './launchStatsStore.js';
 import { readLaunchHistory } from '../market/launchHistory.js';
@@ -231,6 +232,17 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
 
 export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
   const quoteMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined;
+  const launchHistoryMemo = intervalTtlMemo(
+    async (_key: string, arg: { chainId: number; tokenAddress: string; window: { intervalSeconds: number; buckets: number; venueKind?: string } }) => {
+      const head = await safeHead();
+      const launch = (await pool.query(`SELECT ${launchCoverageSql(3)} AS launch_coverage_complete
+        FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
+      [arg.chainId, arg.tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
+      if (!launch) return null;
+      return readLaunchHistory(pool, { chainId: arg.chainId, tokenAddress: arg.tokenAddress, ...arg.window, asOf: Math.floor(Date.now() / 1000),
+        complete: Boolean(launch.launch_coverage_complete) });
+    },
+    (arg) => arg.window.intervalSeconds);
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
   // "use whichever source has a reading, prefer the more current one" behavior needed here.
   // observed_blocks is only ever written by the RPC-scan indexer; envio_chain_progress mirrors
@@ -777,14 +789,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         })),
       };
     },
-    async listLaunchHistory(chainId: number, tokenAddress: string, window: { intervalSeconds: number; buckets: number; venueKind?: string }): Promise<{ items: PoolDayHistory[]; complete: boolean } | null> {
-      const head = await safeHead();
-      const launch = (await pool.query(`SELECT ${launchCoverageSql(3)} AS launch_coverage_complete
-        FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
-      [chainId, tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
-      if (!launch) return null;
-      return readLaunchHistory(pool, { chainId, tokenAddress, ...window, asOf: Math.floor(Date.now() / 1000), complete: Boolean(launch.launch_coverage_complete) });
-    },
+    listLaunchHistory: (chainId, tokenAddress, window) => launchHistoryMemo(
+      `${chainId}:${tokenAddress.toLowerCase()}:${window.intervalSeconds}:${window.buckets}:${window.venueKind ?? ''}`, { chainId, tokenAddress, window }),
     async getCurveSummary(chainId: number, tokenAddress: string): Promise<CurveSummary | null> {
       const token = tokenAddress.toLowerCase();
       const venue = (await pool.query(`SELECT v.id, v.ref, v.effective_to_block, l.quote_asset_decimals FROM venues v

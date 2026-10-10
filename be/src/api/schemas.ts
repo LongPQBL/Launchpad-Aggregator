@@ -180,6 +180,7 @@ export const poolHistory = { type: 'object', properties: {
     volumeUsd: { type: 'string', nullable: true }, tvlUsd: { type: 'string', nullable: true },
   } } },
   complete: { type: 'boolean' },
+  intervalSeconds: { type: 'integer' },
 } } as const;
 
 export const curveSummary = { type: 'object', properties: {

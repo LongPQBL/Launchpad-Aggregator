@@ -946,6 +946,9 @@
                     },
                     "complete": {
                       "type": "boolean"
+                    },
+                    "intervalSeconds": {
+                      "type": "integer"
                     }
                   }
                 }
@@ -1798,6 +1801,9 @@
                     },
                     "complete": {
                       "type": "boolean"
+                    },
+                    "intervalSeconds": {
+                      "type": "integer"
                     }
                   }
                 }
