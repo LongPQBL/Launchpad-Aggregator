@@ -12,7 +12,6 @@ import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { enqueueRoundBackfillJob } from '../market/quotePricing/priceJobStore.js';
 import { assetDecimals } from '../pools/stats.js';
-import type { PoolDayHistory } from '../pools/history.js';
 import { createTokenMetadataResolver } from '../pools/tokenMetadata.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { decodeVolumeCursor, encodeVolumeCursor } from './volumeCursor.js';
