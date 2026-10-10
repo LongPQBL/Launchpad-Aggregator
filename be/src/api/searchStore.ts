@@ -38,10 +38,10 @@ const POOL_ID_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): SearchStore {
   const resolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined;
   const metadata = async (address: string, symbol: string | null, logoUri: string | null) => {
-    if (symbol || logoUri) return { symbol, logoUri };
-    if (!resolver) return { symbol: address === '0x0000000000000000000000000000000000000000' ? 'ETH' : null, logoUri: null };
-    try { const resolved = await resolver.resolve(address); return { symbol: resolved.symbol, logoUri: resolved.logoUri }; }
-    catch { return { symbol: null, logoUri: null }; }
+    if (symbol) return { symbol, logoUri };
+    if (!resolver) return { symbol: address === '0x0000000000000000000000000000000000000000' ? 'ETH' : null, logoUri };
+    try { const resolved = await resolver.resolve(address); return { symbol: resolved.symbol, logoUri: logoUri ?? resolved.logoUri }; }
+    catch { return { symbol: null, logoUri }; }
   };
   const poolVolume = ttlMemo(async (_key: string, hit: SearchPoolHit) => {
     try {
@@ -72,8 +72,10 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
         [contains, limit, prefix, lowered, tokenAddress, chainIds ?? null, safeHead?.toString() ?? null]),
         pool.query(`SELECT pc.chain_id, pc.protocol, pc.pool_id, pc.fee, pc.currency0, pc.currency1,
             l.token_address, l.name, l.symbol, l.logo_uri,
-            c0.symbol AS currency0_symbol, c0.logo_uri AS currency0_logo_uri,
-            c1.symbol AS currency1_symbol, c1.logo_uri AS currency1_logo_uri,
+            COALESCE(c0.symbol, CASE WHEN pc.currency0 = l.quote_asset_address THEN l.quote_asset_symbol END) AS currency0_symbol,
+            c0.logo_uri AS currency0_logo_uri,
+            COALESCE(c1.symbol, CASE WHEN pc.currency1 = l.quote_asset_address THEN l.quote_asset_symbol END) AS currency1_symbol,
+            c1.logo_uri AS currency1_logo_uri,
             EXISTS (SELECT 1 FROM venues v WHERE v.chain_id=pc.chain_id AND v.ref=pc.pool_id
               AND v.kind IN ('v3_pool','v4_pool') AND v.official=true) AS pons_designated
           FROM pool_catalog pc

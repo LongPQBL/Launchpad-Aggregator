@@ -49,7 +49,14 @@ function SearchLogo({ chainId, token0, token1 }: {
   </span>;
 }
 
-function shortAddress(address: string): string { return `${address.slice(0, 6)}…${address.slice(-4)}`; }
+const NATIVE_ADDRESS = '0x0000000000000000000000000000000000000000';
+
+function poolCurrencySymbol(address: string, symbol: string | null, launchToken: { address: string; symbol: string | null }): string {
+  if (symbol?.trim()) return symbol;
+  if (address.toLowerCase() === launchToken.address.toLowerCase() && launchToken.symbol?.trim()) return launchToken.symbol;
+  if (address.toLowerCase() === NATIVE_ADDRESS) return 'ETH';
+  return '—';
+}
 
 function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option[] } {
   return {
@@ -69,8 +76,8 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
       </>,
     })),
     pools: results.pools.map((pool) => {
-      const symbol0 = pool.currency0Symbol ?? shortAddress(pool.currency0);
-      const symbol1 = pool.currency1Symbol ?? shortAddress(pool.currency1);
+      const symbol0 = poolCurrencySymbol(pool.currency0, pool.currency0Symbol, pool.launchToken);
+      const symbol1 = poolCurrencySymbol(pool.currency1, pool.currency1Symbol, pool.launchToken);
       return {
         key: `pool:${pool.chainId}:${pool.protocol}:${pool.poolId}`,
         href: poolHref(pool, pool.launchToken.address),

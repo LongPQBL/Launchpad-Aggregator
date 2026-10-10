@@ -66,6 +66,20 @@ describe('GlobalSearch', () => {
     expect(within(screen.getByRole('option', { name: /ZRB \/ ETH/ })).getByText('—')).toBeInTheDocument();
   });
 
+  it('shows the launch symbol without displaying token addresses when pool metadata is missing', async () => {
+    const incomplete = {
+      tokens: [],
+      pools: results.pools.map((pool) => ({ ...pool, currency0Symbol: null, currency1Symbol: null })),
+    } as SearchResults;
+    vi.mocked(searchAll).mockResolvedValue(incomplete);
+    render(<GlobalSearch />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search tokens and pools' }));
+    await typeQuery('z');
+    const pool = within(screen.getByRole('group', { name: 'Pools' })).getByRole('option');
+    expect(within(pool).getByText('ZRB / ETH')).toBeInTheDocument();
+    expect(pool).not.toHaveTextContent('0xaaa');
+  });
+
   it('filters the displayed result groups with All, Tokens and Pools tabs', async () => {
     vi.mocked(searchAll).mockResolvedValue(results);
     render(<GlobalSearch />);

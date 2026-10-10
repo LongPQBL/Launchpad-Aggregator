@@ -11,7 +11,7 @@ const chainId = 4663;
 const source = 'search-test-src';
 const tokenA = `0x${'5a'.repeat(20)}`;
 const tokenB = `0x${'5b'.repeat(20)}`;
-const quote = `0x${'00'.repeat(20)}`;
+const quote = `0x${'59'.repeat(20)}`;
 const poolId = `0x${'5c'.repeat(32)}`;
 const hash = (c: string) => `0x${c.repeat(64)}`;
 
@@ -22,7 +22,7 @@ beforeAll(async () => {
     await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, name, symbol, token_decimals, platform,
       protocol_version, factory_address, deployer_address, launch_block, launch_tx_hash, launch_log_index,
       quote_asset_address, quote_asset_symbol, quote_asset_decimals, lifecycle_status)
-      VALUES ($1, $2, $3, $4, $5, 18, 'pons', 'v2', $2, $2, $6, $7, 0, $8, 'ETH', 18, 'trading') ON CONFLICT DO NOTHING`,
+      VALUES ($1, $2, $3, $4, $5, 18, 'pons', 'v2', $2, $2, $6, $7, 0, $8, 'USDG', 18, 'trading') ON CONFLICT DO NOTHING`,
     [chainId, token, source, name, symbol, 900000000 + index, hash(String(index + 1)), quote]);
   }
   await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
@@ -85,7 +85,7 @@ describe('search store', () => {
     const result = await store.search('zorbtoken', 5);
     expect(result.tokens[0]).toHaveProperty('priceUsd');
     expect(result.tokens[0]).toHaveProperty('change1d');
-    expect(result.pools[0]).toHaveProperty('currency0Symbol');
+    expect(result.pools[0]).toHaveProperty('currency0Symbol', 'USDG');
     expect(result.pools[0]).toHaveProperty('currency1Symbol', 'ZRBA');
     expect(result.pools[0]).toHaveProperty('volume24hUsd');
     expect(result.pools[0]).toHaveProperty('ponsDesignated', false);
