@@ -126,3 +126,18 @@ per-range cache and the existing gated live refresh.
 2. Venue-scoped price candles: extend cache with `venue_kind` vs bounded trades path.
 3. `usd_candles` redesign (separate work unit).
 4. Enabling 60 s snapshots on a live worker is an ops decision; this work only documents it.
+
+## Measurement (2026-10-10, local dev DB, cold cache)
+
+Token `0x39dbed3a…` with 129,173 official trades, `EXPLAIN (ANALYZE)`:
+
+| Read | Before (raw trades + per-trade oracle lookup) | After (rollup range scan) |
+|---|---|---|
+| 1Y volume (daily buckets) | 8,463 ms | 9 ms |
+| 1H volume (1-minute buckets) | not measured (same query shape, ≥ the 1Y cost on a busy token) | 3 ms |
+
+Two design faults were found only by measuring and fixed before this note:
+- `launch_volume_buckets` had `venue_kind` ahead of `interval_seconds`/`bucket_start` in its primary key, so range reads and
+  rebuilds scanned the whole token. The primary key now ends with `venue_kind` (migration `0051`).
+- A plain join of "dirty minutes × trades of the token" made the planner pair every minute with every trade and filter
+  (64M rows removed for 500 minutes). The rebuild now aggregates inside a `LATERAL` per minute, which forces one index range scan each.
