@@ -83,6 +83,12 @@ describe('CurveDepthChart', () => {
     expect(screen.getByText('Buying beyond the last row graduates the curve.')).toBeInTheDocument();
     expect(screen.queryByText(/no sells beyond/)).not.toBeInTheDocument();
   });
+  it('explains a curve nobody has bought from: no bids, nothing to sell into', async () => {
+    vi.mocked(getCurveDepth).mockResolvedValue(curve({ bidsEndAtEmptyReserve: true, asksEndAtGraduation: false, depth: { ...depth, bids: [], spreadPercent: 2 } }));
+    render(<CurveDepthChart chainId={4663} tokenAddress="0xtoken" baseSymbol="TKN" quoteSymbol="ETH" />);
+    await waitFor(() => expect(screen.getByText('Nobody has bought from this curve yet, so there is nothing to sell into.')).toBeInTheDocument());
+    expect(screen.queryByText(/no sells beyond/)).not.toBeInTheDocument();
+  });
   it('says the curve has graduated, or that there is no curve', async () => {
     vi.mocked(getCurveDepth).mockResolvedValueOnce(curve({ complete: false, unavailableReason: 'graduated', depth: null, price: null }));
     const { unmount } = render(<CurveDepthChart chainId={4663} tokenAddress="0xtoken" baseSymbol="TKN" quoteSymbol="ETH" />);

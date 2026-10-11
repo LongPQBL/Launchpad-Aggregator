@@ -127,7 +127,8 @@ export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
   if (!data.complete || !data.depth || data.price === null) return <Message trailing={trailing}>{unavailableText(data.unavailableReason)}</Message>;
   const notes = ['Amounts exclude the creator tax and snipe protection.'];
   if (data.asksEndAtGraduation) notes.push('Buying beyond the last row graduates the curve.');
-  if (data.bidsEndAtEmptyReserve) notes.push('The curve can only pay out what has been paid in, so there are no sells beyond the last row.');
+  if (data.depth.bids.length === 0) notes.push('Nobody has bought from this curve yet, so there is nothing to sell into.');
+  else if (data.bidsEndAtEmptyReserve) notes.push('The curve can only pay out what has been paid in, so there are no sells beyond the last row.');
   const fee = data.feeBps === null ? '—' : formatLevel(data.feeBps / 100);
   return (
     <div>
