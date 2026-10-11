@@ -73,8 +73,9 @@ test('the pool page draws Volume for the selected range, and the range tabs swit
   const history = page.getByRole('region', { name: 'Pool history' });
   await expect(history).toBeVisible();
   await expect(history.getByTestId('history-chart-container')).toBeVisible();
-  // One bucket in the mock is unavailable, so no window total is claimed.
-  await expect(history.getByTestId('pool-history-readout')).toContainText('Unavailable');
+  // One bucket in the mock is unavailable: the total is shown as a minimum (with a +) and says how many buckets are missing.
+  await expect(history.getByTestId('pool-history-readout')).toContainText('+');
+  await expect(history.getByTestId('pool-history-readout')).toContainText('1 of 288 buckets unavailable');
   await history.getByRole('link', { name: '1H' }).click();
   await expect(history.getByRole('link', { name: '1H' })).toHaveAttribute('aria-current', 'page');
   await expect(page).toHaveURL(/range=1h/);
