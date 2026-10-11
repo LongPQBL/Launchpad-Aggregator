@@ -108,9 +108,11 @@ describe('rebuilding what is still unpriced', () => {
     expect(after.rows[0].n).toBe(0);
     const hourly = (await pool.query(`SELECT volume_usd FROM launch_volume_buckets WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = 3600 ORDER BY bucket_start`, [chainId, token])).rows;
     expect(hourly.map((row) => Number(row.volume_usd))).toEqual([2, 2]);
-    // Nothing of this chain is left for the next run (other tests' fixtures in the shared database may still be unpriced on purpose).
-    const left = await pool.query(`SELECT (SELECT count(*) FROM launch_usd_candle_buckets WHERE chain_id = $1 AND unpriced_count > 0)::int AS usd,
-      (SELECT count(*) FROM pool_volume_buckets WHERE chain_id = $1 AND (unpriced0 > 0 OR unpriced1 > 0))::int AS pools`, [chainId]);
-    expect(left.rows[0]).toEqual({ usd: 0, pools: 0 });
+    // Nothing of this chain's launch is left for the next run (other tests' fixtures in the shared database may still be unpriced on purpose;
+    // a pool's side without any USD feed always counts as unpriced, so pools are not expected to reach zero).
+    const left = await pool.query('SELECT count(*)::int AS usd FROM launch_usd_candle_buckets WHERE chain_id = $1 AND unpriced_count > 0', [chainId]);
+    expect(left.rows[0].usd).toBe(0);
+    const poolSide = await pool.query('SELECT count(*)::int AS n FROM pool_volume_buckets WHERE chain_id = $1 AND unpriced0 > 0', [chainId]);
+    expect(poolSide.rows[0].n).toBe(0); // the side that has a feed is priced
   });
 });
