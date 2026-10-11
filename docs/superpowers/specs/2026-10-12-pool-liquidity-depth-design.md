@@ -69,6 +69,8 @@ Regenerate `be/openapi.json` and `fe/src/api/schema.ts`.
 
 ## Out of scope
 
+The bonding-curve page and the token (launch) page keep their tabs (curve: Price, Volume; token: Price, Volume, TVL): a curve has no ticks and the token page spans many pools, so Liquidity and Depth exist only on pool pages. A depth view derived from the curve's own pricing formula could be added later.
+
 History of liquidity over time, V2 pools, adding/removing liquidity, per-position data, Explore-page charts.
 
 ## Testing
