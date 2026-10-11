@@ -10,6 +10,11 @@ export type HistoryMetric = 'volume' | 'tvl';
 
 const FALLBACK_GREEN = '#22c55e';
 
+/** Volume and TVL are never negative; the crosshair can sit below the baseline, where it would otherwise read "$-0.00". */
+export function formatUsdAxis(value: number): string {
+  return formatUsdCompact(String(Math.max(0, value)), 2);
+}
+
 interface AutoscaleRange { priceRange: { minValue: number; maxValue: number }; margins?: { above: number; below: number } }
 
 /** A series whose values barely differ (often a single point) would label every axis tick the same; include 0 so the axis is readable. */
@@ -94,13 +99,13 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
       grid: { vertLines: { visible: false }, horzLines: { color: '#18181b' } },
       rightPriceScale: { borderColor: '#27272a' },
       timeScale: { borderColor: '#27272a', timeVisible: step < DAY_SECONDS, secondsVisible: false },
-      localization: { priceFormatter: (value: number) => formatUsdCompact(String(value), 2) },
+      localization: { priceFormatter: (value: number) => formatUsdAxis(value) },
     });
     const series = metric === 'volume'
-      ? chart.addSeries(HistogramSeries, { color: green, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdCompact(String(value), 2), minMove: 0.01 } })
+      ? chart.addSeries(HistogramSeries, { color: green, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } })
       : chart.addSeries(AreaSeries, { lineColor: green, topColor: `${green}59`, bottomColor: `${green}00`, lineWidth: 2,
         autoscaleInfoProvider: (original: () => AutoscaleRange | null) => withZeroBaseline(original()),
-        priceFormat: { type: 'custom', formatter: (value: number) => formatUsdCompact(String(value), 2), minMove: 0.01 } });
+        priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } });
     chartRef.current = chart;
     seriesRef.current = series;
     const onMove = (param: MouseEventParams<Time>) => setHovered(param.time === undefined ? null : byTimeRef.current.get(Number(param.time)) ?? null);

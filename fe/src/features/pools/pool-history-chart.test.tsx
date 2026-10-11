@@ -104,7 +104,7 @@ describe('PoolHistoryChart', () => {
   });
 });
 
-import { withZeroBaseline } from './pool-history-chart';
+import { formatUsdAxis, withZeroBaseline } from './pool-history-chart';
 
 describe('withZeroBaseline', () => {
   it('includes 0 when every value is (nearly) the same, so axis ticks are not all identical', () => {
@@ -116,5 +116,12 @@ describe('withZeroBaseline', () => {
   });
   it('passes through a missing range', () => {
     expect(withZeroBaseline(null)).toBeNull();
+  });
+});
+
+describe('formatUsdAxis', () => {
+  it('never shows a negative amount for a crosshair below the baseline', () => {
+    expect(formatUsdAxis(-0.004)).toBe('$0.00');
+    expect(formatUsdAxis(1500)).toBe('$1.5K');
   });
 });
