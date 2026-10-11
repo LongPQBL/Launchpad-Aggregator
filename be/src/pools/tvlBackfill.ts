@@ -77,7 +77,11 @@ export async function backfillPoolTvl(pool: Pool, client: BackfillClient, option
   const grid = buildGrid(options.nowSeconds, options.days);
   const locate = createBlockLocator(client);
   const blocks = new Map<number, bigint | null>();
-  for (const point of grid) blocks.set(point.sampleAt, (await locate(point.sampleAt))?.block ?? null);
+  // The lookups share what each one learns, and run several at a time: this is the slow part before any pool is read.
+  const pending = [...grid];
+  await Promise.all(Array.from({ length: 8 }, async () => {
+    for (let point = pending.shift(); point; point = pending.shift()) blocks.set(point.sampleAt, (await locate(point.sampleAt))?.block ?? null);
+  }));
   log(`located ${blocks.size} sample blocks`);
 
   const pools = (await pool.query(`SELECT chain_id, protocol, pool_id, currency0, currency1, fee, tick_spacing, hooks, block_number
