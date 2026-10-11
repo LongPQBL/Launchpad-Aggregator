@@ -174,6 +174,18 @@ export const searchResults = { type: 'object', properties: {
   } } },
 } } as const;
 
+const depthRow = { type: 'object', properties: { price: { type: 'number' }, amount0: { type: 'number' }, total1: { type: 'number' }, cumulative1: { type: 'number' } } } as const;
+const tokenSide = { type: 'object', properties: { address: { type: 'string' }, decimals: { type: 'integer', nullable: true } } } as const;
+export const poolLiquidity = { type: 'object', properties: {
+  protocol: { type: 'string' }, blockNumber: { type: 'string', nullable: true }, tickSpacing: { type: 'integer' }, feePips: { type: 'integer' },
+  currentTick: { type: 'integer', nullable: true }, price: { type: 'number', nullable: true }, priceInverse: { type: 'number', nullable: true },
+  activeLiquidity: { type: 'string', nullable: true }, token0: tokenSide, token1: tokenSide,
+  ranges: { type: 'array', items: { type: 'object', properties: { tickLower: { type: 'integer' }, tickUpper: { type: 'integer' }, priceLower: { type: 'number' },
+    priceUpper: { type: 'number' }, liquidity: { type: 'string' }, active: { type: 'boolean' } } } },
+  depth: { type: 'object', nullable: true, properties: { asks: { type: 'array', items: depthRow }, bids: { type: 'array', items: depthRow }, spreadPercent: { type: 'number', nullable: true } } },
+  complete: { type: 'boolean' }, unavailableReason: { type: 'string', nullable: true },
+} } as const;
+
 export const poolHistory = { type: 'object', properties: {
   items: { type: 'array', items: { type: 'object', properties: {
     day: { type: 'integer' }, tradeCount: { type: 'integer' },

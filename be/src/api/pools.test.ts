@@ -74,4 +74,19 @@ describe('pool API', () => {
     const without = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });
     expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
   });
+  it('serves pool liquidity for V3/V4 only, 404 for V2 or an unknown pool, 503 without a reader', async () => {
+    const { pools, data } = setup();
+    const answer = { protocol: 'uniswap_v4', blockNumber: '9', tickSpacing: 60, feePips: 500, currentTick: 0, price: 1, priceInverse: 1, activeLiquidity: '5',
+      token0: { address: '0xa', decimals: 18 }, token1: { address: '0xb', decimals: 18 },
+      ranges: [{ tickLower: -60, tickUpper: 60, priceLower: 0.99, priceUpper: 1.01, liquidity: '5', active: true }],
+      depth: { asks: [{ price: 1.01, amount0: 1, total1: 1, cumulative1: 1 }], bids: [], spreadPercent: 0.1 }, complete: true, unavailableReason: null };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools: { ...pools, getPoolLiquidity: async (key) => (key.protocol === 'uniswap_v4' ? answer as never : null) } });
+    const ok = await app.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v4/${id}/liquidity` });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual(answer);
+    expect((await app.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v2/0x${'ab'.repeat(20)}/liquidity` })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v3/0x${'cd'.repeat(20)}/liquidity` })).statusCode).toBe(404);
+    const without = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });
+    expect((await without.inject({ method: 'GET', url: `/v1/pools/4663/uniswap_v4/${id}/liquidity` })).statusCode).toBe(503);
+  });
 });

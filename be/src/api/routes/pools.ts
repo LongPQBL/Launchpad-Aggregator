@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { DEFAULT_RANGE, parseRange, rangeSpec, trimToRange } from '../../charts/ranges.js';
 import type { PoolKey } from '../../pools/stats.js';
-import { pageSchema, poolCandle, poolHistory, poolPage, poolSummary, poolTrade } from '../schemas.js';
+import { pageSchema, poolCandle, poolHistory, poolLiquidity, poolPage, poolSummary, poolTrade } from '../schemas.js';
 import type { ApiDeps } from '../server.js';
 
 const poolIdPattern = /^0x[0-9a-fA-F]{64}$/;
@@ -95,6 +95,14 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
       const window = { intervalSeconds, buckets };
       try { return await deps.pools.listPoolHistory(identity, window); }
       catch (error) { if (error instanceof Error && error.message === 'Pool not found') return reply.code(404).send({ error: 'Pool not found' }); throw error; }
+    });
+  app.get<{ Params: Params }>('/v1/pools/:chainId/:protocol/:poolId/liquidity',
+    { schema: { response: { 200: poolLiquidity } } }, async (request, reply) => {
+      const identity = key(request.params);
+      if (!identity || identity.protocol === 'uniswap_v2') return reply.code(404).send({ error: 'Pool not found' });
+      if (!deps.pools?.getPoolLiquidity) return unavailable(reply);
+      const answer = await deps.pools.getPoolLiquidity(identity);
+      return answer ?? reply.code(404).send({ error: 'Pool not found' });
     });
   app.get<{ Params: Params; Querystring: Query }>('/v1/pools/:chainId/:protocol/:poolId/candles',
     { schema: { response: { 200: { type: 'object', properties: { items: { type: 'array', items: poolCandle }, complete: { type: 'boolean' } } } } } },

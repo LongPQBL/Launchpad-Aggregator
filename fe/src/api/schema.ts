@@ -951,6 +951,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/pools/{chainId}/{protocol}/{poolId}/liquidity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    protocol: string;
+                    poolId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            protocol?: string;
+                            blockNumber?: string | null;
+                            tickSpacing?: number;
+                            feePips?: number;
+                            currentTick?: number | null;
+                            price?: number | null;
+                            priceInverse?: number | null;
+                            activeLiquidity?: string | null;
+                            token0?: {
+                                address?: string;
+                                decimals?: number | null;
+                            };
+                            token1?: {
+                                address?: string;
+                                decimals?: number | null;
+                            };
+                            ranges?: {
+                                tickLower?: number;
+                                tickUpper?: number;
+                                priceLower?: number;
+                                priceUpper?: number;
+                                liquidity?: string;
+                                active?: boolean;
+                            }[];
+                            depth?: {
+                                asks?: {
+                                    price?: number;
+                                    amount0?: number;
+                                    total1?: number;
+                                    cumulative1?: number;
+                                }[];
+                                bids?: {
+                                    price?: number;
+                                    amount0?: number;
+                                    total1?: number;
+                                    cumulative1?: number;
+                                }[];
+                                spreadPercent?: number | null;
+                            } | null;
+                            complete?: boolean;
+                            unavailableReason?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pools/{chainId}/{protocol}/{poolId}/candles": {
         parameters: {
             query?: never;

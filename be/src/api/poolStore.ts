@@ -6,6 +6,7 @@ import { assetDecimals, readPoolStats, readPoolTrades, type PoolStats, type Pool
 import { intervalTtlMemo } from '../charts/intervalMemo.js';
 import { readPoolDailyHistory, readPoolHistory, type PoolDayHistory } from '../pools/history.js';
 import { sumUsdValues } from '../pools/valuation.js';
+import { readPoolLiquidityAnswer, type PoolLiquidityAnswer } from '../pools/liquidity.js';
 import { ttlMemo } from './ttlMemo.js';
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
@@ -32,6 +33,8 @@ export interface PoolApiStore {
   listPoolTrades(key: PoolKey, displayedToken: string, query: { limit: number; cursor?: string }): Promise<{ items: PoolTradeResponse[]; nextCursor: string | null }>;
   listPoolCandles(key: PoolKey, displayedToken: string, intervalSeconds: number, before?: number): Promise<{ items: PoolCandleResponse[]; complete: boolean }>;
   // Optional so test doubles that predate the daily history keep compiling; the route answers 503 without it.
+  /** Liquidity per price range and depth read from the chain; null for a V2 pair or an unknown pool. Optional like the history, 503 without it. */
+  getPoolLiquidity?(key: PoolKey): Promise<PoolLiquidityAnswer | null>;
   listPoolHistory?(key: PoolKey, window: { intervalSeconds: number; buckets: number }): Promise<{ items: PoolDayHistory[]; complete: boolean; intervalSeconds?: number }>;
 }
 
@@ -67,6 +70,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     (_key: string, arg: { key: PoolKey; window: { intervalSeconds: number; buckets: number } }) =>
       readPoolHistory(pool, arg.key, { ...arg.window, asOf: Math.floor(Date.now() / 1000), rpcClient }),
     (arg) => arg.window.intervalSeconds);
+  // Reading every tick costs RPC calls; a minute of reuse per pool keeps a busy page from repeating it.
+  const poolLiquidityMemo = ttlMemo((_key: string, arg: PoolKey) => readPoolLiquidityAnswer(pool, rpcClient as never, arg), 60_000);
   const emptyMetadata: TokenMetadata = { symbol: null, name: null, logoUri: null };
   async function currencyMetadata(address: string): Promise<TokenMetadata> {
     if (!tokenMetadataResolver) return emptyMetadata;
@@ -181,6 +186,10 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     },
     listPoolTrades: (key, token, query) => readPoolTrades(pool, key, token, { ...query, rpcClient }),
     listPoolCandles: (key, token, interval, before) => readPoolCandles(pool, key, token, interval, before, { rpcClient }),
+    getPoolLiquidity: async (key) => {
+      if (!rpcClient?.getBlockNumber) return null;
+      return poolLiquidityMemo(`${key.chainId}:${key.protocol}:${key.poolId.toLowerCase()}`, key);
+    },
     listPoolHistory: (key, window) => poolHistoryMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${window.intervalSeconds}:${window.buckets}`,
       { key, window }),
   };

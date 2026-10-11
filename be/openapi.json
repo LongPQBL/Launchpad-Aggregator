@@ -1821,6 +1821,186 @@
         }
       }
     },
+    "/v1/pools/{chainId}/{protocol}/{poolId}/liquidity": {
+      "get": {
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "protocol",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "path",
+            "name": "poolId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "protocol": {
+                      "type": "string"
+                    },
+                    "blockNumber": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tickSpacing": {
+                      "type": "integer"
+                    },
+                    "feePips": {
+                      "type": "integer"
+                    },
+                    "currentTick": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "price": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "priceInverse": {
+                      "type": "number",
+                      "nullable": true
+                    },
+                    "activeLiquidity": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "token0": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "string"
+                        },
+                        "decimals": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "token1": {
+                      "type": "object",
+                      "properties": {
+                        "address": {
+                          "type": "string"
+                        },
+                        "decimals": {
+                          "type": "integer",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "ranges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "tickLower": {
+                            "type": "integer"
+                          },
+                          "tickUpper": {
+                            "type": "integer"
+                          },
+                          "priceLower": {
+                            "type": "number"
+                          },
+                          "priceUpper": {
+                            "type": "number"
+                          },
+                          "liquidity": {
+                            "type": "string"
+                          },
+                          "active": {
+                            "type": "boolean"
+                          }
+                        }
+                      }
+                    },
+                    "depth": {
+                      "type": "object",
+                      "nullable": true,
+                      "properties": {
+                        "asks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "price": {
+                                "type": "number"
+                              },
+                              "amount0": {
+                                "type": "number"
+                              },
+                              "total1": {
+                                "type": "number"
+                              },
+                              "cumulative1": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        },
+                        "bids": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "price": {
+                                "type": "number"
+                              },
+                              "amount0": {
+                                "type": "number"
+                              },
+                              "total1": {
+                                "type": "number"
+                              },
+                              "cumulative1": {
+                                "type": "number"
+                              }
+                            }
+                          }
+                        },
+                        "spreadPercent": {
+                          "type": "number",
+                          "nullable": true
+                        }
+                      }
+                    },
+                    "complete": {
+                      "type": "boolean"
+                    },
+                    "unavailableReason": {
+                      "type": "string",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/pools/{chainId}/{protocol}/{poolId}/candles": {
       "get": {
         "parameters": [
