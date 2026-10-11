@@ -404,7 +404,7 @@ export const poolTvlSnapshots = pgTable('pool_tvl_snapshots', {
   tvlUsd: numeric('tvl_usd', { precision: 78, scale: 30 }).notNull(),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.blockNumber] }),
-  check('pool_tvl_snapshots_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+  check('pool_tvl_snapshots_protocol', sql`${table.protocol} IN ('uniswap_v4', 'uniswap_v3', 'uniswap_v2')`),
   index('pool_tvl_snapshots_captured_at_idx').on(table.capturedAt),
 ]);
 
@@ -419,7 +419,7 @@ export const poolTvlBuckets = pgTable('pool_tvl_buckets', {
   lastCapturedAt: timestamp('last_captured_at', { withTimezone: true }).notNull(),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.protocol, table.poolId, table.intervalSeconds, table.bucketStart] }),
-  check('pool_tvl_buckets_protocol', sql`${table.protocol} = 'uniswap_v4'`),
+  check('pool_tvl_buckets_protocol', sql`${table.protocol} IN ('uniswap_v4', 'uniswap_v3', 'uniswap_v2')`),
 ]);
 
 // Official USD volume per launch, venue kind and bucket. unpriced_count > 0 means the bucket's volume is unavailable.
