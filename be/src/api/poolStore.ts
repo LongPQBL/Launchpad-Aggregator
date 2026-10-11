@@ -7,7 +7,7 @@ import { intervalTtlMemo } from '../charts/intervalMemo.js';
 import { readPoolDailyHistory, readPoolHistory, type PoolDayHistory } from '../pools/history.js';
 import { sumUsdValues } from '../pools/valuation.js';
 import { readPoolLiquidityAnswer, type PoolLiquidityAnswer } from '../pools/liquidity.js';
-import { ttlMemo } from './ttlMemo.js';
+import { swrMemo, ttlMemo } from './ttlMemo.js';
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
 export interface PoolSummary extends PoolStats {
@@ -110,9 +110,10 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       return days.every((value): value is string => value !== null) ? sumUsdValues(days) : null;
     } catch { return null; }
   }, 5 * 60_000);
-  // Per-pool statistics cost about seven queries plus RPC reads each, and a list or a live refresh asks for the same pools again and again: reuse them for 10 s.
-  const poolStatsMemo = ttlMemo((_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) =>
-    readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), { rpcClient, createdTimestamp: arg.createdTimestamp }), 10_000);
+  // Per-pool statistics cost about seven queries plus RPC reads each (a list of 50 pools: ~2.5 s), and a list or a live refresh asks for the same pools
+  // again and again: fresh for 10 s, then served at once for up to 5 minutes while one background refresh recomputes them.
+  const poolStatsMemo = swrMemo((_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) =>
+    readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), { rpcClient, createdTimestamp: arg.createdTimestamp }), 10_000, 300_000);
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
