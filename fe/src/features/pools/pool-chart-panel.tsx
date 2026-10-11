@@ -10,7 +10,6 @@ import { PoolHistoryChart } from './pool-history-chart';
 
 type ChartKind = 'price' | 'volume' | 'tvl';
 const LABELS: Record<ChartKind, string> = { price: 'Price', volume: 'Volume', tvl: 'TVL' };
-const ALL_POOLS_LABELS: Record<ChartKind, string> = { ...LABELS, volume: 'Volume · all pools', tvl: 'TVL · all pools' };
 
 const STYLE_STORAGE_KEY = 'chartStyle';
 
@@ -74,7 +73,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   headerClassName?: string;
   /** Offer the TVL tab next to Volume. */
   showTvl?: boolean;
-  /** Volume / TVL cover every pool of a token (the token page): the tabs and the readout say so. */
+  /** Volume / TVL cover every pool of a token (the token page); only the wording of the notes under the chart differs. */
   allPools?: boolean;
   /** The range the server rendered `history` and the price candles for (from the page URL). */
   initialRange?: ChartRangeId;
@@ -135,7 +134,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   }, [history, activeRange, initialRange, applyRange]);
 
   if (kinds.length === 0) return null;
-  const kindTabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} labels={allPools ? ALL_POOLS_LABELS : LABELS} /> : null;
+  const kindTabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} labels={LABELS} /> : null;
   // The line / candles switch only means something for the price chart, so it sits beside the kind tabs only there.
   const tabs = (
     <div className="flex items-center gap-2">

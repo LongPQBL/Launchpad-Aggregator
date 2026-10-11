@@ -9,6 +9,16 @@ import { RollingText } from '@/components/percent-change';
 export type HistoryMetric = 'volume' | 'tvl';
 
 const FALLBACK_GREEN = '#22c55e';
+
+interface AutoscaleRange { priceRange: { minValue: number; maxValue: number }; margins?: { above: number; below: number } }
+
+/** A series whose values barely differ (often a single point) would label every axis tick the same; include 0 so the axis is readable. */
+export function withZeroBaseline(range: AutoscaleRange | null): AutoscaleRange | null {
+  if (range === null) return range;
+  const { minValue, maxValue } = range.priceRange;
+  if (maxValue <= 0 || (maxValue - minValue) / maxValue > 0.01) return range;
+  return { ...range, priceRange: { minValue: Math.min(0, minValue), maxValue } };
+}
 const DAY_SECONDS = 86_400;
 
 function valueOf(item: PoolDayHistory, metric: HistoryMetric): string | null {
@@ -88,6 +98,7 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
     const series = metric === 'volume'
       ? chart.addSeries(HistogramSeries, { color: green, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdCompact(String(value), 2), minMove: 0.01 } })
       : chart.addSeries(AreaSeries, { lineColor: green, topColor: `${green}59`, bottomColor: `${green}00`, lineWidth: 2,
+        autoscaleInfoProvider: (original: () => AutoscaleRange | null) => withZeroBaseline(original()),
         priceFormat: { type: 'custom', formatter: (value: number) => formatUsdCompact(String(value), 2), minMove: 0.01 } });
     chartRef.current = chart;
     seriesRef.current = series;
@@ -112,7 +123,7 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
     chartRef.current?.timeScale().fitContent();
   }, [items, metric, step]);
 
-  const label = `${metric === 'volume' ? 'Volume' : 'TVL'}${allPools ? ' (all pools)' : ''}`;
+  const label = metric === 'volume' ? 'Volume' : 'TVL';
   const total = metric === 'volume' ? windowTotal(items) : null;
   const latest = metric === 'tvl' ? latestTvl(items) : null;
   const figure = hovered ? valueOf(hovered, metric) : metric === 'volume' ? total : latest?.tvlUsd ?? null;

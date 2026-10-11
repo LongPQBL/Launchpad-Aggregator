@@ -95,3 +95,18 @@ describe('PoolHistoryChart', () => {
     expect(screen.getByText(/still being indexed/)).toBeInTheDocument();
   });
 });
+
+import { withZeroBaseline } from './pool-history-chart';
+
+describe('withZeroBaseline', () => {
+  it('includes 0 when every value is (nearly) the same, so axis ticks are not all identical', () => {
+    expect(withZeroBaseline({ priceRange: { minValue: 3495, maxValue: 3495 } })?.priceRange).toEqual({ minValue: 0, maxValue: 3495 });
+  });
+  it('leaves a series with real variation alone', () => {
+    const range = { priceRange: { minValue: 100, maxValue: 150 } };
+    expect(withZeroBaseline(range)).toBe(range);
+  });
+  it('passes through a missing range', () => {
+    expect(withZeroBaseline(null)).toBeNull();
+  });
+});

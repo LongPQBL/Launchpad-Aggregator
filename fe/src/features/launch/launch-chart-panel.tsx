@@ -6,7 +6,7 @@ import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges'
 import { ChartTypePanel } from '@/features/pools/pool-chart-panel';
 import { OfficialPriceChart } from './official-price-chart';
 
-// The launch page's chart area: the price chart plus Volume and TVL over all of the token's pools for one shared time range
+// The launch page's chart area: the price chart plus Volume and TVL over the token's pools for one shared time range
 // (scoped to the bonding curve, Volume is the curve's alone).
 export function LaunchChartPanel({ chainId, tokenAddress, history, venue, initialRange = DEFAULT_CHART_RANGE, ...price }: Omit<ComponentProps<typeof OfficialPriceChart>, 'trailing' | 'range' | 'onSelectRange' | 'chartStyle'> & {
   chainId: number; tokenAddress: string; history: PoolHistory | null;

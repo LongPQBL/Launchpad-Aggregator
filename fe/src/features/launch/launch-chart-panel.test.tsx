@@ -29,20 +29,20 @@ describe('LaunchChartPanel', () => {
 
   it('hides the line / candles switch on the Volume and TVL charts', () => {
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Volume · all pools' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
     expect(screen.queryByRole('tab', { name: 'Line chart' })).not.toBeInTheDocument();
   });
 
   it('adds Volume and TVL next to Price when the launch has a Volume / TVL history', () => {
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
     expect(screen.getByRole('tab', { name: 'Price' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent.click(screen.getByRole('tab', { name: 'TVL · all pools' }));
-    expect(screen.getByRole('img', { name: /^tvl \(all pools\) over/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'TVL' }));
+    expect(screen.getByRole('img', { name: /^tvl over/i })).toBeInTheDocument();
   });
 
-  it('says "all pools" on the token page and tells how many pools had no USD price', () => {
+  it('tells how many pools had no USD price on the token page', () => {
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={{ ...history, unvaluedPools: 2 }} />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Volume · all pools' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
     expect(screen.getByText('Excludes 2 pools without a USD price.')).toBeInTheDocument();
   });
 

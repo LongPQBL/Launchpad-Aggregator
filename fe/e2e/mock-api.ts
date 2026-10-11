@@ -366,6 +366,8 @@ export function startMockApi(port: number): Server {
           tvlUsd: index === 5 ? null : String(40_000 + index * 50 + (index % 7) * 120),
         })),
         complete: true,
+        // The launch history covers all of a token's pools and says how many had no USD price.
+        ...(url.pathname.includes('/launches/') ? { poolCount: 3, unvaluedPools: 1 } : {}),
       }));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
