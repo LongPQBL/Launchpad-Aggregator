@@ -1,6 +1,6 @@
 'use client';
 
-import { AreaSeries, HistogramSeries, createChart, type IChartApi, type ISeriesApi, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
+import { AreaSeries, HistogramSeries, LineType, createChart, type IChartApi, type ISeriesApi, type MouseEventParams, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PoolDayHistory } from '@/api/client';
 import { formatUsdCompact } from '@/api/format';
@@ -103,7 +103,7 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
     });
     const series = metric === 'volume'
       ? chart.addSeries(HistogramSeries, { color: green, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } })
-      : chart.addSeries(AreaSeries, { lineColor: green, topColor: `${green}59`, bottomColor: `${green}00`, lineWidth: 2,
+      : chart.addSeries(AreaSeries, { lineColor: green, topColor: `${green}59`, bottomColor: `${green}00`, lineWidth: 2, lineType: LineType.Curved,
         autoscaleInfoProvider: (original: () => AutoscaleRange | null) => withZeroBaseline(original()),
         priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } });
     chartRef.current = chart;

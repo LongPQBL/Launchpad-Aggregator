@@ -5,13 +5,13 @@ import type { PoolCandlePage, PoolSummary } from '@/api/client';
 import { displaySymbol, formatPrice, formatUsd } from '@/api/format';
 import { PercentChange, RollingText } from '@/components/percent-change';
 import type { ChartRangeId } from '@/features/chart/ranges';
-import { OfficialChart, type OfficialChartHoverPoint, type OfficialChartRange } from '@/features/launch/official-chart';
+import { OfficialChart, type PriceChartStyle, type OfficialChartHoverPoint, type OfficialChartRange } from '@/features/launch/official-chart';
 import { rangeChangePercent } from '@/features/launch/official-price-chart';
 
-export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSymbol, range, onSelectRange, trailing }: {
+export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSymbol, range, onSelectRange, trailing, chartStyle }: {
   pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'displayedToken' | 'priceInQuote' | 'priceUsd'>;
   candles: PoolCandlePage; coverageStatus: string; quoteSymbol: string; tokenSymbol: string | null;
-  range?: ChartRangeId; onSelectRange?: (range: ChartRangeId) => void; trailing?: ReactNode;
+  range?: ChartRangeId; onSelectRange?: (range: ChartRangeId) => void; trailing?: ReactNode; chartStyle?: PriceChartStyle;
 }) {
   const [hover, setHover] = useState<OfficialChartHoverPoint | null>(null);
   const [visibleRange, setVisibleRange] = useState<OfficialChartRange | null>(null);
@@ -35,6 +35,6 @@ export function PoolChart({ pool, candles, coverageStatus, quoteSymbol, tokenSym
       candles={candles.items}
       graduationTime={null} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
       coverageStatus={candles.complete ? coverageStatus : 'backfilling'}
-      source={{ pool }} range={range} onSelectRange={onSelectRange} showCurrencyToggle={false} onHoverPoint={setHover} onRangeChange={setVisibleRange} trailing={trailing} />
+      source={{ pool }} range={range} onSelectRange={onSelectRange} showCurrencyToggle={false} onHoverPoint={setHover} onRangeChange={setVisibleRange} trailing={trailing} chartStyle={chartStyle} />
   </div>;
 }

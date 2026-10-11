@@ -51,7 +51,8 @@ const { subscribeCrosshairMoveMock, chartStub } = vi.hoisted(() => {
 });
 
 vi.mock('lightweight-charts', () => ({
-  CandlestickSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
+  CandlestickSeries: {}, AreaSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
 }));
 
 describe('Pools UI', () => {

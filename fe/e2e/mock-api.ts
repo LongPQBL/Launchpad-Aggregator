@@ -134,8 +134,9 @@ function rangeInterval(url: URL): number {
 
 function mockCandles(intervalSeconds: number, currency: 'quote' | 'usd') {
   const base = currency === 'usd' ? 0.00012 : 0.0001;
+  // A trend with slow waves, like a real market: a smooth price path instead of a straight line.
   const items = Array.from({ length: 60 }, (_, index) => {
-    const close = base * (1 + index * 0.002);
+    const close = base * (1 + index * 0.002 + 0.12 * Math.sin(index / 7) + 0.05 * Math.sin(index / 2.5));
     return {
       intervalSeconds,
       bucketStart: 1_700_000_000 + index * intervalSeconds,
@@ -363,7 +364,7 @@ export function startMockApi(port: number): Server {
           tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
           volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
           // A continuous TVL line with one missing snapshot, so the area chart shows both a line and a gap.
-          tvlUsd: index === 5 ? null : String(40_000 + index * 50 + (index % 7) * 120),
+          tvlUsd: index === 5 ? null : String(Math.round(40_000 + index * 40 + 5_000 * Math.sin(index / 14) + 1_500 * Math.sin(index / 4))),
         })),
         complete: true,
         // The launch history covers all of a token's pools and says how many had no USD price.

@@ -10,6 +10,7 @@ const { setData, addSeries, subscribeCrosshairMove, fitContent } = vi.hoisted(()
   return { setData, fitContent, subscribeCrosshairMove: vi.fn(), addSeries: vi.fn((_type?: unknown, _options?: unknown) => ({ setData })) };
 });
 vi.mock('lightweight-charts', () => ({
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: { kind: 'histogram' }, AreaSeries: { kind: 'area' },
   createChart: () => ({ addSeries, subscribeCrosshairMove, unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent }) }),
 }));

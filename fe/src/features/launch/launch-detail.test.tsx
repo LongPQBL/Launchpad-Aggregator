@@ -21,14 +21,17 @@ const createSeriesMarkersMock = vi.fn((..._args: unknown[]) => ({ setMarkers: se
 const createChartMock = vi.fn((..._args: unknown[]) => ({
   addSeries: addSeriesMock,
   remove: removeMock,
+  removeSeries: vi.fn(),
   subscribeCrosshairMove: subscribeCrosshairMoveMock,
   unsubscribeCrosshairMove: unsubscribeCrosshairMoveMock,
 }));
 
 vi.mock('lightweight-charts', () => ({
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   createChart: (...args: unknown[]) => createChartMock(...args),
   createSeriesMarkers: (...args: unknown[]) => createSeriesMarkersMock(...args),
   CandlestickSeries: 'CandlestickSeries',
+  AreaSeries: 'AreaSeries',
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({

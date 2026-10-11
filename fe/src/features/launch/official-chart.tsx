@@ -1,10 +1,14 @@
 'use client';
 
 import {
+  AreaSeries,
   CandlestickSeries,
+  LineType,
   createChart,
   createSeriesMarkers,
   type CandlestickData,
+  type LineData,
+  type IChartApi,
   type ISeriesApi,
   type IPriceLine,
   type ISeriesMarkersPluginApi,
@@ -17,6 +21,9 @@ import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, type ChartRangeId } from '@/features/chart/ranges';
 import { CoverageBadge } from './coverage-badge';
+
+/** How the price is drawn: OHLC candles, or a line through each bucket's close. */
+export type PriceChartStyle = 'candles' | 'line';
 
 export interface OfficialChartCandle { bucketStart: number; open: string; high: string; low: string; close: string }
 
@@ -60,11 +67,14 @@ export interface OfficialChartProps {
   onRangeChange?: (range: OfficialChartRange | null) => void;
   /** Rendered on the right of the range-tabs row (e.g. a Price / Volume / TVL switcher). */
   trailing?: ReactNode;
+  /** Candles (default) or a line through the closes; switching keeps the zoom and data. */
+  chartStyle?: PriceChartStyle;
 }
 
-export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', range = DEFAULT_CHART_RANGE, onSelectRange, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange, trailing }: OfficialChartProps) {
+export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', range = DEFAULT_CHART_RANGE, onSelectRange, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange, trailing, chartStyle = 'candles' }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Area'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLineRef = useRef<IPriceLine | null>(null);
   const requestIdRef = useRef(0);
@@ -187,26 +197,45 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       rightPriceScale: { borderColor: '#27272a' },
       timeScale: { borderColor: '#27272a' },
     });
-    const series = chart.addSeries(CandlestickSeries);
-    seriesRef.current = series;
-    markersRef.current = createSeriesMarkers(series, []);
+    chartRef.current = chart;
 
     // Reports the point the user is pointing at (param.time is undefined outside the chart's
     // data range, e.g. on mouse leave) so a caller's own headline price can track the cursor.
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
-      const data = param.time !== undefined ? (param.seriesData.get(series) as CandlestickData<Time> | undefined) : undefined;
-      onHoverPointRef.current?.(data ? { time: Number(data.time), close: data.close, currency: activeCurrencyRef.current } : null);
+      const series = seriesRef.current;
+      const data = param.time !== undefined && series ? (param.seriesData.get(series) as (CandlestickData<Time> | LineData<Time>) | undefined) : undefined;
+      const close = data === undefined ? undefined : 'close' in data ? data.close : data.value;
+      onHoverPointRef.current?.(data && close !== undefined ? { time: Number(data.time), close, currency: activeCurrencyRef.current } : null);
     };
     chart.subscribeCrosshairMove(handleCrosshairMove);
 
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
+      chartRef.current = null;
       seriesRef.current = null;
       markersRef.current = null;
       priceLineRef.current = null;
     };
   }, []);
+
+  // Swaps the series when the style changes, on the same chart so the zoom/pan survives. Declared before the data effect so
+  // that, in the same commit, the data effect redraws onto the new series.
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const series = chartStyle === 'line'
+      ? chart.addSeries(AreaSeries, { lineColor: '#22c55e', topColor: '#22c55e40', bottomColor: '#22c55e00', lineWidth: 2, lineType: LineType.Curved })
+      : chart.addSeries(CandlestickSeries);
+    seriesRef.current = series;
+    markersRef.current = createSeriesMarkers(series, []);
+    priceLineRef.current = null;
+    return () => {
+      // On unmount the chart's own cleanup (declared earlier) has already removed the chart and its series.
+      if (chartRef.current === chart) chart.removeSeries(series);
+      if (seriesRef.current === series) { seriesRef.current = null; markersRef.current = null; priceLineRef.current = null; }
+    };
+  }, [chartStyle]);
 
   // Updates data on the existing chart/series instead of recreating them.
   useEffect(() => {
@@ -222,15 +251,21 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       },
     });
 
-    series.setData(
-      ascendingCandles.map((candle) => ({
-        time: candle.bucketStart as UTCTimestamp,
-        open: toChartValue(candle.open),
-        high: toChartValue(candle.high),
-        low: toChartValue(candle.low),
-        close: toChartValue(candle.close),
-      })),
-    );
+    if (chartStyle === 'line') {
+      (series as ISeriesApi<'Area'>).setData(
+        ascendingCandles.map((candle) => ({ time: candle.bucketStart as UTCTimestamp, value: toChartValue(candle.close) })),
+      );
+    } else {
+      (series as ISeriesApi<'Candlestick'>).setData(
+        ascendingCandles.map((candle) => ({
+          time: candle.bucketStart as UTCTimestamp,
+          open: toChartValue(candle.open),
+          high: toChartValue(candle.high),
+          low: toChartValue(candle.low),
+          close: toChartValue(candle.close),
+        })),
+      );
+    }
 
     if (priceLineRef.current) series.removePriceLine(priceLineRef.current);
     priceLineRef.current = latestCandle
@@ -256,7 +291,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           ]
         : [],
     );
-  }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle]);
+  }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle, chartStyle]);
 
   const currencyTabClass = (active: boolean) => active
     ? 'rounded px-2.5 py-1.5 text-foreground bg-background shadow-sm'

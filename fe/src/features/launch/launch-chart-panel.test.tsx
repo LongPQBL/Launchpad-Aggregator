@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { LaunchChartPanel } from './launch-chart-panel';
 
 vi.mock('lightweight-charts', () => ({
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: {}, AreaSeries: {},
   createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
 }));

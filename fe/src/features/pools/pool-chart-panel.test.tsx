@@ -6,6 +6,7 @@ import { PoolChartPanel } from './pool-chart-panel';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolHistory: vi.fn() }));
 vi.mock('lightweight-charts', () => ({
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: {}, AreaSeries: {},
   createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
 }));

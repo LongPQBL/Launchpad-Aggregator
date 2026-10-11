@@ -12,7 +12,8 @@ const { subscribeCrosshairMoveMock, chartStub } = vi.hoisted(() => {
   return { subscribeCrosshairMoveMock, chartStub };
 });
 vi.mock('lightweight-charts', () => ({
-  CandlestickSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
+  CandlestickSeries: {}, AreaSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
 }));
 
 const candle = (bucketStart: number, close: string) => ({ intervalSeconds: 3600, bucketStart, open: close, high: close, low: close, close, tradeCount: 1 });

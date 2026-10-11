@@ -26,8 +26,9 @@ const { subscribeCrosshairMoveMock, chartStub } = vi.hoisted(() => {
 });
 
 vi.mock('lightweight-charts', () => ({
+  LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   // Any other method call on the chart or series is a no-op; most tests check the markup, not the canvas.
-  CandlestickSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
+  CandlestickSeries: {}, AreaSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,
 }));
 
 const props = { candles: [], graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'caught_up' };

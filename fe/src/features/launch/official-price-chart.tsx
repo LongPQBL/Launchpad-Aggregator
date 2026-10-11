@@ -5,7 +5,7 @@ import type { CandlePage } from '@/api/client';
 import { formatPrice, formatUsd } from '@/api/format';
 import { PercentChange, RollingText } from '@/components/percent-change';
 import type { ChartRangeId } from '@/features/chart/ranges';
-import { OfficialChart, type OfficialChartHoverPoint, type OfficialChartRange, type OfficialChartSource } from './official-chart';
+import { OfficialChart, type OfficialChartHoverPoint, type PriceChartStyle, type OfficialChartRange, type OfficialChartSource } from './official-chart';
 
 // Uniswap-style: change from the first point of the visible range to the latest price, or to the
 // hovered point while scrubbing. Null (shown as "—") when either end isn't a usable positive price.
@@ -32,6 +32,7 @@ export function OfficialPriceChart({
   source,
   showCurrencyToggle = true,
   trailing,
+  chartStyle,
 }: {
   priceText: string;
   priceValue?: string | null;
@@ -48,6 +49,7 @@ export function OfficialPriceChart({
   showCurrencyToggle?: boolean;
   /** Right side of the range row (the Price / Volume / TVL switcher). */
   trailing?: ReactNode;
+  chartStyle?: PriceChartStyle;
 }) {
   const [hover, setHover] = useState<OfficialChartHoverPoint | null>(null);
   const [visibleRange, setVisibleRange] = useState<OfficialChartRange | null>(null);
@@ -79,6 +81,7 @@ export function OfficialPriceChart({
           onHoverPoint={setHover}
           onRangeChange={setVisibleRange}
           trailing={trailing}
+          chartStyle={chartStyle}
         />
       )}
     </div>
