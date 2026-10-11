@@ -498,6 +498,8 @@ export interface paths {
                             }[];
                             complete?: boolean;
                             intervalSeconds?: number;
+                            poolCount?: number;
+                            unvaluedPools?: number;
                         };
                     };
                 };
@@ -934,6 +936,8 @@ export interface paths {
                             }[];
                             complete?: boolean;
                             intervalSeconds?: number;
+                            poolCount?: number;
+                            unvaluedPools?: number;
                         };
                     };
                 };

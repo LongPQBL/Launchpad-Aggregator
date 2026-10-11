@@ -26,6 +26,20 @@ function trimFractionZeros(value: string): string {
   return value.includes('.') ? value.replace(/\.?0+$/, '') : value;
 }
 
+/** The side whose raw amounts value a swap in USD: the first of currency1, then currency0 with a verified USD feed and known decimals (the same choice as the pool's 24h volume). */
+export async function pickPricedSide(pool: Pool, chainId: number, catalog: { currency0: string; currency1: string }, rpcClient?: UsdPriceClient): Promise<{ decimals: number; side: 0 | 1 } | null> {
+  const [decimals0, decimals1] = await Promise.all([assetDecimals(rpcClient, catalog.currency0), assetDecimals(rpcClient, catalog.currency1)]);
+  const sides = [
+    { address: catalog.currency1, decimals: decimals1, side: 1 as const },
+    { address: catalog.currency0, decimals: decimals0, side: 0 as const },
+  ];
+  for (const side of sides) {
+    const feed = side.decimals === null ? null : await resolveVerifiedFeed(pool, chainId, side.address);
+    if (feed && side.decimals !== null) return { decimals: side.decimals, side: side.side };
+  }
+  return null;
+}
+
 /**
  * Per-UTC-day USD volume and end-of-day TVL for one pool, oldest first, one entry per day in the window
  * (days with no swaps are real zeros when the pool is caught up, null otherwise).
@@ -53,19 +67,7 @@ export async function readPoolHistory(pool: Pool, key: PoolKey, options: { inter
   const lastDay = Math.floor(options.asOf / step) * step;
   const firstDay = lastDay - (options.buckets - 1) * step;
 
-  const [decimals0, decimals1] = await Promise.all([
-    assetDecimals(options.rpcClient, catalog.currency0), assetDecimals(options.rpcClient, catalog.currency1),
-  ]);
-  // Same choice as the pool's 24h volume: the first side (currency1, then currency0) with a verified USD feed and known decimals.
-  const sides = [
-    { address: catalog.currency1, decimals: decimals1, side: 1 as const },
-    { address: catalog.currency0, decimals: decimals0, side: 0 as const },
-  ];
-  let priced: { decimals: number; side: 0 | 1 } | null = null;
-  for (const side of sides) {
-    const feed = side.decimals === null ? null : await resolveVerifiedFeed(pool, key.chainId, side.address);
-    if (feed && side.decimals !== null) { priced = { decimals: side.decimals, side: side.side }; break; }
-  }
+  const priced = await pickPricedSide(pool, key.chainId, catalog, options.rpcClient);
 
   const volumeByDay = new Map<number, { tradeCount: number; volumeUsd: string | null }>();
   // Rollup rows: |raw| * oracle answer / 10^feed decimals per side, so the priced side's token decimals are applied here.

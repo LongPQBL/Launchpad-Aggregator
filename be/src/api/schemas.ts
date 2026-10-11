@@ -181,6 +181,9 @@ export const poolHistory = { type: 'object', properties: {
   } } },
   complete: { type: 'boolean' },
   intervalSeconds: { type: 'integer' },
+  // Launch history only: pools the answer is built from, and pools left out for lack of a USD price.
+  poolCount: { type: 'integer' },
+  unvaluedPools: { type: 'integer' },
 } } as const;
 
 export const curveSummary = { type: 'object', properties: {

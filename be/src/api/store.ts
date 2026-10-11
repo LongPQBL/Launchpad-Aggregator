@@ -240,7 +240,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       [arg.chainId, arg.tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
       if (!launch) return null;
       return readLaunchHistory(pool, { chainId: arg.chainId, tokenAddress: arg.tokenAddress, ...arg.window, asOf: Math.floor(Date.now() / 1000),
-        complete: Boolean(launch.launch_coverage_complete) });
+        complete: Boolean(launch.launch_coverage_complete), rpcClient });
     },
     (arg) => arg.window.intervalSeconds);
   // GREATEST(a, b) ignores a NULL operand (returning the other) unless both are NULL — exactly the
