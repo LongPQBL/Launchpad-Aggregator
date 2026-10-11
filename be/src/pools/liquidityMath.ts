@@ -3,6 +3,7 @@ export interface DepthRow { price: number; amount0: number; total1: number; cumu
 export interface DepthResult { asks: DepthRow[]; bids: DepthRow[]; spreadPercent: number | null }
 
 const Q96 = 2 ** 96;
+const MAX_ROW_TICKS = 100;
 
 /** sqrt(1.0001^tick) as a float. */
 export function tickToSqrt(tick: number): number { return 1.0001 ** (tick / 2); }
@@ -67,7 +68,8 @@ export function buildDepth(input: {
   decimals0: number; decimals1: number; feePips: number; maxRows?: number;
 }): DepthResult {
   const maxRows = input.maxRows ?? 40;
-  const spacing = Math.max(1, input.tickSpacing);
+  // Rows are one tick spacing wide, but never wider than ~1% of price: liquidity is constant inside a range, so a coarse spacing does not need coarse rows.
+  const spacing = Math.max(1, Math.min(input.tickSpacing, MAX_ROW_TICKS));
   const currentSqrt = Number(input.sqrtPriceX96) / Q96;
   const scale0 = 10 ** input.decimals0;
   const scale1 = 10 ** input.decimals1;
@@ -87,6 +89,8 @@ export function buildDepth(input: {
       cumulative1 += amount1 / scale1;
       rows.push({ price: sqrtToPrice(next, input.decimals0, input.decimals1), amount0: amount0 / scale0, total1: amount1 / scale1, cumulative1 });
     }
+    // Rows beyond the last range with liquidity carry nothing; they are dropped instead of padding the table.
+    while (rows.length > 0 && rows[rows.length - 1]!.total1 === 0) rows.pop();
     return rows;
   };
   return { asks: side(1), bids: side(-1), spreadPercent: (2 * input.feePips) / 10_000 };

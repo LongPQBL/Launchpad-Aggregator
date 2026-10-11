@@ -47,9 +47,16 @@ describe('buildDepth', () => {
   });
   it('shows nothing where there is no liquidity, and a spread of twice the fee tier', () => {
     const depth = buildDepth({ ...input, ranges: [{ tickLower: -600, tickUpper: -300, liquidity: 10n ** 18n, active: false }] });
-    expect(depth.asks.every((row) => row.total1 === 0)).toBe(true);
-    expect(depth.bids.some((row) => row.total1 > 0)).toBe(false);
+    expect(depth.asks).toEqual([]); // nothing above the current price
+    expect(depth.bids).toEqual([]); // the range [-600,-300) lies below the five rows shown
     expect(depth.spreadPercent).toBeCloseTo(0.1, 12);
+  });
+  it('uses rows of about 1% for a coarse tick spacing and drops empty rows after the last liquidity', () => {
+    const wide = buildDepth({ ...input, tickSpacing: 5_000, maxRows: 40 });
+    expect(wide.asks[1]!.price / wide.asks[0]!.price).toBeCloseTo(1.0001 ** 100, 6);
+    const short = buildDepth({ ...input, ranges: [{ tickLower: -300, tickUpper: 300, liquidity: 10n ** 18n, active: true }], maxRows: 40 });
+    expect(short.asks).toHaveLength(5); // 60-tick rows up to tick 300
+    expect(short.asks.at(-1)!.total1).toBeGreaterThan(0);
   });
   it('scales amounts by each token\'s decimals', () => {
     const six = buildDepth({ ...input, decimals0: 18, decimals1: 6, maxRows: 1 });
