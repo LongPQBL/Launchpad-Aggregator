@@ -114,7 +114,9 @@ export async function readPoolTrades(pool: Pool, key: PoolKey, displayedToken: s
 }
 
 // A token's decimals never change, so a successful read is remembered (per chain and address); a failed read is not, and is retried next time.
-const decimalsCache = new Map<string, number>();
+// The pending read itself is shared too: a list of pools asks for the same token's decimals from many rows at once, and each of those asks used
+// to become its own RPC call.
+const decimalsCache = new Map<string, Promise<number | null>>();
 /** Test-only: forget the remembered decimals (module state otherwise survives between tests of one file). */
 export function __resetAssetDecimalsCacheForTests(): void { decimalsCache.clear(); }
 
@@ -123,13 +125,16 @@ export async function assetDecimals(client: UsdPriceClient | undefined, address:
   if (!client) return null;
   const key = `${client.chain?.id ?? 0}:${address.toLowerCase()}`;
   const known = decimalsCache.get(key);
-  if (known !== undefined) return known;
-  try {
-    const value = await client.readContract({ address: address as Address, abi: erc20DecimalsAbi, functionName: 'decimals' });
-    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 36) return null;
-    decimalsCache.set(key, value);
-    return value;
-  } catch { return null; }
+  if (known) return known;
+  const pending = (async (): Promise<number | null> => {
+    try {
+      const value = await client.readContract({ address: address as Address, abi: erc20DecimalsAbi, functionName: 'decimals' });
+      return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 36 ? value : null;
+    } catch { return null; }
+  })();
+  decimalsCache.set(key, pending);
+  void pending.then((value) => { if (value === null && decimalsCache.get(key) === pending) decimalsCache.delete(key); });
+  return pending;
 }
 
 async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: PoolRow, displayedIsCurrency0: boolean,

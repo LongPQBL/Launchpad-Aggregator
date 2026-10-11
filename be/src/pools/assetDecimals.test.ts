@@ -22,6 +22,12 @@ describe('assetDecimals', () => {
     expect(await assetDecimals(recovered, token)).toBe(18);
     expect(await assetDecimals({ readContract: async () => 99 } as never, '0x8888888888888888888888888888888888888888')).toBeNull();
   });
+  it('shares one pending read between concurrent callers', async () => {
+    const readContract = vi.fn(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); return 9; });
+    const client = { readContract } as never;
+    expect(await Promise.all(Array.from({ length: 12 }, () => assetDecimals(client, token)))).toEqual(Array(12).fill(9));
+    expect(readContract).toHaveBeenCalledTimes(1);
+  });
   it('answers 18 for the native asset and null without a client', async () => {
     expect(await assetDecimals(undefined, '0x0000000000000000000000000000000000000000')).toBe(18);
     expect(await assetDecimals(undefined, token)).toBeNull();
