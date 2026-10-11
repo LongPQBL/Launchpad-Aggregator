@@ -52,7 +52,7 @@ describe('readPoolLiquidityAnswer', () => {
     expect(answer.ranges).toHaveLength(1);
     expect(answer.ranges[0]).toMatchObject({ tickLower: -200, tickUpper: 200, active: true, liquidity: L.toString() });
     expect(answer.price).toBeCloseTo(1, 9);
-    expect(answer.depth!.asks).toHaveLength(3);
+    expect(answer.depth!.asks).toHaveLength(2); // rows of 100 ticks up to the range's top at tick 200
     expect(answer.depth!.spreadPercent).toBeCloseTo(0.6, 9);
   });
   it('treats a pool without liquidity as a real, complete answer with no ranges', async () => {
