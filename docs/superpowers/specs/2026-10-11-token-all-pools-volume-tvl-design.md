@@ -32,7 +32,7 @@ Decided with the user (2026-10-11):
 
 `tvl(bucket) = sum over pools holding the token of that pool's last snapshot in the bucket`
 
-- Pools: official V4 pool, other V4, V3 and V2 pools of the token. The bonding curve is not a pool and has no TVL history, so it is excluded and the chart is labeled "all pools".
+- Pools: official V4 pool, other V4, V3 and V2 pools of the token. The bonding curve is not a pool. It has a current reserve (`realQuoteReserve`, used for the token's current `tvlUsd`) but no history, so the TVL chart excludes it and is labeled "all pools". The curve page gets no TVL chart or TVL figure (decided 2026-10-11; pump.fun also shows liquidity only as a single number, not a chart). A token that only has its curve therefore has an empty TVL chart while its current TVL figure still shows; the UI says so.
 - V3/V2 have no TVL history today (`pool_tvl_snapshots`/`pool_tvl_buckets` are V4-only by CHECK constraint). Add them:
   - Migration relaxes the protocol CHECK on both tables to V4/V3/V2 (additive).
   - The snapshot worker also captures V3 (token balances held by the pool contract plus `slot0` price) and V2 (`getReserves`, price from reserves), valued with the pool's verified quote feed through the existing `calculateTvlUsd`. Each snapshot records its basis (V3 balances include uncollected fees, which is stated in the API).
