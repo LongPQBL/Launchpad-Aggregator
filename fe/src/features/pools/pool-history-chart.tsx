@@ -52,10 +52,14 @@ function stepOf(items: readonly PoolDayHistory[], intervalSeconds?: number): num
 
 // Volume bars and TVL area for one launch or pool over the selected range. A bucket with no value is a gap in the
 // series and reads "Unavailable" on hover — never a zero-height bar, which would claim a real $0.
-export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loading = false, error = false, headerClassName = 'text-2xl', leading, trailing }: {
+export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loading = false, error = false, headerClassName = 'text-2xl', leading, trailing, allPools = false, unvaluedPools = 0 }: {
   items: readonly PoolDayHistory[]; complete: boolean; metric: HistoryMetric; intervalSeconds?: number; loading?: boolean; error?: boolean; headerClassName?: string;
   /** Left of the bottom row (the range tabs); `trailing` is its right side (the chart-type tabs). */
   leading?: ReactNode; trailing?: ReactNode;
+  /** The series covers every pool holding a token (the token page) rather than one pool. */
+  allPools?: boolean;
+  /** Pools left out of an all-pools series because they have no USD price. */
+  unvaluedPools?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const seriesRef = useRef<ISeriesApi<'Histogram'> | ISeriesApi<'Area'> | null>(null);
@@ -108,7 +112,7 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
     chartRef.current?.timeScale().fitContent();
   }, [items, metric, step]);
 
-  const label = metric === 'volume' ? 'Volume' : 'TVL';
+  const label = `${metric === 'volume' ? 'Volume' : 'TVL'}${allPools ? ' (all pools)' : ''}`;
   const total = metric === 'volume' ? windowTotal(items) : null;
   const latest = metric === 'tvl' ? latestTvl(items) : null;
   const figure = hovered ? valueOf(hovered, metric) : metric === 'volume' ? total : latest?.tvlUsd ?? null;
@@ -130,13 +134,14 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
       {error && <p role="alert" className="flex h-80 items-center justify-center text-sm text-muted-foreground">Could not load this history.</p>}
       {!loading && !error && !hasAny && (
         <p role="status" className="flex h-80 items-center justify-center text-center text-sm text-muted-foreground">
-          {metric === 'tvl' ? 'No TVL history recorded for this pool in this range.' : 'Volume history is unavailable.'}
+          {metric === 'tvl' ? `No TVL history recorded for ${allPools ? 'this token\'s pools' : 'this pool'} in this range.` : 'Volume history is unavailable.'}
         </p>
       )}
       <div ref={containerRef} role="img" aria-label={`${label} over the last ${windowLabel(items.length * step)}`} data-testid="history-chart-container"
         className={showChart ? 'h-80 w-full' : 'hidden'} onMouseLeave={() => setHovered(null)} />
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">{leading ?? <span />}{trailing}</div>
-      {!complete && <p className="mt-2 text-xs text-muted-foreground">This pool is still being indexed, so earlier days may be incomplete.</p>}
+      {!complete && <p className="mt-2 text-xs text-muted-foreground">{allPools ? 'Some pools are still being indexed' : 'This pool is still being indexed'}, so earlier days may be incomplete.</p>}
+      {unvaluedPools > 0 && <p className="mt-2 text-xs text-muted-foreground">Excludes {unvaluedPools} {unvaluedPools === 1 ? 'pool' : 'pools'} without a USD price.</p>}
     </section>
   );
 }

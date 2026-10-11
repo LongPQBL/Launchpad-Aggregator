@@ -242,7 +242,8 @@ export async function getAllTransactions(query: { cursor?: string; limit?: numbe
 
 type PoolHistoryBody = paths['/v1/pools/{chainId}/{protocol}/{poolId}/history']['get']['responses'][200]['content']['application/json'];
 export type PoolDayHistory = Required<NonNullable<PoolHistoryBody['items']>[number]>;
-export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean; /** Bucket size in seconds, chosen by the server for the requested range. */ intervalSeconds?: number }
+export interface PoolHistory { items: readonly PoolDayHistory[]; complete: boolean; /** Bucket size in seconds, chosen by the server for the requested range. */ intervalSeconds?: number;
+  /** Launch history only: pools the answer covers, and how many were left out for lack of a USD price. */ poolCount?: number; unvaluedPools?: number }
 export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>, range: ChartRangeId = DEFAULT_CHART_RANGE): Promise<PoolHistory> {
   return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { range });
 }

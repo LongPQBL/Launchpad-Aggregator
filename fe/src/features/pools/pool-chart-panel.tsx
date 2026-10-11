@@ -3,21 +3,57 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getPoolHistory, type PoolCandlePage, type PoolHistory, type PoolSummary } from '@/api/client';
 import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
-import { ChartRangeTabs } from '@/features/launch/official-chart';
+import { ChartRangeTabs, type PriceChartStyle } from '@/features/launch/official-chart';
 import { cn } from '@/lib/utils';
 import { PoolChart } from './pool-chart';
 import { PoolHistoryChart } from './pool-history-chart';
 
 type ChartKind = 'price' | 'volume' | 'tvl';
 const LABELS: Record<ChartKind, string> = { price: 'Price', volume: 'Volume', tvl: 'TVL' };
+const ALL_POOLS_LABELS: Record<ChartKind, string> = { ...LABELS, volume: 'Volume · all pools', tvl: 'TVL · all pools' };
 
-function ChartKindTabs({ kinds, selected, onSelect }: { kinds: readonly ChartKind[]; selected: ChartKind; onSelect: (kind: ChartKind) => void }) {
+const STYLE_STORAGE_KEY = 'chartStyle';
+
+// Candles by default; the choice is remembered like the theme. Read after mount so the server and first client render agree.
+function usePriceChartStyle(): [PriceChartStyle, (style: PriceChartStyle) => void] {
+  const [style, setStyle] = useState<PriceChartStyle>('candles');
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the saved choice after hydration
+      if (window.localStorage.getItem(STYLE_STORAGE_KEY) === 'line') setStyle('line');
+    } catch { /* storage unavailable: keep the default */ }
+  }, []);
+  const choose = useCallback((next: PriceChartStyle) => {
+    setStyle(next);
+    try { window.localStorage.setItem(STYLE_STORAGE_KEY, next); } catch { /* not persisted */ }
+  }, []);
+  return [style, choose];
+}
+
+function ChartStyleTabs({ selected, onSelect }: { selected: PriceChartStyle; onSelect: (style: PriceChartStyle) => void }) {
+  const items: { id: PriceChartStyle; label: string; icon: ReactNode }[] = [
+    { id: 'line', label: 'Line chart', icon: <path d="M3 17l5-6 4 3 8-9" /> },
+    { id: 'candles', label: 'Candlestick chart', icon: <><path d="M7 4v3M7 17v3M17 7v2M17 15v3" /><rect x="5" y="7" width="4" height="10" /><rect x="15" y="9" width="4" height="6" /></> },
+  ];
+  return (
+    <div role="tablist" aria-label="Price chart style" className="inline-flex gap-1 rounded-full border border-border p-1">
+      {items.map((item) => (
+        <button key={item.id} type="button" role="tab" aria-selected={selected === item.id} aria-label={item.label} title={item.label} onClick={() => onSelect(item.id)}
+          className={cn('cursor-pointer rounded-full px-2.5 py-1.5', selected === item.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground')}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{item.icon}</svg>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ChartKindTabs({ kinds, selected, onSelect, labels }: { kinds: readonly ChartKind[]; selected: ChartKind; onSelect: (kind: ChartKind) => void; labels: Record<ChartKind, string> }) {
   return (
     <div role="tablist" aria-label="Chart type" className="inline-flex gap-1 rounded-full border border-border p-1">
       {kinds.map((kind) => (
         <button key={kind} type="button" role="tab" aria-selected={selected === kind} onClick={() => onSelect(kind)}
           className={cn('cursor-pointer rounded-full px-3 py-1.5 text-xs', selected === kind ?'bg-muted text-foreground' :'text-muted-foreground hover:text-foreground')}>
-          {LABELS[kind]}
+          {labels[kind]}
         </button>
       ))}
     </div>
@@ -28,21 +64,24 @@ function ChartKindTabs({ kinds, selected, onSelect }: { kinds: readonly ChartKin
 // and picks which chart is drawn. All kinds share one time range (the server picks the bucket size): the price chart
 // stays mounted (just hidden), follows the shared range and keeps its zoom, while Volume / TVL load their series per
 // range. `showTvl` is on for the launch page and off for the pool page, which has no TVL chart.
-export function ChartTypePanel({ loadHistory, history, price, headerClassName, showTvl = true, initialRange = DEFAULT_CHART_RANGE }: {
+export function ChartTypePanel({ loadHistory, history, price, headerClassName, showTvl = true, allPools = false, initialRange = DEFAULT_CHART_RANGE }: {
   /** Fetches the Volume / TVL series for a range (the first page arrives as `history`, for `initialRange`). */
   loadHistory: (range: ChartRangeId) => Promise<PoolHistory>;
   history: PoolHistory | null;
   /** The price chart, given the Price / Volume / TVL tabs to place in its range row and the shared range; null when there is no price chart. */
-  price: ((options: { tabs: ReactNode; range: ChartRangeId; onSelectRange: (range: ChartRangeId) => void }) => ReactNode) | null;
+  price: ((options: { tabs: ReactNode; range: ChartRangeId; onSelectRange: (range: ChartRangeId) => void; chartStyle: PriceChartStyle }) => ReactNode) | null;
   /** Height of the readout line above the history chart; match the price chart's own header. */
   headerClassName?: string;
   /** Offer the TVL tab next to Volume. */
   showTvl?: boolean;
+  /** Volume / TVL cover every pool of a token (the token page): the tabs and the readout say so. */
+  allPools?: boolean;
   /** The range the server rendered `history` and the price candles for (from the page URL). */
   initialRange?: ChartRangeId;
 }) {
   const kinds: ChartKind[] = [...(price ? ['price' as const] : []), ...(history ? ['volume' as const, ...(showTvl ? ['tvl' as const] : [])] : [])];
   const [selected, setSelected] = useState<ChartKind>(kinds[0] ?? 'price');
+  const [chartStyle, setChartStyle] = usePriceChartStyle();
   const [activeRange, setActiveRange] = useState(initialRange);
   const latestRange = useRef(initialRange);
   const cache = useRef(new Map<ChartRangeId, PoolHistory>(history ? [[initialRange, history]] : []));
@@ -96,15 +135,22 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   }, [history, activeRange, initialRange, applyRange]);
 
   if (kinds.length === 0) return null;
-  const tabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} /> : null;
+  const kindTabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} labels={allPools ? ALL_POOLS_LABELS : LABELS} /> : null;
+  // The line / candles switch only means something for the price chart, so it sits beside the kind tabs only there.
+  const tabs = (
+    <div className="flex items-center gap-2">
+      {price && selected === 'price' && <ChartStyleTabs selected={chartStyle} onSelect={setChartStyle} />}
+      {kindTabs}
+    </div>
+  );
   return (
     <>
       {/* eslint-disable-next-line react-hooks/refs -- the callback only reads the stale-answer ref when the user clicks, never while rendering */}
-      {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart })}</div>}
+      {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart, chartStyle })}</div>}
       {history && selected !== 'price' && (
         <PoolHistoryChart items={data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
-          intervalSeconds={data?.intervalSeconds} loading={loading} error={failed}
-          leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} />} trailing={tabs} />
+          intervalSeconds={data?.intervalSeconds} loading={loading} error={failed} allPools={allPools} unvaluedPools={data?.unvaluedPools ?? history.unvaluedPools ?? 0}
+          leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} />} trailing={kindTabs} />
       )}
     </>
   );
@@ -117,6 +163,6 @@ export function PoolChartPanel({ pool, candles, history, coverageStatus, quoteSy
 }) {
   const loadHistory = useCallback((range: ChartRangeId) => getPoolHistory(pool, range), [pool]);
   return <ChartTypePanel loadHistory={loadHistory} history={history} showTvl={false} initialRange={initialRange}
-    price={candles ? ({ tabs, range, onSelectRange }) => <PoolChart pool={pool} candles={candles} coverageStatus={coverageStatus} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
-      range={range} onSelectRange={onSelectRange} trailing={tabs} /> : null} />;
+    price={candles ? ({ tabs, range, onSelectRange, chartStyle }) => <PoolChart pool={pool} candles={candles} coverageStatus={coverageStatus} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
+      range={range} onSelectRange={onSelectRange} trailing={tabs} chartStyle={chartStyle} /> : null} />;
 }
