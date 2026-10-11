@@ -59,8 +59,11 @@ Regenerate `be/openapi.json` and `fe/src/api/schema.ts`.
 
 ## Frontend
 
-- `PoolChartPanel` shows tabs Price, Volume, Liquidity, Depth for V3/V4 (Liquidity and Depth load when first opened); V2 keeps Price and Volume. No range tabs, no line/candle switch on the new tabs.
-- `pool-liquidity-chart.tsx`: histogram of liquidity per range (green; the active range brighter), dotted grid, current-price marker, header as above, hover shows the range's prices and liquidity.
+- The new tabs join the existing switcher under the chart (the pill row with Price, Volume, ...): Price, Volume, **Liquidity**, **Depth** for V3/V4 pools. V2 keeps Price and Volume. Not a separate tab bar above the chart as on Uniswap (decided 2026-10-12).
+- The controls row under the chart adapts to the active tab. Range tabs (1H ... All) show only for tabs that use a time range (Price, Volume); the line / candle switch shows only for Price.
+  Liquidity and Depth show neither, so the row holds only the tab switcher. Each tab declares what it uses (`usesRange`, `usesChartStyle`) in one place instead of the panel testing tab names.
+- Liquidity and Depth load when first opened.
+- `pool-liquidity-chart.tsx`: histogram of liquidity per range (green; the active range brighter), dotted grid, current-price marker, header with the price in both directions, hover shows the range's prices and liquidity.
 - `pool-depth-chart.tsx` + `pool-depth-table.tsx`: the V-shaped cumulative chart (green bids, red asks as on Uniswap, since buy/sell colors are semantic) with zoom in / fit / zoom out, and the order-book table.
 - Loading, error and "unavailable" states in English; never a silent empty chart.
 
