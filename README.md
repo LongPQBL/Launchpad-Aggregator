@@ -153,8 +153,11 @@ npm run -w be charts:backfill-volume
 
 Nến USD (chế độ USD của chart giá) cũng được tính sẵn theo từng phút trong `launch_usd_candle_buckets`
 (cùng worker, cùng giao dịch). Dựng lại lịch sử bằng `npm run -w be charts:backfill-volume` (hoặc chỉ phần này:
-`... charts:backfill-volume -- --only usd`). `usd-candles:worker` cũ không còn cần thiết sau khi backfill xong; bảng
-`usd_candles` được giữ lại để so sánh (`npm run -w be usd-candles:compare`) và sẽ gỡ ở một thay đổi riêng.
+`... charts:backfill-volume -- --only usd`). Worker và bảng `usd_candles` cũ (cùng script so sánh) đã được gỡ ở migration `0054`,
+cùng bảng `scan_jobs` của bộ indexer RPC đã bỏ.
+
+Worker giá USD chính thức: `npm run -w be prices:worker` (giải quyết feed Chainlink còn chờ và đồng bộ các round oracle; chu kỳ
+`PRICE_WORKER_INTERVAL_SECONDS`, mặc định 30 giây).
 
 Khi backfill chạy xong, nó ghi `chart_rollup_state` (`launch_volume_done`, `pool_volume_done`, `launch_usd_candles_done`). Trước đó API trả
 `complete: false` và bucket không có dòng là `null` (không phải $0), vì có thể chỉ là chưa dựng lại.

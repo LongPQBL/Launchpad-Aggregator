@@ -74,11 +74,11 @@ describe('migration 0050 chart rollups', () => {
   const find = (needle: string) => statements.find((statement) => statement.includes(needle))!;
 
   it('creates the rollup tables and accepts 4h USD candles', async () => {
-    for (const table of ['launch_volume_buckets', 'pool_volume_buckets', 'pool_tvl_buckets', 'chart_rollup_state']) {
+    for (const table of ['launch_volume_buckets', 'pool_volume_buckets', 'pool_tvl_buckets', 'chart_rollup_state', 'launch_usd_candle_buckets']) {
       const result = await pool.query('SELECT to_regclass($1) AS name', [table]);
       expect(result.rows[0].name).toBe(table);
     }
-    await expect(pool.query(`SELECT 1 FROM pg_constraint WHERE conname = 'usd_candles_interval_valid'
+    await expect(pool.query(`SELECT 1 FROM pg_constraint WHERE conname = 'launch_usd_candle_buckets_interval_valid'
       AND pg_get_constraintdef(oid) LIKE '%14400%'`).then((r) => r.rowCount)).resolves.toBe(1);
   });
 

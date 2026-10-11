@@ -19,28 +19,6 @@ export const sourceGaps = pgTable('source_gaps', {
   reason: text('reason').notNull(),
 }, (table) => [primaryKey({ columns: [table.sourceId, table.fromBlock, table.toBlock] })]);
 
-export const scanJobs = pgTable('scan_jobs', {
-  id: text('id').primaryKey(),
-  sourceId: text('source_id').notNull().references(() => sources.id, { onDelete: 'cascade' }),
-  lane: text('lane').notNull(),
-  fromBlock: bigint('from_block', { mode: 'bigint' }).notNull(),
-  toBlock: bigint('to_block', { mode: 'bigint' }).notNull(),
-  generation: bigint('generation', { mode: 'bigint' }).notNull().default(sql`0`),
-  status: text('status').notNull(),
-  leaseOwner: text('lease_owner'),
-  leaseUntil: timestamp('lease_until', { withTimezone: true }),
-  startedAt: timestamp('started_at', { withTimezone: true }),
-  completedAt: timestamp('completed_at', { withTimezone: true }),
-  elapsedMs: integer('elapsed_ms'),
-  requestCount: integer('request_count'),
-  errorReason: text('error_reason'),
-}, (table) => [
-  uniqueIndex('scan_jobs_source_lane_range').on(table.sourceId, table.lane, table.fromBlock, table.toBlock),
-  index('scan_jobs_claim_idx').on(table.status, table.leaseUntil, table.sourceId),
-  check('scan_jobs_valid_range', sql`${table.fromBlock} <= ${table.toBlock}`),
-  check('scan_jobs_valid_lane', sql`${table.lane} IN ('certified', 'provisional')`),
-]);
-
 export const metadataEnrichmentBudget = pgTable('metadata_enrichment_budget', {
   id: integer('id').primaryKey(),
   lastStartedAt: timestamp('last_started_at', { withTimezone: true }),
@@ -277,24 +255,6 @@ export const launchCurveReserves = pgTable('launch_curve_reserves', {
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
-]);
-
-export const usdCandles = pgTable('usd_candles', {
-  chainId: integer('chain_id').notNull(),
-  tokenAddress: text('token_address').notNull(),
-  intervalSeconds: integer('interval_seconds').notNull(),
-  bucketStart: bigint('bucket_start', { mode: 'number' }).notNull(),
-  open: numeric('open', { precision: 40, scale: 20 }).notNull(),
-  high: numeric('high', { precision: 40, scale: 20 }).notNull(),
-  low: numeric('low', { precision: 40, scale: 20 }).notNull(),
-  close: numeric('close', { precision: 40, scale: 20 }).notNull(),
-  volumeUsd: numeric('volume_usd', { precision: 40, scale: 6 }).notNull(),
-  tradeCount: integer('trade_count').notNull(),
-  computedAt: timestamp('computed_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [
-  primaryKey({ columns: [table.chainId, table.tokenAddress, table.intervalSeconds, table.bucketStart] }),
-  foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
-  check('usd_candles_interval_valid', sql`${table.intervalSeconds} IN (60, 300, 900, 3600, 14400, 86400)`),
 ]);
 
 export const launchVolume24hState = pgTable('launch_volume24h_state', {
