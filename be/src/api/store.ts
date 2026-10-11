@@ -804,11 +804,12 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         WHERE v.chain_id = $1 AND v.token_address = $2 AND v.kind = 'curve' AND v.official = true LIMIT 1`, [chainId, token])).rows[0] as Row | undefined;
       if (!venue) return null;
       const since = Math.floor(Date.now() / 1000) - 86_400;
+      // The token's own indexes (chain, token, timestamp / block) narrow the scan; filtering by venue alone read millions of rows (7 s+ on a busy dev DB).
       const volume = (await pool.query(`SELECT COALESCE(sum(quote_amount_raw), 0)::text AS raw, count(*)::int AS trades FROM trades
-        WHERE venue_id = $1 AND timestamp >= $2`, [string(venue.id), since])).rows[0] as Row;
-      const last = (await pool.query(`SELECT price_numerator_raw, price_denominator_raw FROM trades WHERE venue_id = $1
+        WHERE chain_id = $1 AND token_address = $2 AND venue_id = $3 AND timestamp >= $4`, [chainId, token, string(venue.id), since])).rows[0] as Row;
+      const last = (await pool.query(`SELECT price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND token_address = $2 AND venue_id = $3
         AND price_numerator_raw IS NOT NULL AND price_denominator_raw IS NOT NULL
-        ORDER BY block_number DESC, log_index DESC LIMIT 1`, [string(venue.id)])).rows[0] as Row | undefined;
+        ORDER BY block_number DESC, log_index DESC LIMIT 1`, [chainId, token, string(venue.id)])).rows[0] as Row | undefined;
       return {
         venueId: string(venue.id), curveAddress: string(venue.ref), active: venue.effective_to_block === null,
         volume24hQuote: formatUnits(BigInt(string(volume.raw)), number(venue.quote_asset_decimals)), tradeCount24h: number(volume.trades),
