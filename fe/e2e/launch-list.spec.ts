@@ -34,16 +34,25 @@ test('switches tabs without reloading the page', async ({ page }) => {
   expect(await page.evaluate(() => document.body.dataset.filterPageMarker)).toBe('retained');
 });
 
+// A <details> menu clicked before the page has hydrated can be reset by hydration, so open it again until its first option is really visible.
+async function openFilter(filter: import('@playwright/test').Locator, firstOption: string) {
+  await expect(async () => {
+    const option = filter.getByRole('button', { name: firstOption, exact: true });
+    if (!(await option.isVisible())) await filter.locator('summary').click();
+    await expect(option).toBeVisible({ timeout: 1_500 });
+  }).toPass({ timeout: 20_000 });
+}
+
 test('keeps Pons launches when another launchpad and chain are selected', async ({ page }) => {
   await page.goto('/launches');
   const launchpadFilter = page.getByRole('navigation', { name: 'Filter by launchpad' });
-  await launchpadFilter.locator('summary').click();
+  await openFilter(launchpadFilter, 'Pons');
   await launchpadFilter.getByRole('button', { name: 'Pons', exact: true }).click();
   await launchpadFilter.getByRole('button', { name: 'NOXA', exact: true }).click();
   await expect(page.getByRole('link', { name: /E2E Launch/i })).toBeVisible();
 
   const chainFilter = page.getByRole('navigation', { name: 'Filter by chain' });
-  await chainFilter.locator('summary').click();
+  await openFilter(chainFilter, 'Robinhood Chain');
   await chainFilter.getByRole('button', { name: 'Robinhood Chain', exact: true }).click();
   await chainFilter.getByRole('button', { name: 'Arc', exact: true }).click();
   await expect(page.getByRole('link', { name: /E2E Launch/i })).toBeVisible();
