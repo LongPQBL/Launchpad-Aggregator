@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans (native execution chosen by the user). Steps use checkbox syntax.
 
-**Goal:** Pool pages for V3/V4 get Liquidity and Depth tabs in the existing tab switcher, backed by tick liquidity read from the chain.
+**Goal:** Pool pages for V3/V4 get Liquidity and Depth tabs in the existing tab switcher, backed by tick liquidity read from the chain; the bonding-curve page gets a Depth tab computed from the curve's constant-product state.
 
 **Architecture:** Pure tick math (`liquidityMath.ts`) + chain readers for V3 (`tickBitmap`/`ticks`) and V4 (`PoolManager.extsload`) (`liquidityRead.ts`) + one read-only endpoint with a 60 s cache; the frontend adds two tabs whose "uses range / uses chart style" flags decide which controls show.
 
@@ -60,6 +60,16 @@
 - [ ] Implement; `npm run -w be openapi:write`, `npm run -w fe generate:schema`; run unit + integration (`VOLUME_CURSOR_SECRET=x`).
 - [ ] Commit `feat(api): pool liquidity and depth endpoint`.
 
+### Task 3b: Curve depth (backend)
+
+**Files:** Create `be/src/pools/curveDepth.ts`, `be/src/pools/curveDepth.test.ts`; modify `be/src/api/routes/launches.ts`, `schemas.ts`, `server.ts`, `store.ts`; regenerate OpenAPI/FE schema.
+
+**Produces:** `buildCurveDepth(state: { quoteReserve: bigint; tokenReserve: bigint; feeBps: bigint; realQuoteReserve: bigint; graduationThreshold: bigint; quoteDecimals: number; tokenDecimals: number; maxRows?: number }): DepthResult` (same `DepthResult` as Task 1) and `GET /v1/launches/:chainId/:tokenAddress/curve/depth`.
+
+- [ ] Tests: constant-product identity (cost to move the price to `P'` equals `sqrt(k*P') - Q` grossed up by the fee, within 1e-9); asks end exactly at `graduationThreshold - realQuoteReserve` of quote; bids end at `realQuoteReserve`; a curve at the threshold has no asks; a graduated phase answers `unavailableReason: 'graduated'`; 404 without a curve venue.
+- [ ] Live check: compare the quote for a mid-size buy from the formula against `eth_call` of the curve's `buy` simulation (as `curve-guess.ts` documents) on a real curve.
+- [ ] Commit `feat(api): bonding-curve depth`.
+
 ### Task 4: Frontend
 
 **Files:** Modify `fe/src/features/pools/pool-chart-panel.tsx`, `fe/src/features/launch/official-chart.tsx` (hide range tabs via prop), `fe/src/api/client.ts` (`getPoolLiquidity`); Create `fe/src/features/pools/pool-liquidity-chart.tsx`, `pool-depth-chart.tsx`, `pool-depth-table.tsx`, `chart-kinds.ts`, with tests.
@@ -67,6 +77,7 @@
 **Produces:** `CHART_KINDS: Record<ChartKind, { label: string; usesRange: boolean; usesChartStyle: boolean }>` in `chart-kinds.ts`; the panel renders range tabs only when `usesRange`, the line/candle switch only when `usesChartStyle`.
 
 - [ ] Tests: V3/V4 pool shows Price, Volume, Liquidity, Depth; V2 shows Price, Volume; on Liquidity/Depth neither range tabs nor the style switch render; loading/error/unavailable states; Depth table rows (asks above, spread row, bids below).
+- [ ] The curve page tab switcher becomes Price, Volume, Depth; its Depth tab reuses the pool Depth chart and table and shows the graduation/zero ends and the "excludes creator tax and snipe protection" note.
 - [ ] Implement the components (dotted grid, green Liquidity bars with the active range brighter and a current-price marker, Depth cumulative areas green/red with zoom in / fit / zoom out, order-book table).
 - [ ] `npx tsc --noEmit`, eslint, vitest on touched dirs; commit `feat(fe): Liquidity and Depth tabs`.
 

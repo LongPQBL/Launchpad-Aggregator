@@ -67,9 +67,24 @@ Regenerate `be/openapi.json` and `fe/src/api/schema.ts`.
 - `pool-depth-chart.tsx` + `pool-depth-table.tsx`: the V-shaped cumulative chart (green bids, red asks as on Uniswap, since buy/sell colors are semantic) with zoom in / fit / zoom out, and the order-book table.
 - Loading, error and "unavailable" states in English; never a silent empty chart.
 
+## Depth on the bonding-curve page
+
+Decided with the user (2026-10-12): the curve page gets a **Depth** tab too (tabs Price, Volume, Depth; no Liquidity, no TVL).
+The Pons curve is a constant-product curve with virtual reserves and a fee, so its depth is exact from on-chain state:
+
+- Reads: `quoteReserve()`, `tokenReserve()`, `feeBps()` on the curve (verified in `fe/src/trading/curveAbi.ts`), `realQuoteReserve()` (already used for TVL),
+  and `graduationThreshold`, `creatorTaxBps`, `phase` from the factory's `getLaunchedToken(token)` (`be/src/launchpads/pons/v2/abi.ts`).
+- Price `P = quoteReserve / tokenReserve` (quote per token). Buying drives the price up: to reach `P' > P`, `tokenReserve' = sqrt(k / P')`, tokens bought `= tokenReserve - tokenReserve'`,
+  quote needed `= (sqrt(k * P') - quoteReserve)` grossed up by the fee (`/ (1 - feeBps/10000)`). Selling drives it down symmetrically (tokens in, quote out less the fee).
+- The two sides are bounded, unlike a pool: asks stop where the real quote reserve would reach `graduationThreshold` (the curve then graduates), bids stop where the real quote
+  reserve would reach 0 (the curve cannot pay out more than was paid in). The chart shows these ends; no row beyond them.
+- Same shape as the pool depth (`asks`, `bids`, `spreadPercent`, the fee as the "fee tier"), so the same chart and table components render both. The note under the table says amounts exclude the creator tax and snipe protection.
+- A graduated curve (`phase` not trading) answers `unavailableReason: 'graduated'` and the tab shows "This curve has graduated; see the pool."
+- Endpoint: `GET /v1/launches/:chainId/:tokenAddress/curve/depth`; 404 when the launch has no bonding-curve venue.
+
 ## Out of scope
 
-The bonding-curve page and the token (launch) page keep their tabs (curve: Price, Volume; token: Price, Volume, TVL): a curve has no ticks and the token page spans many pools, so Liquidity and Depth exist only on pool pages. A depth view derived from the curve's own pricing formula could be added later.
+The token (launch) page keeps its tabs (Price, Volume, TVL): it spans many pools. Liquidity exists only on pool pages (a curve has no ticks).
 
 History of liquidity over time, V2 pools, adding/removing liquidity, per-position data, Explore-page charts.
 
