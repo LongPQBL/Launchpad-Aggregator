@@ -32,6 +32,7 @@
     "mode:test": "bash ../scripts/mode.sh test",
     "mode:prod": "bash ../scripts/mode.sh prod",
     "pools:candles:worker": "tsx --env-file-if-exists=.env src/cli/runPoolCandleWorker.ts",
+    "prices:backfill-history": "tsx --env-file-if-exists=.env src/cli/backfillPriceHistory.ts",
     "prices:worker": "tsx --env-file-if-exists=.env src/cli/runPriceWorker.ts",
     "pools:tvl-snapshots:worker": "tsx --env-file-if-exists=.env src/cli/runPoolTvlSnapshotWorker.ts",
     "pools:tvl-backfill": "tsx --env-file-if-exists=.env src/cli/backfillPoolTvl.ts",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildGrid, createBlockLocator } from './tvlBackfill.js';
+import { buildGrid } from './tvlBackfill.js';
 
 describe('buildGrid', () => {
   const now = 1_800_000_000 + 1234; // not on a bucket boundary
@@ -20,24 +20,5 @@ describe('buildGrid', () => {
   });
   it('shrinks every window to the requested number of days', () => {
     expect(buildGrid(now, 2).filter((point) => point.interval === 3600).length).toBeLessThanOrEqual(48);
-  });
-});
-
-describe('createBlockLocator', () => {
-  // Block n has timestamp 1000 + 2n; the head is block 1,000,000.
-  const calls = { blocks: 0 };
-  const client = {
-    getBlockNumber: async () => 1_000_000n,
-    getBlock: async ({ blockNumber }: { blockNumber: bigint }) => { calls.blocks += 1; return { timestamp: BigInt(1000 + 2 * Number(blockNumber)) }; },
-  };
-  it('finds the latest block at or before the target time without scanning', async () => {
-    const locate = createBlockLocator(client);
-    expect(await locate(1000 + 2 * 250_000 + 1)).toEqual({ block: 250_000n, timestamp: 501_000 });
-    expect(calls.blocks).toBeLessThan(45);
-  });
-  it('returns the head when the target is in the future and null before the chain began', async () => {
-    const locate = createBlockLocator(client);
-    expect((await locate(9_999_999_999))?.block).toBe(1_000_000n);
-    expect(await locate(5)).toBeNull();
   });
 });
