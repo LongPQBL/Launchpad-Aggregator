@@ -132,6 +132,45 @@ function rangeInterval(url: URL): number {
   return RANGE_INTERVAL_SECONDS[url.searchParams.get('range') ?? '1d'] ?? 300;
 }
 
+// A pool with several price ranges around the current price (tick 0 = 2,540 quote per base), and an order book derived from them.
+function mockLiquidity() {
+  const base = 2540;
+  const tick0 = Math.round(Math.log(base) / Math.log(1.0001) / 60) * 60; // the current tick, consistent with the price
+  const price = (tick: number) => 1.0001 ** tick;
+  const ranges = [[-3000, -1000, 2], [-1000, -200, 6], [-200, 400, 12], [400, 1500, 5], [1500, 4000, 1.5]]
+    .map(([lower, upper, l]) => ({ tickLower: tick0 + lower!, tickUpper: tick0 + upper!, priceLower: price(tick0 + lower!), priceUpper: price(tick0 + upper!),
+      liquidity: String(BigInt(Math.round(l! * 1e6)) * 10n ** 12n), active: lower! <= 0 && 0 < upper! }));
+  const rows = (direction: 1 | -1) => {
+    let cumulative = 0;
+    return Array.from({ length: 40 }, (_, index) => {
+      const offset = direction * (index + 1) * 60;
+      const tick = tick0 + offset;
+      const depthHere = Math.max(0, 14 - Math.abs(offset) / 280) + 1;
+      const total1 = depthHere * 6_000;
+      cumulative += total1;
+      return { price: price(tick), amount0: total1 / price(tick), total1, cumulative1: cumulative };
+    });
+  };
+  return { blockNumber: '12345', tickSpacing: 60, feePips: 500, currentTick: tick0, price: price(tick0), priceInverse: 1 / price(tick0),
+    token0: { address: '0xa', decimals: 18 }, token1: { address: '0xb', decimals: 18 }, ranges,
+    depth: { asks: rows(1), bids: rows(-1), spreadPercent: 0.1 }, complete: true, unavailableReason: null };
+}
+
+// A bonding curve nearly at its start: asks end at graduation, bids end at the paid-in reserve.
+function mockCurveDepth() {
+  const row = (index: number, direction: 1 | -1) => {
+    const price = 0.000004 * 1.01 ** (direction * (index + 1));
+    const total1 = 0.02 * (1 + index * 0.05);
+    return { price, amount0: total1 / price, total1, cumulative1: 0 };
+  };
+  const build = (direction: 1 | -1, count: number) => {
+    let cumulative = 0;
+    return Array.from({ length: count }, (_, index) => { const r = row(index, direction); cumulative += r.total1; return { ...r, cumulative1: cumulative }; });
+  };
+  return { blockNumber: '777', price: 0.000004, priceInverse: 250_000, feeBps: 100, creatorTaxBps: 100, asksEndAtGraduation: true, bidsEndAtEmptyReserve: true,
+    depth: { asks: build(1, 40), bids: build(-1, 18), spreadPercent: 2 }, complete: true, unavailableReason: null };
+}
+
 function mockCandles(intervalSeconds: number, currency: 'quote' | 'usd') {
   const base = currency === 'usd' ? 0.00012 : 0.0001;
   // A trend with slow waves, like a real market: a smooth price path instead of a straight line.
@@ -370,6 +409,12 @@ export function startMockApi(port: number): Server {
         // The launch history covers all of a token's pools and says how many had no USD price.
         ...(url.pathname.includes('/launches/') ? { poolCount: 3, unvaluedPools: 1 } : {}),
       }));
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/liquidity$/.test(url.pathname)) {
+      res.end(JSON.stringify(mockLiquidity()));
+    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve`) {
+      res.end(JSON.stringify({ venueId: 'pons-v2-curve:0xtoken', curveAddress: '0xcurve', active: true, volume24hQuote: '2', tradeCount24h: 5, lastPriceQuote: '0.000004' }));
+    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve/depth`) {
+      res.end(JSON.stringify(mockCurveDepth()));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
         txHash: `0x${(index + 900).toString(16).padStart(64, '0')}`,

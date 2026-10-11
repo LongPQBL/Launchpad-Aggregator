@@ -18,6 +18,7 @@ export function formatLevel(value: number): string {
 }
 
 const ZOOMS = [0.25, 0.5, 1] as const;
+const ROWS_PER_SIDE = 8;
 
 function DepthChart({ depth, price }: { depth: DepthData; price: number }) {
   const [zoom, setZoom] = useState<number>(1);
@@ -76,8 +77,8 @@ function DepthChart({ depth, price }: { depth: DepthData; price: number }) {
 }
 
 function DepthTable({ depth, baseSymbol, quoteSymbol, spreadLabel }: { depth: DepthData; baseSymbol: string; quoteSymbol: string; spreadLabel: string }) {
-  const asks = depth.asks.slice(0, 12).slice().reverse(); // farthest ask on top, nearest next to the spread
-  const bids = depth.bids.slice(0, 12);
+  const asks = depth.asks.slice(0, ROWS_PER_SIDE).slice().reverse(); // farthest ask on top, nearest next to the spread
+  const bids = depth.bids.slice(0, ROWS_PER_SIDE);
   const biggest = Math.max(1e-300, ...asks.map((row) => row.total1), ...bids.map((row) => row.total1));
   const row = (item: { price: number; amount0: number; total1: number }, side: 'ask' | 'bid') => (
     <tr key={`${side}-${item.price}`} data-testid={`depth-${side}-row`} className="relative">
@@ -87,7 +88,7 @@ function DepthTable({ depth, baseSymbol, quoteSymbol, spreadLabel }: { depth: De
     </tr>
   );
   return (
-    <div className="max-h-96 overflow-y-auto rounded-lg border border-border text-xs">
+    <div className="self-start overflow-hidden rounded-lg border border-border text-xs">
       <table className="w-full">
         <thead><tr className="text-muted-foreground"><th className="px-2 py-1 text-left font-normal">Price ({quoteSymbol})</th><th className="px-2 py-1 text-right font-normal">Amount ({baseSymbol})</th><th className="px-2 py-1 text-right font-normal">Total ({quoteSymbol})</th></tr></thead>
         <tbody>

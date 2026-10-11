@@ -21,6 +21,11 @@ function Message({ children, role = 'status', trailing }: { children: ReactNode;
   return <div><p role={role} className="flex h-80 items-center justify-center text-center text-sm text-muted-foreground">{children}</p><div className="mt-2 flex justify-end">{trailing}</div></div>;
 }
 
+/** Raw liquidity units are huge (1e18 and up): below a trillion in plain compact form, above it in scientific notation. */
+export function formatLiquidity(value: number): string {
+  return value >= 1e12 ? value.toExponential(2) : Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 }).format(value);
+}
+
 const BINS = 80;
 const WIDTH = 600;
 const HEIGHT = 300;
@@ -62,7 +67,7 @@ export function LiquidityBars({ data, symbols }: { data: PoolLiquidity; symbols:
       </svg>
       {shown && shown.range && <div role="status" data-testid="liquidity-hover" className="pointer-events-none absolute right-3 top-3 rounded-md border border-border bg-background/95 px-2 py-1 text-xs">
         <div>{formatLevel(shown.range.priceLower)} – {formatLevel(shown.range.priceUpper)} {symbols.token1}</div>
-        <div className="text-muted-foreground">Liquidity {Intl.NumberFormat('en-US', { notation: 'compact', maximumSignificantDigits: 3 }).format(shown.liquidity)}</div>
+        <div className="text-muted-foreground">Liquidity {formatLiquidity(shown.liquidity)}</div>
       </div>}
     </div>
   );

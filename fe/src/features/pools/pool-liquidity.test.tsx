@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCurveDepth, getPoolLiquidity } from '@/api/client';
-import { CurveDepthChart, PoolDepthChart, PoolLiquidityChart } from './pool-liquidity';
+import { CurveDepthChart, formatLiquidity, PoolDepthChart, PoolLiquidityChart } from './pool-liquidity';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolLiquidity: vi.fn(), getCurveDepth: vi.fn() }));
 
@@ -48,6 +48,13 @@ describe('PoolLiquidityChart', () => {
     fireEvent.mouseEnter(hits[40]!); // the bin at the current tick
     expect(screen.getByTestId('liquidity-hover')).toHaveTextContent('Liquidity');
     expect(screen.getByTestId('liquidity-hover')).toHaveTextContent('USDC');
+  });
+});
+
+describe('formatLiquidity', () => {
+  it('keeps small values compact and shows huge raw liquidity in scientific notation', () => {
+    expect(formatLiquidity(1500)).toBe('1.5K');
+    expect(formatLiquidity(1.5e18)).toBe('1.50e+18');
   });
 });
 
