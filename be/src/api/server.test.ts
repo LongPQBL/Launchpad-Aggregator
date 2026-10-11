@@ -208,6 +208,21 @@ describe('read-only API', () => {
     await bare.close();
   });
 
+  it('serves the curve depth, 404s without a curve venue, and 503s without the data method', async () => {
+    const depth = { blockNumber: '5', price: 0.000004, priceInverse: 250_000, feeBps: 100, creatorTaxBps: 0, graduationThreshold: '10', realQuoteReserve: '2',
+      asksEndAtGraduation: true, bidsEndAtEmptyReserve: true,
+      depth: { asks: [{ price: 0.0000041, amount0: 1, total1: 1, cumulative1: 1 }], bids: [], spreadPercent: 2 }, complete: true, unavailableReason: null };
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(), getCurveDepth: async (_chainId, token) => (token === address ? depth : null) } });
+    const found = await app.inject({ method: 'GET', url: `/v1/launches/4663/${address}/curve/depth` });
+    expect(found.statusCode).toBe(200);
+    expect(found.json()).toEqual(depth);
+    expect((await app.inject({ method: 'GET', url: `/v1/launches/4663/0x${'2'.repeat(40)}/curve/depth` })).statusCode).toBe(404);
+    await app.close();
+    const bare = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    expect((await bare.inject({ method: 'GET', url: `/v1/launches/4663/${address}/curve/depth` })).statusCode).toBe(503);
+    await bare.close();
+  });
+
   it('accepts an exclusive candle page boundary and rejects malformed boundaries', async () => {
     const beforeValues: Array<number | undefined> = [];
     const source = data();

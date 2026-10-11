@@ -5,7 +5,7 @@ import { InvalidVolumeCursorError } from '../volumeCursor.js';
 import { InvalidMetricCursorError, type LaunchSort, type SortDirection } from '../metricCursor.js';
 import { VolumeRankingUnavailableError } from '../../market/launchVolume/state.js';
 import { DEFAULT_RANGE, parseRange, rangeSpec, trimToRange } from '../../charts/ranges.js';
-import { candle, curveSummary, poolHistory, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
+import { candle, curveDepthResponse, curveSummary, poolHistory, globalTransaction, launchDetail, launchSummary, pageSchema, trade, transaction } from '../schemas.js';
 import type { ApiDeps, LaunchListQuery } from '../server.js';
 
 const LIFECYCLE_STATUSES = new Set(['trading', 'swept', 'graduated', 'rescued']);
@@ -133,6 +133,16 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
       const history = await deps.data.listLaunchHistory(identity.chainId, identity.tokenAddress, { intervalSeconds: spec.intervalSeconds, buckets: spec.buckets, ...(request.query.venue === 'curve' ? { venueKind: 'curve' } : {}) });
       if (!history) return reply.code(404).send({ error: 'Launch not found' });
       return history;
+    },
+  );
+
+  app.get<{ Params: { chainId: string; tokenAddress: string } }>(
+    '/v1/launches/:chainId/:tokenAddress/curve/depth', { schema: { response: { 200: curveDepthResponse } } }, async (request, reply) => {
+      const identity = tokenParams(request.params);
+      if (!identity) return reply.code(404).send({ error: 'Launch not found' });
+      if (!deps.data.getCurveDepth) { reply.code(503); return { error: 'Curve depth unavailable' }; }
+      const depth = await deps.data.getCurveDepth(identity.chainId, identity.tokenAddress);
+      return depth ?? reply.code(404).send({ error: 'No bonding-curve venue for this launch' });
     },
   );
 

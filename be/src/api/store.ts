@@ -23,6 +23,7 @@ import { isRollupBackfilled } from '../charts/rollupState.js';
 import { ttlMemo } from './ttlMemo.js';
 import { readLaunchStats } from './launchStatsStore.js';
 import { readLaunchHistory } from '../market/launchHistory.js';
+import { readCurveDepthAnswer } from '../pools/curveDepth.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
@@ -232,6 +233,8 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
 
 export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
   const quoteMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined;
+  // Reading the curve's state costs a few RPC calls; a minute of reuse per launch is plenty for a current-state chart.
+  const curveDepthMemo = ttlMemo((_key: string, arg: { chainId: number; tokenAddress: string }) => readCurveDepthAnswer(pool, rpcClient as never, arg), 60_000);
   const launchHistoryMemo = intervalTtlMemo(
     async (_key: string, arg: { chainId: number; tokenAddress: string; window: { intervalSeconds: number; buckets: number; venueKind?: string } }) => {
       const head = await safeHead();
@@ -793,6 +796,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     listLaunchHistory: (chainId, tokenAddress, window) => launchHistoryMemo(
       `${chainId}:${tokenAddress.toLowerCase()}:${window.intervalSeconds}:${window.buckets}:${window.venueKind ?? ''}`, { chainId, tokenAddress, window }),
+    getCurveDepth: async (chainId, tokenAddress) => rpcClient?.getBlockNumber ? curveDepthMemo(`${chainId}:${tokenAddress.toLowerCase()}`, { chainId, tokenAddress }) : null,
     async getCurveSummary(chainId: number, tokenAddress: string): Promise<CurveSummary | null> {
       const token = tokenAddress.toLowerCase();
       const venue = (await pool.query(`SELECT v.id, v.ref, v.effective_to_block, l.quote_asset_decimals FROM venues v

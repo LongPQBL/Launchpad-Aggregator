@@ -176,6 +176,15 @@ export const searchResults = { type: 'object', properties: {
 
 const depthRow = { type: 'object', properties: { price: { type: 'number' }, amount0: { type: 'number' }, total1: { type: 'number' }, cumulative1: { type: 'number' } } } as const;
 const tokenSide = { type: 'object', properties: { address: { type: 'string' }, decimals: { type: 'integer', nullable: true } } } as const;
+export const curveDepthResponse = { type: 'object', properties: {
+  blockNumber: { type: 'string', nullable: true }, price: { type: 'number', nullable: true }, priceInverse: { type: 'number', nullable: true },
+  feeBps: { type: 'integer', nullable: true }, creatorTaxBps: { type: 'integer', nullable: true },
+  graduationThreshold: { type: 'string', nullable: true }, realQuoteReserve: { type: 'string', nullable: true },
+  asksEndAtGraduation: { type: 'boolean' }, bidsEndAtEmptyReserve: { type: 'boolean' },
+  depth: { type: 'object', nullable: true, properties: { asks: { type: 'array', items: depthRow }, bids: { type: 'array', items: depthRow }, spreadPercent: { type: 'number', nullable: true } } },
+  complete: { type: 'boolean' }, unavailableReason: { type: 'string', nullable: true },
+} } as const;
+
 export const poolLiquidity = { type: 'object', properties: {
   protocol: { type: 'string' }, blockNumber: { type: 'string', nullable: true }, tickSpacing: { type: 'integer' }, feePips: { type: 'integer' },
   currentTick: { type: 'integer', nullable: true }, price: { type: 'number', nullable: true }, priceInverse: { type: 'number', nullable: true },

@@ -513,6 +513,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/launches/{chainId}/{tokenAddress}/curve/depth": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    chainId: string;
+                    tokenAddress: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Default Response */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            blockNumber?: string | null;
+                            price?: number | null;
+                            priceInverse?: number | null;
+                            feeBps?: number | null;
+                            creatorTaxBps?: number | null;
+                            graduationThreshold?: string | null;
+                            realQuoteReserve?: string | null;
+                            asksEndAtGraduation?: boolean;
+                            bidsEndAtEmptyReserve?: boolean;
+                            depth?: {
+                                asks?: {
+                                    price?: number;
+                                    amount0?: number;
+                                    total1?: number;
+                                    cumulative1?: number;
+                                }[];
+                                bids?: {
+                                    price?: number;
+                                    amount0?: number;
+                                    total1?: number;
+                                    cumulative1?: number;
+                                }[];
+                                spreadPercent?: number | null;
+                            } | null;
+                            complete?: boolean;
+                            unavailableReason?: string | null;
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/launches/{chainId}/{tokenAddress}/curve": {
         parameters: {
             query?: never;

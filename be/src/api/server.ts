@@ -1,3 +1,4 @@
+import type { CurveDepthAnswer } from '../pools/curveDepth.js';
 import type { PoolDayHistory } from '../pools/history.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
@@ -134,6 +135,8 @@ export interface ApiDeps {
     // Optional so test doubles that predate the Volume / TVL charts keep compiling; the route answers 503 without it.
     // Optional like listLaunchHistory: the route answers 503 without it.
     getCurveSummary?(chainId: number, tokenAddress: string): Promise<CurveSummary | null>;
+    /** Bonding-curve depth from on-chain state; null when the launch has no curve venue. */
+    getCurveDepth?(chainId: number, tokenAddress: string): Promise<CurveDepthAnswer | null>;
     listLaunchHistory?(chainId: number, tokenAddress: string, window: { intervalSeconds: number; buckets: number; venueKind?: string }): Promise<{ items: PoolDayHistory[]; complete: boolean; intervalSeconds?: number; poolCount?: number; unvaluedPools?: number } | null>;
   };
 }
