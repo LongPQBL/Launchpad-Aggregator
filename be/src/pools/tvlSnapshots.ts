@@ -10,7 +10,7 @@ export const TVL_LAUNCH_SNAPSHOT_TOLERANCE_SECONDS = 10_800;
 export const TVL_BUCKET_INTERVALS = [3600, 14400, 86400] as const;
 
 export interface TvlSnapshotInput {
-  chainId: number; protocol: 'uniswap_v4'; poolId: string; blockNumber: bigint; capturedAtSeconds: number;
+  chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string; blockNumber: bigint; capturedAtSeconds: number;
   coreAmount0Raw: bigint; coreAmount1Raw: bigint; sqrtPriceX96: bigint; quoteAddress: string; tvlUsd: string;
 }
 

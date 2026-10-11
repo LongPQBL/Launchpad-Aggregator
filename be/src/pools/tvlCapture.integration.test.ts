@@ -56,6 +56,37 @@ afterAll(async () => {
   await pool.end();
 });
 
+const pairAddress = '0x5555555555555555555555555555555555555555';
+
+describe('captureTvlSnapshots for a V2 pair', () => {
+  beforeAll(async () => {
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES ($1,'uniswap_v2',$2,$3,$4,3000,0,'0x0000000000000000000000000000000000000000',99,$5,$6,0,true,'caught_up')
+      ON CONFLICT (chain_id,protocol,pool_id) DO NOTHING`, [chainId, pairAddress, a, b, tx('1'), tx('2')]);
+  });
+  afterAll(async () => {
+    await pool.query('DELETE FROM pool_tvl_snapshots WHERE pool_id=$1', [pairAddress]);
+    await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id=$1', [pairAddress]);
+    await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, pairAddress]);
+  });
+  it('stores a snapshot valued from the pair reserves and the price they imply', async () => {
+    __resetUsdPriceCacheForTests();
+    const client = {
+      ...clientWith(goodLens),
+      async readContract(args: { functionName: string; address: string }) {
+        if (args.functionName === 'getReserves') return [3n * 10n ** 18n, 2n * 10n ** 18n, 1];
+        return clientWith(goodLens).readContract(args as never);
+      },
+    };
+    await captureTvlSnapshots(pool, client, now);
+    const stored = (await pool.query("SELECT tvl_usd, protocol FROM pool_tvl_snapshots WHERE pool_id=$1", [pairAddress])).rows;
+    expect(stored).toHaveLength(1);
+    expect(stored[0].protocol).toBe('uniswap_v2');
+    expect(Number(stored[0].tvl_usd)).toBeCloseTo(16, 1); // 2e18 quote + 3e18 token worth 2e18 quote, x $4
+  });
+});
+
 describe('captureTvlSnapshots', () => {
   it('records raw amounts and the USD TVL priced through the side that has a verified feed', async () => {
     const result = await captureTvlSnapshots(pool, clientWith(goodLens), now);

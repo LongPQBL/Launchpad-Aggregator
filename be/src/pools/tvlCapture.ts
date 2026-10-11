@@ -3,7 +3,7 @@ import { robinhood } from '../chains/robinhood.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
-import { readLensSnapshot } from './lens.js';
+import { readPoolAmounts } from './poolAmounts.js';
 import { assetDecimals } from './stats.js';
 import { insertTvlSnapshot, pruneTvlSnapshots } from './tvlSnapshots.js';
 
@@ -27,7 +27,7 @@ export function parseSnapshotConfig(env: Record<string, string | undefined>): Sn
   return { intervalSeconds, retentionHours };
 }
 
-interface CatalogRow { chain_id: number; pool_id: string; currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
+interface CatalogRow { chain_id: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; pool_id: string; currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
 
 async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, nowSeconds: number): Promise<boolean> {
   const quoteAddress = (await resolveVerifiedFeed(pool, row.chain_id, row.currency0)) ? row.currency0
@@ -38,29 +38,30 @@ async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, n
   if (decimals0 === null || decimals1 === null) return false;
   const quoteUsd = await readUsdPrice(pool, client, row.chain_id, quoteAddress, () => nowSeconds * 1000);
   if (!quoteUsd) return false;
-  const lens = await readLensSnapshot(client, row);
+  const lens = await readPoolAmounts(client, { protocol: row.protocol, poolId: row.pool_id, currency0: row.currency0, currency1: row.currency1,
+    fee: row.fee, tick_spacing: row.tick_spacing, hooks: row.hooks });
   if (!lens) return false;
   const tvlUsd = calculateTvlUsd({
-    tokenRaw: quoteIsCurrency0 ? lens.coreAmount1 : lens.coreAmount0,
-    quoteRaw: quoteIsCurrency0 ? lens.coreAmount0 : lens.coreAmount1,
-    blockNumber: lens.blockNumber, basis: 'pool_principal', sqrtPriceX96: lens.sqrtPriceX96,
+    tokenRaw: quoteIsCurrency0 ? lens.amount1 : lens.amount0,
+    quoteRaw: quoteIsCurrency0 ? lens.amount0 : lens.amount1,
+    blockNumber: lens.blockNumber, basis: row.protocol === 'uniswap_v4' ? 'pool_principal' : 'pool_custody', sqrtPriceX96: lens.sqrtPriceX96,
     tokenIsCurrency0: !quoteIsCurrency0,
   }, quoteIsCurrency0 ? decimals0 : decimals1, quoteIsCurrency0 ? decimals1 : decimals0, quoteUsd.priceUsd);
   if (tvlUsd === null) return false;
   await insertTvlSnapshot(pool, {
-    chainId: row.chain_id, protocol: 'uniswap_v4', poolId: row.pool_id, blockNumber: lens.blockNumber,
-    capturedAtSeconds: nowSeconds, coreAmount0Raw: lens.coreAmount0, coreAmount1Raw: lens.coreAmount1,
+    chainId: row.chain_id, protocol: row.protocol, poolId: row.pool_id, blockNumber: lens.blockNumber,
+    capturedAtSeconds: nowSeconds, coreAmount0Raw: lens.amount0, coreAmount1Raw: lens.amount1,
     sqrtPriceX96: lens.sqrtPriceX96, quoteAddress, tvlUsd,
   });
   return true;
 }
 
-/** One pass over every verified V4 pool on the chain this worker's RPC client serves (Robinhood). A pool that cannot be read or priced is skipped, never stored as a guess. */
+/** One pass over every verified pool (V4, V3 and V2) on the chain this worker's RPC client serves (Robinhood). A pool that cannot be read or priced is skipped, never stored as a guess. */
 export async function captureTvlSnapshots(pool: Pool, client: UsdPriceClient, nowSeconds: number,
   log: (message: string, error: unknown) => void = (message, error) => console.error(message, error),
 ): Promise<{ captured: number; skipped: number }> {
-  const pools = (await pool.query(`SELECT chain_id, pool_id, currency0, currency1, fee, tick_spacing, hooks
-    FROM pool_catalog WHERE protocol='uniswap_v4' AND verified=true AND chain_id=$1`, [robinhood.id])).rows as CatalogRow[];
+  const pools = (await pool.query(`SELECT chain_id, protocol, pool_id, currency0, currency1, fee, tick_spacing, hooks
+    FROM pool_catalog WHERE verified=true AND chain_id=$1`, [robinhood.id])).rows as CatalogRow[];
   let captured = 0;
   let skipped = 0;
   for (const row of pools) {
