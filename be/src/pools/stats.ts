@@ -113,12 +113,22 @@ export async function readPoolTrades(pool: Pool, key: PoolKey, displayedToken: s
   ])).toString('base64url') : null };
 }
 
+// A token's decimals never change, so a successful read is remembered (per chain and address); a failed read is not, and is retried next time.
+const decimalsCache = new Map<string, number>();
+/** Test-only: forget the remembered decimals (module state otherwise survives between tests of one file). */
+export function __resetAssetDecimalsCacheForTests(): void { decimalsCache.clear(); }
+
 export async function assetDecimals(client: UsdPriceClient | undefined, address: string): Promise<number | null> {
   if (address === ZERO_ADDRESS) return 18;
   if (!client) return null;
+  const key = `${client.chain?.id ?? 0}:${address.toLowerCase()}`;
+  const known = decimalsCache.get(key);
+  if (known !== undefined) return known;
   try {
     const value = await client.readContract({ address: address as Address, abi: erc20DecimalsAbi, functionName: 'decimals' });
-    return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 36 ? value : null;
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 36) return null;
+    decimalsCache.set(key, value);
+    return value;
   } catch { return null; }
 }
 
