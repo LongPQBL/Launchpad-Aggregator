@@ -6,7 +6,7 @@ import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges'
 import { ChartRangeTabs, type PriceChartStyle } from '@/features/launch/official-chart';
 import { cn } from '@/lib/utils';
 import { PoolChart } from './pool-chart';
-import { PoolHistoryChart } from './pool-history-chart';
+import { PoolHistoryChart, trimLeadingEmpty } from './pool-history-chart';
 
 type ChartKind = 'price' | 'volume' | 'tvl';
 const LABELS: Record<ChartKind, string> = { price: 'Price', volume: 'Volume', tvl: 'TVL' };
@@ -147,7 +147,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
       {/* eslint-disable-next-line react-hooks/refs -- the callback only reads the stale-answer ref when the user clicks, never while rendering */}
       {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart, chartStyle })}</div>}
       {history && selected !== 'price' && (
-        <PoolHistoryChart items={data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
+        <PoolHistoryChart items={activeRange === 'all' ? trimLeadingEmpty(data?.items ?? []) : data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
           intervalSeconds={data?.intervalSeconds} loading={loading} error={failed} allPools={allPools} unvaluedPools={data?.unvaluedPools ?? history.unvaluedPools ?? 0}
           leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} />} trailing={kindTabs} />
       )}

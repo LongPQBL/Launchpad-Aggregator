@@ -79,10 +79,10 @@ describe('OfficialChart range tabs', () => {
     expect(within(intervals).getByRole('link', { name: '1W' })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('offers 1H, 1D, 1W, 1M, and 1Y, and marks the active one', () => {
+  it('offers 1H, 1D, 1W, 1M, 1Y and All, and marks the active one', () => {
     render(<OfficialChart {...props} range="1d" currency="usd" />);
     const nav = screen.getByRole('navigation', { name: 'Chart range' });
-    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['1H', '1D', '1W', '1M', '1Y']);
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['1H', '1D', '1W', '1M', '1Y', 'All']);
     expect(nav).toHaveClass('inline-flex', 'flex-wrap');
     expect(within(nav).getByText('1D')).toHaveAttribute('aria-current', 'page');
     expect(within(nav).getByText('1H')).toHaveAttribute('href', '?currency=usd&range=1h');

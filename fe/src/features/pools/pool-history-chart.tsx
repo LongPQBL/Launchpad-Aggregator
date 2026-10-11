@@ -31,6 +31,12 @@ function valueOf(item: PoolDayHistory, metric: HistoryMetric): string | null {
   return metric === 'volume' ? item.volumeUsd : item.tvlUsd;
 }
 
+/** Drops the buckets before the first one that has any data, so the "All" range starts where the history does. Unchanged when nothing has data. */
+export function trimLeadingEmpty(items: readonly PoolDayHistory[]): readonly PoolDayHistory[] {
+  const first = items.findIndex((item) => item.tradeCount > 0 || item.tvlUsd !== null || (item.volumeUsd !== null && item.volumeUsd !== '0'));
+  return first <= 0 ? items : items.slice(first);
+}
+
 // Total of the buckets that have a value, plus how many do not (the total is then a minimum). Null when no bucket has a value.
 export function windowTotal(items: readonly PoolDayHistory[]): { total: string; missing: number } | null {
   let total = 0;

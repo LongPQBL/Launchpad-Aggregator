@@ -5,6 +5,7 @@ export const CHART_RANGES = [
   { id: '1w', label: '1W' },
   { id: '1m', label: '1M' },
   { id: '1y', label: '1Y' },
+  { id: 'all', label: 'All' },
 ] as const;
 export type ChartRangeId = (typeof CHART_RANGES)[number]['id'];
 export const DEFAULT_CHART_RANGE: ChartRangeId = '1d';

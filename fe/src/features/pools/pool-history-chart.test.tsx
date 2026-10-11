@@ -114,7 +114,7 @@ describe('PoolHistoryChart', () => {
   });
 });
 
-import { formatUsdAxis, withZeroBaseline } from './pool-history-chart';
+import { formatUsdAxis, trimLeadingEmpty, withZeroBaseline } from './pool-history-chart';
 
 describe('withZeroBaseline', () => {
   it('always starts the TVL axis at 0, also for a flat series so axis ticks are not all identical', () => {
@@ -134,5 +134,19 @@ describe('formatUsdAxis', () => {
   it('never shows a negative amount for a crosshair below the baseline', () => {
     expect(formatUsdAxis(-0.004)).toBe('$0.00');
     expect(formatUsdAxis(1500)).toBe('$1.5K');
+  });
+});
+
+describe('trimLeadingEmpty', () => {
+  const empty = (day: number) => ({ day, tradeCount: 0, volumeUsd: '0', tvlUsd: null });
+  it('drops the empty days before the first one with data', () => {
+    const data = { day: 3, tradeCount: 2, volumeUsd: '40', tvlUsd: null };
+    expect(trimLeadingEmpty([empty(1), empty(2), data, empty(4)])).toEqual([data, empty(4)]);
+  });
+  it('starts at the first TVL snapshot too, and keeps everything when nothing has data', () => {
+    const snap = { day: 2, tradeCount: 0, volumeUsd: null, tvlUsd: '10' };
+    expect(trimLeadingEmpty([empty(1), snap])).toEqual([snap]);
+    const none = [empty(1), empty(2)];
+    expect(trimLeadingEmpty(none)).toBe(none);
   });
 });

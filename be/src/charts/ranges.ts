@@ -1,4 +1,4 @@
-export const CHART_RANGES = ['1h', '1d', '1w', '1m', '1y'] as const;
+export const CHART_RANGES = ['1h', '1d', '1w', '1m', '1y', 'all'] as const;
 export type ChartRange = (typeof CHART_RANGES)[number];
 export const DEFAULT_RANGE: ChartRange = '1d';
 
@@ -9,6 +9,8 @@ const SPECS = {
   '1w': { windowSeconds: 604_800, intervalSeconds: 3_600 },
   '1m': { windowSeconds: 2_592_000, intervalSeconds: 14_400 },
   '1y': { windowSeconds: 31_536_000, intervalSeconds: 86_400 },
+  // Everything the history endpoints can serve: daily buckets up to their bucket cap (400 days). The client drops the empty days before the first data.
+  all: { windowSeconds: 400 * 86_400, intervalSeconds: 86_400 },
 } as const;
 
 export function parseRange(value: unknown): ChartRange | null {

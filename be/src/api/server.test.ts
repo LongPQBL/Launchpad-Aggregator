@@ -255,7 +255,8 @@ describe('read-only API', () => {
     expect(seen).toEqual([60]);
     expect(hour.json().items).toHaveLength(1); // the two-hour-old candle is outside the 1h window
     expect((await app.inject({ method: 'GET', url: `${url}?range=1y` })).statusCode).toBe(200);
-    expect(seen).toEqual([60, 86_400]);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=all` })).statusCode).toBe(200);
+    expect(seen).toEqual([60, 86_400, 86_400]); // 1y and all both read daily candles
     expect((await app.inject({ method: 'GET', url: `${url}?range=5m` })).statusCode).toBe(400);
     await app.close();
   });

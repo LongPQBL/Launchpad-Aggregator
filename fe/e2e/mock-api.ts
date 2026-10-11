@@ -127,7 +127,7 @@ const transactions = {
 };
 
 // Mirrors be/src/charts/ranges.ts: the server picks the bucket size for each range.
-const RANGE_INTERVAL_SECONDS: Record<string, number> = { '1h': 60, '1d': 300, '1w': 3600, '1m': 14_400, '1y': 86_400 };
+const RANGE_INTERVAL_SECONDS: Record<string, number> = { '1h': 60, '1d': 300, '1w': 3600, '1m': 14_400, '1y': 86_400, all: 86_400 };
 function rangeInterval(url: URL): number {
   return RANGE_INTERVAL_SECONDS[url.searchParams.get('range') ?? '1d'] ?? 300;
 }
