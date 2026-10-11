@@ -110,13 +110,16 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       return days.every((value): value is string => value !== null) ? sumUsdValues(days) : null;
     } catch { return null; }
   }, 5 * 60_000);
+  // Per-pool statistics cost about seven queries plus RPC reads each, and a list or a live refresh asks for the same pools again and again: reuse them for 10 s.
+  const poolStatsMemo = ttlMemo((_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) =>
+    readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), { rpcClient, createdTimestamp: arg.createdTimestamp }), 10_000);
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
     const createdAtPromise = createdTimestamp(String(row.block_number));
     const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
-      createdAtPromise.then((created) => readPoolStats(pool, key, displayedToken, Math.floor(Date.now() / 1000),
-        { rpcClient, createdTimestamp: created })),
+      createdAtPromise.then((created) => poolStatsMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${displayedToken}`,
+        { key, displayedToken, createdTimestamp: created })),
       volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, key),
       createdAtPromise,
       currencyMetadata(row.currency0),
