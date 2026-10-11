@@ -248,6 +248,32 @@ export async function getPoolHistory(pool: Pick<PoolSummary, 'chainId' | 'protoc
   return request<PoolHistory>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/history`, { range });
 }
 
+export interface DepthRowData { price: number; amount0: number; total1: number; cumulative1: number }
+export interface DepthData { asks: readonly DepthRowData[]; bids: readonly DepthRowData[]; spreadPercent: number | null }
+export interface PoolLiquidityRange { tickLower: number; tickUpper: number; priceLower: number; priceUpper: number; liquidity: string; active: boolean }
+export interface PoolLiquidity {
+  blockNumber: string | null; tickSpacing: number; feePips: number; currentTick: number | null; price: number | null; priceInverse: number | null;
+  token0: { address: string; decimals: number | null }; token1: { address: string; decimals: number | null };
+  ranges: readonly PoolLiquidityRange[]; depth: DepthData | null; complete: boolean; unavailableReason: string | null;
+}
+// Liquidity per price range and the order-book depth of a V3 / V4 pool, read from the chain when the tab opens.
+export async function getPoolLiquidity(pool: Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId'>): Promise<PoolLiquidity> {
+  return request<PoolLiquidity>(`/v1/pools/${pool.chainId}/${pool.protocol}/${encodeURIComponent(pool.poolId)}/liquidity`);
+}
+
+export interface CurveDepth {
+  blockNumber: string | null; price: number | null; priceInverse: number | null; feeBps: number | null; creatorTaxBps: number | null;
+  asksEndAtGraduation: boolean; bidsEndAtEmptyReserve: boolean; depth: DepthData | null; complete: boolean; unavailableReason: string | null;
+}
+// Depth of the launch's bonding curve; null (404) when it has no curve venue.
+export async function getCurveDepth(chainId: number, tokenAddress: string): Promise<CurveDepth | null> {
+  const path = `/v1/launches/${chainId}/${tokenAddress}/curve/depth`;
+  const response = await rawFetch(path);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError(`${path} returned error ${response.status}`, undefined, response.status);
+  return (await response.json()) as CurveDepth;
+}
+
 type LaunchHistoryBody = paths['/v1/launches/{chainId}/{tokenAddress}/history']['get']['responses'][200]['content']['application/json'];
 export async function getLaunchHistory(chainId: number, tokenAddress: string, range: ChartRangeId = DEFAULT_CHART_RANGE, venue?: 'curve'): Promise<PoolHistory> {
   return request<LaunchHistoryBody & PoolHistory>(`/v1/launches/${chainId}/${tokenAddress}/history`, { range, venue });
