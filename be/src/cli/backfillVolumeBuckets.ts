@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { backfillLaunchVolume, backfillPoolVolume, backfillUsdCandles } from '../charts/backfillVolume.js';
+import { backfillLaunchVolume, backfillPoolVolume, backfillUsdCandles, rebuildUnpriced } from '../charts/backfillVolume.js';
 
 // Rebuilds the chart rollups from trades. Resumable; `--only volume` or `--only usd` runs one part (each has its own cursor).
 // `--rebuild` starts the selected parts over (cursor and "done" flag reset, so the API reports them incomplete meanwhile): needed after oracle
@@ -9,8 +9,17 @@ if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const onlyIndex = process.argv.indexOf('--only');
 const only = onlyIndex === -1 ? null : process.argv[onlyIndex + 1];
 if (only !== null && only !== 'volume' && only !== 'usd') throw new Error('--only must be "volume" or "usd"');
-const pool = new Pool({ connectionString: databaseUrl, max: 2 });
+// `--unpriced [--concurrency 6]` rebuilds only the launches and pools that still have unpriced buckets, in parallel: the fast follow-up to backfilling old oracle rounds.
+const concurrencyIndex = process.argv.indexOf('--concurrency');
+const concurrency = concurrencyIndex === -1 ? 4 : Number(process.argv[concurrencyIndex + 1]);
+if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('--concurrency must be a positive integer');
+const pool = new Pool({ connectionString: databaseUrl, max: process.argv.includes('--unpriced') ? concurrency + 2 : 2 });
 try {
+  if (process.argv.includes('--unpriced')) {
+    const result = await rebuildUnpriced(pool, { concurrency, log: console.log });
+    console.log(`done: rebuilt ${result.launches} launches and ${result.pools} pools that had unpriced buckets`);
+    process.exit(0);
+  }
   if (process.argv.includes('--rebuild')) {
     const names = only === 'volume' ? ['launch_volume', 'pool_volume'] : only === 'usd' ? ['launch_usd_candles'] : ['launch_volume', 'pool_volume', 'launch_usd_candles'];
     await pool.query('DELETE FROM chart_rollup_state WHERE name = ANY($1)', [names.flatMap((name) => [name, `${name}_done`])]);

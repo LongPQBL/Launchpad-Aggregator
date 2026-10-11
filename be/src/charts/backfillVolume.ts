@@ -107,3 +107,43 @@ export async function backfillPoolVolume(pool: Pool, log: (message: string) => v
   await markRollupBackfilled(pool, 'pool_volume');
   return pools;
 }
+
+async function rebuildPoolHistory(pool: Pool, row: { chain_id: unknown; protocol: unknown; pool_id: unknown }): Promise<void> {
+  const minutes = (await pool.query(`SELECT DISTINCT (timestamp / 60) * 60 AS bucket_start FROM pool_trades
+    WHERE chain_id = $1 AND protocol = $2 AND pool_id = $3 ORDER BY 1`, [row.chain_id, row.protocol, row.pool_id])).rows.map((r) => Number(r.bucket_start));
+  for (const slice of chunks(minutes, MINUTES_PER_TRANSACTION)) {
+    await inTransaction(pool, (client) => rebuildPoolVolume(client, slice.map((bucketStart) => ({
+      chainId: Number(row.chain_id), protocol: String(row.protocol), poolId: String(row.pool_id), bucketStart }))));
+  }
+}
+
+/**
+ * Rebuilds only what still has unpriced trades: the launches with an unpriced volume or USD-candle bucket and the pools with an unpriced volume bucket.
+ * This is the follow-up to backfilling old oracle rounds (the live re-queue only covers the last 48 h). The work is split over `concurrency` parallel
+ * rebuilds (each launch / pool is independent and idempotent). A launch whose trades predate any oracle round stays unpriced and is simply visited again by a later run.
+ */
+export async function rebuildUnpriced(pool: Pool, options: { concurrency?: number; log?: (message: string) => void } = {}): Promise<{ launches: number; pools: number }> {
+  const log = options.log ?? (() => {});
+  const concurrency = Math.max(1, options.concurrency ?? 4);
+  const launches = (await pool.query(`SELECT chain_id, token_address FROM launch_volume_buckets WHERE unpriced_count > 0
+    UNION SELECT chain_id, token_address FROM launch_usd_candle_buckets WHERE unpriced_count > 0`)).rows;
+  const pools = (await pool.query(`SELECT DISTINCT chain_id, protocol, pool_id FROM pool_volume_buckets WHERE unpriced0 > 0 OR unpriced1 > 0`)).rows;
+  log(`${launches.length} launches and ${pools.length} pools with unpriced buckets`);
+  let done = 0;
+  const run = async <T>(items: readonly T[], work: (item: T) => Promise<void>): Promise<void> => {
+    let next = 0;
+    await Promise.all(Array.from({ length: concurrency }, async () => {
+      for (let index = next++; index < items.length; index = next++) {
+        await work(items[index]!);
+        done += 1;
+        if (done % 200 === 0) log(`rebuilt ${done} of ${launches.length + pools.length}`);
+      }
+    }));
+  };
+  await run(launches, async (row) => {
+    await rebuildLaunchHistory(pool, Number(row.chain_id), String(row.token_address), rebuildLaunchVolume);
+    await rebuildLaunchHistory(pool, Number(row.chain_id), String(row.token_address), rebuildUsdCandles);
+  });
+  await run(pools, (row) => rebuildPoolHistory(pool, row));
+  return { launches: launches.length, pools: pools.length };
+}

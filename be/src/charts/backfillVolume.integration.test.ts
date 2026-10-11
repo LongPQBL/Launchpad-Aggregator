@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { backfillLaunchVolume, backfillPoolVolume, backfillUsdCandles } from './backfillVolume.js';
+import { backfillLaunchVolume, backfillPoolVolume, backfillUsdCandles, rebuildUnpriced } from './backfillVolume.js';
 import { isRollupBackfilled } from './rollupState.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -87,5 +87,30 @@ describe('volume bucket backfill', () => {
     expect(usdHourly.rows).toEqual([{ trade_count: 1 }, { trade_count: 1 }]);
     expect(await backfillLaunchVolume(pool)).toBe(0);
     expect(await backfillPoolVolume(pool)).toBe(0);
+  });
+});
+
+describe('rebuilding what is still unpriced', () => {
+  it('prices old trades once their oracle round exists, and leaves nothing to do on the next run', async () => {
+    // Start from buckets built while the round did not exist yet: remove the round, rebuild (everything unpriced), then add it back.
+    await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id = $1', [chainId]);
+    await backfillLaunchVolume(pool);
+    await pool.query("DELETE FROM chart_rollup_state WHERE name IN ('launch_volume','pool_volume','launch_usd_candles')");
+    await backfillLaunchVolume(pool); await backfillPoolVolume(pool); await backfillUsdCandles(pool);
+    const unpriced = await pool.query('SELECT count(*)::int AS n FROM launch_volume_buckets WHERE chain_id = $1 AND unpriced_count > 0', [chainId]);
+    expect(unpriced.rows[0].n).toBeGreaterThan(0);
+    await pool.query(`INSERT INTO quote_usd_price_rounds (chain_id, feed_address, round_id, answer_raw, decimals, started_at, updated_at, block_number, log_index)
+      VALUES ($1,$2,1,200000000,8,$3,$3,500,0) ON CONFLICT DO NOTHING`, [chainId, feed, minute - 100]);
+    await pool.query('DELETE FROM candle_dirty_buckets WHERE chain_id = $1', [chainId]); // as for old trades: the live re-queue does not cover them
+    const result = await rebuildUnpriced(pool, { concurrency: 2 });
+    expect(result.launches).toBeGreaterThan(0);
+    const after = await pool.query('SELECT count(*)::int AS n FROM launch_volume_buckets WHERE chain_id = $1 AND unpriced_count > 0', [chainId]);
+    expect(after.rows[0].n).toBe(0);
+    const hourly = (await pool.query(`SELECT volume_usd FROM launch_volume_buckets WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = 3600 ORDER BY bucket_start`, [chainId, token])).rows;
+    expect(hourly.map((row) => Number(row.volume_usd))).toEqual([2, 2]);
+    // Nothing of this chain is left for the next run (other tests' fixtures in the shared database may still be unpriced on purpose).
+    const left = await pool.query(`SELECT (SELECT count(*) FROM launch_usd_candle_buckets WHERE chain_id = $1 AND unpriced_count > 0)::int AS usd,
+      (SELECT count(*) FROM pool_volume_buckets WHERE chain_id = $1 AND (unpriced0 > 0 OR unpriced1 > 0))::int AS pools`, [chainId]);
+    expect(left.rows[0]).toEqual({ usd: 0, pools: 0 });
   });
 });
