@@ -186,10 +186,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     },
     listPoolTrades: (key, token, query) => readPoolTrades(pool, key, token, { ...query, rpcClient }),
     listPoolCandles: (key, token, interval, before) => readPoolCandles(pool, key, token, interval, before, { rpcClient }),
-    getPoolLiquidity: async (key) => {
-      if (!rpcClient?.getBlockNumber) return null;
-      return poolLiquidityMemo(`${key.chainId}:${key.protocol}:${key.poolId.toLowerCase()}`, key);
-    },
+    // Without an RPC client this is left out, so the route answers 503 (unavailable) instead of a misleading 404.
+    ...(rpcClient?.getBlockNumber ? { getPoolLiquidity: (key: PoolKey) => poolLiquidityMemo(`${key.chainId}:${key.protocol}:${key.poolId.toLowerCase()}`, key) } : {}),
     listPoolHistory: (key, window) => poolHistoryMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${window.intervalSeconds}:${window.buckets}`,
       { key, window }),
   };

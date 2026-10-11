@@ -796,7 +796,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     },
     listLaunchHistory: (chainId, tokenAddress, window) => launchHistoryMemo(
       `${chainId}:${tokenAddress.toLowerCase()}:${window.intervalSeconds}:${window.buckets}:${window.venueKind ?? ''}`, { chainId, tokenAddress, window }),
-    getCurveDepth: async (chainId, tokenAddress) => rpcClient?.getBlockNumber ? curveDepthMemo(`${chainId}:${tokenAddress.toLowerCase()}`, { chainId, tokenAddress }) : null,
+    // Without an RPC client these are left out, so the routes answer 503 (unavailable) instead of a misleading 404.
+    ...(rpcClient?.getBlockNumber ? { getCurveDepth: (chainId: number, tokenAddress: string) => curveDepthMemo(`${chainId}:${tokenAddress.toLowerCase()}`, { chainId, tokenAddress }) } : {}),
     async getCurveSummary(chainId: number, tokenAddress: string): Promise<CurveSummary | null> {
       const token = tokenAddress.toLowerCase();
       const venue = (await pool.query(`SELECT v.id, v.ref, v.effective_to_block, l.quote_asset_decimals FROM venues v
