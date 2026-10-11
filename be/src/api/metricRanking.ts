@@ -18,10 +18,11 @@ export interface MetricRankingInput {
 const SORT_VALUES: Record<LaunchSort, string> = {
   recent: 'base.block_number::numeric',
   volume24hUsd: 'base.volume_usd',
-  fdvUsd: "CASE WHEN base.launch_coverage_complete THEN (base.cached_stats->>'fdvUsd')::numeric END",
+  // A launch without cached stats sorts as NULL whatever its coverage is, so the (expensive) coverage check runs only for launches that have stats.
+  fdvUsd: "CASE WHEN base.cached_stats IS NULL THEN NULL WHEN base.launch_coverage_complete THEN (base.cached_stats->>'fdvUsd')::numeric END",
   tvlUsd: "(base.cached_stats->>'tvlUsd')::numeric",
-  change1h: "CASE WHEN base.launch_coverage_complete THEN (base.cached_stats->>'change1h')::numeric END",
-  change1d: "CASE WHEN base.launch_coverage_complete THEN (base.cached_stats->>'change1d')::numeric END",
+  change1h: "CASE WHEN base.cached_stats IS NULL THEN NULL WHEN base.launch_coverage_complete THEN (base.cached_stats->>'change1h')::numeric END",
+  change1d: "CASE WHEN base.cached_stats IS NULL THEN NULL WHEN base.launch_coverage_complete THEN (base.cached_stats->>'change1d')::numeric END",
 };
 
 export async function readMetricRankingPage(pool: Pool, input: MetricRankingInput): Promise<{ rows: Record<string, unknown>[]; nextCursor: string | null }> {
@@ -30,29 +31,39 @@ export async function readMetricRankingPage(pool: Pool, input: MetricRankingInpu
   const sqlDirection = input.sort === 'recent'
     ? input.direction === 'asc' ? 'DESC' : 'ASC'
     : input.direction === 'asc' ? 'ASC' : 'DESC';
-  const result = await pool.query(`
-    WITH base AS (
-      SELECT l.*, l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
+  // Only launches with cached stats can have a non-NULL stat value; every other launch sorts as NULL, in recency order. So for the stat sorts the
+  // launches with stats are ranked on their own (a handful of rows) and only as many of the others as the page can reach are read in recency
+  // order, instead of joining, evaluating and sorting every launch.
+  const statSort = input.sort === 'fdvUsd' || input.sort === 'tvlUsd' || input.sort === 'change1h' || input.sort === 'change1d';
+  const columns = `l.*, l.launch_block AS block_number, l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
         st.stats AS cached_stats, vr.volume_usd, vr.rank_category, vr.window_end,
         (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
          WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
            AND t.timestamp >= $5) AS official_volume_raw,
-        ${launchCoverageSql(6)} AS launch_coverage_complete
-      FROM launches l
+        ${launchCoverageSql(6)} AS launch_coverage_complete`;
+  const fromWhere = `FROM launches l
       JOIN sources src ON src.id = l.source_id
       LEFT JOIN launch_stats st ON st.chain_id = l.chain_id AND st.token_address = l.token_address
       LEFT JOIN launch_volume24h_usd vr ON vr.chain_id = l.chain_id AND vr.token_address = l.token_address
       WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
         AND ($2::text[] IS NULL OR l.platform = ANY($2))
         AND ($3::text IS NULL OR l.lifecycle_status = $3)
-        AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')
-    )
+        AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')`;
+  const baseSql = statSort
+    ? `(SELECT ${columns} ${fromWhere} AND st.stats IS NOT NULL)
+       UNION ALL
+       (SELECT ${columns} ${fromWhere} AND st.stats IS NULL
+         ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $9)`
+    : `SELECT ${columns} ${fromWhere}`;
+  const result = await pool.query(`
+    WITH base AS (${baseSql})
     SELECT base.* FROM base
     ORDER BY ${SORT_VALUES[input.sort]} ${sqlDirection} NULLS LAST,
       base.block_number DESC, base.tx_hash DESC, base.log_index DESC
     LIMIT $7 OFFSET $8`,
   [input.chainId === undefined ? null : [input.chainId].flat(), input.platform === undefined ? null : [input.platform].flat(),
-    input.status ?? null, input.search ?? null, input.since, input.headBlock?.toString() ?? null, input.limit + 1, offset]);
+    input.status ?? null, input.search ?? null, input.since, input.headBlock?.toString() ?? null, input.limit + 1, offset,
+    ...(statSort ? [input.limit + 1 + offset] : [])]);
   const rows = result.rows.slice(0, input.limit) as Record<string, unknown>[];
   const nextCursor = result.rows.length > input.limit
     ? encodeMetricCursor({ version: 1, sort: input.sort, direction: input.direction, offset: offset + input.limit }) : null;
