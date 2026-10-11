@@ -6,20 +6,23 @@ import { backfillRoundHistory, type RoundHistoryClient } from '../market/quotePr
 // Fills the USD oracle round history of every verified feed back to the first trade quoted in its asset, so old trades can be valued (Volume and
 // USD candle history stop being "unavailable"). Resumable and safe to re-run. Afterwards run the candle / volume workers: storing a round marks the
 // buckets it affects dirty and they recompute.
-//   npm run -w be prices:backfill-history -- --concurrency 8 [--feed 0x...]
+//   npm run -w be prices:backfill-history -- --concurrency 8 [--feed 0x...] [--shard 1/4]   (shards split the feeds between parallel runs)
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
 const argument = (name: string): string | undefined => { const index = process.argv.indexOf(`--${name}`); return index === -1 ? undefined : process.argv[index + 1]; };
 const concurrency = Number(argument('concurrency') ?? 8);
 if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error('--concurrency must be a positive integer');
 const only = argument('feed')?.toLowerCase();
+const shard = (argument('shard') ?? '1/1').split('/').map(Number);
+if (shard.length !== 2 || !shard.every((value) => Number.isInteger(value) && value >= 1) || shard[0]! > shard[1]!) throw new Error('--shard must look like 2/4');
 const pool = new Pool({ connectionString: databaseUrl, max: 4 });
 const client = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com') as unknown as RoundHistoryClient;
 try {
   const feeds = (await pool.query(`SELECT f.feed_address, min(t.timestamp)::bigint AS first_trade FROM quote_usd_feeds f
     JOIN trades t ON t.chain_id = f.chain_id AND t.quote_asset_address = f.quote_asset_address
     WHERE f.chain_id = $1 AND f.verification_status = 'verified' GROUP BY f.feed_address ORDER BY first_trade`, [robinhood.id])).rows
-    .filter((row) => only === undefined || String(row.feed_address).toLowerCase() === only);
+    .filter((row) => only === undefined || String(row.feed_address).toLowerCase() === only)
+    .filter((_, index) => index % shard[1]! === shard[0]! - 1);
   console.log(`${feeds.length} feed(s) with trades to value`);
   const started = Date.now();
   for (const row of feeds) {
