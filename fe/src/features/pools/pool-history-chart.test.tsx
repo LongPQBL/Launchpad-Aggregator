@@ -24,9 +24,10 @@ const items: PoolDayHistory[] = [
 beforeEach(() => { setData.mockClear(); addSeries.mockClear(); subscribeCrosshairMove.mockClear(); });
 
 describe('history helpers', () => {
-  it('sums the window only when every bucket is available', () => {
-    expect(windowTotal(items)).toBe('2000');
-    expect(windowTotal([...items, { day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }])).toBeNull();
+  it('sums the available buckets and counts the unavailable ones; nothing to sum is null', () => {
+    expect(windowTotal(items)).toEqual({ total: '2000', missing: 0 });
+    expect(windowTotal([...items, { day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }])).toEqual({ total: '2000', missing: 1 });
+    expect(windowTotal([{ day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }])).toBeNull();
     expect(windowTotal([])).toBeNull();
   });
   it('finds the latest TVL and formats UTC bucket times and window labels', () => {
@@ -57,7 +58,9 @@ describe('PoolHistoryChart', () => {
   it('shows the window total by default and the hovered bucket on hover, with "Unavailable" for a gap', () => {
     render(<PoolHistoryChart items={[...items, { day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }]} complete metric="volume" intervalSeconds={DAY} />);
     const readout = screen.getByTestId('pool-history-readout');
-    expect(readout).toHaveTextContent('Unavailable'); // one bucket is null, so no total is claimed
+    // One bucket is null: the total is a minimum and says so, instead of claiming the whole window.
+    expect(readout).toHaveTextContent('$2K+');
+    expect(readout).toHaveTextContent('1 of 4 buckets unavailable');
     const onMove = subscribeCrosshairMove.mock.calls.at(-1)![0] as (param: MouseEventParams<Time>) => void;
     act(() => { onMove({ time: (10 * DAY) as Time } as MouseEventParams<Time>); });
     expect(readout).toHaveTextContent('$1.5K');
@@ -66,6 +69,11 @@ describe('PoolHistoryChart', () => {
     expect(readout).toHaveTextContent('Unavailable');
     act(() => { onMove({} as MouseEventParams<Time>); });
     expect(readout).toHaveTextContent('Total, last 4 days');
+  });
+
+  it('says Unavailable when no bucket has a value', () => {
+    render(<PoolHistoryChart items={[{ day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }]} complete metric="volume" intervalSeconds={DAY} />);
+    expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Unavailable');
   });
 
   it('shows the total when every bucket is available, and the latest value for TVL', () => {

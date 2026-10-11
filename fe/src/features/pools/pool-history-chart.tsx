@@ -25,15 +25,16 @@ function valueOf(item: PoolDayHistory, metric: HistoryMetric): string | null {
   return metric === 'volume' ? item.volumeUsd : item.tvlUsd;
 }
 
-// Total of every bucket in the window, or null when any bucket is unavailable (a partial sum would understate it).
-export function windowTotal(items: readonly PoolDayHistory[]): string | null {
-  if (items.length === 0) return null;
+// Total of the buckets that have a value, plus how many do not (the total is then a minimum). Null when no bucket has a value.
+export function windowTotal(items: readonly PoolDayHistory[]): { total: string; missing: number } | null {
   let total = 0;
+  let known = 0;
   for (const item of items) {
-    if (item.volumeUsd === null) return null;
+    if (item.volumeUsd === null) continue;
     total += Number(item.volumeUsd);
+    known += 1;
   }
-  return Number.isFinite(total) ? String(total) : null;
+  return known === 0 || !Number.isFinite(total) ? null : { total: String(total), missing: items.length - known };
 }
 
 export function latestTvl(items: readonly PoolDayHistory[]): PoolDayHistory | null {
@@ -126,17 +127,20 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
   const label = metric === 'volume' ? 'Volume' : 'TVL';
   const total = metric === 'volume' ? windowTotal(items) : null;
   const latest = metric === 'tvl' ? latestTvl(items) : null;
-  const figure = hovered ? valueOf(hovered, metric) : metric === 'volume' ? total : latest?.tvlUsd ?? null;
+  const figure = hovered ? valueOf(hovered, metric) : metric === 'volume' ? total?.total ?? null : latest?.tvlUsd ?? null;
+  const partial = !hovered && total !== null && total.missing > 0;
   const caption = hovered
     ? formatBucketTime(hovered.day, step)
-    : metric === 'volume' ? `Total, last ${windowLabel(items.length * step)}` : latest ? `Latest, ${formatBucketTime(latest.day, step)}` : 'No snapshot in this range';
+    : metric === 'volume'
+      ? `Total, last ${windowLabel(items.length * step)}${partial ? ` · ${total.missing} of ${items.length} buckets unavailable` : ''}`
+      : latest ? `Latest, ${formatBucketTime(latest.day, step)}` : 'No snapshot in this range';
 
   return (
     <section aria-label="Pool history">
       <div className="mb-2 min-h-20" data-testid="pool-history-readout">
         {!loading && !error && items.length > 0 && <>
           <p className={headerClassName}>
-            {figure === null ? 'Unavailable' : <RollingText text={formatUsdCompact(figure, 2)} value={figure} flash />}
+            {figure === null ? 'Unavailable' : <RollingText text={`${formatUsdCompact(figure, 2)}${partial ? '+' : ''}`} value={figure} flash />}
           </p>
           <p className="text-sm text-muted-foreground">{label} · {caption} <span className="text-xs">UTC</span></p>
         </>}
