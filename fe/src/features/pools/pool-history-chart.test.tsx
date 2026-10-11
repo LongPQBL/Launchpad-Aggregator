@@ -89,7 +89,7 @@ describe('PoolHistoryChart', () => {
   it('says so when no TVL was recorded, and hides the chart', () => {
     render(<PoolHistoryChart items={items.map((day) => ({ ...day, tvlUsd: null }))} complete metric="tvl" />);
     expect(screen.getByRole('status')).toHaveTextContent('No TVL history recorded');
-    expect(screen.getByTestId('history-chart-container')).toHaveClass('hidden');
+    expect(screen.getByTestId('history-chart-container').parentElement).toHaveClass('hidden');
   });
 
   it('shows loading and error states instead of the chart', () => {

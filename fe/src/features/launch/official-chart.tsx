@@ -10,6 +10,7 @@ import {
   type LineData,
   type IChartApi,
   type ISeriesApi,
+  type SeriesType,
   type IPriceLine,
   type ISeriesMarkersPluginApi,
   type MouseEventParams,
@@ -20,6 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, type ChartRangeId } from '@/features/chart/ranges';
+import { ChartDimAfter, ChartLeftFade, ChartLiveDot, DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
 import { CoverageBadge } from './coverage-badge';
 
 /** How the price is drawn: OHLC candles, or a line through each bucket's close. */
@@ -74,6 +76,10 @@ export interface OfficialChartProps {
 export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageStatus, currency = 'quote', range = DEFAULT_CHART_RANGE, onSelectRange, tokenSymbol, source, showCurrencyToggle = true, onHoverPoint, onRangeChange, trailing, chartStyle = 'candles' }: OfficialChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  // The same chart / series as state too, so the overlays (live dot) re-attach when the series is swapped.
+  const [chartApi, setChartApi] = useState<IChartApi | null>(null);
+  const [seriesApi, setSeriesApi] = useState<ISeriesApi<SeriesType> | null>(null);
+  const [hoverX, setHoverX] = useState<number | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Area'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLineRef = useRef<IPriceLine | null>(null);
@@ -190,7 +196,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       autoSize: true,
       layout: {
         attributionLogo: true,
-        background: { color: '#0a0a0b' },
+        background: { color: 'transparent' },
         textColor: '#a1a1aa',
       },
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
@@ -198,10 +204,12 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       timeScale: { borderColor: '#27272a' },
     });
     chartRef.current = chart;
+    setChartApi(chart);
 
     // Reports the point the user is pointing at (param.time is undefined outside the chart's
     // data range, e.g. on mouse leave) so a caller's own headline price can track the cursor.
     const handleCrosshairMove = (param: MouseEventParams<Time>) => {
+      setHoverX(param.point?.x ?? null);
       const series = seriesRef.current;
       const data = param.time !== undefined && series ? (param.seriesData.get(series) as (CandlestickData<Time> | LineData<Time>) | undefined) : undefined;
       const close = data === undefined ? undefined : 'close' in data ? data.close : data.value;
@@ -212,6 +220,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
+      setChartApi(null);
       chartRef.current = null;
       seriesRef.current = null;
       markersRef.current = null;
@@ -225,14 +234,20 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     const chart = chartRef.current;
     if (!chart) return;
     const series = chartStyle === 'line'
-      ? chart.addSeries(AreaSeries, { lineColor: '#22c55e', topColor: '#22c55e40', bottomColor: '#22c55e00', lineWidth: 2, lineType: LineType.Curved })
+      ? chart.addSeries(AreaSeries, { lineColor: '#22c55e', topColor: '#22c55e40', bottomColor: '#22c55e00', lineWidth: 2, lineType: LineType.Curved,
+        crosshairMarkerRadius: 5, crosshairMarkerBorderColor: '#0a0a0b', crosshairMarkerBackgroundColor: '#22c55e' })
       : chart.addSeries(CandlestickSeries);
     seriesRef.current = series;
+    // A line chart is scrubbed with a vertical line and a dot on the line; candles keep the full crosshair.
+    chart.applyOptions({ crosshair: { horzLine: { visible: chartStyle !== 'line', labelVisible: chartStyle !== 'line' } } });
+    setSeriesApi(series);
     markersRef.current = createSeriesMarkers(series, []);
     priceLineRef.current = null;
     return () => {
       // On unmount the chart's own cleanup (declared earlier) has already removed the chart and its series.
       if (chartRef.current === chart) chart.removeSeries(series);
+      setSeriesApi(null);
+      setHoverX(null);
       if (seriesRef.current === series) { seriesRef.current = null; markersRef.current = null; priceLineRef.current = null; }
     };
   }, [chartStyle]);
@@ -312,7 +327,13 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           )}
         </div>
       </div>
-      <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" />
+      <div className="relative" onMouseLeave={() => setHoverX(null)}>
+        <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" style={DOTTED_BACKGROUND_STYLE} />
+        <ChartLeftFade />
+        {chartStyle === 'line' && <ChartDimAfter x={hoverX} />}
+        <ChartLiveDot chart={chartApi} series={seriesApi} color="#22c55e"
+          point={chartStyle === 'line' && latestCandle ? { time: latestCandle.bucketStart, value: toChartValue(latestCandle.close) } : null} />
+      </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
       <nav aria-label="Chart range" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
         {CHART_RANGES.map((item) => (

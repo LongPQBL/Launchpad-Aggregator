@@ -21,6 +21,7 @@ const createSeriesMarkersMock = vi.fn((..._args: unknown[]) => ({ setMarkers: se
 const createChartMock = vi.fn((..._args: unknown[]) => ({
   addSeries: addSeriesMock,
   remove: removeMock,
+  applyOptions: vi.fn(),
   removeSeries: vi.fn(),
   subscribeCrosshairMove: subscribeCrosshairMoveMock,
   unsubscribeCrosshairMove: unsubscribeCrosshairMoveMock,
