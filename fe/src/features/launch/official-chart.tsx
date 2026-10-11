@@ -21,7 +21,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, type ChartRangeId } from '@/features/chart/ranges';
-import { ChartDimAfter, ChartLeftFade, ChartLiveDot, DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
+import { ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip, DOTTED_BACKGROUND_STYLE, type OhlcHover } from '@/components/chart-decor';
 import { CoverageBadge } from './coverage-badge';
 
 /** How the price is drawn: OHLC candles, or a line through each bucket's close. */
@@ -80,6 +80,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);
   const [seriesApi, setSeriesApi] = useState<ISeriesApi<SeriesType> | null>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [ohlcHover, setOhlcHover] = useState<OhlcHover | null>(null);
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Area'> | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLineRef = useRef<IPriceLine | null>(null);
@@ -213,6 +214,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       const series = seriesRef.current;
       const data = param.time !== undefined && series ? (param.seriesData.get(series) as (CandlestickData<Time> | LineData<Time>) | undefined) : undefined;
       const close = data === undefined ? undefined : 'close' in data ? data.close : data.value;
+      setOhlcHover(data && 'close' in data && param.point ? { x: param.point.x, y: param.point.y, width: container.clientWidth, open: data.open, high: data.high, low: data.low, close: data.close } : null);
       onHoverPointRef.current?.(data && close !== undefined ? { time: Number(data.time), close, currency: activeCurrencyRef.current } : null);
     };
     chart.subscribeCrosshairMove(handleCrosshairMove);
@@ -327,10 +329,11 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           )}
         </div>
       </div>
-      <div className="relative" onMouseLeave={() => setHoverX(null)}>
+      <div className="relative" onMouseLeave={() => { setHoverX(null); setOhlcHover(null); }}>
         <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" style={DOTTED_BACKGROUND_STYLE} />
         <ChartLeftFade />
         {chartStyle === 'line' && <ChartDimAfter x={hoverX} />}
+        {chartStyle === 'candles' && <ChartOhlcTooltip hover={ohlcHover} format={formatAxisValue} />}
         <ChartLiveDot chart={chartApi} series={seriesApi} color="#22c55e"
           point={chartStyle === 'line' && latestCandle ? { time: latestCandle.bucketStart, value: toChartValue(latestCandle.close) } : null} />
       </div>

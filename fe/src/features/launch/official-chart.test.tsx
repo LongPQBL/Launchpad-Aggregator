@@ -141,6 +141,24 @@ describe('OfficialChart range tabs', () => {
     expect(onHoverPoint).toHaveBeenLastCalledWith(null);
   });
 
+  it('shows open, high, low and close of the hovered candle in a tooltip, and removes it on leave', () => {
+    render(<OfficialChart {...props} candles={[{
+      bucketStart: 1_700_000_000, open: '0.00012', high: '0.00014', low: '0.00011', close: '0.00013',
+    }]} currency="quote" />);
+    const handler = subscribeCrosshairMoveMock.mock.calls.at(-1)![0] as (param: MouseEventParams<Time>) => void;
+    act(() => {
+      handler({
+        time: 1_699_990_000 as Time, point: { x: 80, y: 90 },
+        seriesData: new Map([[chartStub, { time: 1_699_990_000 as Time, open: 0.0005, high: 0.0006, low: 0.0004, close: 0.00055 }]]),
+      } as unknown as MouseEventParams<Time>);
+    });
+    const box = screen.getByTestId('chart-ohlc-tooltip');
+    expect(box).toHaveTextContent('Open');
+    expect(box).toHaveTextContent('Close');
+    act(() => { handler({ seriesData: new Map() } as unknown as MouseEventParams<Time>); });
+    expect(screen.queryByTestId('chart-ohlc-tooltip')).toBeNull();
+  });
+
   it('reports which currency the hovered point is in', () => {
     const onHoverPoint = vi.fn();
     render(<OfficialChart {...props} candles={[{

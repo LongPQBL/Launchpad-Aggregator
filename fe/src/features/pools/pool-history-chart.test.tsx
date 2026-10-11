@@ -12,7 +12,7 @@ const { setData, addSeries, subscribeCrosshairMove, fitContent } = vi.hoisted(()
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: { kind: 'histogram' }, AreaSeries: { kind: 'area' },
-  createChart: () => ({ addSeries, subscribeCrosshairMove, unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent }) }),
+  createChart: () => ({ addSeries, subscribeCrosshairMove, unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent, timeToCoordinate: (time: number) => time / 1000, width: () => 600 }) }),
 }));
 
 const DAY = 86_400;
@@ -72,6 +72,15 @@ describe('PoolHistoryChart', () => {
     expect(readout).toHaveTextContent('Total, last 4 days');
   });
 
+  it('highlights the volume bar under the pointer and clears it when the pointer leaves', () => {
+    render(<PoolHistoryChart items={items} complete metric="volume" intervalSeconds={DAY} />);
+    const onMove = subscribeCrosshairMove.mock.calls.at(-1)![0] as (param: MouseEventParams<Time>) => void;
+    act(() => { onMove({ time: (10 * DAY) as Time, point: { x: 50, y: 20 } } as MouseEventParams<Time>); });
+    expect(screen.getByTestId('chart-bar-highlight')).toBeInTheDocument();
+    act(() => { onMove({} as MouseEventParams<Time>); });
+    expect(screen.queryByTestId('chart-bar-highlight')).toBeNull();
+  });
+
   it('says Unavailable when no bucket has a value', () => {
     render(<PoolHistoryChart items={[{ day: 13 * DAY, tradeCount: 1, volumeUsd: null, tvlUsd: null }]} complete metric="volume" intervalSeconds={DAY} />);
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Unavailable');
@@ -108,12 +117,13 @@ describe('PoolHistoryChart', () => {
 import { formatUsdAxis, withZeroBaseline } from './pool-history-chart';
 
 describe('withZeroBaseline', () => {
-  it('includes 0 when every value is (nearly) the same, so axis ticks are not all identical', () => {
+  it('always starts the TVL axis at 0, also for a flat series so axis ticks are not all identical', () => {
     expect(withZeroBaseline({ priceRange: { minValue: 3495, maxValue: 3495 } })?.priceRange).toEqual({ minValue: 0, maxValue: 3495 });
   });
-  it('leaves a series with real variation alone', () => {
-    const range = { priceRange: { minValue: 100, maxValue: 150 } };
-    expect(withZeroBaseline(range)).toBe(range);
+  it('anchors a series with real variation at 0 too, and leaves a non-positive range alone', () => {
+    expect(withZeroBaseline({ priceRange: { minValue: 100, maxValue: 150 } })?.priceRange).toEqual({ minValue: 0, maxValue: 150 });
+    const empty = { priceRange: { minValue: -5, maxValue: 0 } };
+    expect(withZeroBaseline(empty)).toBe(empty);
   });
   it('passes through a missing range', () => {
     expect(withZeroBaseline(null)).toBeNull();

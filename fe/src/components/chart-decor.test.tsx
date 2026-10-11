@@ -1,6 +1,6 @@
 import { act, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChartDimAfter, ChartLeftFade, ChartLiveDot } from './chart-decor';
+import { ChartBarHighlight, ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip } from './chart-decor';
 
 afterEach(() => { vi.restoreAllMocks(); });
 
@@ -47,5 +47,33 @@ describe('ChartDimAfter / ChartLeftFade', () => {
   it('renders the left fade as a non-interactive overlay', () => {
     const { container } = render(<ChartLeftFade />);
     expect(container.firstElementChild).toHaveStyle({ pointerEvents: 'none' });
+  });
+});
+
+describe('ChartOhlcTooltip', () => {
+  const hover = { x: 100, y: 120, width: 600, open: 1, high: 3, low: 0.5, close: 2 };
+  it('shows open, high, low and close of the candle under the pointer', () => {
+    render(<ChartOhlcTooltip hover={hover} format={(value) => `$${value}`} />);
+    const box = screen.getByTestId('chart-ohlc-tooltip');
+    expect(box).toHaveTextContent('Open$1');
+    expect(box).toHaveTextContent('High$3');
+    expect(box).toHaveTextContent('Low$0.5');
+    expect(box).toHaveTextContent('Close$2');
+    expect(box).toHaveStyle({ left: '116px' });
+  });
+  it('flips to the left of the pointer near the right edge, and is absent without a hover', () => {
+    const { rerender } = render(<ChartOhlcTooltip hover={{ ...hover, x: 560 }} format={String} />);
+    expect(screen.getByTestId('chart-ohlc-tooltip')).toHaveStyle({ left: '394px' });
+    rerender(<ChartOhlcTooltip hover={null} format={String} />);
+    expect(screen.queryByTestId('chart-ohlc-tooltip')).toBeNull();
+  });
+});
+
+describe('ChartBarHighlight', () => {
+  it('covers the hovered bar, centered on it, and nothing without a hover', () => {
+    const { rerender } = render(<ChartBarHighlight x={200} width={10} />);
+    expect(screen.getByTestId('chart-bar-highlight')).toHaveStyle({ left: '195px', width: '10px' });
+    rerender(<ChartBarHighlight x={null} width={10} />);
+    expect(screen.queryByTestId('chart-bar-highlight')).toBeNull();
   });
 });

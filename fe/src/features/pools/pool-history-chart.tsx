@@ -4,7 +4,7 @@ import { AreaSeries, HistogramSeries, LineType, createChart, type IChartApi, typ
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PoolDayHistory } from '@/api/client';
 import { formatUsdCompact } from '@/api/format';
-import { ChartDimAfter, ChartLeftFade, ChartLiveDot, DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
+import { ChartBarHighlight, ChartDimAfter, ChartLeftFade, ChartLiveDot, DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
 import { RollingText } from '@/components/percent-change';
 
 export type HistoryMetric = 'volume' | 'tvl';
@@ -18,11 +18,11 @@ export function formatUsdAxis(value: number): string {
 
 interface AutoscaleRange { priceRange: { minValue: number; maxValue: number }; margins?: { above: number; below: number } }
 
-/** A series whose values barely differ (often a single point) would label every axis tick the same; include 0 so the axis is readable. */
+/** TVL is a stock, so its axis starts at 0 like Uniswap's: the area fills the chart and small moves are not exaggerated. */
 export function withZeroBaseline(range: AutoscaleRange | null): AutoscaleRange | null {
   if (range === null) return range;
   const { minValue, maxValue } = range.priceRange;
-  if (maxValue <= 0 || (maxValue - minValue) / maxValue > 0.01) return range;
+  if (maxValue <= 0) return range;
   return { ...range, priceRange: { minValue: Math.min(0, minValue), maxValue } };
 }
 const DAY_SECONDS = 86_400;
@@ -85,6 +85,7 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
   const [chartApi, setChartApi] = useState<IChartApi | null>(null);
   const [seriesApi, setSeriesApi] = useState<ISeriesApi<SeriesType> | null>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
+  const [bar, setBar] = useState<{ x: number; width: number } | null>(null);
   const step = stepOf(items, intervalSeconds);
   const byTime = useMemo(() => new Map(items.map((item) => [item.day, item])), [items]);
   const byTimeRef = useRef(byTime);
@@ -102,7 +103,10 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
       layout: { attributionLogo: true, background: { color: 'transparent' }, textColor: '#a1a1aa' },
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
       // Area charts are scrubbed with a vertical line and a dot on the line; bars keep the full crosshair.
-      ...(metric === 'tvl' ? { crosshair: { horzLine: { visible: false, labelVisible: false } } } : {}),
+      // Volume is read from the highlighted bar alone, so its crosshair lines are hidden.
+      crosshair: metric === 'tvl'
+        ? { horzLine: { visible: false, labelVisible: false } }
+        : { vertLine: { visible: false, labelVisible: false }, horzLine: { visible: false, labelVisible: false } },
       rightPriceScale: { borderColor: '#27272a' },
       timeScale: { borderColor: '#27272a', timeVisible: step < DAY_SECONDS, secondsVisible: false },
       localization: { priceFormatter: (value: number) => formatUsdAxis(value) },
@@ -117,7 +121,15 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
     seriesRef.current = series;
     setChartApi(chart);
     setSeriesApi(series);
-    const onMove = (param: MouseEventParams<Time>) => { setHoverX(param.point?.x ?? null); setHovered(param.time === undefined ? null : byTimeRef.current.get(Number(param.time)) ?? null); };
+    const onMove = (param: MouseEventParams<Time>) => {
+      setHoverX(param.point?.x ?? null);
+      if (metric === 'volume' && param.time !== undefined) {
+        const center = chart.timeScale().timeToCoordinate(param.time);
+        const next = chart.timeScale().timeToCoordinate((Number(param.time) + step) as UTCTimestamp);
+        setBar(center !== null && next !== null ? { x: center, width: Math.max(4, Math.abs(next - center)) } : null);
+      } else setBar(null);
+      setHovered(param.time === undefined ? null : byTimeRef.current.get(Number(param.time)) ?? null);
+    };
     chart.subscribeCrosshairMove(onMove);
     return () => {
       chart.unsubscribeCrosshairMove(onMove);
@@ -168,11 +180,12 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
           {metric === 'tvl' ? `No TVL history recorded for ${allPools ? 'this token\'s pools' : 'this pool'} in this range.` : 'Volume history is unavailable.'}
         </p>
       )}
-      <div className={showChart ? 'relative' : 'hidden'} onMouseLeave={() => { setHovered(null); setHoverX(null); }}>
+      <div className={showChart ? 'relative' : 'hidden'} onMouseLeave={() => { setHovered(null); setHoverX(null); setBar(null); }}>
         <div ref={containerRef} role="img" aria-label={`${label} over the last ${windowLabel(items.length * step)}`} data-testid="history-chart-container"
           className="h-80 w-full" style={DOTTED_BACKGROUND_STYLE} />
         <ChartLeftFade />
         {metric === 'tvl' && <ChartDimAfter x={hoverX} />}
+        {metric === 'volume' && <ChartBarHighlight x={bar?.x ?? null} width={bar?.width ?? 0} />}
         <ChartLiveDot chart={chartApi} series={seriesApi}
           point={metric === 'tvl' && showChart && latest?.tvlUsd ? { time: latest.day, value: Number(latest.tvlUsd) } : null} />
       </div>

@@ -75,3 +75,29 @@ export function ChartLiveDot({ chart, series, point, color = GREEN }: {
     </>
   );
 }
+
+export interface OhlcHover { x: number; y: number; width: number; open: number; high: number; low: number; close: number }
+
+/** Open / High / Low / Close of the candle under the pointer, in a small box beside it (flips to the left near the right edge). */
+export function ChartOhlcTooltip({ hover, format }: { hover: OhlcHover | null; format: (value: number) => string }) {
+  if (hover === null) return null;
+  const boxWidth = 150;
+  const left = hover.x + 16 + boxWidth > hover.width ? hover.x - 16 - boxWidth : hover.x + 16;
+  return (
+    <div role="tooltip" data-testid="chart-ohlc-tooltip" style={{ position: 'absolute', left, top: Math.max(4, hover.y - 40), width: boxWidth, pointerEvents: 'none', zIndex: 5,
+      background: 'rgba(24, 24, 27, 0.95)', border: '1px solid #3f3f46', borderRadius: 8, padding: '6px 10px', fontSize: 12, lineHeight: '18px' }}>
+      {([['Open', hover.open], ['High', hover.high], ['Low', hover.low], ['Close', hover.close]] as const).map(([label, value]) => (
+        <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ color: '#a1a1aa' }}>{label}</span><span>{format(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A translucent column over the bar under the pointer, like Uniswap's Volume chart. `x` is the bar's center, `width` the column width. */
+export function ChartBarHighlight({ x, width }: { x: number | null; width: number }) {
+  if (x === null) return null;
+  return <div aria-hidden="true" data-testid="chart-bar-highlight" style={{ position: 'absolute', left: x - width / 2, width, top: 0, bottom: 0, pointerEvents: 'none', zIndex: 1,
+    background: 'rgba(255, 255, 255, 0.18)' }} />;
+}
