@@ -3,7 +3,7 @@ import { robinhood } from '../chains/robinhood.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
-import { readPoolAmounts } from './poolAmounts.js';
+import { readPoolAmounts, type PoolAmounts } from './poolAmounts.js';
 import { assetDecimals } from './stats.js';
 import { insertTvlSnapshot, pruneTvlSnapshots } from './tvlSnapshots.js';
 
@@ -27,31 +27,43 @@ export function parseSnapshotConfig(env: Record<string, string | undefined>): Sn
   return { intervalSeconds, retentionHours };
 }
 
-interface CatalogRow { chain_id: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; pool_id: string; currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
+export interface CatalogRow { chain_id: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; pool_id: string; currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
+
+/** The side of a pool whose asset has a verified USD feed (currency0 first), or null when neither does. */
+export async function pickQuoteSide(pool: Pool, chainId: number, currency0: string, currency1: string): Promise<string | null> {
+  if (await resolveVerifiedFeed(pool, chainId, currency0)) return currency0;
+  if (await resolveVerifiedFeed(pool, chainId, currency1)) return currency1;
+  return null;
+}
+
+/** USD TVL of a pool from both sides' amounts and spot price, valued through the quote side; null when it cannot be valued. */
+export function tvlFromAmounts(row: Pick<CatalogRow, 'protocol' | 'currency0'>, amounts: PoolAmounts, quoteAddress: string,
+  decimals0: number, decimals1: number, quoteUsdPrice: number): string | null {
+  const quoteIsCurrency0 = quoteAddress === row.currency0;
+  return calculateTvlUsd({
+    tokenRaw: quoteIsCurrency0 ? amounts.amount1 : amounts.amount0,
+    quoteRaw: quoteIsCurrency0 ? amounts.amount0 : amounts.amount1,
+    blockNumber: amounts.blockNumber, basis: row.protocol === 'uniswap_v4' ? 'pool_principal' : 'pool_custody', sqrtPriceX96: amounts.sqrtPriceX96,
+    tokenIsCurrency0: !quoteIsCurrency0,
+  }, quoteIsCurrency0 ? decimals0 : decimals1, quoteIsCurrency0 ? decimals1 : decimals0, quoteUsdPrice);
+}
 
 async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, nowSeconds: number): Promise<boolean> {
-  const quoteAddress = (await resolveVerifiedFeed(pool, row.chain_id, row.currency0)) ? row.currency0
-    : (await resolveVerifiedFeed(pool, row.chain_id, row.currency1)) ? row.currency1 : null;
+  const quoteAddress = await pickQuoteSide(pool, row.chain_id, row.currency0, row.currency1);
   if (quoteAddress === null) return false;
-  const quoteIsCurrency0 = quoteAddress === row.currency0;
   const [decimals0, decimals1] = await Promise.all([assetDecimals(client, row.currency0), assetDecimals(client, row.currency1)]);
   if (decimals0 === null || decimals1 === null) return false;
   const quoteUsd = await readUsdPrice(pool, client, row.chain_id, quoteAddress, () => nowSeconds * 1000);
   if (!quoteUsd) return false;
-  const lens = await readPoolAmounts(client, { protocol: row.protocol, poolId: row.pool_id, currency0: row.currency0, currency1: row.currency1,
+  const amounts = await readPoolAmounts(client, { protocol: row.protocol, poolId: row.pool_id, currency0: row.currency0, currency1: row.currency1,
     fee: row.fee, tick_spacing: row.tick_spacing, hooks: row.hooks });
-  if (!lens) return false;
-  const tvlUsd = calculateTvlUsd({
-    tokenRaw: quoteIsCurrency0 ? lens.amount1 : lens.amount0,
-    quoteRaw: quoteIsCurrency0 ? lens.amount0 : lens.amount1,
-    blockNumber: lens.blockNumber, basis: row.protocol === 'uniswap_v4' ? 'pool_principal' : 'pool_custody', sqrtPriceX96: lens.sqrtPriceX96,
-    tokenIsCurrency0: !quoteIsCurrency0,
-  }, quoteIsCurrency0 ? decimals0 : decimals1, quoteIsCurrency0 ? decimals1 : decimals0, quoteUsd.priceUsd);
+  if (!amounts) return false;
+  const tvlUsd = tvlFromAmounts(row, amounts, quoteAddress, decimals0, decimals1, quoteUsd.priceUsd);
   if (tvlUsd === null) return false;
   await insertTvlSnapshot(pool, {
-    chainId: row.chain_id, protocol: row.protocol, poolId: row.pool_id, blockNumber: lens.blockNumber,
-    capturedAtSeconds: nowSeconds, coreAmount0Raw: lens.amount0, coreAmount1Raw: lens.amount1,
-    sqrtPriceX96: lens.sqrtPriceX96, quoteAddress, tvlUsd,
+    chainId: row.chain_id, protocol: row.protocol, poolId: row.pool_id, blockNumber: amounts.blockNumber,
+    capturedAtSeconds: nowSeconds, coreAmount0Raw: amounts.amount0, coreAmount1Raw: amounts.amount1,
+    sqrtPriceX96: amounts.sqrtPriceX96, quoteAddress, tvlUsd,
   });
   return true;
 }

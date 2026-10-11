@@ -12,11 +12,11 @@ const lensAbi = parseAbi([
 export interface LensPoolKey { currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
 export interface LensSnapshot { blockNumber: bigint; coreAmount0: bigint; coreAmount1: bigint; sqrtPriceX96: bigint }
 
-/** Current core reserves + spot price of a V4 pool from the reserves lens; null if unavailable or invalid. */
-export async function readLensSnapshot(client: UsdPriceClient | undefined, catalog: LensPoolKey): Promise<LensSnapshot | null> {
-  if (!client?.getBlockNumber) return null;
+/** Core reserves + spot price of a V4 pool from the reserves lens at `atBlock` (default: the current block); null if unavailable or invalid. */
+export async function readLensSnapshot(client: UsdPriceClient | undefined, catalog: LensPoolKey, atBlock?: bigint): Promise<LensSnapshot | null> {
+  if (!client || (atBlock === undefined && !client.getBlockNumber)) return null;
   try {
-    const blockNumber = await client.getBlockNumber();
+    const blockNumber = atBlock ?? await client.getBlockNumber!();
     const result = await client.readContract({ address: RESERVES_LENS, abi: lensAbi, functionName: 'getPoolTVL',
       args: [POOL_MANAGER, { currency0: catalog.currency0 as Address, currency1: catalog.currency1 as Address,
         fee: catalog.fee, tickSpacing: catalog.tick_spacing, hooks: catalog.hooks as Address }],

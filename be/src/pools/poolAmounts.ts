@@ -22,18 +22,18 @@ export function integerSqrt(value: bigint): bigint {
 function isAmount(value: unknown): value is bigint { return typeof value === 'bigint' && value >= 0n; }
 
 /**
- * Both sides' amounts of a pool and its spot price (sqrt, Q64.96) at the current block: the V4 reserves lens, a V3 pool's token
+ * Both sides' amounts of a pool and its spot price (sqrt, Q64.96) at `atBlock` (default: the current block; an old block needs an archive RPC): the V4 reserves lens, a V3 pool's token
  * balances plus `slot0` (uncollected fees included), or a V2 pair's reserves with the price they imply.
  * Null when anything cannot be read or the pool is empty — never a guess.
  */
-export async function readPoolAmounts(client: UsdPriceClient, row: PoolAmountsRow): Promise<PoolAmounts | null> {
+export async function readPoolAmounts(client: UsdPriceClient, row: PoolAmountsRow, atBlock?: bigint): Promise<PoolAmounts | null> {
   if (row.protocol === 'uniswap_v4') {
-    const lens = await readLensSnapshot(client, row);
+    const lens = await readLensSnapshot(client, row, atBlock);
     return lens ? { blockNumber: lens.blockNumber, amount0: lens.coreAmount0, amount1: lens.coreAmount1, sqrtPriceX96: lens.sqrtPriceX96 } : null;
   }
-  if (!client.getBlockNumber) return null;
+  if (atBlock === undefined && !client.getBlockNumber) return null;
   try {
-    const blockNumber = await client.getBlockNumber();
+    const blockNumber = atBlock ?? await client.getBlockNumber!();
     const pool = row.poolId as Address;
     if (row.protocol === 'uniswap_v2') {
       const reserves = await client.readContract({ address: pool, abi: v2Abi, functionName: 'getReserves', blockNumber });

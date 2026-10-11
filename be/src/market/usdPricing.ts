@@ -104,3 +104,23 @@ export async function readUsdPrice(pool: Pool, client: UsdPriceClient, chainId: 
   inFlight.set(key, promise);
   return promise;
 }
+
+/**
+ * The quote asset's USD price as the verified Chainlink feed answered at `blockNumber` (needs an archive RPC), or null when the asset has no
+ * verified feed, the answer is unusable, or it was older than the feed's staleness ceiling at that block's time (`atSeconds`).
+ */
+export async function readUsdPriceAtBlock(pool: Pool, client: UsdPriceClient, chainId: number, quoteAssetAddress: string,
+  blockNumber: bigint, atSeconds: number): Promise<number | null> {
+  assertClientMatchesChain(client, chainId);
+  const address = quoteAssetAddress.toLowerCase();
+  const feed = await resolveVerifiedFeed(pool, chainId, address);
+  if (!feed) return null;
+  const decimals = await readFeedDecimals(client, chainId, feed.feedAddress, address);
+  const roundData = await client.readContract({ address: feed.feedAddress, abi: aggregatorAbi, functionName: 'latestRoundData', blockNumber });
+  if (!Array.isArray(roundData) || typeof roundData[1] !== 'bigint' || typeof roundData[3] !== 'bigint') return null;
+  const priceUsd = Number(roundData[1]) / 10 ** decimals;
+  const updatedAt = Number(roundData[3]);
+  if (!Number.isFinite(priceUsd) || priceUsd <= 0 || !Number.isSafeInteger(updatedAt) || updatedAt <= 0) return null;
+  if ((atSeconds - updatedAt) * 1000 > MAX_PRICE_AGE_MS) return null;
+  return priceUsd;
+}
