@@ -13,9 +13,7 @@ const nextConfig: NextConfig = {
         { key: 'X-Frame-Options', value: 'DENY' },
         { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
         { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
-        // Only the directives that cannot break wallet / chart / inline-theme scripts: no plugins, no <base> hijack,
-        // no framing (clickjacking a swap button), forms post only to this origin.
-        { key: 'Content-Security-Policy', value: "object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'" },
+        // Content-Security-Policy is set per request (with a nonce) in src/proxy.ts.
       ],
     }];
   },

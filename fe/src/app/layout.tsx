@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
 import './globals.css';
 import { AppShell } from '@/components/app-shell';
@@ -10,11 +11,13 @@ export const metadata: Metadata = {
   description: 'Track Pons launches on Robinhood Chain',
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Reading the request's nonce also makes every page render per request, which a nonce-based CSP requires.
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeInitScript }} />
       </head>
       {/* The shell lives in the layout, not in each page, so the header (wallet connection, search, theme) persists
          across navigations instead of being torn down and rebuilt with every page. */}
