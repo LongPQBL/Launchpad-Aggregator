@@ -19,6 +19,8 @@ const nativeQuote = { address: '0x0000000000000000000000000000000000000000' as c
 const erc20Quote = { address: '0x6666666666666666666666666666666666666666' as const, symbol: 'USDG', decimals: 18 };
 
 const hooks = vi.hoisted(() => ({
+  // What the price-impact calculation reports; the mocked wagmi quote returns one fixed output, so a real probe comparison is meaningless here.
+  impactBps: 0 as number | null,
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   paymasterServiceUrl: undefined as string | undefined,
   balance: { data: { value: 10000000000000000n } as { value: bigint } | undefined, isLoading: false },
@@ -68,6 +70,11 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: hooks.sendStatus, error: null, data: hooks.sendData }),
   useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
   useCapabilities: () => ({ data: hooks.capabilities }),
+}));
+
+vi.mock('./price-impact', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./price-impact')>(),
+  priceImpactBps: () => hooks.impactBps,
 }));
 
 vi.mock('./paymasterConfig', () => ({

@@ -19,6 +19,12 @@ Scope: the local-first read-only app (`be/` API, `fe/`). Nothing deployed, no re
 | `chainId` list in search was unbounded | max 20 chains |
 | FE had no security headers; token logos leaked visitor referrer to token creators' servers | `next.config.ts` headers (nosniff, DENY framing, referrer/permissions policy, safe CSP directives); logo `<img>` uses `referrerPolicy="no-referrer"` |
 
+## User-facing trade warnings (added after the hardening pass)
+- **Slippage setting** (`TradeSettingsPopover`): custom value above 5% (pool) / 25% (curve) warns about sandwiching; below 0.1% (pool) / 0.5% (curve) warns the trade may fail. `Auto` is never warned about.
+- **Price impact** (`fe/src/trading/price-impact.ts`): shown in the swap card for V3, V4 and the curve. Computed as how much worse the trade's rate is than the rate of a 1% probe quote from the same quoter (the pool fee cancels). Pool: yellow from 5%, red from 15%; curve: from 15% / 30%. Unknown (no quote or trade too small to probe) shows nothing, never 0%.
+- **Severe impact needs a tick**: the swap button stays disabled until the user ticks "I understand I will lose about X%"; the tick belongs to one amount, so changing the amount asks again. Approval is not blocked.
+- Checked against real V3 pools on chain 4663: 0.001 ETH → 0.08%, 0.1 ETH → 6.7%, 1 ETH → 42% (monotonic, plausible).
+
 ## Open / operator actions
 - Adding a new browser-called origin (another chain RPC, wallet SDK, analytics) requires listing it in `fe/src/proxy.ts`, or the browser will block it.
 - Behind a reverse proxy set `API_TRUST_PROXY=true`, otherwise every client shares the proxy's IP in the limiter.

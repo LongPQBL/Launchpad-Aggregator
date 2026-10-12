@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { slippageWarning } from './price-impact';
 import { resolveAutoSlippageBps, type TradeSettings } from './use-trade-settings';
 
 function InfoTooltip({ label, description }: { label: string; description: string }) {
@@ -48,6 +49,7 @@ export interface TradeSettingsPopoverProps {
 export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSettingsPopoverProps) {
   const [open, setOpen] = useState(false);
   const isAutoSlippage = settings.slippageBps === 'auto';
+  const warning = slippageWarning(settings.slippageBps, venueKind);
   const autoSlippagePercent = resolveAutoSlippageBps(venueKind) / 100;
   const displayedSlippagePercent = settings.slippageBps === 'auto' ? autoSlippagePercent : settings.slippageBps / 100;
   const [slippageDraft, setSlippageDraft] = useState(() => String(displayedSlippagePercent));
@@ -125,6 +127,11 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
             <span className="pr-1 text-sm text-muted-foreground">%</span>
             </div>
           </div>
+          {warning && (
+            <p role="alert" data-testid="slippage-warning" className={warning.level === 'high' ? 'text-sm text-destructive' : 'text-sm text-amber-500'}>
+              {warning.message}
+            </p>
+          )}
           {venueKind === 'pool' && (
             <label className="flex min-h-12 items-center justify-between gap-2">
             <SettingLabel label="Swap deadline" tooltipLabel="Swap deadline (minutes)" description="The transaction expires after this many minutes if it has not been confirmed." />

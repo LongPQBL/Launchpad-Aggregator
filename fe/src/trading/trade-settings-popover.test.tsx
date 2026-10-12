@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { TradeSettingsPopover } from './trade-settings-popover';
 
@@ -86,5 +86,21 @@ describe('TradeSettingsPopover', () => {
     expect(screen.getByRole('button', { name: '1-click trade' })).toHaveTextContent(/on/i);
     fireEvent.click(screen.getByRole('button', { name: '1-click trade' }));
     expect(onChange).toHaveBeenCalledWith({ ...baseSettings, oneClickTradeOptIn: false });
+  });
+
+  it('warns about a slippage setting that invites sandwiching, and not about a sensible one', () => {
+    const open = (slippageBps: number | 'auto') => {
+      const view = render(<TradeSettingsPopover settings={{ ...baseSettings, slippageBps }} onChange={vi.fn()} venueKind="pool" />);
+      fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+      return view;
+    };
+    open(1000);
+    expect(screen.getByTestId('slippage-warning')).toHaveTextContent(/front-run/i);
+    cleanup();
+    open(5);
+    expect(screen.getByTestId('slippage-warning')).toHaveTextContent(/may fail/i);
+    cleanup();
+    open(100);
+    expect(screen.queryByTestId('slippage-warning')).not.toBeInTheDocument();
   });
 });

@@ -87,4 +87,33 @@ describe('TradeCard', () => {
     render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} footer={<button type="button">Swap now</button>} />);
     expect(screen.getByRole('button', { name: 'Swap now' })).toBeInTheDocument();
   });
+
+  describe('price impact', () => {
+    const impact = (level: 'ok' | 'warn' | 'severe', acknowledged = false, onAcknowledge = vi.fn()) => ({ text: '12.00%', level, acknowledged, onAcknowledge });
+
+    it('shows the figure without any warning when the impact is ordinary', () => {
+      render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} priceImpact={{ ...impact('ok'), text: '0.30%' }} />);
+      expect(screen.getByTestId('price-impact')).toHaveTextContent('0.30%');
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    });
+
+    it('warns on a high impact but does not ask for confirmation', () => {
+      render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} priceImpact={impact('warn')} />);
+      expect(screen.getByRole('alert')).toHaveTextContent('12.00%');
+      expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    });
+
+    it('asks the user to acknowledge a severe impact', () => {
+      const onAcknowledge = vi.fn();
+      render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} priceImpact={impact('severe', false, onAcknowledge)} />);
+      fireEvent.click(screen.getByRole('checkbox'));
+      expect(onAcknowledge).toHaveBeenCalledWith(true);
+    });
+
+    it('hides the row when there is no figure', () => {
+      render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} priceImpact={null} />);
+      expect(screen.queryByTestId('price-impact')).not.toBeInTheDocument();
+    });
+  });
 });

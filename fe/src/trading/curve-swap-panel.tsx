@@ -24,6 +24,7 @@ import { SwapShell } from './swap-shell';
 import { TradeCard } from './trade-card';
 import { TokenSelector } from './token-selector';
 import { usdPriceFor, usdText, type UsdPrices } from './trade-usd';
+import { describePriceImpact, probeAmount, priceImpactBps, usePriceImpactAck } from './price-impact';
 import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
 
@@ -97,6 +98,17 @@ export function CurveSwapPanel({
     recipient: account,
     nativeValue: sellsNative ? amountIn : undefined,
   });
+  const probeIn = probeAmount(amountIn);
+  const probeQuote = useCurveQuote({
+    curveAddress,
+    direction,
+    amountIn: probeIn ?? 0n,
+    recipient: account,
+    nativeValue: sellsNative && probeIn !== null ? probeIn : undefined,
+  });
+  // Price impact = how much worse this trade's rate is than a small (1%) probe quote's rate, which sits on the marginal price.
+  const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'curve');
+  const impactAck = usePriceImpactAck(amountIn, impact.level);
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const paymasterCapable = usePaymasterCapability();
@@ -167,6 +179,7 @@ export function CurveSwapPanel({
           usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
         }}
         onFlip={() => { setDirection(direction === 'buy' ? 'sell' : 'buy'); amounts.flip(); }}
+        priceImpact={impact.text === null ? null : { text: impact.text, level: impact.level, acknowledged: impactAck.acknowledged, onAcknowledge: impactAck.set }}
         minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'curve', tokenOut.decimals, tokenOut.symbol)}
         footer={<>
           <ApproveOrActionButton
@@ -182,6 +195,7 @@ export function CurveSwapPanel({
             onConnect={openWalletDialog}
             isSubmitting={isSubmitting}
             allowance={allowance}
+            actionBlocked={impactAck.blocked}
             actionLabel="Swap"
             onAction={submitTrade}
           />

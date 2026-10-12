@@ -29,6 +29,8 @@ function decodeZeroForOne(swapInput: `0x${string}`): boolean {
 }
 
 const hooks = vi.hoisted(() => ({
+  // What the price-impact calculation reports; the mocked wagmi quote returns one fixed output, so a real probe comparison is meaningless here.
+  impactBps: 0 as number | null,
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   erc20Allowance: 0n,
   permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
@@ -78,6 +80,11 @@ vi.mock('wagmi', async (importOriginal) => ({
   useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
 }));
 
+vi.mock('./price-impact', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./price-impact')>(),
+  priceImpactBps: () => hooks.impactBps,
+}));
+
 vi.mock('./paymasterConfig', () => ({
   get PAYMASTER_SERVICE_URL() { return hooks.paymasterServiceUrl; },
 }));
@@ -122,12 +129,51 @@ beforeEach(() => {
   hooks.callsStatusData = undefined;
   hooks.erc20AllowanceRefetch.mockReset();
   hooks.erc20AllowanceLoading = false;
+  hooks.impactBps = 0;
 });
 
 // Each TradeCard side is the label's parent element, so the token pills can be asserted per side.
 function card(label: 'Sell' | 'Buy') {
   return within(screen.getByText(label).parentElement as HTMLElement);
 }
+
+describe('V4SwapPanel price impact', () => {
+  function renderWithQuote() {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '1' } });
+  }
+
+  it('shows the price impact and lets an ordinary trade through without confirmation', async () => {
+    hooks.impactBps = 30;
+    renderWithQuote();
+    expect(screen.getByTestId('price-impact')).toHaveTextContent('0.30%');
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+  });
+
+  it('blocks a severe price impact until the user acknowledges it', async () => {
+    hooks.impactBps = 2000;
+    renderWithQuote();
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(hooks.writeContract).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    await waitFor(() => expect(hooks.writeContract).toHaveBeenCalled());
+  });
+
+  it('asks again when the amount changes after acknowledging', () => {
+    hooks.impactBps = 2000;
+    renderWithQuote();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.change(screen.getByLabelText('Sell amount'), { target: { value: '2' } });
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Swap' })).toBeDisabled();
+  });
+});
 
 describe('V4SwapPanel', () => {
   it('defaults to swapping tokenA for tokenB, deriving zeroForOne from the real pool key', () => {

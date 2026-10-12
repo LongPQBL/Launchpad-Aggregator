@@ -26,6 +26,7 @@ import { useSwapAmounts } from './use-swap-amounts';
 import { TradeCard } from './trade-card';
 import { SwapShell } from './swap-shell';
 import { usdText, usdPriceFor, type UsdPrices } from './trade-usd';
+import { describePriceImpact, probeAmount, priceImpactBps, usePriceImpactAck } from './price-impact';
 import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
 import { encodePermit2PermitInput } from './v4SwapEncoding';
@@ -99,6 +100,11 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
   const erc20Allowance = useTokenAllowance(nativeIn ? undefined : tokenIn.address, PERMIT2_ADDRESS);
   const permit2 = usePermit2Permit(nativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
   const quote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn });
+  const probeIn = probeAmount(amountIn);
+  const probeQuote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn: probeIn ?? 0n });
+  // Price impact = how much worse this trade's rate is than a small (1%) probe quote's rate, which sits on the marginal price.
+  const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'pool');
+  const impactAck = usePriceImpactAck(amountIn, impact.level);
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const paymasterCapable = usePaymasterCapability();
@@ -238,6 +244,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
           usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
         }}
         onFlip={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }}
+        priceImpact={impact.text === null ? null : { text: impact.text, level: impact.level, acknowledged: impactAck.acknowledged, onAcknowledge: impactAck.set }}
         minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, displaySymbol(tokenOut, nativeOut))}
         footer={<>
           {permit2.signError && (
@@ -259,6 +266,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
             onConnect={openWalletDialog}
             isSubmitting={isSubmitting || permit2.isSigning}
             allowance={erc20Allowance}
+            actionBlocked={impactAck.blocked}
             actionLabel="Swap"
             onAction={() => { void submitSwap(); }}
             targetChainName={targetChainName}

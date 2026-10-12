@@ -36,6 +36,8 @@ export interface ApproveOrActionButtonProps {
   isSubmitting: boolean;
   allowance: ApproveOrActionAllowance;
   actionLabel: string;
+  // True while a severe price impact has not been acknowledged: the action stays visible but cannot be pressed.
+  actionBlocked?: boolean;
   onAction: () => void;
   targetChainName?: string;
 }
@@ -49,7 +51,7 @@ export interface ApproveOrActionButtonProps {
 // paragraph for those same three conditions above this button.
 export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
   const { needsApproval, amountIn, approveAmount, isWrongChain, hasInsufficientBalance, tokenInSymbol, canBatchApprove,
-    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, onAction, targetChainName = 'Robinhood Chain' } = props;
+    quoteState, isConnected, balanceKnown, onConnect, isSubmitting, allowance, actionLabel, actionBlocked = false, onAction, targetChainName = 'Robinhood Chain' } = props;
   const state = resolveTradeButton({ isConnected, isWrongChain, amountIn, quoteState, balanceKnown, hasInsufficientBalance,
     needsApproval, canBatchApprove: Boolean(canBatchApprove), tokenInSymbol });
   const approveError = allowance.approveError && (
@@ -81,8 +83,8 @@ export function ApproveOrActionButton(props: ApproveOrActionButtonProps) {
     <>
       {approveError}
       <Button type="button"
-        className={`h-14 rounded-[20px] text-base ${state.kind === 'swap' && !isSubmitting ? 'cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover' : 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'}`}
-        disabled={state.disabled || (state.kind === 'swap' && isSubmitting)}
+        className={`h-14 rounded-[20px] text-base ${state.kind === 'swap' && !isSubmitting && !actionBlocked ? 'cursor-pointer bg-brand text-brand-foreground hover:bg-brand-hover' : 'cursor-default bg-white/10 text-white/40 hover:bg-white/10 hover:text-white/40'}`}
+        disabled={state.disabled || (state.kind === 'swap' && (isSubmitting || actionBlocked))}
         onClick={state.kind === 'swap' ? onAction : undefined}>
         {state.kind === 'swap' ? actionLabel : state.label}
       </Button>

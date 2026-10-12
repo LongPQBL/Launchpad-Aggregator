@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { sanitizeAmountInput } from './amount';
 import { RollingText } from '@/components/percent-change';
+import type { ImpactLevel } from './price-impact';
 
 export interface TradeCardSide {
   value: string;
@@ -25,12 +26,15 @@ export interface TradeCardProps {
   onFlip: () => void;
   // Pre-formatted "least you receive after slippage" text; null/omitted hides the row.
   minReceived?: string | null;
+  // How far the trade moves the price, from price-impact.ts; null/omitted hides the row. A 'severe' level also asks the
+  // user to tick a box (ack) before the panel lets the trade through.
+  priceImpact?: { text: string; level: ImpactLevel; acknowledged: boolean; onAcknowledge: (value: boolean) => void } | null;
   footer?: ReactNode;
 }
 
 // Presentational only: two stacked cards (Sell on top, Buy below) with the flip arrow overlapping
 // the seam, as on Uniswap. No trade logic lives here — panels own state, quotes and submission.
-export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: TradeCardProps) {
+export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact = null, footer }: TradeCardProps) {
   const [activeSide, setActiveSide] = useState<'sell' | 'buy'>('sell');
   return (
     <div className="flex flex-col gap-3">
@@ -47,6 +51,28 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, footer }: Tra
         <div className="flex items-center justify-between px-1 text-base text-muted-foreground">
           <span>Min received</span>
           <span><RollingText text={minReceived} /></span>
+        </div>
+      )}
+      {priceImpact !== null && (
+        <div className="flex flex-col gap-2 px-1 text-base">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Price impact</span>
+            <span data-testid="price-impact" data-level={priceImpact.level}
+              className={cn(priceImpact.level === 'warn' && 'text-amber-500', priceImpact.level === 'severe' && 'text-destructive')}>
+              {priceImpact.text}
+            </span>
+          </div>
+          {priceImpact.level !== 'ok' && (
+            <p role="alert" className={cn('text-sm', priceImpact.level === 'severe' ? 'text-destructive' : 'text-amber-500')}>
+              This trade moves the price by {priceImpact.text}, so you receive noticeably less than the current price implies.
+            </p>
+          )}
+          {priceImpact.level === 'severe' && (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={priceImpact.acknowledged} onChange={(event) => priceImpact.onAcknowledge(event.target.checked)} />
+              I understand I will lose about {priceImpact.text} to price impact
+            </label>
+          )}
         </div>
       )}
       {footer}

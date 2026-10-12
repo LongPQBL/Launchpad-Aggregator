@@ -403,4 +403,21 @@ describe('ApproveOrActionButton states', () => {
     render(<ApproveOrActionButton {...baseProps} quoteState="unavailable" />);
     expect(screen.getByRole('button', { name: 'Quote unavailable' })).toBeDisabled();
   });
+
+  it('keeps the action visible but disabled while a severe price impact is unacknowledged', () => {
+    const onAction = vi.fn();
+    const render1 = (actionBlocked: boolean) => (
+      <ApproveOrActionButton needsApproval={false} amountIn={1_000n} isWrongChain={false} hasInsufficientBalance={false} quoteState="ready"
+        isConnected balanceKnown onConnect={vi.fn()} isSubmitting={false} allowance={baseAllowance()} actionLabel="Swap"
+        actionBlocked={actionBlocked} onAction={onAction} />
+    );
+    const { rerender } = render(render1(true));
+    const button = screen.getByRole('button', { name: 'Swap' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(onAction).not.toHaveBeenCalled();
+    rerender(render1(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
 });
