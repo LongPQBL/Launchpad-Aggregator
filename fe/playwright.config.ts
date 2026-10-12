@@ -8,6 +8,9 @@ const BE_URL = `http://127.0.0.1:${MOCK_API_PORT}`;
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // The default (half the cores) oversubscribes the machine once charts and the dev server run together: whole-suite
+  // runs then fail on 30 s page timeouts, while the same specs pass alone. Three workers: 59/59 in about 1.4 minutes.
+  workers: 3,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',
