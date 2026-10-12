@@ -189,7 +189,7 @@ ENVIO_SYNC_TARGET=real npm run -w be sync:envio-staging:loop
 
 Các biến điều khiển vòng lặp mới (đều optional, có default hợp lý cho dev):
 
-- `ENVIO_TAIL_PASS_INTERVAL_MS` (mặc định `1000`): khoảng nghỉ giữa hai lượt tail+history.
+- `ENVIO_TAIL_PASS_INTERVAL_MS` (mặc định `250`): khoảng nghỉ giữa hai lượt tail+history. Đo 2026-10-12: 1000ms → độ trễ raw→trades p50 0,83s; 250ms → 0,41s, CPU của sync loop ~6%.
 - `ENVIO_INCREMENTAL_PAGE_LIMIT` (mặc định `500`): số dòng raw tối đa đọc mỗi stream mỗi lượt.
 - `ENVIO_REPAIR_EVERY_TICKS` (mặc định `30`): sau bao nhiêu lượt tail thì chạy một lượt repair reorg
   (so khớp key canonical trong 500 block cuối, xoá dòng đã lỗi thời, lùi cursor để lượt sau áp lại

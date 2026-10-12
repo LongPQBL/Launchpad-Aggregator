@@ -88,7 +88,7 @@ if (syncTarget === 'staging') {
   // offline full-table reconciliation command — it is not called from this live loop for 'real'.
   // No RPC client is needed for ingestion itself (metadataClient still drives the separate extended/
   // core-metadata enrichment loops started above).
-  const tailIntervalMs = Number(process.env.ENVIO_TAIL_PASS_INTERVAL_MS ?? 1000);
+  const tailIntervalMs = Number(process.env.ENVIO_TAIL_PASS_INTERVAL_MS ?? 250);
   const limit = Number(process.env.ENVIO_INCREMENTAL_PAGE_LIMIT ?? 500);
   // Reorg repair compares a whole ~500-block window per stream — materially heavier than one bounded
   // tail page, so it runs far less often than every tick, not on every pass.
