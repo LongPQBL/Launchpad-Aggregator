@@ -1,5 +1,6 @@
 'use client';
 
+import { CopiedCheck } from '@/components/copied-check';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { isHttpUrl } from '@/api/url';
 import { cn } from '@/lib/utils';
@@ -58,16 +59,6 @@ function CopyIcon() {
       <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
       <path d="M3 10.5V3.5A1.5 1.5 0 0 1 4.5 2h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
-  );
-}
-
-function CopiedIcon() {
-  return (
-    <span aria-hidden className="inline-flex h-[14px] w-[14px] shrink-0 items-center justify-center rounded-full bg-success text-success-foreground">
-      <svg viewBox="0 0 16 16" width="10" height="10" fill="none">
-        <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </span>
   );
 }
 
@@ -146,7 +137,7 @@ export function AboutSection({ description, tokenAddress, explorerUrl, explorerL
           className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-white/20 bg-black px-3 py-1 text-sm text-white hover:bg-neutral-800"
         >
           <span>{`${tokenAddress.slice(0, 6)}…${tokenAddress.slice(-4)}`}</span>
-          {copyState === 'copied' ? <CopiedIcon /> : <CopyIcon />}
+          {copyState === 'copied' ? <CopiedCheck /> : <CopyIcon />}
         </button>
         {copyState === 'error' && (
           <span role="alert" className="text-sm text-destructive">

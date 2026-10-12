@@ -6,6 +6,7 @@ import { Card, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Image from 'next/image';
 import Link from 'next/link';
+import { ShareMenu } from '@/components/share-menu';
 import { CopyableTokenAddress } from '@/features/launch/copyable-token-address';
 import { PoolChartPanel } from './pool-chart-panel';
 import { PoolLogo } from './pool-logo';
@@ -65,6 +66,7 @@ export function PoolDetail({ pool, trades, candles, history = null, chartRange }
           {pool.ponsDesignated && <span>Official Pons pool</span>}
         </div>
       </div>
+      <div className="ml-auto"><ShareMenu buttonClassName="flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/5 hover:text-foreground" /></div>
     </CardHeader></Card>
     </StickyDetailHeader>
 

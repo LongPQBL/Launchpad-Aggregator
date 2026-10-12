@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { launchHref } from '@/api/client';
 import { displayName, displaySymbol } from '@/api/format';
+import { CopiedCheck } from '@/components/copied-check';
 import { TokenLogo } from './token-logo';
 
 function CopyIcon() {
@@ -10,14 +11,6 @@ function CopyIcon() {
     <svg aria-hidden viewBox="0 0 16 16" width="12" height="12" fill="none" className="shrink-0">
       <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3" />
       <path d="M3 10.5V3.5A1.5 1.5 0 0 1 4.5 2h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg aria-hidden viewBox="0 0 16 16" width="14" height="14" fill="none" className="shrink-0">
-      <path d="m3.5 8 3 3 6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -74,11 +67,10 @@ export function TokenCell({ chainId, tokenAddress, name, symbol, logoUri }: Toke
               type="button"
               onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copyAddress(); }}
               aria-label={copied ? 'Copied' : 'Copy token address'}
-              className={copied
-                ? 'pointer-events-auto relative z-20 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-success p-0 text-success-foreground hover:bg-success/90'
-                : 'pointer-events-auto relative z-20 flex h-6 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground'}
+              className="pointer-events-auto relative z-20 flex h-6 cursor-pointer items-center gap-1 text-muted-foreground hover:text-foreground"
             >
-              {copied ? <CheckIcon /> : <><span>{shortAddress(tokenAddress)}</span><CopyIcon /></>}
+              <span>{shortAddress(tokenAddress)}</span>
+              {copied ? <CopiedCheck /> : <CopyIcon />}
             </button>
           </div>
         </div>

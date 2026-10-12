@@ -1,20 +1,7 @@
 @import 'tailwindcss';
 
-@font-face {
-  font-family: Basel;
-  src: url('/fonts/Basel-Grotesk-Book.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 485;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: Basel;
-  src: url('/fonts/Basel-Grotesk-Medium.woff2') format('woff2');
-  font-style: normal;
-  font-weight: 535;
-  font-display: swap;
-}
+/* Inter (variable, open license). The weight axis runs 100-900; the app uses 500 (Medium) as its base weight. */
+@import '@fontsource-variable/inter/wght.css';
 
 @theme {
   --color-background: #ffffff;
@@ -68,10 +55,10 @@
 }
 
 body {
-  font-family: Basel, ui-sans-serif, system-ui, sans-serif;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-weight: 485;
+  font-weight: 500; /* Inter Medium */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -132,6 +119,6 @@ a.chart-interval-tab[aria-current='page'] {
 
 @layer base {
   th, b, strong {
-    font-weight: 485;
+    font-weight: 500;
   }
 }

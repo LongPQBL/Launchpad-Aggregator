@@ -26,23 +26,25 @@ describe('HeaderActions', () => {
     expect(screen.queryByRole('link', { name: 'X' })).not.toBeInTheDocument();
   });
 
-  it('copies the current page URL when Share is clicked', async () => {
+  it('opens a popup with Copy link that copies the current page URL', async () => {
     const writeText = (text: string) => { captured = text; return Promise.resolve(); };
     let captured = '';
     setClipboard({ writeText });
     render(<HeaderActions twitterUrl={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
     });
     expect(captured).toBe(window.location.href);
-    expect(screen.getByRole('button', { name: 'Link copied' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Link copied' })).toHaveTextContent('Copy link');
   });
 
-  it('shows a manual-copy error when the Clipboard API is unavailable', async () => {
+  it('shows an error when the Clipboard API is unavailable', async () => {
     setClipboard(undefined);
     render(<HeaderActions twitterUrl={null} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Share' }));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Share' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
     });
     expect(screen.getByRole('alert')).toHaveTextContent(/could not copy/i);
   });

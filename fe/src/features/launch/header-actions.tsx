@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { ShareMenu } from '@/components/share-menu';
 import { isHttpUrl } from '@/api/url';
 
 export interface HeaderActionsProps {
@@ -15,45 +15,7 @@ function TwitterIcon() {
   );
 }
 
-function ShareIcon() {
-  return (
-    <svg aria-hidden viewBox="0 0 16 16" width="16" height="16" fill="none">
-      <circle cx="12.5" cy="3.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="3.5" cy="8" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="12.5" cy="12.5" r="1.8" stroke="currentColor" strokeWidth="1.3" />
-      <path d="M5.1 7.1l5.8-3.1M5.1 8.9l5.8 3.1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 export function HeaderActions({ twitterUrl }: HeaderActionsProps) {
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'shared' | 'error'>('idle');
-  const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (resetRef.current) clearTimeout(resetRef.current);
-  }, []);
-
-  async function share() {
-    if (resetRef.current) clearTimeout(resetRef.current);
-    setCopyState('idle');
-    try {
-      const url = window.location.href;
-      if (navigator.share) {
-        await navigator.share({ title: document.title, url });
-        setCopyState('shared');
-      } else {
-        if (!navigator.clipboard?.writeText) throw new Error('Share and Clipboard APIs unavailable');
-        await navigator.clipboard.writeText(url);
-        setCopyState('copied');
-      }
-      resetRef.current = setTimeout(() => setCopyState('idle'), 2000);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      setCopyState('error');
-    }
-  }
-
   const iconButtonClass = 'flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground hover:bg-foreground/5 hover:text-foreground';
 
   return (
@@ -63,10 +25,7 @@ export function HeaderActions({ twitterUrl }: HeaderActionsProps) {
           <TwitterIcon />
         </a>
       )}
-      <button type="button" onClick={share} aria-label={copyState === 'copied' ? 'Link copied' : copyState === 'shared' ? 'Shared' : 'Share'} className={iconButtonClass}>
-        <ShareIcon />
-      </button>
-      {copyState === 'error' && <span role="alert" className="text-xs text-destructive">Could not copy or share link</span>}
+      <ShareMenu buttonClassName={iconButtonClass} />
     </div>
   );
 }
