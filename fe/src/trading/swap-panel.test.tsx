@@ -52,6 +52,7 @@ vi.mock('./reverse-quote', () => ({
 const hooks = vi.hoisted(() => ({
   // What the price-impact calculation reports; the mocked wagmi quote returns one fixed output, so a real probe comparison is meaningless here.
   impactBps: 0 as number | null,
+  tokenWarning: null as string | null,
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   poolFee: 10000 as number | undefined,
   erc20Allowance: 0n,
@@ -104,6 +105,8 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: hooks.sendStatus, error: null, data: hooks.sendData }),
   useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
 }));
+
+vi.mock('./use-token-fee-warning', () => ({ useTokenFeeWarning: () => hooks.tokenWarning }));
 
 vi.mock('./price-impact', async (importOriginal) => ({
   ...await importOriginal<typeof import('./price-impact')>(),

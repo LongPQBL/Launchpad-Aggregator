@@ -50,6 +50,9 @@ const { subscribeCrosshairMoveMock, chartStub } = vi.hoisted(() => {
   return { subscribeCrosshairMoveMock, chartStub };
 });
 
+// The fee check is covered in token-fee-check.test.ts; here it would need a QueryClientProvider and a chain.
+vi.mock('@/trading/use-token-fee-warning', () => ({ useTokenFeeWarning: () => null }));
+
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   CandlestickSeries: {}, AreaSeries: {}, createChart: () => chartStub, createSeriesMarkers: () => chartStub,

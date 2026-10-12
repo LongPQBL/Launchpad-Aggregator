@@ -31,6 +31,7 @@ function decodeZeroForOne(swapInput: `0x${string}`): boolean {
 const hooks = vi.hoisted(() => ({
   // What the price-impact calculation reports; the mocked wagmi quote returns one fixed output, so a real probe comparison is meaningless here.
   impactBps: 0 as number | null,
+  tokenWarning: null as string | null,
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   erc20Allowance: 0n,
   permit2Allowance: undefined as readonly [bigint, number, number] | undefined,
@@ -79,6 +80,8 @@ vi.mock('wagmi', async (importOriginal) => ({
   useSendCalls: () => ({ sendCalls: hooks.sendCalls, status: hooks.sendStatus, error: null, data: hooks.sendData }),
   useWaitForCallsStatus: () => ({ data: hooks.callsStatusData, error: null }),
 }));
+
+vi.mock('./use-token-fee-warning', () => ({ useTokenFeeWarning: () => hooks.tokenWarning }));
 
 vi.mock('./price-impact', async (importOriginal) => ({
   ...await importOriginal<typeof import('./price-impact')>(),
@@ -130,12 +133,24 @@ beforeEach(() => {
   hooks.erc20AllowanceRefetch.mockReset();
   hooks.erc20AllowanceLoading = false;
   hooks.impactBps = 0;
+  hooks.tokenWarning = null;
 });
 
 // Each TradeCard side is the label's parent element, so the token pills can be asserted per side.
 function card(label: 'Sell' | 'Buy') {
   return within(screen.getByText(label).parentElement as HTMLElement);
 }
+
+describe('V4SwapPanel token fee warning', () => {
+  it('shows what the fee check found, and nothing when it found nothing', () => {
+    hooks.simulateData = { result: [500_000_000_000_000_000n, 100_000n] };
+    const { rerender } = render(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.queryByTestId('token-fee-warning')).not.toBeInTheDocument();
+    hooks.tokenWarning = 'TOK charges a fee on sell (5%); you will receive less than the quote shows.';
+    rerender(<V4SwapPanel poolKey={poolKey} tokenA={tokenA} tokenB={tokenB} explorerBase={null} />);
+    expect(screen.getByTestId('token-fee-warning')).toHaveTextContent('charges a fee on sell (5%)');
+  });
+});
 
 describe('V4SwapPanel price impact', () => {
   function renderWithQuote() {

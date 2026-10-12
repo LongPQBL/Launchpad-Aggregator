@@ -28,13 +28,15 @@ export interface TradeCardProps {
   minReceived?: string | null;
   // How far the trade moves the price, from price-impact.ts; null/omitted hides the row. A 'severe' level also asks the
   // user to tick a box (ack) before the panel lets the trade through.
+  // A token in the pair takes a fee or refuses transfers, so the amount received will differ from the quote; null hides it.
+  tokenWarning?: string | null;
   priceImpact?: { text: string; level: ImpactLevel; acknowledged: boolean; onAcknowledge: (value: boolean) => void } | null;
   footer?: ReactNode;
 }
 
 // Presentational only: two stacked cards (Sell on top, Buy below) with the flip arrow overlapping
 // the seam, as on Uniswap. No trade logic lives here — panels own state, quotes and submission.
-export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact = null, footer }: TradeCardProps) {
+export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact = null, tokenWarning = null, footer }: TradeCardProps) {
   const [activeSide, setActiveSide] = useState<'sell' | 'buy'>('sell');
   return (
     <div className="flex flex-col gap-3">
@@ -52,6 +54,9 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact =
           <span>Min received</span>
           <span><RollingText text={minReceived} /></span>
         </div>
+      )}
+      {tokenWarning !== null && (
+        <p role="status" data-testid="token-fee-warning" className="px-1 text-sm text-amber-500">{tokenWarning}</p>
       )}
       {priceImpact !== null && (
         <div className="flex flex-col gap-2 px-1 text-base">

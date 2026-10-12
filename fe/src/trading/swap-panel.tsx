@@ -26,6 +26,7 @@ import { useSwapAmounts } from './use-swap-amounts';
 import { TradeCard } from './trade-card';
 import { SwapShell } from './swap-shell';
 import { usdText, usdPriceFor, type UsdPrices } from './trade-usd';
+import { useTokenFeeWarning } from './use-token-fee-warning';
 import { describePriceImpact, probeAmount, priceImpactBps, usePriceImpactAck } from './price-impact';
 import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
@@ -105,6 +106,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
   // Price impact = how much worse this trade's rate is than a small (1%) probe quote's rate, which sits on the marginal price.
   const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'pool');
   const impactAck = usePriceImpactAck(amountIn, impact.level);
+  const tokenWarning = useTokenFeeWarning([tokenA, tokenB], poolAddress);
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const paymasterCapable = usePaymasterCapability();
@@ -244,6 +246,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
           usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
         }}
         onFlip={() => { setDirection(direction === 'aToB' ? 'bToA' : 'aToB'); amounts.flip(); }}
+        tokenWarning={tokenWarning}
         priceImpact={impact.text === null ? null : { text: impact.text, level: impact.level, acknowledged: impactAck.acknowledged, onAcknowledge: impactAck.set }}
         minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'pool', tokenOut.decimals, displaySymbol(tokenOut, nativeOut))}
         footer={<>

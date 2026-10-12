@@ -8,6 +8,9 @@ const ACTION_SWAP_EXACT_IN_SINGLE = 0x06;
 const ACTION_SETTLE_ALL = 0x0c;
 const ACTION_TAKE_ALL = 0x0f;
 
+// Uniswap's V4 PoolManager on Robinhood Chain (4663): the singleton that holds every V4 pool's tokens.
+export const V4_POOL_MANAGER_ADDRESS: Address = '0x8366a39cc670b4001a1121b8f6a443a643e40951';
+
 export interface V4PoolKey {
   currency0: Address;
   currency1: Address;
