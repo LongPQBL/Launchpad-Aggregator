@@ -2,6 +2,7 @@ import type { CurveDepthAnswer } from '../pools/curveDepth.js';
 import type { PoolDayHistory } from '../pools/history.js';
 import Fastify, { type FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
+import { registerSecurity, type SecurityOptions } from './security.js';
 import swagger from '@fastify/swagger';
 import { registerSourcesRoutes } from './routes/sources.js';
 import { registerCoverageRoutes } from './routes/coverage.js';
@@ -114,6 +115,7 @@ export interface IncrementalSyncCoverage {
 
 export interface ApiDeps {
   feOrigin: string;
+  security?: SecurityOptions;
   events?: ApiEventBus;
   pools?: PoolApiStore;
   search?: SearchStore;
@@ -142,7 +144,7 @@ export interface ApiDeps {
 }
 
 export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
-  const app = Fastify();
+  const app = Fastify({ trustProxy: process.env.API_TRUST_PROXY === 'true' });
   const configuredOrigin = new URL(deps.feOrigin);
   const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
   await app.register(cors, { origin: (origin, callback) => {
@@ -157,6 +159,7 @@ export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
       return callback(null, false);
     }
   }, credentials: false });
+  await registerSecurity(app, deps.security);
   await app.register(swagger, { openapi: { info: { title: 'Launchpad Aggregator API', version: '0.1.0' } } });
   registerSourcesRoutes(app, deps);
   registerCoverageRoutes(app, deps);
@@ -164,7 +167,7 @@ export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
   registerPoolRoutes(app, deps);
   registerSearchRoutes(app, deps);
   registerWalletRoutes(app, deps);
-  registerEventsRoute(app, deps.events ?? new ApiEventBus());
+  registerEventsRoute(app, deps.events ?? new ApiEventBus(), deps.security);
   app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
   await app.ready();
   return app;

@@ -1,3 +1,4 @@
+import { DEFAULT_HEAVY_PER_MINUTE, heavyRoute } from '../security.js';
 import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { decodeCursor } from '../cursor.js';
@@ -137,7 +138,7 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
   );
 
   app.get<{ Params: { chainId: string; tokenAddress: string } }>(
-    '/v1/launches/:chainId/:tokenAddress/curve/depth', { schema: { response: { 200: curveDepthResponse } } }, async (request, reply) => {
+    '/v1/launches/:chainId/:tokenAddress/curve/depth', { schema: { response: { 200: curveDepthResponse } }, ...heavyRoute(deps.security?.heavyPerMinute ?? DEFAULT_HEAVY_PER_MINUTE) }, async (request, reply) => {
       const identity = tokenParams(request.params);
       if (!identity) return reply.code(404).send({ error: 'Launch not found' });
       if (!deps.data.getCurveDepth) { reply.code(503); return { error: 'Curve depth unavailable' }; }

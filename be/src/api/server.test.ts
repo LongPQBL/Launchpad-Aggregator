@@ -360,3 +360,44 @@ describe('read-only API', () => {
     await app.close();
   });
 });
+
+describe('API hardening', () => {
+  it('sets security headers and hides internal error text', async () => {
+    const app = await createApiServer({
+      feOrigin: 'http://localhost:3000',
+      data: { ...data(), listLaunches: async () => { throw new Error('connect ECONNREFUSED postgres://user:pw@db/launchpad'); } },
+    });
+    const ok = await app.inject({ url: '/v1/sources' });
+    expect(ok.headers['x-content-type-options']).toBe('nosniff');
+    expect(ok.headers['content-security-policy']).toContain("default-src 'none'");
+    const failed = await app.inject({ url: '/v1/launches' });
+    expect(failed.statusCode).toBe(500);
+    expect(failed.body).not.toContain('postgres://');
+    expect(failed.json()).toEqual({ error: 'Internal server error' });
+  });
+
+  it('rate-limits a client that exceeds the global budget', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data(), security: { globalPerMinute: 3 } });
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i += 1) codes.push((await app.inject({ url: '/v1/sources' })).statusCode);
+    expect(codes).toEqual([200, 200, 200, 429, 429]);
+  });
+
+  it('rejects a search that asks for too many chains', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    const chains = Array.from({ length: 50 }, (_, i) => i + 1).join(',');
+    expect((await app.inject({ url: `/v1/search?q=abc&chainId=${chains}` })).statusCode).toBe(400);
+  });
+
+  it('caps open event streams per client', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data(), security: { maxEventStreamsPerIp: 1 } });
+    await app.listen({ host: '127.0.0.1', port: 0 });
+    const url = `http://127.0.0.1:${(app.server.address() as { port: number }).port}/v1/events`;
+    const first = await fetch(url);
+    const second = await fetch(url);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(429);
+    await first.body?.cancel();
+    await app.close();
+  });
+});

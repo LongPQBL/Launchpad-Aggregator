@@ -31,6 +31,9 @@ export function TokenImage({ logoUri, symbol, className }: TokenImageProps) {
     <img
       src={resolved}
       alt="Token logo"
+      // Logo URLs are chosen by whoever launched the token; never tell their server which page the visitor is on.
+      referrerPolicy="no-referrer"
+      loading="lazy"
       className={cn('object-cover', className)}
       onError={() => setFailed(true)}
       // The server-rendered <img> can start loading from the raw HTML stream before React

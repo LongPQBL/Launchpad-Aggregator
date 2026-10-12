@@ -1,3 +1,4 @@
+import { DEFAULT_HEAVY_PER_MINUTE, heavyRoute } from '../security.js';
 import type { FastifyInstance } from 'fastify';
 import { isAddress } from 'viem';
 import { DEFAULT_RANGE, parseRange, rangeSpec, trimToRange } from '../../charts/ranges.js';
@@ -97,7 +98,7 @@ export function registerPoolRoutes(app: FastifyInstance, deps: ApiDeps): void {
       catch (error) { if (error instanceof Error && error.message === 'Pool not found') return reply.code(404).send({ error: 'Pool not found' }); throw error; }
     });
   app.get<{ Params: Params }>('/v1/pools/:chainId/:protocol/:poolId/liquidity',
-    { schema: { response: { 200: poolLiquidity } } }, async (request, reply) => {
+    { schema: { response: { 200: poolLiquidity } }, ...heavyRoute(deps.security?.heavyPerMinute ?? DEFAULT_HEAVY_PER_MINUTE) }, async (request, reply) => {
       const identity = key(request.params);
       if (!identity || identity.protocol === 'uniswap_v2') return reply.code(404).send({ error: 'Pool not found' });
       if (!deps.pools?.getPoolLiquidity) return unavailable(reply);

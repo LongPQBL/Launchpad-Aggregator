@@ -6,6 +6,7 @@ import type { ApiDeps } from '../server.js';
 const DEFAULT_LIMIT = 5;
 const MAX_LIMIT = 10;
 const MAX_QUERY_LENGTH = 100;
+const MAX_CHAINS = 20;
 
 export function registerSearchRoutes(app: FastifyInstance, deps: ApiDeps): void {
   app.get<{ Querystring: { q?: string; limit?: string; offset?: string } }>('/v1/search', { schema: { response: { 200: searchResults } } }, async (request, reply) => {
@@ -16,7 +17,7 @@ export function registerSearchRoutes(app: FastifyInstance, deps: ApiDeps): void 
     const offset = request.query.offset === undefined ? 0 : Number(request.query.offset);
     if (query.length < MIN_SEARCH_LENGTH || query.length > MAX_QUERY_LENGTH || !Number.isSafeInteger(requested) || requested < 1
       || !Number.isSafeInteger(offset) || offset < 0
-      || (chains !== undefined && (chains.length === 0 || chains.some((id) => !Number.isSafeInteger(id) || id < 1)))) {
+      || (chains !== undefined && (chains.length === 0 || chains.length > MAX_CHAINS || chains.some((id) => !Number.isSafeInteger(id) || id < 1)))) {
       return reply.code(400).send({ error: 'Invalid search query' });
     }
     if (!deps.search) return reply.code(503).send({ error: 'Search unavailable' });
