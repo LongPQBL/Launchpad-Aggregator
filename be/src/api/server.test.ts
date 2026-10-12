@@ -400,4 +400,10 @@ describe('API hardening', () => {
     await first.body?.cancel();
     await app.close();
   });
+
+  it('refuses a NUL byte anywhere in the URL instead of letting the database fail with a 500', async () => {
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
+    expect((await app.inject({ url: '/v1/launches?search=a%00b' })).statusCode).toBe(400);
+    expect((await app.inject({ url: '/v1/search?q=%00' })).statusCode).toBe(400);
+  });
 });

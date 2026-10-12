@@ -20,6 +20,16 @@ describe('TokenCell', () => {
     expect(screen.getByRole('button', { name: 'Copy token address' })).toHaveTextContent('0x2E8c…1e18');
   });
 
+  it('renders a hostile token name and symbol as plain text, never as markup', () => {
+    const { container } = render(<TokenCell chainId={4663} tokenAddress={tokenAddress} name={'<img src=x onerror="window.pwned=1">'} symbol={'<script>window.pwned=1</script>'} logoUri={'javascript:window.pwned=1'} />);
+    expect(container.querySelector('img[src="x"]')).toBeNull();
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('[onerror]')).toBeNull();
+    expect(container.querySelector('img[src^="javascript:"]')).toBeNull();
+    expect(screen.getByText('<img src=x onerror="window.pwned=1">')).toBeInTheDocument();
+    expect((window as unknown as { pwned?: number }).pwned).toBeUndefined();
+  });
+
   it('copies the full token address to the clipboard and shows transient confirmation', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setClipboard({ writeText });

@@ -26,6 +26,11 @@ export async function registerSecurity(app: FastifyInstance, options: SecurityOp
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   });
   await app.register(rateLimit, { global: true, max: options.globalPerMinute ?? DEFAULT_GLOBAL_PER_MINUTE, timeWindow: '1 minute' });
+  // PostgreSQL text cannot hold a NUL byte, so one in any query value or path segment surfaces as a database error (HTTP 500).
+  // No endpoint has a legitimate use for it; refuse it up front.
+  app.addHook('onRequest', async (request, reply) => {
+    if (/%00/i.test(request.url)) return reply.code(400).send({ error: 'Invalid request' });
+  });
   // A raw exception message can carry SQL text, RPC URLs or file paths; clients only get a generic body for 5xx.
   app.setErrorHandler((error: FastifyError, request, reply) => {
     const statusCode = typeof error.statusCode === 'number' && error.statusCode >= 400 ? error.statusCode : 500;
