@@ -79,7 +79,9 @@ export function registerLaunchRoutes(app: FastifyInstance, deps: ApiDeps): void 
     const query = launchListQuery(request.query);
     if (!query) return reply.code(400).send({ error: 'Invalid launch query' });
     try {
-      return await deps.data.listLaunches(query);
+      const page = await deps.data.listLaunches(query);
+      if (page.rankingAgeSeconds !== undefined) reply.header('X-Volume-Ranking-Age', String(page.rankingAgeSeconds));
+      return page;
     } catch (error) {
       // The signed volume24hUsd cursor's format/tamper/expiry/sort-mismatch validation, and the
       // "pinned row no longer exists in the current ranking" case, both happen inside the store

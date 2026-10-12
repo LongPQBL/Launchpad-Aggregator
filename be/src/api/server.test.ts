@@ -85,6 +85,18 @@ describe('read-only API', () => {
     await app.close();
   });
 
+  it('keeps serving the volume ranking and reports its age in a header when the ranking worker is behind', async () => {
+    const source = data();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: {
+      ...source, listLaunches: async () => ({ items: [launchSummary], nextCursor: null, rankingAgeSeconds: 900 }),
+    } });
+    const response = await app.inject({ method: 'GET', url: '/v1/launches?sort=volume24hUsd' });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers['x-volume-ranking-age']).toBe('900');
+    expect(response.json()).not.toHaveProperty('rankingAgeSeconds');
+    await app.close();
+  });
+
   it('passes search and lifecycle-status filters through to the launch list, and rejects an unknown status', async () => {
     const calls: Array<{ limit: number; search?: string; status?: string }> = [];
     const source = data();

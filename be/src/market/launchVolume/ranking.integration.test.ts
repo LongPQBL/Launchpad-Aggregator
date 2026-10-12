@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { readVolumeRankingPage, type VolumeRankCursor } from './ranking.js';
-import { assertVolumeRankingAvailable, markVolumeBackfillComplete, recordVolumeWorkerHeartbeat, VolumeRankingUnavailableError } from './state.js';
+import { assertVolumeRankingAvailable, markVolumeBackfillComplete, recordVolumeWorkerHeartbeat, VolumeRankingUnavailableError, VOLUME_RANKING_MAX_STALE_MS } from './state.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -100,19 +100,24 @@ describe('assertVolumeRankingAvailable', () => {
     await expect(assertVolumeRankingAvailable(pool, now)).rejects.toBeInstanceOf(VolumeRankingUnavailableError);
   });
 
-  it('is unavailable when the worker heartbeat is more than two minutes old', async () => {
+  it('serves the last ranking, reported as stale, when the worker heartbeat is more than two minutes old', async () => {
     await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - 121_000));
+    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toEqual({ ageMs: 121_000, stale: true });
+  });
+
+  it('is unavailable once the heartbeat is older than the maximum stale age', async () => {
+    await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - VOLUME_RANKING_MAX_STALE_MS - 1));
     await expect(assertVolumeRankingAvailable(pool, now)).rejects.toBeInstanceOf(VolumeRankingUnavailableError);
   });
 
   it('is available with a fresh heartbeat even though the initial backfill has never completed', async () => {
     await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - 60_000));
-    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toBeUndefined();
+    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toMatchObject({ stale: false });
   });
 
   it('is available once backfill is complete and the heartbeat is fresh', async () => {
     await markVolumeBackfillComplete(pool, now);
     await recordVolumeWorkerHeartbeat(pool, new Date(now.getTime() - 60_000));
-    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toBeUndefined();
+    await expect(assertVolumeRankingAvailable(pool, now)).resolves.toMatchObject({ stale: false });
   });
 });

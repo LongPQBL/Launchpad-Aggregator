@@ -18,7 +18,9 @@ import { ApiEventBus } from './events.js';
 import type { LaunchParityCoverage } from '../coverage/repairRanges.js';
 import type { LaunchSort, SortDirection } from './metricCursor.js';
 
-export interface Page<T> { items: readonly T[]; nextCursor: string | null }
+// rankingAgeSeconds is set only by a volume-sorted launch list whose ranking worker is behind; the route turns it
+// into the X-Volume-Ranking-Age header and the response schema keeps it out of the body.
+export interface Page<T> { items: readonly T[]; nextCursor: string | null; rankingAgeSeconds?: number }
 export interface LaunchSummary {
   // name/symbol are null until core-metadata enrichment resolves them — a near-realtime-synced
   // launch is visible immediately with its address as the display fallback.

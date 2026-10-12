@@ -327,7 +327,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     const secret = process.env.VOLUME_CURSOR_SECRET;
     if (!secret) throw new Error('VOLUME_CURSOR_SECRET is required to use sort=volume24hUsd');
     const now = new Date();
-    await assertVolumeRankingAvailable(pool, now);
+    const ranking = await assertVolumeRankingAvailable(pool, now);
     const nowSeconds = Math.floor(now.getTime() / 1000);
     const cursorValue = query.cursor ? decodeVolumeCursor(query.cursor, secret, nowSeconds) : null;
     const page = await readVolumeRankingPage(pool, {
@@ -351,13 +351,14 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
         officialVolume24hUsdAsOf: item.rankCategory === 'null' ? null : new Date(item.windowEnd * 1000).toISOString(),
       })),
       nextCursor,
+      ...(ranking.stale ? { rankingAgeSeconds: Math.floor(ranking.ageMs / 1000) } : {}),
     };
   }
 
   async function listLaunchesByMetric(query: LaunchListQuery): Promise<Page<LaunchSummary>> {
     const sort = query.sort ?? 'recent';
     const direction = query.direction ?? (sort === 'recent' ? 'asc' : 'desc');
-    if (sort === 'volume24hUsd') await assertVolumeRankingAvailable(pool, new Date());
+    const ranking = sort === 'volume24hUsd' ? await assertVolumeRankingAvailable(pool, new Date()) : null;
     const result = await readMetricRankingPage(pool, {
       sort, direction, chainId: query.chainId, platform: query.platform, status: query.status, search: query.search,
       cursor: query.cursor, limit: query.limit, headBlock: await safeHead(), since: Math.floor(Date.now() / 1000) - 86_400,
@@ -373,6 +374,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
           officialVolume24hUsdAsOf: volume === null || row.window_end === null ? null : new Date(number(row.window_end) * 1000).toISOString() };
       }),
       nextCursor: result.nextCursor,
+      ...(ranking?.stale ? { rankingAgeSeconds: Math.floor(ranking.ageMs / 1000) } : {}),
     };
   }
 
