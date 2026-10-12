@@ -45,3 +45,7 @@ Scope: the local-first read-only app (`be/` API, `fe/`). Nothing deployed, no re
 - Same check for V3 (`fe/scripts/verify-slippage.ts v3`, native ETH → token through WETH, pool fee 10000, token `0xf3cc…4b76`) and the bonding curve (`… curve <address>`, two live curves): minimum 1 succeeds, an unreachable minimum reverts. Both pass.
 - Hostile tokens (fee-on-transfer, reverting hook) were not simulated: the minimum-output rule is enforced by the router/pool against what the pool pays out, so a token that skims on transfer after payout is outside what calldata can protect. Mitigation is product-side (show a warning for tokens whose transfer amount differs from the quote), not a calldata fix.
 - E2E: whole-suite Playwright failures were timeouts from oversubscribed workers, not the CSP. The server answers pages in ~10–30 ms; with `workers: 3` all 59 specs pass.
+
+
+### Bonding curve fee check
+The curve panel now runs the same `eth_simulateV1` probe with the curve contract as holder (it holds the token reserve). Six random live curves: 0 bps buy/sell/transfer, no warning. The curve's own quote does not see a token fee either, so the warning matters equally here.

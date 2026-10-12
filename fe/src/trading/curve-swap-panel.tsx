@@ -27,6 +27,7 @@ import { usdPriceFor, usdText, type UsdPrices } from './trade-usd';
 import { describePriceImpact, probeAmount, priceImpactBps, usePriceImpactAck } from './price-impact';
 import { formatBalanceAmount, minReceivedText } from './trade-amount-format';
 import { deriveQuoteState } from './trade-button-state';
+import { useTokenFeeWarning } from './use-token-fee-warning';
 
 export interface CurveSwapPanelProps {
   curveAddress: Address;
@@ -64,6 +65,8 @@ export function CurveSwapPanel({
   const tokenOut = direction === 'buy' ? launched : quoteTok;
 
   const client = usePublicClient({ chainId: robinhoodChain.id });
+  // The curve holds the token reserve, so it is the holder the fee probe moves tokens out of.
+  const tokenWarning = useTokenFeeWarning([launched, quoteTok], curveAddress);
   // No dependence on the connected account: the reverse quote simulates as a synthetic account.
   const solve = useMemo(
     () => (client
@@ -179,6 +182,7 @@ export function CurveSwapPanel({
           usdText: usdText(quote.outputAmount, tokenOut.decimals, priceFor(tokenOut)), hint: buyHint,
         }}
         onFlip={() => { setDirection(direction === 'buy' ? 'sell' : 'buy'); amounts.flip(); }}
+        tokenWarning={tokenWarning}
         priceImpact={impact.text === null ? null : { text: impact.text, level: impact.level, acknowledged: impactAck.acknowledged, onAcknowledge: impactAck.set }}
         minReceived={minReceivedText(quote.outputAmount, settings.slippageBps, 'curve', tokenOut.decimals, tokenOut.symbol)}
         footer={<>

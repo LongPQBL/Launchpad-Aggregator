@@ -21,6 +21,7 @@ const erc20Quote = { address: '0x6666666666666666666666666666666666666666' as co
 const hooks = vi.hoisted(() => ({
   // What the price-impact calculation reports; the mocked wagmi quote returns one fixed output, so a real probe comparison is meaningless here.
   impactBps: 0 as number | null,
+  tokenWarning: null as string | null,
   account: { address: '0x1111111111111111111111111111111111111111' as `0x${string}` | undefined, chainId: 4663, isConnected: true },
   paymasterServiceUrl: undefined as string | undefined,
   balance: { data: { value: 10000000000000000n } as { value: bigint } | undefined, isLoading: false },
@@ -72,6 +73,7 @@ vi.mock('wagmi', async (importOriginal) => ({
   useCapabilities: () => ({ data: hooks.capabilities }),
 }));
 
+vi.mock('./use-token-fee-warning', () => ({ useTokenFeeWarning: () => hooks.tokenWarning }));
 vi.mock('./price-impact', async (importOriginal) => ({
   ...await importOriginal<typeof import('./price-impact')>(),
   priceImpactBps: () => hooks.impactBps,
@@ -86,6 +88,7 @@ afterEach(() => { vi.useRealTimers(); });
 
 beforeEach(() => {
   localStorage.clear();
+  hooks.tokenWarning = null;
   hooks.paymasterServiceUrl = undefined;
   hooks.account.address = '0x1111111111111111111111111111111111111111';
   hooks.account.chainId = 4663;
@@ -133,6 +136,12 @@ describe('CurveSwapPanel - buy direction (default)', () => {
     flip();
     expect(screen.getByText(textContent('Balance: 2 PROM'))).not.toHaveClass('text-destructive');
   });
+  it('shows the token fee warning on the curve card', () => {
+    hooks.tokenWarning = 'TOK charges a fee on sell (5%); you will receive less than the quote shows.';
+    render(panel(nativeQuote));
+    expect(screen.getByTestId('token-fee-warning')).toHaveTextContent('charges a fee on sell');
+  });
+
   it('shows an "Enter an amount" label when the amount is empty', () => {
     render(panel(nativeQuote));
     expect(screen.getByRole('button', { name: 'Enter an amount' })).toBeDisabled();
