@@ -25,7 +25,7 @@ vi.mock('wagmi', async (importOriginal) => ({
 }));
 
 const token = '0x2222222222222222222222222222222222222222' as const;
-const spender = '0x8876789976decbfcbbbe364623c63652db8c0904' as const;
+const spender = '0x204FAca1764B154221e35c0d20aBb3c525710498' as const;
 const future = Math.floor(Date.now() / 1000) + 10_000;
 const past = Math.floor(Date.now() / 1000) - 10_000;
 

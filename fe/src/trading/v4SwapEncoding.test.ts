@@ -82,7 +82,7 @@ describe('encodePermit2PermitInput', () => {
   it('round-trips the PermitSingle struct and signature', () => {
     const permitSingle = {
       details: { token: poolKey.currency0, amount: 1_000_000_000_000_000_000n, expiration: 1_800_000_000, nonce: 3 },
-      spender: '0x8876789976decbfcbbbe364623c63652db8c0904' as const,
+      spender: '0x204FAca1764B154221e35c0d20aBb3c525710498' as const,
       sigDeadline: 1_800_000_600n,
     };
     const signature = '0x1234' as const;

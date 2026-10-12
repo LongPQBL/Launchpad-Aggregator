@@ -48,21 +48,25 @@ export function makeV3ReverseSolve(
   };
 }
 
-// V4: the deployed quoter exposes only exact-input (quoteExactInputSingleV4), so invert it.
+const MAX_UINT128 = (1n << 128n) - 1n;
+
+// V4: the deployed quoter exposes only exact-input (quoteExactInputSingle), so invert it.
 export function makeV4ReverseSolve(
   client: CallClient,
   { poolKey, zeroForOne }: { poolKey: V4PoolKey; zeroForOne: boolean },
 ): ReverseSolve {
   const quote: QuoteFn = async (amountIn) => {
-    const data = encodeFunctionData({
-      abi: v4QuoterAbi,
-      functionName: 'quoteExactInputSingleV4',
-      args: [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }],
-    });
     return callOrNull(async () => {
+      // exactAmount is a uint128; a search probe above that range simply has no quote.
+      if (amountIn > MAX_UINT128) return null;
+      const data = encodeFunctionData({
+        abi: v4QuoterAbi,
+        functionName: 'quoteExactInputSingle',
+        args: [{ poolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }],
+      });
       const { data: out } = await client.call({ to: V4_QUOTER_ADDRESS, data });
       if (!out) return null;
-      return decodeFunctionResult({ abi: v4QuoterAbi, functionName: 'quoteExactInputSingleV4', data: out })[0];
+      return decodeFunctionResult({ abi: v4QuoterAbi, functionName: 'quoteExactInputSingle', data: out })[0];
     });
   };
   return (targetOut, signal) => solveInputForOutput(quote, targetOut, { signal });

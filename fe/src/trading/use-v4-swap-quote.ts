@@ -18,11 +18,12 @@ export interface V4SwapQuoteResult {
 }
 
 export function useV4SwapQuote({ poolKey, zeroForOne, amountIn }: V4SwapQuoteParams): V4SwapQuoteResult {
-  const enabled = Boolean(poolKey && amountIn > 0n);
+  // exactAmount is a uint128; a larger typed amount has no quote (and would fail to encode).
+  const enabled = Boolean(poolKey && amountIn > 0n && amountIn < 1n << 128n);
   const { data, isLoading, error } = useSimulateContract({
     address: V4_QUOTER_ADDRESS,
     abi: v4QuoterAbi,
-    functionName: 'quoteExactInputSingleV4',
+    functionName: 'quoteExactInputSingle',
     args: enabled ? [{ poolKey: poolKey as V4PoolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }] : undefined,
     query: { enabled },
   });

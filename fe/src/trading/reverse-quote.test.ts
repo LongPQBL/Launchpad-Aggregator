@@ -59,12 +59,12 @@ describe('makeV3ReverseSolve', () => {
 });
 
 describe('makeV4ReverseSolve', () => {
-  it('searches over quoteExactInputSingleV4 and returns an input that covers the target', async () => {
+  it('searches over quoteExactInputSingle and returns an input that covers the target', async () => {
     const client = makeFakeClient((req) => {
       expect(req.to).toBe(V4_QUOTER_ADDRESS);
       const { args } = decodeFunctionData({ abi: v4QuoterAbi, data: req.data });
       const exact = (args![0] as { exactAmount: bigint }).exactAmount;
-      return encodeResult(v4QuoterAbi, 'quoteExactInputSingleV4', [exact * 2n, 0n]); // linear 2x
+      return encodeResult(v4QuoterAbi, 'quoteExactInputSingle', [exact * 2n, 0n]); // linear 2x
     });
     const solve = makeV4ReverseSolve(client, { poolKey, zeroForOne: true });
     const x = await solve(2_000_000_000_000_000n, signal);
