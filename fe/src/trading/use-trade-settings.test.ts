@@ -35,3 +35,14 @@ describe('resolveAutoSlippageBps', () => {
     expect(resolveAutoSlippageBps('curve')).toBeGreaterThan(resolveAutoSlippageBps('pool'));
   });
 });
+
+import { sanitizeTradeSettings } from './use-trade-settings';
+describe('sanitizeTradeSettings', () => {
+  it('replaces out-of-range or malformed stored values with safe defaults', () => {
+    expect(sanitizeTradeSettings({ slippageBps: 10000, deadlineMinutes: 1e9, oneClickTradeOptIn: 'yes' }))
+      .toEqual({ slippageBps: 'auto', deadlineMinutes: 30, oneClickTradeOptIn: false });
+    expect(sanitizeTradeSettings(null)).toEqual({ slippageBps: 'auto', deadlineMinutes: 30, oneClickTradeOptIn: false });
+    expect(sanitizeTradeSettings({ slippageBps: 100, deadlineMinutes: 10, oneClickTradeOptIn: true }))
+      .toEqual({ slippageBps: 100, deadlineMinutes: 10, oneClickTradeOptIn: true });
+  });
+});

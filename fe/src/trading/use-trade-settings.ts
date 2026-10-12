@@ -21,6 +21,22 @@ export function resolveAutoSlippageBps(venueKind: 'curve' | 'pool'): number {
   return venueKind === 'curve' ? 1200 : 50;
 }
 
+const MAX_SLIPPAGE_BPS = 5000;
+const MAX_DEADLINE_MINUTES = 1440;
+
+// localStorage is writable by anything running on this origin and survives across sessions, so a stored value is
+// untrusted input: an out-of-range slippage (10000 bps = no minimum output) or deadline would reach the swap as-is.
+export function sanitizeTradeSettings(value: unknown): TradeSettings {
+  const raw = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  const slippage = raw.slippageBps;
+  const deadline = raw.deadlineMinutes;
+  return {
+    slippageBps: typeof slippage === 'number' && Number.isFinite(slippage) && slippage >= 1 && slippage <= MAX_SLIPPAGE_BPS ? slippage : 'auto',
+    deadlineMinutes: typeof deadline === 'number' && Number.isFinite(deadline) && deadline > 0 && deadline <= MAX_DEADLINE_MINUTES ? deadline : DEFAULT_SETTINGS.deadlineMinutes,
+    oneClickTradeOptIn: raw.oneClickTradeOptIn === true,
+  };
+}
+
 export function useTradeSettings(): { settings: TradeSettings; update: (next: TradeSettings) => void } {
   const [settings, setSettings] = useState<TradeSettings>(DEFAULT_SETTINGS);
 
@@ -29,7 +45,7 @@ export function useTradeSettings(): { settings: TradeSettings; update: (next: Tr
     if (!stored) return;
     try {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- same SSR-safe localStorage-sync pattern as theme-toggle.tsx
-      setSettings(JSON.parse(stored) as TradeSettings);
+      setSettings(sanitizeTradeSettings(JSON.parse(stored)));
     } catch {
       // Malformed stored value — keep the default rather than crashing.
     }

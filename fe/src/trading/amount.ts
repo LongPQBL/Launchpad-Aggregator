@@ -27,6 +27,7 @@ export function applySlippage(amount: bigint, slippageBps: number | 'auto', venu
   // negative, producing a negative minimum-output and throwing when it's later ABI-encoded.
   // The settings UI already caps what a user can type, but this is the one place that actually
   // computes the on-chain parameter, so it must never trust an out-of-range value to reach it.
-  const bps = Math.min(10_000, Math.max(0, rawBps));
+  // 50% matches the settings UI's own ceiling; anything higher is effectively no minimum output.
+  const bps = Number.isFinite(rawBps) ? Math.min(5_000, Math.max(0, rawBps)) : resolveAutoSlippageBps(venueKind);
   return (amount * BigInt(10_000 - bps)) / 10_000n;
 }

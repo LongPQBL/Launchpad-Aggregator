@@ -23,4 +23,5 @@ Scope: the local-first read-only app (`be/` API, `fe/`). Nothing deployed, no re
 - Rate limits are in-memory per process; use a shared store if the API runs on several instances.
 - Give the API a read-only database role (it only reads); workers keep the write role.
 - Full script-src CSP for the FE needs nonces (Next inline scripts, theme script, wallet SDKs); not attempted to avoid breaking the app.
-- Not yet reviewed adversarially: swap calldata construction in `fe/src/trading` (slippage, deadline, Permit2 `maxUint256` allowance). Do this before any real-money use.
+- Swap review (`fe/src/trading`): router/Permit2 addresses are constants; the Permit2 permit signs exactly `amountIn` with a short expiry and a nonce re-read before signing; the ERC20→Permit2 approval is `maxUint256` (same as Uniswap's own flow, Permit2 still limits what the router can pull). Fixed: slippage and deadline were read from `localStorage` unchecked and `applySlippage` allowed up to 100% (zero minimum output) — stored values are now sanitized and slippage is capped at 50%.
+- Still to do before real-money use: a fork/anvil test that simulates each swap with a hostile pool (fee-on-transfer token, hook that reverts) and confirms the minimum-output check protects the user.
