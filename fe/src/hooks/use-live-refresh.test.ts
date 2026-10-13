@@ -64,6 +64,21 @@ describe('useLiveRefresh', () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it('reports each matching event to onEvent immediately, before the coalesced refetch', () => {
+    const refresh = vi.fn();
+    const onEvent = vi.fn();
+    renderHook(() => useLiveRefresh([launchResourceKey(4663, '0xAbC0000000000000000000000000000000000001')], refresh, { onEvent }));
+    const source = latestSource();
+
+    act(() => {
+      source.dispatch('trade.created', { chainId: 4663, tokenAddress: '0xabc0000000000000000000000000000000000001' });
+      source.dispatch('trade.created', { chainId: 4663, tokenAddress: '0x0000000000000000000000000000000000000002' });
+    });
+    expect(onEvent).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledWith('trade.created', { chainId: 4663, tokenAddress: '0xabc0000000000000000000000000000000000001' });
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
   it('ignores events for a chain the caller did not subscribe to', () => {
     const refresh = vi.fn();
     renderHook(() => useLiveRefresh([chainResourceKey(4663)], refresh));

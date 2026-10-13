@@ -25,17 +25,25 @@ const MAX_PENDING_RETRIES = 6;
 
 const NEXT_PUBLIC_BE_API_URL = process.env.NEXT_PUBLIC_BE_API_URL ?? 'http://127.0.0.1:3001';
 
+export type SseEventType = (typeof SSE_EVENT_TYPES)[number];
+
 export interface UseLiveRefreshOptions {
   retryWhilePending?: boolean;
+  // Called once per matching event as it arrives, ahead of the coalesced refetch, so a component can
+  // apply a cheap partial update (e.g. fetch just the newest transactions) instead of waiting for a
+  // full page refresh.
+  onEvent?: (type: SseEventType, payload: SseEventPayload) => void;
 }
 
 export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => void, options?: UseLiveRefreshOptions): LiveStatus {
   const [status, setStatus] = useState<LiveStatus>('connecting');
   const refreshRef = useRef(refresh);
   const resourceKeysRef = useRef(resourceKeys);
+  const onEventRef = useRef(options?.onEvent);
   useEffect(() => {
     refreshRef.current = refresh;
     resourceKeysRef.current = resourceKeys;
+    onEventRef.current = options?.onEvent;
   });
   const key = resourceKeys.join(',');
   const retryWhilePending = options?.retryWhilePending ?? false;
@@ -96,17 +104,19 @@ export function useLiveRefresh(resourceKeys: readonly string[], refresh: () => v
       startPolling();
     };
 
-    const onSseEvent = (event: { data: string }): void => {
+    const onSseEvent = (type: SseEventType) => (event: { data: string }): void => {
       let payload: SseEventPayload;
       try {
         payload = JSON.parse(event.data) as SseEventPayload;
       } catch {
         return;
       }
-      if (matchesResourceKeys(payload, resourceKeysRef.current)) scheduleRefresh();
+      if (!matchesResourceKeys(payload, resourceKeysRef.current)) return;
+      onEventRef.current?.(type, payload);
+      scheduleRefresh();
     };
 
-    for (const type of SSE_EVENT_TYPES) source.addEventListener(type, onSseEvent);
+    for (const type of SSE_EVENT_TYPES) source.addEventListener(type, onSseEvent(type));
 
     // Runs for the whole lifetime of this connection attempt, independent of 'live'/'polling'
     // status — a missed notification must not leave a tab stale indefinitely even while SSE

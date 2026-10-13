@@ -3,6 +3,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OfficialVenue, Transaction } from '@/api/client';
 import { getLaunchTransactions } from '@/api/client';
+import { emitTradeCreated } from '@/hooks/live-events';
 import { TransactionList } from './transaction-list';
 
 vi.mock('@/api/client', async (importOriginal) => ({
@@ -44,6 +45,44 @@ describe('TransactionList', () => {
     vi.unstubAllGlobals();
   });
 
+
+  describe('live trade events', () => {
+    const props = { venues: noVenues, tokenSymbol: 'DELTA', quoteAsset, chainId: 4663, tokenAddress: '0xToken' };
+    beforeEach(() => { vi.useFakeTimers(); vi.mocked(getLaunchTransactions).mockReset(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('fetches the newest transactions as soon as a trade is announced for this token, keeping rows already shown', async () => {
+      vi.mocked(getLaunchTransactions).mockResolvedValue({
+        items: [transaction({ txHash: '0xnew', blockNumber: '101' }), transaction()], nextCursor: null,
+      });
+      render(<TransactionList {...props} transactions={[transaction()]} nextCursor={null} />);
+      expect(screen.getAllByRole('row')).toHaveLength(2);
+
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xtoken' }); });
+      expect(getLaunchTransactions).toHaveBeenCalledTimes(1);
+      expect(getLaunchTransactions).toHaveBeenCalledWith(4663, '0xToken', { venue: undefined });
+      expect(screen.getAllByRole('row')).toHaveLength(3);
+    });
+
+    it('ignores a trade announced for another token', async () => {
+      render(<TransactionList {...props} transactions={[transaction()]} nextCursor={null} />);
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xother' }); });
+      expect(getLaunchTransactions).not.toHaveBeenCalled();
+    });
+
+    it('collapses a burst of events into one leading fetch and one trailing fetch', async () => {
+      vi.mocked(getLaunchTransactions).mockResolvedValue({ items: [transaction()], nextCursor: null });
+      render(<TransactionList {...props} transactions={[transaction()]} nextCursor={null} />);
+      await act(async () => {
+        for (let i = 0; i < 5; i += 1) emitTradeCreated({ chainId: 4663, tokenAddress: '0xtoken' });
+      });
+      expect(getLaunchTransactions).toHaveBeenCalledTimes(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+      expect(getLaunchTransactions).toHaveBeenCalledTimes(2);
+      await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+      expect(getLaunchTransactions).toHaveBeenCalledTimes(2);
+    });
+  });
 
   it('shows skeleton rows while the next page loads, then replaces them with the new rows', async () => {
     let resolvePage!: (page: { items: Transaction[]; nextCursor: string | null }) => void;
