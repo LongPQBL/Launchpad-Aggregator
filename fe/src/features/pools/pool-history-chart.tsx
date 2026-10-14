@@ -69,6 +69,34 @@ export function windowLabel(seconds: number): string {
   return plural(Math.round(seconds / 60), 'minute');
 }
 
+const BAR_STEPS = [60, 300, 900, 3_600, 14_400, 86_400, 604_800];
+const MAX_VOLUME_BARS = 60;
+const WEEK_SECONDS = 604_800;
+const MONDAY_OFFSET = 4 * DAY_SECONDS; // the epoch is a Thursday
+
+/**
+ * Wide, readable bars: the rollup buckets (1 minute ... 1 day) are summed into at most 60 bars, like Uniswap's volume chart
+ * (1D = 24 hourly bars, 1M = 30 daily bars, 1Y = weekly). A bar with any unavailable bucket is unavailable itself, never a smaller sum.
+ */
+export function coarsenVolume(items: readonly PoolDayHistory[], step: number): { items: readonly PoolDayHistory[]; step: number } {
+  const target = BAR_STEPS.find((candidate) => candidate >= step && candidate % step === 0 && Math.ceil(items.length / (candidate / step)) <= MAX_VOLUME_BARS)
+    ?? BAR_STEPS[BAR_STEPS.length - 1]!;
+  if (target <= step) return { items, step };
+  const startOf = (time: number) => target === WEEK_SECONDS ? Math.floor((time - MONDAY_OFFSET) / target) * target + MONDAY_OFFSET : Math.floor(time / target) * target;
+  const groups = new Map<number, PoolDayHistory[]>();
+  for (const item of items) {
+    const start = startOf(item.day);
+    const group = groups.get(start);
+    if (group) group.push(item); else groups.set(start, [item]);
+  }
+  const merged = [...groups.entries()].sort((a, b) => a[0] - b[0]).map(([day, group]) => {
+    const unavailable = group.some((item) => item.volumeUsd === null);
+    return { ...group[0]!, day, volumeUsd: unavailable ? null : String(group.reduce((sum, item) => sum + Number(item.volumeUsd), 0)),
+      tradeCount: group.reduce((sum, item) => sum + item.tradeCount, 0) } as PoolDayHistory;
+  });
+  return { items: merged, step: target };
+}
+
 function stepOf(items: readonly PoolDayHistory[], intervalSeconds?: number): number {
   if (intervalSeconds) return intervalSeconds;
   return items.length > 1 ? items[1]!.day - items[0]!.day : DAY_SECONDS;
@@ -76,7 +104,7 @@ function stepOf(items: readonly PoolDayHistory[], intervalSeconds?: number): num
 
 // Volume bars and TVL area for one launch or pool over the selected range. A bucket with no value is a gap in the
 // series and reads "Unavailable" on hover — never a zero-height bar, which would claim a real $0.
-export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loading = false, error = false, headerClassName = 'text-2xl', leading, trailing, allPools = false, unvaluedPools = 0 }: {
+export function PoolHistoryChart({ items: rawItems, complete, metric, intervalSeconds, loading = false, error = false, headerClassName = 'text-2xl', leading, trailing, allPools = false, unvaluedPools = 0 }: {
   items: readonly PoolDayHistory[]; complete: boolean; metric: HistoryMetric; intervalSeconds?: number; loading?: boolean; error?: boolean; headerClassName?: string;
   /** Left of the bottom row (the range tabs); `trailing` is its right side (the chart-type tabs). */
   leading?: ReactNode; trailing?: ReactNode;
@@ -93,7 +121,8 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
   const [seriesApi, setSeriesApi] = useState<ISeriesApi<SeriesType> | null>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [bar, setBar] = useState<{ x: number; width: number } | null>(null);
-  const step = stepOf(items, intervalSeconds);
+  const rawStep = stepOf(rawItems, intervalSeconds);
+  const { items, step } = useMemo(() => metric === 'volume' ? coarsenVolume(rawItems, rawStep) : { items: rawItems, step: rawStep }, [rawItems, rawStep, metric]);
   const byTime = useMemo(() => new Map(items.map((item) => [item.day, item])), [items]);
   const byTimeRef = useRef(byTime);
   useEffect(() => { byTimeRef.current = byTime; }, [byTime]);
