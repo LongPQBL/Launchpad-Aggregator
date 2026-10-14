@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCurveDepth, getPoolLiquidity } from '@/api/client';
+import { emitPoolChanged, emitTradeCreated } from '@/hooks/live-events';
 import { CurveDepthChart, formatLiquidity, PoolDepthChart, PoolLiquidityChart } from './pool-liquidity';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolLiquidity: vi.fn(), getCurveDepth: vi.fn() }));
@@ -97,5 +98,30 @@ describe('CurveDepthChart', () => {
     vi.mocked(getCurveDepth).mockResolvedValueOnce(null);
     render(<CurveDepthChart chainId={4663} tokenAddress="0xtoken" baseSymbol="TKN" quoteSymbol="ETH" />);
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('no bonding curve'));
+  });
+});
+
+describe('live updates', () => {
+  it('rereads the price when a swap lands in this pool, keeping the chart on screen, and ignores other pools', async () => {
+    vi.mocked(getPoolLiquidity).mockResolvedValueOnce(liquidity());
+    render(<PoolLiquidityChart pool={pool} />);
+    await waitFor(() => expect(screen.getByTestId('liquidity-readout')).toHaveTextContent('1 ETH = 2,540 USDC'));
+    vi.mocked(getPoolLiquidity).mockResolvedValueOnce(liquidity({ price: 2600 }));
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xother' }); });
+    expect(getPoolLiquidity).toHaveBeenCalledTimes(1);
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xpool' }); });
+    expect(getPoolLiquidity).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('status', { name: 'Loading liquidity' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('liquidity-readout')).toHaveTextContent('1 ETH = 2,600 USDC'));
+  });
+
+  it('rereads the curve depth when a trade of the launch is announced', async () => {
+    vi.mocked(getCurveDepth).mockResolvedValue({ complete: true, unavailableReason: null, price: 2, depth, feeBps: 100, asksEndAtGraduation: false, bidsEndAtEmptyReserve: false } as never);
+    render(<CurveDepthChart chainId={4663} tokenAddress="0xAbC" baseSymbol="TKN" quoteSymbol="ETH" />);
+    await waitFor(() => expect(screen.getByText(/1 TKN = 2 ETH/)).toBeInTheDocument());
+    await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xother' }); });
+    expect(getCurveDepth).toHaveBeenCalledTimes(1);
+    await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xabc' }); });
+    expect(getCurveDepth).toHaveBeenCalledTimes(2);
   });
 });

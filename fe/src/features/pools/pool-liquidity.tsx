@@ -5,6 +5,7 @@ import { getCurveDepth, getPoolLiquidity, type PoolLiquidity, type PoolSummary }
 import { displaySymbol } from '@/api/format';
 import { DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
 import { DepthView, formatLevel } from '@/features/chart/depth-view';
+import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT, TRADE_CREATED_EVENT } from '@/hooks/live-events';
 import { useLoaded } from '@/hooks/use-loaded';
 
 const UNAVAILABLE: Record<string, string> = {
@@ -74,11 +75,16 @@ export function LiquidityBars({ data, symbols }: { data: PoolLiquidity; symbols:
 }
 
 type PoolRef = Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'currency0Symbol' | 'currency1Symbol'>;
+// A swap in this pool moves the price the chart shows; the API drops its cached read when it announces the swap.
+const poolLive = (pool: PoolRef) => ({
+  eventName: POOL_CHANGED_EVENT,
+  matches: (payload: { chainId: number; poolId?: string }) => payload.chainId === pool.chainId && payload.poolId === pool.poolId.toLowerCase(),
+});
 const poolSymbols = (pool: PoolRef) => ({ token0: displaySymbol(pool.currency0Symbol ?? null), token1: displaySymbol(pool.currency1Symbol ?? null) });
 
 /** The Liquidity tab of a V3 / V4 pool. */
 export function PoolLiquidityChart({ pool, trailing }: { pool: PoolRef; trailing?: ReactNode }) {
-  const loaded = useLoaded(() => getPoolLiquidity(pool), [pool.chainId, pool.protocol, pool.poolId]);
+  const loaded = useLoaded(() => getPoolLiquidity(pool), [pool.chainId, pool.protocol, pool.poolId], poolLive(pool));
   const symbols = poolSymbols(pool);
   if (loaded.status === 'loading') return <div role="status" aria-label="Loading liquidity" className="h-80 w-full animate-pulse rounded-lg bg-muted" />;
   if (loaded.status === 'error') return <Message role="alert" trailing={trailing}>Could not load this pool&apos;s liquidity.</Message>;
@@ -99,7 +105,7 @@ export function PoolLiquidityChart({ pool, trailing }: { pool: PoolRef; trailing
 
 /** The Depth tab of a V3 / V4 pool: the order-book view of its liquidity (token0 is the base, token1 the quote). */
 export function PoolDepthChart({ pool, trailing }: { pool: PoolRef & { fee?: number }; trailing?: ReactNode }) {
-  const loaded = useLoaded(() => getPoolLiquidity(pool), [pool.chainId, pool.protocol, pool.poolId]);
+  const loaded = useLoaded(() => getPoolLiquidity(pool), [pool.chainId, pool.protocol, pool.poolId], poolLive(pool));
   const symbols = poolSymbols(pool);
   if (loaded.status === 'loading') return <div role="status" aria-label="Loading depth" className="h-80 w-full animate-pulse rounded-lg bg-muted" />;
   if (loaded.status === 'error') return <Message role="alert" trailing={trailing}>Could not load this pool&apos;s depth.</Message>;
@@ -119,7 +125,11 @@ export function PoolDepthChart({ pool, trailing }: { pool: PoolRef & { fee?: num
 export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol, trailing }: {
   chainId: number; tokenAddress: string; baseSymbol: string; quoteSymbol: string; trailing?: ReactNode;
 }) {
-  const loaded = useLoaded(() => getCurveDepth(chainId, tokenAddress), [chainId, tokenAddress]);
+  // A trade of the launch moves the curve's reserves (trade.created), and the API announces launch.changed once it has recomputed.
+  const loaded = useLoaded(() => getCurveDepth(chainId, tokenAddress), [chainId, tokenAddress], {
+    eventName: [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT],
+    matches: (payload) => payload.chainId === chainId && payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase(),
+  });
   if (loaded.status === 'loading') return <div role="status" aria-label="Loading depth" className="h-80 w-full animate-pulse rounded-lg bg-muted" />;
   if (loaded.status === 'error') return <Message role="alert" trailing={trailing}>Could not load the curve&apos;s depth.</Message>;
   const data = loaded.data;

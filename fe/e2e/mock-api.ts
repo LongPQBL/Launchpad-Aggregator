@@ -136,8 +136,8 @@ function rangeInterval(url: URL): number {
 }
 
 // A pool with several price ranges around the current price (tick 0 = 2,540 quote per base), and an order book derived from them.
-function mockLiquidity() {
-  const base = 2540;
+function mockLiquidity(priceBump = 0) {
+  const base = 2540 * (1 + priceBump);
   const tick0 = Math.round(Math.log(base) / Math.log(1.0001) / 60) * 60; // the current tick, consistent with the price
   const price = (tick: number) => 1.0001 ** tick;
   const ranges = [[-3000, -1000, 2], [-1000, -200, 6], [-200, 400, 12], [400, 1500, 5], [1500, 4000, 1.5]]
@@ -452,7 +452,7 @@ export function startMockApi(port: number): Server {
         ...(route.includes('/launches/') ? { poolCount: 3, unvaluedPools: 1 } : {}),
       }));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/liquidity$/.test(route)) {
-      res.end(JSON.stringify(mockLiquidity()));
+      res.end(JSON.stringify(mockLiquidity(route.toLowerCase().includes(mockPools[LIVE_POOL_INDEX]!.poolId.toLowerCase()) ? livePoolTrades.length * 0.1 : 0)));
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve`) {
       res.end(JSON.stringify({ venueId: 'pons-v2-curve:0xtoken', curveAddress: '0xcurve', active: true, volume24hQuote: '2', tradeCount24h: 5, lastPriceQuote: '0.000004' }));
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve/depth`) {

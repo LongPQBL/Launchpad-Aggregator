@@ -91,3 +91,17 @@ test('the Volume total on the pool page grows when a swap lands in that pool', a
   await historyRequest;
   await expect.poll(() => volumeTotal(page), { timeout: 3_000 }).not.toBe(before);
 });
+
+test('the Depth price on the pool page follows a swap in that pool', async ({ page, request }) => {
+  const poolId = `0x${(LIVE_POOL_INDEX + 1).toString(16).padStart(64, '0')}`;
+  const currency0 = `0x${(LIVE_POOL_INDEX + 101).toString(16).padStart(40, '0')}`;
+  await page.goto(`/pools/${CHAIN_ID}/uniswap_v4/${poolId}?displayedToken=${currency0}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Depth' }).click();
+  const headline = page.locator('p.text-2xl', { hasText: /^1 .* = / }).first();
+  await expect(headline).toBeVisible();
+  const before = await headline.textContent();
+  const liquidityRequest = page.waitForRequest((r) => r.url().includes('/liquidity'), { timeout: 1_500 });
+  await postSwap(request);
+  await liquidityRequest;
+  await expect.poll(async () => headline.textContent(), { timeout: 3_000 }).not.toBe(before);
+});
