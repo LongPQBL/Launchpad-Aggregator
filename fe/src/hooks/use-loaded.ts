@@ -9,7 +9,7 @@ export type Loaded<T> = { status: 'loading' } | { status: 'error' } | { status: 
 /** Runs `load` once when mounted (and again when `deps` change) and reports loading / error / ready; an answer for an older run is ignored. */
 export function useLoaded<T>(load: () => Promise<T>, deps: readonly unknown[],
   /** Reload quietly (the old answer stays on screen) whenever a matching announcement arrives. */
-  live?: { eventName: string | readonly string[]; matches: (payload: SseEventPayload) => boolean }): Loaded<T> {
+  live?: { eventName: string | readonly string[]; matches: (payload: SseEventPayload) => boolean; minIntervalMs?: number }): Loaded<T> {
   const [state, setState] = useState<{ deps: readonly unknown[]; value: Loaded<T> }>({ deps, value: { status: 'loading' } });
   useEffect(() => {
     let current = true;
@@ -28,6 +28,7 @@ export function useLoaded<T>(load: () => Promise<T>, deps: readonly unknown[],
     },
     deps,
     live?.eventName,
+    live?.minIntervalMs,
   );
   const stale = state.deps.length !== deps.length || state.deps.some((value, index) => value !== deps[index]);
   return stale ? { status: 'loading' } : state.value;

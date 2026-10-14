@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emitTradeCreated } from './live-events';
 import { useLiveFirstPage } from './use-live-first-page';
 
-function Probe({ fetchFirstPage }: { fetchFirstPage: () => Promise<void> }) {
-  useLiveFirstPage(() => true, fetchFirstPage, []);
+function Probe({ fetchFirstPage, minIntervalMs }: { fetchFirstPage: () => Promise<void>; minIntervalMs?: number }) {
+  useLiveFirstPage(() => true, fetchFirstPage, [], undefined, minIntervalMs);
   return null;
 }
 
@@ -33,6 +33,17 @@ describe('useLiveFirstPage', () => {
     const fetchFirstPage = vi.fn(async () => {});
     render(<Probe fetchFirstPage={fetchFirstPage} />);
     await act(async () => { for (let i = 0; i < 4; i += 1) emitTradeCreated({ chainId: 1 }); });
+    expect(fetchFirstPage).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
+    expect(fetchFirstPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('spaces fetches by the interval it is given, for reads the API limits more tightly', async () => {
+    const fetchFirstPage = vi.fn(async () => {});
+    render(<Probe fetchFirstPage={fetchFirstPage} minIntervalMs={4_000} />);
+    await act(async () => { emitTradeCreated({ chainId: 1 }); });
+    expect(fetchFirstPage).toHaveBeenCalledTimes(1);
+    await act(async () => { emitTradeCreated({ chainId: 1 }); await vi.advanceTimersByTimeAsync(3_000); });
     expect(fetchFirstPage).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(1_100); });
     expect(fetchFirstPage).toHaveBeenCalledTimes(2);

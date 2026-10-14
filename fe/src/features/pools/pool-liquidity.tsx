@@ -76,8 +76,11 @@ export function LiquidityBars({ data, symbols }: { data: PoolLiquidity; symbols:
 
 type PoolRef = Pick<PoolSummary, 'chainId' | 'protocol' | 'poolId' | 'currency0Symbol' | 'currency1Symbol'>;
 // A swap in this pool moves the price the chart shows; the API drops its cached read when it announces the swap.
+// These reads cost the API dozens of RPC calls, so it limits them to 20 a minute per client: refetch at most every 4 s (15 a minute).
+const RPC_BACKED_MIN_INTERVAL_MS = 4_000;
 const poolLive = (pool: PoolRef) => ({
   eventName: POOL_CHANGED_EVENT,
+  minIntervalMs: RPC_BACKED_MIN_INTERVAL_MS,
   matches: (payload: { chainId: number; poolId?: string }) => payload.chainId === pool.chainId && payload.poolId === pool.poolId.toLowerCase(),
 });
 const poolSymbols = (pool: PoolRef) => ({ token0: displaySymbol(pool.currency0Symbol ?? null), token1: displaySymbol(pool.currency1Symbol ?? null) });
@@ -128,6 +131,7 @@ export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
   // A trade of the launch moves the curve's reserves (trade.created), and the API announces launch.changed once it has recomputed.
   const loaded = useLoaded(() => getCurveDepth(chainId, tokenAddress), [chainId, tokenAddress], {
     eventName: [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT],
+    minIntervalMs: RPC_BACKED_MIN_INTERVAL_MS,
     matches: (payload) => payload.chainId === chainId && payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase(),
   });
   if (loaded.status === 'loading') return <div role="status" aria-label="Loading depth" className="h-80 w-full animate-pulse rounded-lg bg-muted" />;
