@@ -41,15 +41,18 @@ chain --HTTP 10 s sweep getLogs--> gap fill (also after a reconnect)
 
 1. **Subscription.** `eth_subscribe logs` with `topics[0]` in {CurveBuy, CurveSell, BuybackLocked, V3 `Swap`, V4 `Swap`} and no address
    filter (a 100k-address filter is not possible). There is no `newHeads` subscription. Each log is then kept only if its source is in the **watch set**:
-   curve addresses (`venues.kind='curve'`), V3 pools (`v3_pool`), V4 pool ids (`v4_pool`), read from the app DB and refreshed every 10 s
-   and on `launch.changed`. Before building this, step 0 counts the logs per second per topic on the real chain to size the filter cost.
+   curve addresses (`venues.kind='curve'`), V3 pools (`v3_pool`), V4 pool ids (`v4_pool`), read from the app DB and refreshed on a 10 s
+   timer only (there is no `launch.changed` listener; a new venue is picked up within 10 s). A V4 swap names its pool only in a topic, so it
+   is accepted only when the log's address is the V4 PoolManager (`v4PoolManager` in `incrementalSync.ts`): any contract can emit the same
+   event with a watched pool id. Before building this, step 0 counts the logs per second per topic on the real chain to size the filter cost.
 2. **Decode to Envio's raw shape.** The lane builds the same `Record<string, unknown>` that `envio/src/EventHandlers.ts` writes for that
    event (`poolAddress`/`curveAddress`/`poolId`, amounts, `txFrom`, `blockNumber`, `blockHash`, `txHash`, `logIndex`, `timestamp`, the
    Envio `id`). `timestamp` and `blockHash` come from the header cache (a header is fetched over HTTP once per block that holds a watched log and cached,
    512 blocks; it is evicted when one of its logs is reported removed and re-fetched once before concluding a block-hash mismatch); `txFrom` comes from one `eth_getTransactionByHash` per kept log
-   (batched, cached per tx). If a header or transaction cannot be had, the log is skipped, never guessed.
+   (one call per transaction, made one after another, cached per tx; not batched). If a header or transaction cannot be had, the log is skipped, never guessed.
 3. **Apply with the existing code.** `applyLiveRows` (in `incrementalSync.ts`, next to `applyRow`) applies decoded rows, with the
-   volume invalidation and quote-asset enqueue that follow; `applyEnvioPage` is unchanged. The lane calls it per block, in
+   volume invalidation and `trade.created` announcement that follow (no quote-asset feed job is enqueued: these streams never add a quote
+   asset); `applyEnvioPage` is unchanged. The lane calls it per block, in
    `(blockNumber, logIndex)` order. So hydration (price fields, side, activity kind, trader)
    is the same code; there is no second decoder to keep in step. A row reported `unresolved` is dropped and counted, not queued.
 4. **Idempotence.** Rows are inserted with `onConflictDoNothing` on the existing key `(chain_id, tx_hash, log_index)`. When Envio's tail
@@ -68,22 +71,47 @@ chain --HTTP 10 s sweep getLogs--> gap fill (also after a reconnect)
   which also covers a reconnect. **Only the sweep advances the saved block** (the WebSocket path does not), so a restart can re-scan at most
   one sweep interval, deduplicated by the unique key. A lane that never ran starts at the head and does not backfill. If the gap is
   larger than 20,000 blocks it skips ahead; Envio covers it.
-- **Parity.** The lane records the key of every row it writes in a small table, `fast_lane_rows(chain_id, tx_hash, log_index, written_at)`.
-  `npm run -w be fast-lane:parity` compares each recorded row with the row Envio produced for the same key on every column, reports
-  mismatches and missing keys, and deletes the entries it has checked. `trades` itself carries no marker.
+- **Reconcile.** Repair only compares `[fence-500, fence]` every few cycles, so a lane row from a reorged-away block that never got a
+  `removed` notice (sweep rows come over HTTP; the socket can drop one) could be missed if the fence jumps. `runFastLane` therefore runs
+  `reconcileLaneRows` (`be/src/fastLane/reconcile.ts`) every 60 s when `ENVIO_DATABASE_URL` is set (one warning at start when it is not:
+  reconcile is then off). It reads only `fast_lane_rows`, oldest first: for a row at or below Envio's processed block and older than
+  `FAST_LANE_RECONCILE_MIN_AGE_SECONDS` (300), it looks up Envio's raw row for the same `(chain_id, tx_hash, log_index)`. Same block hash:
+  kept for parity. No Envio row: the lane's trade (matched by the lane's own block hash) is deleted with repair's invalidations (volume
+  job, curve reserve checkpoint, `launch.changed`). Envio has it in another block: the lane's copy is deleted and Envio's row is applied in
+  its place (the app's insert ignores a conflict, so Envio's own pass could not have replaced it). It never touches a trade the lane did not write.
+- **Parity.** The lane records every row it writes in a small table, `fast_lane_rows(chain_id, tx_hash, log_index, stream, raw, block_number,
+  written_at)` — `raw` is the raw row it fed in. `npm run -w be fast-lane:parity` reads the oldest rows first, compares each recorded raw row
+  with the row Envio produced for the same key on every column, reports mismatches and missing keys, and deletes the entries that match. A
+  row whose trade is already gone (repair, reconcile or a `removed` log removed it) has its entry deleted and is counted as `repaired`, not
+  as missing. `trades` itself carries no marker.
+- **Curve pricing.** The curve replay (`be/src/market/curvePricing.ts`) needs each curve trade's fee and tax from Envio's `RawCurveTrade`,
+  which a lane-written trade does not have yet, and the lane can write a trade before an earlier one of the same launch exists. The replay
+  therefore stops at the block the Envio sync has applied for the `v2-curve` and `v2-buyback` streams (per stream the best of the tail and
+  history cursors' `processed_watermark`, then the lower of the two streams; a chain whose sync never ran prices nothing). Trades above it
+  are "not yet", never a failure or a backoff; trades at or below it must all have their raw rows. Deleting a lane curve trade
+  (`removeLaneTrade`) drops the launch's reserve checkpoint, as repair does.
+- **Watchdog.** viem's WebSocket reconnects every 2 s practically forever (its default gives up after 5 attempts, and its subscriptions
+  are then gone). The runner records when the socket last delivered logs (`lastSocketLogAt` in its stats; the sweep never sets it).
+  `runFastLane` warns every 60 s once no log batch has arrived for 120 s (the chain emits ~30 trade logs/s, so silence means a dead
+  subscription) and exits 1 after 600 s so a supervisor restarts it. SIGINT/SIGTERM end with an explicit exit (hard exit after 10 s).
 - **Coverage and safe head** keep using Envio's progress, so blocks beyond the fence still show as not confirmed.
 - **Order.** A row Envio adds late can sit before lane rows of the same bucket; the candle and volume workers already rebuild a bucket
   when any trade in it is inserted.
 
 ### Configuration
 
-`FAST_LANE_ENABLED` (default `false`), `RH_WS_RPC_URL`, `RH_HTTP_RPC_URL`, `FAST_LANE_MAX_GAP_BLOCKS` (20000). The CLIs redact RPC URLs in every error message (`redact.ts`). Tables
+`FAST_LANE_ENABLED` (default `false`), `RH_WS_RPC_URL`, `RH_HTTP_RPC_URL`, `FAST_LANE_MAX_GAP_BLOCKS` (20000), `ENVIO_DATABASE_URL`
+(enables reconcile), `FAST_LANE_RECONCILE_MIN_AGE_SECONDS` (300). HTTP calls time out after 3 s with no transport retries (the lane retries
+a lookup itself); a sweep tick is skipped while the previous sweep is still queued or running. The CLIs redact RPC URLs in every error
+message and route every `console.log/warn/error` argument through redaction, with process-level `unhandledRejection`/`uncaughtException`
+handlers that print a redacted message and exit 1 (`redact.ts`), since viem prints some socket errors itself. Tables
 `fast_lane_rows` and `fast_lane_state` come from migration `0055`. No change to the API or the
 browser: they already react to `trade.created`.
 
 ## Testing
 
-- Unit: decoder output equals the raw row Envio writes, for a recorded log of each of the five events (fixtures from real receipts); a log
+- Unit: decoder output equals the raw row Envio writes, for each of the five events, using synthetic logs encoded with viem from the same
+  ABI (not recorded receipts); a V4 swap from any address but the PoolManager is rejected; console redaction; watchdog thresholds. A log
   from an unwatched address, a missing header and a missing `tx.from` are skipped.
 - Integration (test DB): lane rows then Envio rows for the same events give one row and one announcement; lane rows beyond the fence
   survive a repair pass; a lane row whose block was replaced is deleted by repair and by a `removed` log; gap fill after a simulated drop.
@@ -97,7 +125,7 @@ Envio alone still produces every row.
 
 ## Risks
 
-- Two decoders for the same event (the lane's and Envio's handler) can drift; the parity command and the fixture tests are the guard.
+- Two decoders for the same event (the lane's and Envio's handler) can drift; the parity command and the decoder tests are the guard.
 - Provider limits: log subscriptions and `getLogs` quota on the RPC plan; the WebSocket URL in `envio/.env` is a private key and must stay
   out of the repository.
 - A bug that writes a wrong row Envio would also write identically is not caught by repair; the shared `applyRow` limits that class.
@@ -106,6 +134,9 @@ Envio alone still produces every row.
 
 - Launch and lifecycle repair windows are still unbounded above the fence; the lane writes neither, so they are unaffected.
 - The saved block is advanced only by the sweep.
-- The parity command orders nothing (a limit without an order) and compares raw rows.
-- viem errors outside the CLIs' own try/catch could still print a raw URL (there is no process-level handler yet).
+- The parity command compares raw rows.
+- The watch set reloads every venue every 10 s (~167k rows, estimated ~10 MB per refresh). Make it incremental before running the lane
+  against any remote database.
+- `fast_lane_rows` grows ~19k rows/day unless parity or reconcile runs.
+- Console redaction covers `console.*` only; a library writing straight to `process.stdout`/`stderr` would bypass it (none is known to).
 - No live-trade latency of the lane has been measured; the success criteria above are targets.

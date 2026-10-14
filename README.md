@@ -166,8 +166,15 @@ tức chặng chain → Envio → sync → Postgres. Dùng nó để so trước
 **Fast lane (WebSocket, mặc định tắt):** một tiến trình riêng ghi giao dịch chính thức của launch (curve buy/sell, buyback, swap V3/V4 của pool
 chính thức) vào `trades` ngay từ log WebSocket của chain, trước khi Envio kịp quét; Envio vẫn là nguồn đúng đắn, nó bổ sung phần lane bỏ sót
 và `incrementalRepair` xoá dòng sai/reorg. Bật bằng `FAST_LANE_ENABLED=true` và `RH_WS_RPC_URL` (URL riêng tư, không đưa vào repo), rồi chạy
-`npm run -w be fast-lane:run`. Đo tốc độ log và trễ WebSocket: `npm run -w be fast-lane:measure -- 90`. So các dòng lane đã ghi với dòng của
-Envio: `npm run -w be fast-lane:parity` (thoát với mã 1 nếu có khác biệt). `GET /v1/metrics` có `lagByVia.fast` và `lagByVia.envio` để so
+`npm run -w be fast-lane:run`. Đếm số log mỗi giây theo từng sự kiện (chỉ đếm tốc độ log, không đo trễ WebSocket):
+`npm run -w be fast-lane:measure -- 90`. So các dòng lane đã ghi với dòng của Envio: `npm run -w be fast-lane:parity` (thoát với mã 1 nếu
+có khác biệt; dòng nào mà giao dịch đã bị xoá thì được tính là `repaired` và bỏ đi). Khi có `ENVIO_DATABASE_URL`, `fast-lane:run` cứ 60 s
+chạy reconcile: dòng lane đã cũ (mặc định 300 s, `FAST_LANE_RECONCILE_MIN_AGE_SECONDS`) và nằm dưới block Envio đã xử lý mà Envio không có
+(hoặc có ở block khác) thì bị xoá (và thay bằng dòng của Envio nếu có); không có biến này thì reconcile tắt (in một cảnh báo). Swap V4 chỉ
+được nhận khi log đến từ PoolManager. Watchdog: WebSocket im lặng 120 s thì cảnh báo mỗi phút, 600 s thì thoát mã 1 để supervisor khởi
+động lại. Worker định giá curve chỉ định giá tới block mà sync Envio đã áp dụng cho `v2-curve`/`v2-buyback` (giao dịch lane ghi phía trên
+chờ, không bị tính là lỗi). Hạn chế: watch set tải lại toàn bộ venue mỗi 10 s (~167k dòng, ước ~10 MB/lần) — phải làm tăng dần trước khi
+chạy với DB từ xa; `fast_lane_rows` tăng ~19k dòng/ngày nếu không chạy parity hoặc reconcile. `GET /v1/metrics` có `lagByVia.fast` và `lagByVia.envio` để so
 độ trễ hai đường. Tắt: bỏ biến `FAST_LANE_ENABLED` rồi dừng tiến trình; không có thành phần nào khác phụ thuộc vào nó. Chưa đo độ trễ
 của lane trên giao dịch thật; mục tiêu là p50 từ chain đến API dưới ~1,5 s và 0 khác biệt parity trong 24 giờ.
 
