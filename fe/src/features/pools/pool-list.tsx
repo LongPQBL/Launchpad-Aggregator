@@ -81,6 +81,10 @@ function PoolRowsSkeleton({ count }: { count: number }) {
   ));
 }
 
+function poolKey(pool: PoolSummary): string {
+  return `${pool.chainId}:${pool.protocol}:${pool.poolId}`;
+}
+
 export function PoolList({ page, error = false, tokenAddress, chainId, displayedToken, primaryVenue }: {
   page: PoolPage | null; error?: boolean; tokenAddress?: string; chainId?: number;
   displayedToken?: PoolListDisplayedToken;
@@ -94,8 +98,14 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   const [loadError, setLoadError] = useState(false);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
-  const sortedItems = useMemo(() => {
-    if (sortBy === null) return items;
+  // The order is decided when the user sorts, a page is added, or the list changes size - never by a live
+  // refresh, which only updates the numbers of the rows already placed.
+  const itemsRef = useRef(items);
+  useEffect(() => { itemsRef.current = items; });
+  const order = useMemo(() => {
+    const keys = items.map(poolKey);
+    if (sortBy === null) return keys;
+    const byKey = new Map(items.map((pool) => [poolKey(pool), pool]));
     return [...items].sort((a, b) => {
       const left = poolSortValue(a, sortBy);
       const right = poolSortValue(b, sortBy);
@@ -104,10 +114,17 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       if (right === null) return -1;
       const comparison = left - right;
       return sortDirection === 'asc' ? comparison : -comparison;
-    });
-  }, [items, sortBy, sortDirection]);
+    }).map((pool) => poolKey(byKey.get(poolKey(pool))!));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items.length, sortBy, sortDirection]);
+  const sortedItems = useMemo(() => {
+    const byKey = new Map(items.map((pool) => [poolKey(pool), pool]));
+    const placed = order.flatMap((key) => byKey.get(key) ?? []);
+    const placedKeys = new Set(order);
+    return [...placed, ...items.filter((pool) => !placedKeys.has(poolKey(pool)))];
+  }, [items, order]);
   // The launch's official Pons pool is pinned to the top of the list (not shown as a separate card).
-  const rowKey = (pool: PoolSummary) => `${pool.chainId}:${pool.protocol}:${pool.poolId}`;
+  const rowKey = poolKey;
   const officialKey = primaryVenue?.kind === 'pool' && primaryVenue.pool ? rowKey(primaryVenue.pool) : null;
   const isOfficial = (pool: PoolSummary) => pool.ponsDesignated || rowKey(pool) === officialKey;
   const displayedRows = useMemo(() => {
@@ -135,7 +152,8 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   // A swap announced in a listed pool refreshes the numbers of the rows on screen in place (no reshuffling,
   // no new rows); the page-wide router.refresh() still brings in pools created since.
   useLiveFirstPage(
-    (payload) => chainId === undefined || payload.chainId === chainId,
+    // Only a swap in a pool on this list matters; any other pool's swap leaves these rows unchanged.
+    (payload) => payload.poolId !== undefined && itemsRef.current.some((pool) => pool.chainId === payload.chainId && pool.poolId.toLowerCase() === payload.poolId),
     async (isStale) => {
       if (tokenAddress && chainId === undefined) return;
       const fresh = tokenAddress

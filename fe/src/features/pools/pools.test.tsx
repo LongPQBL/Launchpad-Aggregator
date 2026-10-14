@@ -290,4 +290,26 @@ describe('Pools UI', () => {
     expect(after[0]).toContain('Official Pons pool');
     expect(after[1]).not.toContain('Official Pons pool');
   });
+
+  it('ignores a swap in a pool that is not listed', async () => {
+    vi.mocked(getPools).mockClear();
+    render(<PoolList page={{ items: [pool], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: `0x${'9'.repeat(64)}` }); });
+    expect(getPools).not.toHaveBeenCalled();
+  });
+
+  it('updates the numbers but keeps the order the user sorted by when a swap is announced', async () => {
+    const low: PoolSummary = { ...pool, poolId: `0x${'1'.repeat(64)}`, ponsDesignated: false, volume24hUsd: '100' };
+    const high: PoolSummary = { ...pool, poolId: `0x${'2'.repeat(64)}`, ponsDesignated: false, volume24hUsd: '900' };
+    vi.mocked(getPools).mockResolvedValue({ items: [{ ...low, volume24hUsd: '5000' }, high], nextCursor: null, supportedProtocols: ['uniswap_v4'] });
+    render(<PoolList page={{ items: [low, high], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: /24H Volume/ }));
+    const rowText = () => screen.getAllByRole('row').slice(1).map((row) => row.textContent ?? '');
+    const before = rowText();
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: low.poolId }); });
+    const after = rowText();
+    // `low` now has the biggest volume but stays second, since the user's sort was not re-applied.
+    expect(after[0]).toEqual(before[0]);
+    expect(after[1]).not.toEqual(before[1]);
+  });
 });
