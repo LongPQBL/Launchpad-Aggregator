@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeRefreshedPage } from './merge-refreshed-page';
+import { mergeRefreshedPage, refreshRowsInPlace } from './merge-refreshed-page';
 
 const key = (n: number) => String(n);
 
@@ -11,5 +11,25 @@ describe('mergeRefreshedPage', () => {
 
   it('uses the fresh cursor when nothing beyond the first page was loaded', () => {
     expect(mergeRefreshedPage([3, 2], 'fresh', [3, 2], 'stale', (n) => key(n))).toEqual({ items: [3, 2], nextCursor: 'fresh' });
+  });
+});
+
+describe('refreshRowsInPlace', () => {
+  const k = (item: { id: string }) => item.id;
+  const row = (id: string, v: number) => ({ id, v });
+
+  it('updates the numbers of shown rows without moving them, even when the fresh ranking differs', () => {
+    const shown = [row('a', 1), row('b', 2), row('c', 3)];
+    const fresh = [row('c', 30), row('a', 10), row('b', 20)];
+    expect(refreshRowsInPlace(fresh, shown, k)).toEqual([row('a', 10), row('b', 20), row('c', 30)]);
+  });
+
+  it('ignores fresh rows that are not shown, and keeps shown rows the fresh page no longer has', () => {
+    expect(refreshRowsInPlace([row('z', 9), row('a', 5)], [row('a', 1), row('b', 2)], k)).toEqual([row('a', 5), row('b', 2)]);
+  });
+
+  it('puts new rows ahead of the first shown row at the top when the list is newest-first', () => {
+    const fresh = [row('n2', 1), row('n1', 1), row('a', 5), row('b', 6)];
+    expect(refreshRowsInPlace(fresh, [row('a', 1), row('b', 2)], k, true)).toEqual([row('n2', 1), row('n1', 1), row('a', 5), row('b', 6)]);
   });
 });

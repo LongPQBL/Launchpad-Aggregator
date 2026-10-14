@@ -7,6 +7,8 @@ import { chainIcon, chainName, ROADMAP_CHAIN_IDS } from '@/api/chains';
 import { formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
 import { PercentChange, RollingText } from '@/components/percent-change';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
+import { refreshRowsInPlace } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 import { launchpadName, launchpadIconSrc, LaunchpadIcon } from './launchpad-icon';
 import { TokenCell } from './token-cell';
@@ -188,6 +190,10 @@ function LaunchRowsSkeleton({ count }: { count: number }) {
   ));
 }
 
+function launchKey(launch: LaunchSummary): string {
+  return `${launch.chainId}-${launch.tokenAddress}`;
+}
+
 export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab, sort: initialSort, direction: initialDirection, loading = false }: LaunchListProps) {
   const [items, setItems] = useState<readonly LaunchSummary[]>(page?.items ?? []);
   const [nextCursor, setNextCursor] = useState<string | null>(page?.nextCursor ?? null);
@@ -265,9 +271,17 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
     }
   }, [nextCursor, appliedSearch, selectedChains, selectedPlatforms, selectedStatus, sortBy, sortDirection]);
 
+  // A server refresh with the same filters only updates the rows on screen in place (no reshuffling);
+  // new filters, or a first render, replace the list.
+  const filterSignature = JSON.stringify([chainId, platform, search, status, tab, initialSort, initialDirection]);
+  const appliedSignatureRef = useRef<string | null>(null);
   useEffect(() => {
-    // Reset client filters when the server supplies a new page (including a direct URL visit).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const sameFilters = appliedSignatureRef.current === filterSignature;
+    appliedSignatureRef.current = filterSignature;
+    if (sameFilters && page) {
+      setItems((shown) => refreshRowsInPlace(page.items, shown, launchKey, (initialSort ?? defaultSort(tab)) === 'recent'));
+      return;
+    }
     setItems(page?.items ?? []);
     setNextCursor(page?.nextCursor ?? null);
     setLoadError(false);
@@ -280,7 +294,24 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
     setSelectedStatus(status);
     setFilterError(false);
     setFiltering(false);
-  }, [page, chainId, platform, search, status, tab, initialSort, initialDirection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filterSignature]);
+
+  // A trade announced on a listed chain refreshes the numbers right away, with the filters currently applied.
+  const liveRef = useRef({ filtering, sortBy });
+  useEffect(() => { liveRef.current = { filtering, sortBy }; });
+  const filterKey = JSON.stringify([selectedChains, selectedPlatforms, appliedSearch, selectedStatus, sortBy, sortDirection]);
+  useLiveFirstPage(
+    (payload) => selectedChains.length === 0 || selectedChains.includes(payload.chainId),
+    async (isStale) => {
+      if (liveRef.current.filtering) return;
+      const fresh = await getLaunches({ chainId: selectedChains.length ? selectedChains : undefined, platform: selectedPlatforms.length ? selectedPlatforms : undefined,
+        search: appliedSearch, status: selectedStatus, sort: sortBy, ...(queryDirection(sortBy, sortDirection) ? { direction: sortDirection } : {}) });
+      if (isStale() || liveRef.current.filtering) return;
+      setItems((shown) => refreshRowsInPlace(fresh.items, shown, launchKey, sortBy === 'recent'));
+    },
+    [filterKey],
+  );
 
   useEffect(() => {
     const onPopState = () => {

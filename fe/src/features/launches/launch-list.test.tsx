@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getLaunches, type LaunchSummary, type Source } from '@/api/client';
+import { emitTradeCreated } from '@/hooks/live-events';
 import { LaunchList } from './launch-list';
 import { textContent } from '../../test-utils/text-content';
 
@@ -643,5 +644,30 @@ describe('LaunchList', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(/could not load/i);
     expect(screen.getByRole('link', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  describe('live trades', () => {
+    const sources: Source[] = [];
+    const names = () => screen.getAllByRole('row').map((r) => r.textContent ?? '').filter((t) => /Token [AB]/.test(t)).map((t) => /Token ([AB])/.exec(t)![1]);
+
+    it('refreshes shown rows as soon as a trade is announced and keeps their order', async () => {
+      const a = launch({ tokenAddress: '0xaaa', name: 'Token A', symbol: 'TKA' });
+      const b = launch({ tokenAddress: '0xbbb', name: 'Token B', symbol: 'TKB' });
+      // B overtook A on the server, but the reader's list must not reshuffle.
+      vi.mocked(getLaunches).mockResolvedValue({ items: [{ ...b, officialVolume24hUsd: '900' }, { ...a, officialVolume24hUsd: '100' }], nextCursor: null });
+      render(<LaunchList page={{ items: [a, b], nextCursor: null }} sources={sources} error={false} />);
+      expect(names()).toEqual(['A', 'B']);
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xaaa' }); });
+      expect(getLaunches).toHaveBeenCalledTimes(1);
+      expect(names()).toEqual(['A', 'B']);
+      expect(screen.getAllByRole('row').map((r) => r.textContent).join(' ')).toMatch(/\$100/);
+    });
+
+    it('ignores a trade on a chain the filter excludes', async () => {
+      vi.mocked(getLaunches).mockClear();
+      render(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={sources} error={false} chainId={[1]} />);
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xaaa' }); });
+      expect(getLaunches).not.toHaveBeenCalled();
+    });
   });
 });
