@@ -32,31 +32,20 @@ async function addTrade(txHash: string, logIndex: number, blockNumber: number, s
     [`${txHash}-${logIndex}`, chainId, txHash, logIndex, feeRaw.toString(), taxRaw.toString()]);
 }
 
-// The Envio sync's applied block for the curve and buyback streams: the replay never prices past it.
-async function setConfirmedBlock(block: number) {
-  for (const stream of ['v2-curve', 'v2-buyback']) {
-    for (const lane of ['tail', 'history']) {
-      await pool.query(`INSERT INTO envio_sync_cursors (chain_id, stream, lane, block_number, log_index, raw_id, processed_watermark)
-        VALUES ($1, $2, $3, 0, -1, '', $4) ON CONFLICT (chain_id, stream, lane) DO UPDATE SET processed_watermark = EXCLUDED.processed_watermark`,
-      [chainId, stream, lane, lane === 'tail' ? block : Math.min(block, 50)]);
-    }
-  }
-}
-
-async function addLaneTrade(txHash: string, logIndex: number, blockNumber: number, tokenAmountRaw: bigint, quoteAmountRaw: bigint) {
+async function addLaneTrade(txHash: string, logIndex: number, blockNumber: number, tokenAmountRaw: bigint, quoteAmountRaw: bigint, feeRaw = 0n, taxRaw = 0n) {
   // A trade the fast lane wrote: in `trades`, but Envio has no raw row for it yet.
   await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
     side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'buy',$9,$10,$11,'CurveBuy','user_trade',$2)`,
   [chainId, token, venueId, blockNumber, hash('a'), txHash, logIndex, 1_700_000_000, tokenAmountRaw.toString(), quoteAmountRaw.toString(), quote]);
+  await pool.query(`INSERT INTO fast_lane_rows (chain_id, tx_hash, log_index, stream, raw, block_number) VALUES ($1,$2,$3,'v2-curve',$5,$4)`,
+    [chainId, txHash, logIndex, blockNumber, JSON.stringify({ feeRaw: feeRaw.toString(), taxRaw: taxRaw.toString() })]);
 }
 
 async function addRawRow(txHash: string, logIndex: number, feeRaw: bigint, taxRaw: bigint) {
   await envioPool.query(`INSERT INTO ${tables.rawCurveTradeTable} (id, "chainId", "txHash", "logIndex", "feeRaw", "taxRaw") VALUES ($1,$2,$3,$4,$5,$6)`,
     [`${txHash}-${logIndex}`, chainId, txHash, logIndex, feeRaw.toString(), taxRaw.toString()]);
 }
-
-let savedCursors: Record<string, unknown>[] = [];
 
 async function addBuyback(txHash: string, logIndex: number, blockNumber: number, tokensLockedRaw: bigint, quoteSpentRaw: bigint) {
   await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
@@ -66,7 +55,6 @@ async function addBuyback(txHash: string, logIndex: number, blockNumber: number,
 }
 
 beforeAll(async () => {
-  savedCursors = (await pool.query(`SELECT * FROM envio_sync_cursors WHERE chain_id = $1 AND stream IN ('v2-curve', 'v2-buyback')`, [chainId])).rows;
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_curve_pricing');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS ${tables.rawCurveTradeTable} (id text primary key,
     "chainId" int, "txHash" text, "logIndex" int, "feeRaw" numeric, "taxRaw" numeric)`);
@@ -85,18 +73,14 @@ beforeEach(async () => {
   __resetCurvePricingBackoffForTests();
   await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query('DELETE FROM fast_lane_rows WHERE chain_id = $1', [chainId]);
   await envioPool.query(`DELETE FROM ${tables.rawCurveTradeTable} WHERE "chainId" = $1`, [chainId]);
-  await setConfirmedBlock(1_000_000);
 });
 
 afterAll(async () => {
-  await pool.query(`DELETE FROM envio_sync_cursors WHERE chain_id = $1 AND stream IN ('v2-curve', 'v2-buyback')`, [chainId]);
-  for (const row of savedCursors) {
-    await pool.query(`INSERT INTO envio_sync_cursors (chain_id, stream, lane, block_number, log_index, raw_id, processed_watermark, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, [row.chain_id, row.stream, row.lane, row.block_number, row.log_index, row.raw_id, row.processed_watermark, row.updated_at]);
-  }
   await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query('DELETE FROM fast_lane_rows WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM venues WHERE id = $1', [venueId]);
   await pool.query('DELETE FROM launches WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM sources WHERE id = $1', [source]);
@@ -166,55 +150,29 @@ describe('applyCurvePricingOnce', () => {
     expect(after.processed).toBe(1);
   });
 
-  it('stops at the Envio-confirmed block: a lane-written trade above it is not yet due, never a failure or a backoff', async () => {
+  it('prices a trade the lane wrote at once, from the fee and tax the lane recorded, with the same result as Envio\'s row', async () => {
     await addTrade(hash('8'), 1, 500, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
-    await addLaneTrade(hash('9'), 1, 502, 50n, 60n);
-    await setConfirmedBlock(501);
-
-    const first = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-    expect(first).toMatchObject({ processed: 1, pricedTrades: 1, failed: 0 });
+    await addLaneTrade(hash('9'), 1, 502, 50n, 60n, 2n, 1n); // no Envio raw row for this one
+    const report = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
+    expect(report).toMatchObject({ pricedTrades: 2, failed: 0 });
     const lanePrice = (await pool.query(`SELECT price_numerator_raw FROM trades WHERE chain_id = $1 AND tx_hash = $2`, [chainId, hash('9')])).rows[0];
-    expect(lanePrice.price_numerator_raw).toBeNull();
-    const checkpoint = (await pool.query(`SELECT last_block_number FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2`, [chainId, token])).rows[0];
-    expect(checkpoint.last_block_number).toBe('500');
+    expect(lanePrice.price_numerator_raw).not.toBeNull();
 
-    // Nothing is due below the cap any more, so the launch does not take a batch slot and is not backed off.
-    const again = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-    expect(again).toMatchObject({ processed: 0, failed: 0 });
-
-    // Envio reaches the block: the raw row exists and the cap moves, so the same tick prices it.
-    await addRawRow(hash('9'), 1, 0n, 0n);
-    await setConfirmedBlock(502);
-    expect(await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables)).toMatchObject({ processed: 1, pricedTrades: 1, failed: 0 });
-  });
-
-  it('a trade the lane wrote before an earlier one of the same launch existed is priced in order once Envio fills the gap', async () => {
-    await addTrade(hash('b'), 1, 600, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
-    await addLaneTrade(hash('d'), 1, 602, 45n, 30n); // the lane wrote 602 but missed 601
-    await setConfirmedBlock(600); // the sync has applied everything up to 600 only
-    await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-
-    // Envio's pass inserts 601 (with its raw row) and the raw row for 602, and moves the cap past both.
-    await addTrade(hash('c'), 1, 601, 'CurveSell', 'sell', 50n, 40n, 2n, 1n);
-    await addRawRow(hash('d'), 1, 0n, 0n);
-    await setConfirmedBlock(602);
-    await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-
-    const incremental = (await pool.query(`SELECT tx_hash, price_numerator_raw, price_denominator_raw FROM trades
-      WHERE chain_id = $1 AND token_address = $2 ORDER BY block_number, log_index`, [chainId, token])).rows;
-    // The same prices as one replay of all three trades from scratch.
+    // The same launch replayed with Envio's row for the second trade gives the same prices.
+    const before = (await pool.query(`SELECT tx_hash, price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND token_address = $2 ORDER BY block_number`, [chainId, token])).rows;
+    await addRawRow(hash('9'), 1, 2n, 1n);
+    await pool.query('DELETE FROM fast_lane_rows WHERE chain_id = $1', [chainId]);
     await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
-    await pool.query('UPDATE trades SET price_numerator_raw = NULL, price_denominator_raw = NULL WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
     await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-    const fromScratch = (await pool.query(`SELECT tx_hash, price_numerator_raw, price_denominator_raw FROM trades
-      WHERE chain_id = $1 AND token_address = $2 ORDER BY block_number, log_index`, [chainId, token])).rows;
-    expect(incremental).toEqual(fromScratch);
-    expect(incremental.every((row) => row.price_numerator_raw !== null)).toBe(true);
+    const after = (await pool.query(`SELECT tx_hash, price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND token_address = $2 ORDER BY block_number`, [chainId, token])).rows;
+    expect(after).toEqual(before);
   });
 
-  it('prices nothing on a chain whose Envio sync never ran', async () => {
-    await addTrade(hash('e'), 1, 700, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
-    await pool.query(`DELETE FROM envio_sync_cursors WHERE chain_id = $1 AND stream IN ('v2-curve', 'v2-buyback')`, [chainId]);
-    expect(await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables)).toMatchObject({ processed: 0, failed: 0 });
+  it('a trade with neither an Envio raw row nor a lane record is still a failure that backs off', async () => {
+    await addTrade(hash('b'), 1, 600, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
+      side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
+      VALUES ($1,$2,$3,601,$4,$5,1,1700000000,'buy','5','6',$6,'CurveBuy','user_trade',$2)`, [chainId, token, venueId, hash('a'), hash('c'), quote]);
+    expect(await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables)).toMatchObject({ failed: 1 });
   });
 });

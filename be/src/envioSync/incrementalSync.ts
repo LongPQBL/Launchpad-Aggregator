@@ -3,7 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Address, Hash } from 'viem';
 import type { Database, DbOrTx } from '../db/client.js';
 import type { Launch, LifecycleStatus, Venue, VenueKind } from '../domain/types.js';
-import { launches, venues, trades, lifecycleTransitions, sources } from '../db/schema.js';
+import { launches, venues, trades, lifecycleTransitions, sources, launchCurveReserves } from '../db/schema.js';
 import { claimSyncCursor, advanceSyncCursor, STREAMS, type Stream, type Lane, type CursorPosition, type SyncCursor } from './incrementalCursor.js';
 import { readRawPage, readRawRowById, readRawRowByTxLog } from './incrementalPage.js';
 import { claimDueUnresolvedEvents, earliestUnresolvedBlock, enqueueUnresolvedEvent, settleUnresolvedEvent } from './unresolvedEvents.js';
@@ -207,6 +207,14 @@ async function applyV2Launch(
   return 'applied';
 }
 
+// The curve pricing replay keeps a per-launch checkpoint (reserves after its last priced trade). A trade that lands below it (Envio filling
+// a gap the fast lane left, or the history lane) would make those reserves wrong, so the checkpoint goes and the next tick replays in order.
+async function dropCurveCheckpointPassedBy(tx: DbOrTx, trade: { chainId: number; tokenAddress: string; blockNumber: bigint; logIndex: number }): Promise<void> {
+  await tx.delete(launchCurveReserves).where(and(
+    eq(launchCurveReserves.chainId, trade.chainId), eq(launchCurveReserves.tokenAddress, trade.tokenAddress),
+    sql`(${launchCurveReserves.lastBlockNumber}, ${launchCurveReserves.lastLogIndex}) > (${trade.blockNumber.toString()}::bigint, ${trade.logIndex})`));
+}
+
 // ---- v2-curve / v2-buyback ----
 async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const curveAddress = str(raw.curveAddress).toLowerCase();
@@ -228,6 +236,7 @@ async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unk
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) await dropCurveCheckpointPassedBy(tx, trade);
   if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }
@@ -250,6 +259,7 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length > 0) await dropCurveCheckpointPassedBy(tx, trade);
   if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }

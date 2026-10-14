@@ -57,19 +57,8 @@ function backedOffKeys(nowMs: number): string[] {
 }
 
 interface DueLaunch {
-  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number; confirmedBlock: bigint;
+  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number;
 }
-
-// The highest block, per chain, up to which the Envio sync has applied every curve and buyback row (the best of its tail and history
-// lanes for each stream, then the lower of the two streams). Two reasons the replay stops there: a trade the WebSocket fast lane wrote
-// has no Envio raw row (fee/tax) until Envio reaches its block, and the lane can write a trade before an earlier one of the same launch
-// exists, so a checkpoint moved past it would be wrong for good. Trades above it are "not yet", never a failure. A chain whose sync never
-// ran has no cap and prices nothing.
-const CONFIRMED_CURVE_BLOCK_SQL = `
-  SELECT chain_id, min(best) AS confirmed_block FROM (
-    SELECT chain_id, stream, max(processed_watermark) AS best FROM envio_sync_cursors
-    WHERE stream IN ('v2-curve', 'v2-buyback') GROUP BY chain_id, stream
-  ) s GROUP BY chain_id HAVING count(best) = 2`;
 
 interface DueTrade {
   txHash: string; logIndex: number; blockNumber: bigint; sourceEvent: string;
@@ -81,12 +70,11 @@ interface DueTrade {
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
 async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
   const result = await pool.query(`
-    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, c.confirmed_block
+    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals
     FROM launches l
-    JOIN (${CONFIRMED_CURVE_BLOCK_SQL}) c ON c.chain_id = l.chain_id
     JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
     JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
-      AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked') AND t.block_number <= c.confirmed_block
+      AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
     LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
     WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
       AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
@@ -95,7 +83,6 @@ async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly
   return result.rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),
     tokenDecimals: Number(row.token_decimals), quoteAssetDecimals: Number(row.quote_asset_decimals),
-    confirmedBlock: BigInt(String(row.confirmed_block)),
   }));
 }
 
@@ -113,14 +100,14 @@ Promise<{ reserves: CurveReserves; lastBlockNumber: bigint; lastLogIndex: number
 }
 
 async function readDueTrades(pool: Pool, chainId: number, tokenAddress: string,
-  afterBlock: bigint, afterLogIndex: number, confirmedBlock: bigint): Promise<DueTrade[]> {
+  afterBlock: bigint, afterLogIndex: number): Promise<DueTrade[]> {
   const result = await pool.query(`
     SELECT t.tx_hash, t.log_index, t.block_number, t.source_event, t.side, t.token_amount_raw, t.quote_amount_raw
     FROM trades t JOIN venues v ON v.id = t.venue_id
     WHERE t.chain_id = $1 AND t.token_address = $2 AND v.kind = 'curve' AND v.official = true
       AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
-      AND (t.block_number, t.log_index) > ($3, $4) AND t.block_number <= $5
-    ORDER BY t.block_number ASC, t.log_index ASC`, [chainId, tokenAddress, afterBlock.toString(), afterLogIndex, confirmedBlock.toString()]);
+      AND (t.block_number, t.log_index) > ($3, $4)
+    ORDER BY t.block_number ASC, t.log_index ASC`, [chainId, tokenAddress, afterBlock.toString(), afterLogIndex]);
   return result.rows.map((row: Record<string, unknown>) => ({
     txHash: String(row.tx_hash), logIndex: Number(row.log_index), blockNumber: BigInt(String(row.block_number)),
     sourceEvent: String(row.source_event), side: String(row.side),
@@ -128,14 +115,21 @@ async function readDueTrades(pool: Pool, chainId: number, tokenAddress: string,
   }));
 }
 
-async function readFeeTax(envioPool: Pool, table: string, chainId: number, txHash: string, logIndex: number):
+// Fee and tax of a curve buy/sell come from Envio's raw row. A trade the WebSocket fast lane wrote has no such row until Envio reaches its
+// block, but the lane recorded the same event (fee and tax included) in fast_lane_rows, so it is priced at once instead of waiting.
+async function readFeeTax(pool: Pool, envioPool: Pool, table: string, chainId: number, txHash: string, logIndex: number):
 Promise<{ feeRaw: bigint; taxRaw: bigint } | null> {
   const result = await envioPool.query(
     `SELECT "feeRaw", "taxRaw" FROM ${table} WHERE "chainId" = $1 AND "txHash" = $2 AND "logIndex" = $3`,
     [chainId, txHash, logIndex]);
   const row = result.rows[0] as Record<string, unknown> | undefined;
-  if (!row) return null;
-  return { feeRaw: BigInt(String(row.feeRaw)), taxRaw: BigInt(String(row.taxRaw)) };
+  if (row) return { feeRaw: BigInt(String(row.feeRaw)), taxRaw: BigInt(String(row.taxRaw)) };
+  const lane = await pool.query(
+    `SELECT raw->>'feeRaw' AS fee, raw->>'taxRaw' AS tax FROM fast_lane_rows WHERE chain_id = $1 AND tx_hash = $2 AND log_index = $3`,
+    [chainId, txHash.toLowerCase(), logIndex]);
+  const laneRow = lane.rows[0] as { fee: string | null; tax: string | null } | undefined;
+  if (!laneRow || laneRow.fee === null || laneRow.tax === null) return null;
+  return { feeRaw: BigInt(laneRow.fee), taxRaw: BigInt(laneRow.tax) };
 }
 
 function priceFromReserves(reserves: CurveReserves, tokenDecimals: number, quoteAssetDecimals: number):
@@ -168,14 +162,14 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
         if (totalSupply === null) throw new Error('totalSupply() unavailable');
         reserves = { quote: 0n, token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
       }
-      const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex, launch.confirmedBlock);
+      const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex);
       if (dueTrades.length === 0) continue;
       const updates: { txHash: string; logIndex: number; priceNumeratorRaw: string; priceDenominatorRaw: string }[] = [];
       for (const trade of dueTrades) {
         if (trade.sourceEvent === 'BuybackLocked') {
           reserves = replayCurveBuyback(reserves, { quoteSpentRaw: trade.quoteAmountRaw, tokensLockedRaw: trade.tokenAmountRaw });
         } else {
-          const feeTax = await readFeeTax(envioPool, tables.rawCurveTradeTable, launch.chainId, trade.txHash, trade.logIndex);
+          const feeTax = await readFeeTax(pool, envioPool, tables.rawCurveTradeTable, launch.chainId, trade.txHash, trade.logIndex);
           if (!feeTax) throw new Error(`Missing raw curve trade row for ${trade.txHash}:${trade.logIndex}`);
           reserves = replayCurveEvent(reserves, { side: trade.side as 'buy' | 'sell',
             quoteAmountRaw: trade.quoteAmountRaw, tokenAmountRaw: trade.tokenAmountRaw, ...feeTax });
@@ -192,6 +186,19 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
             `UPDATE trades SET price_numerator_raw = $1, price_denominator_raw = $2
              WHERE chain_id = $3 AND tx_hash = $4 AND log_index = $5`,
             [update.priceNumeratorRaw, update.priceDenominatorRaw, launch.chainId, update.txHash, update.logIndex]);
+        }
+        // A trade inserted below the replay's last one while it ran (the lane can write a later trade before an earlier one exists) has no
+        // price here: the reserves just computed are then wrong, so keep no checkpoint and let the next tick replay from the start.
+        const missed = await dbClient.query(
+          `SELECT 1 FROM trades t JOIN venues v ON v.id = t.venue_id
+           WHERE t.chain_id = $1 AND t.token_address = $2 AND v.kind = 'curve' AND v.official = true
+             AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
+             AND (t.block_number, t.log_index) <= ($3, $4) AND t.price_numerator_raw IS NULL LIMIT 1`,
+          [launch.chainId, launch.tokenAddress, last.blockNumber.toString(), last.logIndex]);
+        if (missed.rows.length > 0) {
+          await dbClient.query(`DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2`, [launch.chainId, launch.tokenAddress]);
+          await dbClient.query('COMMIT');
+          continue;
         }
         await dbClient.query(
           `INSERT INTO launch_curve_reserves (chain_id, token_address, quote_reserve_raw, token_reserve_raw, last_block_number, last_log_index, updated_at)

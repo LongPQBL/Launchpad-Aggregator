@@ -109,6 +109,26 @@ describe('fast lane', () => {
     expect(notifications).toContainEqual(expect.objectContaining({ type: 'trade.created', chainId, tokenAddress: token, blockTimestamp: 1_700_000_000 }));
   });
 
+  it('drops the launch\'s curve pricing checkpoint when a trade lands below it, and keeps it when the trade is newer', async () => {
+    const fake = fakeSource();
+    const instance = await lane(fake);
+    const seed = () => pool.query(`INSERT INTO launch_curve_reserves (chain_id, token_address, quote_reserve_raw, token_reserve_raw, last_block_number, last_log_index, updated_at)
+      VALUES ($1,$2,'1','1',5000,5,now()) ON CONFLICT (chain_id, token_address) DO UPDATE SET last_block_number = 5000, last_log_index = 5`, [chainId, token]);
+    const present = async () => (await pool.query('SELECT 1 FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token])).rows.length === 1;
+    try {
+      await seed();
+      await instance.handleLogs([buyLog({ blockNumber: 5001n, logIndex: 1 })]); // newer than the checkpoint
+      await settle();
+      fake.header = { number: 5001n, hash: blockHash, timestamp: 1_700_000_001 };
+      expect(await present()).toBe(true);
+      await instance.handleLogs([buyLog({ blockNumber: 4999n, logIndex: 9 })]); // older: reserves after block 5000 are now wrong
+      await settle();
+      expect(await present()).toBe(false);
+    } finally {
+      await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+    }
+  });
+
   it('ignores a log from an address that is not a known venue without any RPC call', async () => {
     const fake = fakeSource();
     const instance = await lane(fake);
