@@ -6,8 +6,7 @@ export function proxy(request: NextRequest) {
   const csp = buildContentSecurityPolicy({
     nonce,
     isDev: process.env.NODE_ENV === 'development',
-    connectUrls: [process.env.NEXT_PUBLIC_BE_API_URL, process.env.NEXT_PUBLIC_RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com',
-      process.env.NEXT_PUBLIC_PAYMASTER_SERVICE_URL],
+    connectUrls: [process.env.NEXT_PUBLIC_BE_API_URL, process.env.NEXT_PUBLIC_PAYMASTER_SERVICE_URL],
   });
   // Next.js reads the nonce out of the request's CSP header while rendering and stamps it on its own scripts.
   const requestHeaders = new Headers(request.headers);

@@ -18,7 +18,7 @@ describe('formatLevel', () => {
 });
 
 describe('DepthView', () => {
-  const view = () => render(<DepthView depth={depth} price={100} baseSymbol="ETH" quoteSymbol="USDC" spreadLabel="Spread 0.1% (Fee tier 0.05%)" notes={['A note.']} />);
+  const view = () => render(<DepthView depth={depth} price={100} baseSymbol="ETH" quoteSymbol="USDC" spreadLabel="Spread 0.1% (Fee tier 0.05%)" />);
   it('lists asks with the farthest on top, the spread row, then bids nearest first, under the right column titles', () => {
     view();
     expect(screen.getByText('Price (USDC)')).toBeInTheDocument();
@@ -28,7 +28,6 @@ describe('DepthView', () => {
     expect(asks).toEqual(['104', '103', '102', '101']);
     expect(bids).toEqual(['99', '98', '97', '96']);
     expect(screen.getByTestId('depth-spread')).toHaveTextContent('Spread 0.1% (Fee tier 0.05%)');
-    expect(screen.getByText('A note.')).toBeInTheDocument();
   });
   it('zooms the chart in and out and fits it back', () => {
     view();

@@ -101,9 +101,9 @@ function DepthTable({ depth, baseSymbol, quoteSymbol, spreadLabel }: { depth: De
   );
 }
 
-/** The order-book view of a pool or a bonding curve: the cumulative chart and the price table, with notes under them. */
-export function DepthView({ depth, price, baseSymbol, quoteSymbol, spreadLabel, notes = [], trailing }: {
-  depth: DepthData; price: number; baseSymbol: string; quoteSymbol: string; spreadLabel: string; notes?: readonly string[]; trailing?: ReactNode;
+/** The order-book view of a pool or a bonding curve: the cumulative chart and the price table,  */
+export function DepthView({ depth, price, baseSymbol, quoteSymbol, spreadLabel, trailing }: {
+  depth: DepthData; price: number; baseSymbol: string; quoteSymbol: string; spreadLabel: string; trailing?: ReactNode;
 }) {
   if (depth.asks.length === 0 && depth.bids.length === 0) {
     return <div><p role="status" className="flex h-80 items-center justify-center text-center text-sm text-muted-foreground">No liquidity to show yet.</p><div className="mt-2 flex justify-end">{trailing}</div></div>;
@@ -115,7 +115,6 @@ export function DepthView({ depth, price, baseSymbol, quoteSymbol, spreadLabel, 
         <DepthTable depth={depth} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} spreadLabel={spreadLabel} />
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-end gap-2">{trailing}</div>
-      {notes.map((note) => <p key={note} className="mt-2 text-xs text-muted-foreground">{note}</p>)}
     </section>
   );
 }

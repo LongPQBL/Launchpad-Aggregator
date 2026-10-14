@@ -141,15 +141,11 @@ export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
   const data = loaded.data;
   if (data === null) return <Message trailing={trailing}>This launch has no bonding curve.</Message>;
   if (!data.complete || !data.depth || data.price === null) return <Message trailing={trailing}>{unavailableText(data.unavailableReason)}</Message>;
-  const notes = ['Amounts exclude the creator tax and snipe protection.'];
-  if (data.asksEndAtGraduation) notes.push('Buying beyond the last row graduates the curve.');
-  if (data.depth.bids.length === 0) notes.push('Nobody has bought from this curve yet, so there is nothing to sell into.');
-  else if (data.bidsEndAtEmptyReserve) notes.push('The curve can only pay out what has been paid in, so there are no sells beyond the last row.');
   const fee = data.feeBps === null ? '—' : formatLevel(data.feeBps / 100);
   return (
     <div>
       <div className="mb-2 min-h-20"><p className="text-2xl">1 {baseSymbol} = {formatLevel(data.price)} {quoteSymbol}</p></div>
-      <DepthView depth={data.depth} price={data.price} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} notes={notes} trailing={trailing}
+      <DepthView depth={data.depth} price={data.price} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} trailing={trailing}
         spreadLabel={`Spread ${data.depth.spreadPercent === null ? '—' : formatLevel(data.depth.spreadPercent)}% (Fee ${fee}%)`} />
     </div>
   );

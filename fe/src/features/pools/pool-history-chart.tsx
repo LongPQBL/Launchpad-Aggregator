@@ -127,7 +127,10 @@ export function PoolHistoryChart({ items: rawItems, complete, metric, intervalSe
   const byTime = useMemo(() => new Map(items.map((item) => [item.day, item])), [items]);
   const byTimeRef = useRef(byTime);
   useEffect(() => { byTimeRef.current = byTime; }, [byTime]);
-  const hasAny = items.some((item) => valueOf(item, metric) !== null);
+  // Trades exist but none could be valued in USD (no price for the tokens): the volume is unknown, and a flat $0 line would claim otherwise.
+  const volumeUnpriced = metric === 'volume' && items.some((item) => item.volumeUsd === null && item.tradeCount > 0)
+    && items.every((item) => item.volumeUsd === null || Number(item.volumeUsd) === 0);
+  const hasAny = items.some((item) => valueOf(item, metric) !== null) && !volumeUnpriced;
   const showChart = hasAny && !loading && !error;
 
   // One chart per metric: a histogram for Volume, an area for TVL.
@@ -149,7 +152,7 @@ export function PoolHistoryChart({ items: rawItems, complete, metric, intervalSe
       localization: { priceFormatter: (value: number) => formatUsdAxis(value) },
     });
     const series = metric === 'volume'
-      ? chart.addSeries(HistogramSeries, { color: green, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } })
+      ? chart.addSeries(HistogramSeries, { color: green, lastValueVisible: false, priceLineVisible: false, priceFormat: { type: 'custom', formatter: (value: number) => formatUsdAxis(value), minMove: 0.01 } })
       : chart.addSeries(AreaSeries, { lineColor: green, topColor: `${green}59`, bottomColor: `${green}00`, lineWidth: 2, lineType: LineType.Curved,
         crosshairMarkerRadius: 5, crosshairMarkerBorderColor: '#0a0a0b', crosshairMarkerBackgroundColor: green,
         autoscaleInfoProvider: (original: () => AutoscaleRange | null) => withZeroBaseline(original()),
@@ -214,7 +217,7 @@ export function PoolHistoryChart({ items: rawItems, complete, metric, intervalSe
       {error && <p role="alert" className="flex h-80 items-center justify-center text-sm text-muted-foreground">Could not load this history.</p>}
       {!loading && !error && !hasAny && (
         <p role="status" className="flex h-80 items-center justify-center text-center text-sm text-muted-foreground">
-          {metric === 'tvl' ? `No TVL history recorded for ${allPools ? 'this token\'s pools' : 'this pool'} in this range.` : 'Volume history is unavailable.'}
+          {metric === 'tvl' ? `No TVL history recorded for ${allPools ? 'this token\'s pools' : 'this pool'} in this range.` : (volumeUnpriced ? 'Volume is unavailable: these trades have no USD price.' : 'Volume history is unavailable.')}
         </p>
       )}
       <div className={showChart ? 'relative' : 'hidden'} onMouseLeave={() => { setHovered(null); setHoverX(null); setBar(null); }}>

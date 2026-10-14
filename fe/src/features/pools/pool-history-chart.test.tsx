@@ -182,3 +182,23 @@ describe('coarsenVolume', () => {
     expect(coarsenVolume(few, 86_400)).toEqual({ items: few, step: 86_400 });
   });
 });
+
+describe('volume with unpriced trades', () => {
+  it('says the volume is unavailable instead of drawing a flat $0 line', () => {
+    const items = [
+      { day: 1_800_000_000, volumeUsd: null, tvlUsd: null, tradeCount: 12 },
+      { day: 1_800_003_600, volumeUsd: '0', tvlUsd: null, tradeCount: 0 },
+    ] as never;
+    render(<PoolHistoryChart items={items} complete metric="volume" intervalSeconds={3_600} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Volume is unavailable: these trades have no USD price.');
+    expect(screen.queryByTestId('history-chart-container')?.parentElement).toHaveClass('hidden');
+  });
+});
+
+describe('volume bars have no floating last-value label', () => {
+  it('turns off the label and price line of the volume histogram, which would follow the last visible bar and change on zoom', () => {
+    addSeries.mockClear();
+    render(<PoolHistoryChart items={[{ day: 1_800_000_000, volumeUsd: '5.69', tvlUsd: null, tradeCount: 1 }] as never} complete metric="volume" intervalSeconds={3_600} />);
+    expect(addSeries).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ lastValueVisible: false, priceLineVisible: false }));
+  });
+});
