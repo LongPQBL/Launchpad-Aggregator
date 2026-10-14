@@ -10,10 +10,18 @@ export function toFastLog(log: Log): FastLog | null {
   };
 }
 
+/**
+ * Transport settings. HTTP: a short timeout and no retries, since the lane retries a lookup itself and one slow call must not hold the queue.
+ * WebSocket: keep reconnecting for as long as the process lives (viem's default gives up after 5 attempts, ~10 s, and its subscriptions are
+ * then gone for good); the runner's watchdog exits the process if no log arrives for a long time anyway.
+ */
+export const HTTP_TRANSPORT_OPTIONS = { timeout: 3_000, retryCount: 0 } as const;
+export const WEBSOCKET_TRANSPORT_OPTIONS = { keepAlive: true, reconnect: { attempts: 1_000_000, delay: 2_000 }, timeout: 3_000 } as const;
+
 /** The lane's view of the chain: WebSocket for the live log stream, plain HTTP for everything it asks for by key. */
 export function createViemChainSource(chain: Chain, urls: { http: string; ws: string }): LaneChainSource {
-  const rpc = createPublicClient({ chain, transport: http(urls.http) });
-  const socket = createPublicClient({ chain, transport: webSocket(urls.ws, { keepAlive: true, reconnect: true }) });
+  const rpc = createPublicClient({ chain, transport: http(urls.http, HTTP_TRANSPORT_OPTIONS) });
+  const socket = createPublicClient({ chain, transport: webSocket(urls.ws, WEBSOCKET_TRANSPORT_OPTIONS) });
   return {
     async getBlock(blockNumber) {
       const block = await rpc.getBlock({ blockNumber });

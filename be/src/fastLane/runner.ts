@@ -17,9 +17,17 @@ export interface FastLaneOptions {
   chainId: number;
   sweepEveryMs?: number; watchRefreshEveryMs?: number; sweepLagBlocks?: bigint; maxGapBlocks?: bigint; sweepChunkBlocks?: bigint;
   lookupRetries?: number; lookupRetryDelayMs?: number;
+  /** The clock, in ms since the epoch; injectable for tests. */
+  now?: () => number;
   log?: (message: string, fields?: Record<string, unknown>) => void;
 }
-export interface FastLaneStats { received: number; watched: number; applied: number; unresolved: number; skipped: number; removed: number; errors: number; sweeps: number }
+export interface FastLaneStats {
+  received: number; watched: number; applied: number; unresolved: number; skipped: number; removed: number; errors: number; sweeps: number;
+  /** Sweep timer ticks dropped because the previous sweep was still queued or running. */
+  sweepsSkipped: number;
+  /** When the WebSocket last delivered a batch of logs (ms since the epoch); null before the first one. The sweep never sets it. */
+  lastSocketLogAt: number | null;
+}
 export interface FastLane {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -27,6 +35,8 @@ export interface FastLane {
   sweepOnce(): Promise<void>;
   reloadWatchSet(): Promise<void>;
   stats(): FastLaneStats;
+  /** Seconds since the WebSocket last delivered logs, or since start() when it never has. */
+  socketSilentForSeconds(): number;
 }
 
 const HANDLED_KEYS_MAX = 5_000;
@@ -47,7 +57,12 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   const lookupRetries = options.lookupRetries ?? 3;
   const lookupRetryDelayMs = options.lookupRetryDelayMs ?? 100;
   const log = options.log ?? (() => {});
-  const counters: FastLaneStats = { received: 0, watched: 0, applied: 0, unresolved: 0, skipped: 0, removed: 0, errors: 0, sweeps: 0 };
+  const now = options.now ?? Date.now;
+  const counters: FastLaneStats = {
+    received: 0, watched: 0, applied: 0, unresolved: 0, skipped: 0, removed: 0, errors: 0, sweeps: 0, sweepsSkipped: 0, lastSocketLogAt: null,
+  };
+  let startedAt = now();
+  let sweepInFlight = false;
 
   let watch: WatchSet = EMPTY_WATCH_SET;
   let lastSwept: bigint | null = null;
@@ -170,13 +185,27 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     watch = await loadWatchSet(pool, chainId);
   }
 
+  // The WebSocket path: the only one that proves the subscription is alive.
+  function handleSocketLogs(logs: readonly FastLog[]): Promise<void> {
+    counters.lastSocketLogAt = now();
+    return enqueue(() => processLogs(logs));
+  }
+
+  // A slow RPC can make one sweep outlast the timer: never queue a second one behind it.
+  function sweepTick(): void {
+    if (sweepInFlight) { counters.sweepsSkipped += 1; return; }
+    sweepInFlight = true;
+    void enqueue(async () => { try { await sweep(); } finally { sweepInFlight = false; } });
+  }
+
   return {
     async start() {
+      startedAt = now();
       await reloadWatchSet();
       lastSwept = await readLaneBlock(db, chainId);
-      unsubscribe = source.subscribeLogs((logs) => { void enqueue(() => processLogs(logs)); }, (error) => { counters.errors += 1; log('log subscription error', { error: error.message }); });
+      unsubscribe = source.subscribeLogs((logs) => { void handleSocketLogs(logs); }, (error) => { counters.errors += 1; log('log subscription error', { error: error.message }); });
       timers.push(setInterval(() => { void reloadWatchSet().catch((error) => log('watch set refresh failed', { error: (error as Error).message })); }, watchRefreshEveryMs));
-      timers.push(setInterval(() => { void enqueue(sweep); }, sweepEveryMs));
+      timers.push(setInterval(sweepTick, sweepEveryMs));
     },
     async stop() {
       for (const timer of timers.splice(0)) clearInterval(timer);
@@ -184,9 +213,10 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       unsubscribe = null;
       await queue;
     },
-    handleLogs: (logs) => enqueue(() => processLogs(logs)),
+    handleLogs: handleSocketLogs,
     sweepOnce: () => enqueue(sweep),
     reloadWatchSet,
     stats: () => ({ ...counters }),
+    socketSilentForSeconds: () => Math.max(0, (now() - (counters.lastSocketLogAt ?? startedAt)) / 1000),
   };
 }

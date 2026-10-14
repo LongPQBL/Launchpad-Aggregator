@@ -279,4 +279,46 @@ describe('fast lane', () => {
     expect(await tradeRows()).toHaveLength(1);
     expect(notifications.filter((n) => n.type === 'trade.created')).toHaveLength(0);
   });
+
+  it('records when the WebSocket last delivered logs, never from a sweep, and measures silence from start() until the first batch', async () => {
+    const fake = fakeSource();
+    let clock = 1_000_000;
+    let deliver: ((logs: FastLog[]) => void) | null = null;
+    fake.subscribeLogs = (onLogs) => { deliver = onLogs; return () => {}; };
+    const log = buyLog({ blockNumber: 5010n });
+    fake.header = { number: 5010n, hash: blockHash, timestamp: 1_700_000_050 };
+    fake.logs = [log];
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
+    const instance = createFastLane({ source: fake, db, pool }, { chainId, lookupRetryDelayMs: 1, now: () => clock, sweepEveryMs: 3_600_000 });
+    await instance.start();
+    expect(instance.stats().lastSocketLogAt).toBeNull();
+    clock += 30_000;
+    expect(instance.socketSilentForSeconds()).toBe(30);
+    await instance.sweepOnce(); // applies the log through the sweep
+    expect(await tradeRows()).toHaveLength(1);
+    expect(instance.stats().lastSocketLogAt).toBeNull();
+    clock += 5_000;
+    deliver!([buyLog({ blockNumber: 5011n })]);
+    expect(instance.stats().lastSocketLogAt).toBe(clock);
+    clock += 7_000;
+    expect(instance.socketSilentForSeconds()).toBe(7);
+    await instance.stop();
+  });
+
+  it('a sweep tick while the previous sweep is still running is skipped, not queued behind it', async () => {
+    const fake = fakeSource();
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let headCalls = 0;
+    fake.getBlockNumber = async () => { headCalls += 1; await blocked; return fake.head; };
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5098n });
+    const instance = createFastLane({ source: fake, db, pool }, { chainId, lookupRetryDelayMs: 1, sweepEveryMs: 20 });
+    await instance.start();
+    await new Promise((resolve) => setTimeout(resolve, 150)); // several ticks while the first sweep waits on the node
+    expect(headCalls).toBe(1);
+    expect(instance.stats().sweepsSkipped).toBeGreaterThanOrEqual(2);
+    release();
+    await instance.stop();
+    expect(instance.stats().errors).toBe(0);
+  });
 });
