@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { refreshDirtyCandles } from './candleCache.js';
 import { createApiStore } from '../api/store.js';
 
@@ -98,5 +98,29 @@ describe('precomputed official candles', () => {
     const page = await createApiStore(pool).listCandles(4663, token, 60, bucket + 60);
     expect(page.complete).toBe(false);
     expect(page.items.some((item) => item.bucketStart === bucket)).toBe(false);
+  });
+
+  it('announces launch.changed for a recent bucket only', async () => {
+    const listener = new Client({ connectionString: databaseUrl });
+    await listener.connect();
+    const received: string[] = [];
+    listener.on('notification', (message) => { if (message.payload) received.push(message.payload); });
+    await listener.query('LISTEN launchpad_events');
+    try {
+      await refreshDirtyCandles(pool, 1000); // drain whatever earlier tests left
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      received.length = 0;
+      await addTrade('7', base + 500, 30, 0, '2');
+      await refreshDirtyCandles(pool, 1000);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received).toHaveLength(0);
+      await addTrade('8', Math.floor(Date.now() / 1000), 31, 0, '2');
+      await refreshDirtyCandles(pool, 1000);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'launch.changed', chainId: 4663, tokenAddress: token }]);
+    } finally {
+      await listener.query('UNLISTEN launchpad_events');
+      await listener.end();
+    }
   });
 });

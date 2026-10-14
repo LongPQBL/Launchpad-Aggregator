@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { readPoolCandles, readPoolHighLow, refreshDirtyPoolCandles } from './candleCache.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -45,5 +45,32 @@ describe('pool candle cache', () => {
     await pool.query('DELETE FROM pool_trades WHERE chain_id=$1 AND tx_hash=$2', [chainId, tx]);
     await refreshDirtyPoolCandles(pool, 10);
     expect((await pool.query('SELECT count(*)::int AS n FROM pool_candles WHERE chain_id=$1', [chainId])).rows[0].n).toBe(0);
+  });
+
+  it('announces pool.changed for a recent bucket only, so a backfill of old buckets stays silent', async () => {
+    const listener = new Client({ connectionString: databaseUrl });
+    await listener.connect();
+    const received: string[] = [];
+    listener.on('notification', (message) => { if (message.payload) received.push(message.payload); });
+    await listener.query('LISTEN launchpad_events');
+    const insertSwap = (hash: string, timestamp: number) => pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,
+      timestamp,amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES ($1,$2,0,'uniswap_v4',$3,102,$4,$5,-1,2,$6,$7,$7,3000) ON CONFLICT DO NOTHING`,
+    [chainId, hash, id, hash, timestamp, (2n ** 96n).toString(), address0]);
+    try {
+      await insertSwap(`0x${'1'.repeat(64)}`, 1740);
+      await refreshDirtyPoolCandles(pool, 10);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received).toHaveLength(0);
+      await insertSwap(`0x${'2'.repeat(64)}`, Math.floor(Date.now() / 1000));
+      await refreshDirtyPoolCandles(pool, 10);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'pool.changed', chainId, poolId: id }]);
+    } finally {
+      await listener.query('UNLISTEN launchpad_events');
+      await listener.end();
+      await pool.query('DELETE FROM pool_trades WHERE chain_id=$1', [chainId]);
+      await refreshDirtyPoolCandles(pool, 10);
+    }
   });
 });

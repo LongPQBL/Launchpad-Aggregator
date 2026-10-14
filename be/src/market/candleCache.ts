@@ -140,6 +140,7 @@ export async function refreshDirtyCandles(pool: Pool, limit = 100): Promise<numb
     await client.query(`WITH completed(chain_id, token_address, bucket_start) AS (VALUES ${placeholders})
       DELETE FROM candle_dirty_buckets d USING completed c
       WHERE d.chain_id = c.chain_id AND d.token_address = c.token_address AND d.bucket_start = c.bucket_start`, params);
+    await announceRecentCandleChanges(client, dirty);
     await client.query('COMMIT');
     return dirty.length;
   } catch (error) {
@@ -147,5 +148,18 @@ export async function refreshDirtyCandles(pool: Pool, limit = 100): Promise<numb
     throw error;
   } finally {
     client.release();
+  }
+}
+
+// Only buckets from the last couple of hours are live activity worth telling browsers about; a backfill re-dirties old buckets by the
+// thousand and must not flood the event stream. NOTIFY is delivered when this transaction commits, i.e. once the candles are readable.
+const LIVE_CANDLE_WINDOW_SECONDS = 2 * 60 * 60;
+async function announceRecentCandleChanges(client: { query: (text: string, values?: unknown[]) => Promise<unknown> }, dirty: readonly DirtyBucket[]): Promise<void> {
+  const recentAfter = Math.floor(Date.now() / 1000) - LIVE_CANDLE_WINDOW_SECONDS;
+  const launches = new Map<string, DirtyBucket>();
+  for (const bucket of dirty) if (bucket.bucketStart >= recentAfter) launches.set(`${bucket.chainId}:${bucket.tokenAddress.toLowerCase()}`, bucket);
+  for (const bucket of launches.values()) {
+    await client.query('SELECT pg_notify($1, $2)', ['launchpad_events',
+      JSON.stringify({ type: 'launch.changed', chainId: bucket.chainId, tokenAddress: bucket.tokenAddress.toLowerCase() })]);
   }
 }

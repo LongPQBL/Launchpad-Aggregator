@@ -63,6 +63,13 @@ export async function refreshDirtyPoolCandles(pool: Pool, limit = 100): Promise<
     for (const row of dirty) await client.query(`DELETE FROM pool_candle_dirty_buckets
       WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND bucket_start=$4`,
     [row.chainId, row.protocol, row.poolId, row.bucketStart]);
+    // Only recent buckets are live activity (a backfill re-dirties old ones by the thousand); NOTIFY arrives once this commit makes the candles readable.
+    const recentAfter = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
+    const pools = new Map(dirty.filter((row) => row.bucketStart >= recentAfter).map((row) => [`${row.chainId}:${row.poolId.toLowerCase()}`, row]));
+    for (const row of pools.values()) {
+      await client.query('SELECT pg_notify($1, $2)', ['launchpad_events',
+        JSON.stringify({ type: 'pool.changed', chainId: row.chainId, poolId: row.poolId.toLowerCase() })]);
+    }
     await client.query('COMMIT');
     return dirty.length;
   } catch (error) {
