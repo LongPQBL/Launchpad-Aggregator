@@ -135,7 +135,11 @@ export async function refreshDirtyCandles(pool: Pool, limit = 100): Promise<numb
       await client.query('COMMIT');
       return 0;
     }
-    for (const intervalSeconds of CANDLE_INTERVALS) await rebuildInterval(client, dirty, intervalSeconds);
+    // The `candles` table is read only once its backfill has started (candle_cache_state has a row); before that nothing looks at it, and keeping it
+    // current means re-reading a token's whole day of trades for every dirty minute (50,000 disk reads for 35 dirty minutes on the dev database),
+    // which kept the USD candles the chart does read waiting for minutes.
+    const legacyCandlesInUse = (await client.query('SELECT 1 FROM candle_cache_state WHERE id = 1')).rows.length > 0;
+    if (legacyCandlesInUse) for (const intervalSeconds of CANDLE_INTERVALS) await rebuildInterval(client, dirty, intervalSeconds);
     await rebuildLaunchVolume(client, dirty);
     await rebuildUsdCandles(client, dirty);
     const { placeholders, params } = values(dirty);

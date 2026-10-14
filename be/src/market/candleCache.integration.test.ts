@@ -52,6 +52,7 @@ afterAll(async () => {
 
 describe('precomputed official candles', () => {
   it('rebuilds every supported interval in chain order, then repairs reorg deletion', async () => {
+    await pool.query('INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, false) ON CONFLICT (id) DO NOTHING'); // the legacy candles are in use
     await addTrade('1', base, 10, 2, '2');
     await addTrade('2', base + 1, 10, 3, '4');
     expect((await pool.query('SELECT count(*)::int AS n FROM candle_dirty_buckets WHERE token_address = $1', [token])).rows[0].n).toBe(1);
@@ -88,7 +89,19 @@ describe('precomputed official candles', () => {
     expect(afterOtherPool.items).toEqual(updated.items);
   });
 
+  it('does not maintain the legacy candles table until its backfill has started, but still builds the USD candles the chart reads', async () => {
+    await pool.query('DELETE FROM candle_cache_state WHERE id = 1');
+    await pool.query('DELETE FROM candles WHERE chain_id = 4663 AND token_address = $1', [token]);
+    await addTrade('a', base + 600, 20, 0, '3');
+    await refreshDirtyCandles(pool, 1000);
+    expect((await pool.query('SELECT count(*)::int AS n FROM candles WHERE token_address = $1', [token])).rows[0].n).toBe(0);
+    const usd = (await pool.query(`SELECT interval_seconds FROM launch_usd_candle_buckets WHERE chain_id = 4663 AND token_address = $1 AND bucket_start >= $2 ORDER BY interval_seconds`, [token, base + 600 - 86400])).rows;
+    expect(usd.map((row) => row.interval_seconds)).toContain(60);
+    expect((await pool.query('SELECT count(*)::int AS n FROM candle_dirty_buckets WHERE token_address = $1', [token])).rows[0].n).toBe(0); // the bucket is consumed
+  });
+
   it('omits a bucket with an unpriced trade', async () => {
+    await pool.query('INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, false) ON CONFLICT (id) DO NOTHING');
     await addTrade('3', base + 120, 12, 0, null);
     await refreshDirtyCandles(pool, 1000);
     const bucket = Math.floor((base + 120) / 60) * 60;
