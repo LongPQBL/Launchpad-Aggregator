@@ -172,9 +172,7 @@ có khác biệt; dòng nào mà giao dịch đã bị xoá thì được tính 
 chạy reconcile: dòng lane đã cũ (mặc định 300 s, `FAST_LANE_RECONCILE_MIN_AGE_SECONDS`) và nằm dưới block Envio đã xử lý mà Envio không có
 (hoặc có ở block khác) thì bị xoá (và thay bằng dòng của Envio nếu có); không có biến này thì reconcile tắt (in một cảnh báo). Swap V4 chỉ
 được nhận khi log đến từ PoolManager. Watchdog: WebSocket im lặng 120 s thì cảnh báo mỗi phút, 600 s thì thoát mã 1 để supervisor khởi
-động lại. Worker định giá curve chỉ định giá tới block mà sync Envio đã áp dụng cho `v2-curve`/`v2-buyback` (giao dịch lane ghi phía trên
-chờ, không bị tính là lỗi). Hạn chế: watch set tải lại toàn bộ venue mỗi 10 s (~167k dòng, ước ~10 MB/lần) — phải làm tăng dần trước khi
-chạy với DB từ xa; `fast_lane_rows` tăng ~19k dòng/ngày nếu không chạy parity hoặc reconcile. `GET /v1/metrics` có `lagByVia.fast` và `lagByVia.envio` để so
+động lại. Worker định giá curve lấy phí và thuế của giao dịch lane từ chính bản ghi lane (`fast_lane_rows.raw`) khi Envio chưa có dòng, nên giá token theo quote cũng chạy realtime; nếu một giao dịch cũ hơn đến muộn (Envio lấp chỗ lane bỏ sót) thì điểm lưu reserve của launch bị xoá và tính lại từ đầu theo đúng thứ tự. Watch set chỉ tải venue mới thêm (cột `venues.seq`, chồng lấn 2.000 dòng), tải đầy đủ lại mỗi 10 phút; venue bị xoá nằm lại trong set tới lần tải đầy đủ (vô hại: giao dịch không tìm thấy venue thì bị bỏ). `fast_lane_rows` tăng ~19k dòng/ngày nếu không chạy parity hoặc reconcile. `GET /v1/metrics` có `lagByVia.fast` và `lagByVia.envio` để so
 độ trễ hai đường. Tắt: bỏ biến `FAST_LANE_ENABLED` rồi dừng tiến trình; không có thành phần nào khác phụ thuộc vào nó. Chưa đo độ trễ
 của lane trên giao dịch thật; mục tiêu là p50 từ chain đến API dưới ~1,5 s và 0 khác biệt parity trong 24 giờ.
 

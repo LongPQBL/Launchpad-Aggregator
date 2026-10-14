@@ -84,12 +84,13 @@ chain --HTTP 10 s sweep getLogs--> gap fill (also after a reconnect)
   with the row Envio produced for the same key on every column, reports mismatches and missing keys, and deletes the entries that match. A
   row whose trade is already gone (repair, reconcile or a `removed` log removed it) has its entry deleted and is counted as `repaired`, not
   as missing. `trades` itself carries no marker.
-- **Curve pricing.** The curve replay (`be/src/market/curvePricing.ts`) needs each curve trade's fee and tax from Envio's `RawCurveTrade`,
-  which a lane-written trade does not have yet, and the lane can write a trade before an earlier one of the same launch exists. The replay
-  therefore stops at the block the Envio sync has applied for the `v2-curve` and `v2-buyback` streams (per stream the best of the tail and
-  history cursors' `processed_watermark`, then the lower of the two streams; a chain whose sync never ran prices nothing). Trades above it
-  are "not yet", never a failure or a backoff; trades at or below it must all have their raw rows. Deleting a lane curve trade
-  (`removeLaneTrade`) drops the launch's reserve checkpoint, as repair does.
+- **Curve pricing.** The curve replay (`be/src/market/curvePricing.ts`) needs each curve trade's fee and tax. For a lane-written trade
+  without an Envio `RawCurveTrade` row it reads them from the lane's own record (`fast_lane_rows.raw`, the same event), so the token price in
+  quote units is as fast as the trade itself. The lane can write a trade before an earlier one of the same launch exists; the replay's
+  per-launch reserve checkpoint would then be wrong, so inserting a curve/buyback trade below a launch's checkpoint drops the checkpoint
+  (`dropCurveCheckpointPassedBy` in `incrementalSync.ts`), and the pricing transaction refuses to save a checkpoint when an unpriced curve trade
+  lies at or below it. The next tick replays from the start in order. Deleting a lane curve trade (`removeLaneTrade`) drops the checkpoint too.
+  A trade with neither an Envio row nor a lane record is a failure with backoff, as before.
 - **Watchdog.** viem's WebSocket reconnects every 2 s practically forever (its default gives up after 5 attempts, and its subscriptions
   are then gone). The runner records when the socket last delivered logs (`lastSocketLogAt` in its stats; the sweep never sets it).
   `runFastLane` warns every 60 s once no log batch has arrived for 120 s (the chain emits ~30 trade logs/s, so silence means a dead
@@ -135,8 +136,8 @@ Envio alone still produces every row.
 - Launch and lifecycle repair windows are still unbounded above the fence; the lane writes neither, so they are unaffected.
 - The saved block is advanced only by the sweep.
 - The parity command compares raw rows.
-- The watch set reloads every venue every 10 s (~167k rows, estimated ~10 MB per refresh). Make it incremental before running the lane
-  against any remote database.
+- The watch set reads only venues added since its last refresh (`venues.seq`, migration `0056`, 2,000-row overlap) and everything again every
+  10 minutes; a deleted venue stays in the set until then (harmless).
 - `fast_lane_rows` grows ~19k rows/day unless parity or reconcile runs.
 - Console redaction covers `console.*` only; a library writing straight to `process.stdout`/`stderr` would bypass it (none is known to).
 - No live-trade latency of the lane has been measured; the success criteria above are targets.
