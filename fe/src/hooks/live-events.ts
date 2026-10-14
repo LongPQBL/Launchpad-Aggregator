@@ -12,6 +12,13 @@ export function emitPoolChanged(payload: SseEventPayload): void {
   window.dispatchEvent(new CustomEvent<SseEventPayload>(POOL_CHANGED_EVENT, { detail: payload }));
 }
 
+// A launch's stored figures (price, FDV, volume, ...) were recomputed after a trade, or a launch appeared or changed state.
+export const LAUNCH_CHANGED_EVENT = 'launchpad:launch-changed';
+
+export function emitLaunchChanged(payload: SseEventPayload): void {
+  window.dispatchEvent(new CustomEvent<SseEventPayload>(LAUNCH_CHANGED_EVENT, { detail: payload }));
+}
+
 export function emitTradeCreated(payload: SseEventPayload): void {
   window.dispatchEvent(new CustomEvent<SseEventPayload>(TRADE_CREATED_EVENT, { detail: payload }));
 }

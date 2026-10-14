@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import { useGatedRefresh } from '@/hooks/use-gated-refresh';
-import { emitPoolChanged, emitTradeCreated } from '@/hooks/live-events';
+import { emitLaunchChanged, emitPoolChanged, emitTradeCreated } from '@/hooks/live-events';
 import { useLiveRefresh } from '@/hooks/use-live-refresh';
 
 export interface LiveRefreshIndicatorProps {
@@ -19,6 +19,7 @@ export function LiveRefreshIndicator({ resourceKeys, retryWhilePending }: LiveRe
     onEvent: (type, payload) => {
       if (type === 'trade.created') emitTradeCreated(payload);
       else if (type === 'pool.changed') emitPoolChanged(payload);
+      else if (type === 'launch.changed') emitLaunchChanged(payload);
     },
   });
   return null;

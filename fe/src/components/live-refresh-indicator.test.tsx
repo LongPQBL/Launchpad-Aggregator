@@ -1,6 +1,6 @@
 import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { TRADE_CREATED_EVENT } from '@/hooks/live-events';
+import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT, TRADE_CREATED_EVENT } from '@/hooks/live-events';
 import { launchResourceKey } from '@/hooks/resource-keys';
 import { LiveRefreshIndicator } from './live-refresh-indicator';
 
@@ -47,5 +47,23 @@ describe('LiveRefreshIndicator', () => {
       MockEventSource.instances[0]!.dispatch('trade.created', { chainId: 4663, tokenAddress: '0x2222222222222222222222222222222222222222' });
     });
     expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('announces launch.changed and pool.changed on window as their own events', () => {
+    const launch = vi.fn();
+    const poolChanged = vi.fn();
+    const trade = vi.fn();
+    window.addEventListener(LAUNCH_CHANGED_EVENT, (event) => launch((event as CustomEvent).detail));
+    window.addEventListener(POOL_CHANGED_EVENT, (event) => poolChanged((event as CustomEvent).detail));
+    window.addEventListener(TRADE_CREATED_EVENT, trade);
+    render(<LiveRefreshIndicator resourceKeys={['chain:4663']} />);
+    const poolId = `0x${'ab'.repeat(32)}`;
+    act(() => {
+      MockEventSource.instances[0]!.dispatch('launch.changed', { chainId: 4663, tokenAddress: token });
+      MockEventSource.instances[0]!.dispatch('pool.changed', { chainId: 4663, poolId, poolTokens: [token] });
+    });
+    expect(launch).toHaveBeenCalledWith({ chainId: 4663, tokenAddress: token });
+    expect(poolChanged).toHaveBeenCalledWith({ chainId: 4663, poolId, poolTokens: [token] });
+    expect(trade).not.toHaveBeenCalled();
   });
 });

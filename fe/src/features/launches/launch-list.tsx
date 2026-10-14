@@ -7,6 +7,7 @@ import { chainIcon, chainName, ROADMAP_CHAIN_IDS } from '@/api/chains';
 import { formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
 import { PercentChange, RollingText } from '@/components/percent-change';
+import { LAUNCH_CHANGED_EVENT } from '@/hooks/live-events';
 import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { refreshRowsInPlace } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
@@ -298,11 +299,14 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
   }, [page, filterSignature]);
 
   // A trade announced on a listed chain refreshes the numbers right away, with the filters currently applied.
-  const liveRef = useRef({ filtering, sortBy });
-  useEffect(() => { liveRef.current = { filtering, sortBy }; });
+  const liveRef = useRef({ filtering, sortBy, items });
+  useEffect(() => { liveRef.current = { filtering, sortBy, items }; });
   const filterKey = JSON.stringify([selectedChains, selectedPlatforms, appliedSearch, selectedStatus, sortBy, sortDirection]);
   useLiveFirstPage(
-    (payload) => selectedChains.length === 0 || selectedChains.includes(payload.chainId),
+    // The API announces launch.changed once a launch's stored figures are recomputed after its trade. Only a launch on
+    // screen matters, or any launch in the newest-first list (a new one belongs on top).
+    (payload) => (selectedChains.length === 0 || selectedChains.includes(payload.chainId))
+      && (liveRef.current.sortBy === 'recent' || liveRef.current.items.some((item) => item.chainId === payload.chainId && item.tokenAddress.toLowerCase() === payload.tokenAddress)),
     async (isStale) => {
       if (liveRef.current.filtering) return;
       const fresh = await getLaunches({ chainId: selectedChains.length ? selectedChains : undefined, platform: selectedPlatforms.length ? selectedPlatforms : undefined,
@@ -311,6 +315,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
       setItems((shown) => refreshRowsInPlace(fresh.items, shown, launchKey, sortBy === 'recent'));
     },
     [filterKey],
+    LAUNCH_CHANGED_EVENT,
   );
 
   useEffect(() => {
