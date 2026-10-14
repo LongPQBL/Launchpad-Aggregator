@@ -123,6 +123,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
   events?.subscribe((event) => {
     if (event.type !== 'pool.changed' || !event.poolId) return;
     const marker = `:${event.poolId.toLowerCase()}:`;
+    // Its history charts too (the sync's announcement and the candle worker's, which arrives once the buckets are rebuilt).
+    poolHistoryMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 250);
     poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), POOL_STATS_REFRESH_MIN_AGE_MS);
   });
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {

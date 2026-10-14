@@ -65,10 +65,14 @@ export async function refreshDirtyPoolCandles(pool: Pool, limit = 100): Promise<
     [row.chainId, row.protocol, row.poolId, row.bucketStart]);
     // Only recent buckets are live activity (a backfill re-dirties old ones by the thousand); NOTIFY arrives once this commit makes the candles readable.
     const recentAfter = Math.floor(Date.now() / 1000) - 2 * 60 * 60;
-    const pools = new Map(dirty.filter((row) => row.bucketStart >= recentAfter).map((row) => [`${row.chainId}:${row.poolId.toLowerCase()}`, row]));
+    const pools = new Map(dirty.filter((row) => row.bucketStart >= recentAfter).map((row) => [`${row.chainId}:${row.protocol}:${row.poolId.toLowerCase()}`, row]));
     for (const row of pools.values()) {
+      // The pool's currencies let the pages of the tokens it holds (their all-pools Volume and TVL) reload too.
+      const catalog = await client.query('SELECT currency0, currency1 FROM pool_catalog WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3',
+        [row.chainId, row.protocol, row.poolId.toLowerCase()]);
+      const tokens = catalog.rows[0] ? [String(catalog.rows[0].currency0).toLowerCase(), String(catalog.rows[0].currency1).toLowerCase()] : [];
       await client.query('SELECT pg_notify($1, $2)', ['launchpad_events',
-        JSON.stringify({ type: 'pool.changed', chainId: row.chainId, poolId: row.poolId.toLowerCase() })]);
+        JSON.stringify({ type: 'pool.changed', chainId: row.chainId, poolId: row.poolId.toLowerCase(), ...(tokens.length ? { poolTokens: tokens } : {}) })]);
     }
     await client.query('COMMIT');
     return dirty.length;

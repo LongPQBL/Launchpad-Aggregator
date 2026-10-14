@@ -72,6 +72,9 @@ const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: nu
 // The launch page recomputes these per request; the RPC answers change on the scale of minutes, and
 // the page is re-fetched on every visit, so a short per-(pool, client) cache keeps repeat loads fast.
 const CHAIN_READ_TTL_MS = 60_000;
+// An announced change drops cached history only if it was computed this long ago: a second announcement shortly after the first
+// (the sync's, then the candle worker's) must still be able to replace an answer that was computed from the not yet rebuilt buckets.
+const HISTORY_INVALIDATE_MIN_AGE_MS = 250;
 const usdPriceMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, Awaited<ReturnType<typeof readUsdPrice>>>>>>();
 const totalSupplyMemos = new WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, bigint | null>>>();
 function cachedUsdPrice(pool: Pool, client: UsdPriceClient, chainId: number, quoteAssetAddress: string) {
@@ -380,6 +383,15 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
     };
   }
 
+  // Volume and TVL history is cached for seconds to minutes. A launch whose figures or candles were just recomputed, or a pool holding
+  // it that just had a swap, makes its cached answers stale: drop them so the refetch the announcement triggers reads the new buckets.
+  events?.subscribe((event) => {
+    const tokens = event.type === 'launch.changed' && event.tokenAddress ? [event.tokenAddress]
+      : event.type === 'pool.changed' ? event.poolTokens ?? [] : [];
+    if (tokens.length === 0) return;
+    const prefixes = tokens.map((token) => `${event.chainId}:${token.toLowerCase()}:`);
+    launchHistoryMemo.invalidate((key) => prefixes.some((prefix) => key.startsWith(prefix)), HISTORY_INVALIDATE_MIN_AGE_MS);
+  });
   const store: ApiDeps['data'] = {
     async listSources() {
       const result = await pool.query('SELECT id, chain_id, version FROM sources ORDER BY id');

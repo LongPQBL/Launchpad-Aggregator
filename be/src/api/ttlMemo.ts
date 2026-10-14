@@ -1,9 +1,12 @@
 // Caches a promise per key for ttlMs. A rejected call is dropped so the next call retries.
+// `invalidate(match, minAgeMs)` drops matching entries computed at least `minAgeMs` ago, for when the data behind them is known to have changed.
+export type TtlMemo<K, V, A> = ((key: K, arg?: A) => Promise<V>) & { invalidate: (match: (key: K) => boolean, minAgeMs?: number) => void };
+
 export function ttlMemo<K, V, A = undefined>(
   fn: (key: K, arg: A) => Promise<V>, ttlMs: number, now: () => number = Date.now,
-): (key: K, arg?: A) => Promise<V> {
+): TtlMemo<K, V, A> {
   const entries = new Map<K, { value: Promise<V>; expiresAt: number }>();
-  return (key: K, arg?: A) => {
+  const read = (key: K, arg?: A) => {
     const current = entries.get(key);
     if (current && current.expiresAt > now()) return current.value;
     const value = fn(key, arg as A);
@@ -11,6 +14,10 @@ export function ttlMemo<K, V, A = undefined>(
     value.catch(() => { if (entries.get(key)?.value === value) entries.delete(key); });
     return value;
   };
+  const invalidate = (match: (key: K) => boolean, minAgeMs = 0) => {
+    for (const [key, entry] of entries) if (match(key) && now() - (entry.expiresAt - ttlMs) >= minAgeMs) entries.delete(key);
+  };
+  return Object.assign(read, { invalidate });
 }
 
 /**

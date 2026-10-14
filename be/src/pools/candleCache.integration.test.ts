@@ -65,7 +65,7 @@ describe('pool candle cache', () => {
       await insertSwap(`0x${'2'.repeat(64)}`, Math.floor(Date.now() / 1000));
       await refreshDirtyPoolCandles(pool, 10);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'pool.changed', chainId, poolId: id }]);
+      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'pool.changed', chainId, poolId: id, poolTokens: [address0, address1] }]);
     } finally {
       await listener.query('UNLISTEN launchpad_events');
       await listener.end();
