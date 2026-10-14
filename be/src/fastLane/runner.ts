@@ -34,6 +34,8 @@ export interface FastLaneStats {
   rpcCalls: number; rpcMs: number;
   /** The slowest single call and how many took over half a second. */
   rpcMsMax: number; rpcSlowCalls: number;
+  /** Where the delay of a trade goes: from the block's timestamp to the socket delivering its log (provider side), and from the delivery to the row being written (the lane's queue, lookups, database). Worst case since start, in ms. */
+  deliveryMsMax: number; queueMsMax: number;
   /** When the WebSocket last delivered a batch of logs (ms since the epoch); null before the first one. The sweep never sets it. */
   lastSocketLogAt: number | null;
 }
@@ -69,7 +71,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   const log = options.log ?? (() => {});
   const now = options.now ?? Date.now;
   const counters: FastLaneStats = {
-    received: 0, watched: 0, applied: 0, unresolved: 0, skipped: 0, removed: 0, errors: 0, sweeps: 0, sweepsSkipped: 0, blocks: 0, lookupMs: 0, applyMs: 0, lookupRetries: 0, rpcCalls: 0, rpcMs: 0, rpcMsMax: 0, rpcSlowCalls: 0, lastSocketLogAt: null,
+    received: 0, watched: 0, applied: 0, unresolved: 0, skipped: 0, removed: 0, errors: 0, sweeps: 0, sweepsSkipped: 0, blocks: 0, lookupMs: 0, applyMs: 0, lookupRetries: 0, rpcCalls: 0, rpcMs: 0, rpcMsMax: 0, rpcSlowCalls: 0, deliveryMsMax: 0, queueMsMax: 0, lastSocketLogAt: null,
   };
   let startedAt = now();
   let sweepInFlight = false;
@@ -79,6 +81,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   let lastSwept: bigint | null = null;
   const headers = new Map<string, BlockHeader>();
   const senders = new Map<string, string>();
+  const arrivedAt = new Map<string, number>(); // block number -> when the socket delivered its first watched log
   const handled = new Set<string>(); // `${txHash}:${logIndex}` of logs this process already applied
   let queue: Promise<void> = Promise.resolve();
   let unsubscribe: (() => void) | null = null;
@@ -172,6 +175,14 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     await recordFastRows(db, chainId, entries.filter((_, index) => result.outcomes[index] === 'applied'));
     keys.forEach((key, index) => { if (result.outcomes[index] === 'applied') handled.add(key); });
     counters.blocks += 1; counters.applyMs += now() - applyStart;
+    const arrived = arrivedAt.get(blockNumber.toString());
+    if (arrived !== undefined) {
+      const delivery = arrived - current.timestamp * 1000; // timestamps have 1 s resolution
+      const queued = now() - arrived;
+      counters.deliveryMsMax = Math.max(counters.deliveryMsMax, delivery); counters.queueMsMax = Math.max(counters.queueMsMax, queued);
+      if (delivery > 3_000 || queued > 3_000) log('slow trade', { blockNumber: blockNumber.toString(), deliveryMs: Math.round(delivery), queueMs: Math.round(queued), trades: entries.length });
+      arrivedAt.delete(blockNumber.toString());
+    }
     while (handled.size > HANDLED_KEYS_MAX) handled.delete(handled.values().next().value as string);
   }
 
@@ -232,7 +243,12 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       const cls = classifyLog(entry);
       if (cls !== null && isWatched(watch, cls) && !handled.has(`${entry.transactionHash.toLowerCase()}:${entry.logIndex}`)) blocks.add(entry.blockNumber);
     }
-    for (const blockNumber of blocks) void getHeader(blockNumber);
+    const arrival = now();
+    for (const blockNumber of blocks) {
+      if (!arrivedAt.has(blockNumber.toString())) arrivedAt.set(blockNumber.toString(), arrival);
+      void getHeader(blockNumber);
+    }
+    trim(arrivedAt, CACHE_MAX);
     return enqueue(() => processLogs(logs));
   }
 
