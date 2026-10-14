@@ -66,25 +66,35 @@ interface DueTrade {
   side: string; tokenAmountRaw: bigint; quoteAmountRaw: bigint;
 }
 
-// Newest launches first: those are the ones people are looking at, and a backlog of old launches that keep failing (no raw rows for them) must not
-// starve a launch created minutes ago.
+// Launches created recently are priced first: those are the ones people are looking at, and a backlog of old launches that keep failing (no raw
+// rows for them) must not starve one created minutes ago. Two cheap passes instead of one ORDER BY (ordering a join over every curve trade read the
+// disk for tens of seconds on the dev database): the launches of the last RECENT_LAUNCH_BLOCKS blocks, then, only if the batch is not full, the rest.
+const RECENT_LAUNCH_BLOCKS = 400_000n; // about 14 hours on a chain with ~8 blocks a second
+
 // Finds launches with a priced-behind (or never-started) curve, not just never-started: a launch
 // already caught up has no row returned here (its checkpoint's (block, logIndex) is >= its latest
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
 async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
-  const result = await pool.query(`
+  const query = async (minLaunchBlock: bigint, max: number, excluded: readonly string[]) => (await pool.query(`
     SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, v.ref AS curve_ref, l.launch_block
     FROM launches l
     JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
     JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
       AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
     LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
-    WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
+    WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL AND l.launch_block >= $3
       AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
       AND (l.chain_id::text || ':' || l.token_address) <> ALL($2::text[])
-    ORDER BY l.launch_block DESC
-    LIMIT $1`, [limit, excludedKeys]);
-  return result.rows.map((row: Record<string, unknown>) => ({
+    LIMIT $1`, [max, excluded, minLaunchBlock.toString()])).rows as Record<string, unknown>[];
+  const newest = await pool.query('SELECT max(launch_block) AS newest FROM launches');
+  const newestBlock = newest.rows[0]?.newest === null || newest.rows[0]?.newest === undefined ? 0n : BigInt(String(newest.rows[0].newest));
+  const recent = await query(newestBlock > RECENT_LAUNCH_BLOCKS ? newestBlock - RECENT_LAUNCH_BLOCKS : 0n, limit, excludedKeys);
+  let rows = recent;
+  if (rows.length < limit) {
+    const taken = recent.map((row) => `${row.chain_id}:${row.token_address}`);
+    rows = [...recent, ...await query(0n, limit - recent.length, [...excludedKeys, ...taken])];
+  }
+  return rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),
     tokenDecimals: Number(row.token_decimals), quoteAssetDecimals: Number(row.quote_asset_decimals),
     curveAddress: String(row.curve_ref), launchBlock: BigInt(String(row.launch_block)),
