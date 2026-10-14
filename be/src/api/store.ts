@@ -21,6 +21,8 @@ import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { intervalTtlMemo } from '../charts/intervalMemo.js';
 import { isRollupBackfilled } from '../charts/rollupState.js';
 import { ttlMemo } from './ttlMemo.js';
+import type { ApiEventBus } from './events.js';
+import { withLaunchListCache } from './listCache.js';
 import { readLaunchStats } from './launchStatsStore.js';
 import { readLaunchHistory } from '../market/launchHistory.js';
 import { readCurveDepthAnswer } from '../pools/curveDepth.js';
@@ -231,7 +233,7 @@ function page<T>(rows: readonly Row[], limit: number, map: (row: Row, index: num
   }) : null };
 }
 
-export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps['data'] {
+export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: ApiEventBus): ApiDeps['data'] {
   const quoteMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined;
   // Reading the curve's state costs a few RPC calls; a minute of reuse per launch is plenty for a current-state chart.
   const curveDepthMemo = ttlMemo((_key: string, arg: { chainId: number; tokenAddress: string }) => readCurveDepthAnswer(pool, rpcClient as never, arg), 60_000);
@@ -378,7 +380,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
     };
   }
 
-  return {
+  const store: ApiDeps['data'] = {
     async listSources() {
       const result = await pool.query('SELECT id, chain_id, version FROM sources ORDER BY id');
       return result.rows.filter((row: Row) => baseSourceIds.includes(string(row.id)) || string(row.id).startsWith('pons-v2-v4:'))
@@ -882,4 +884,5 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient): ApiDeps[
       })) };
     },
   };
+  return withLaunchListCache(store, events);
 }
