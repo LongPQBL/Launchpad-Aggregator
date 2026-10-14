@@ -8,26 +8,36 @@ export const LIVE_FETCH_MIN_INTERVAL_MS = 1_000;
 
 // Runs `fetchFirstPage` as soon as a matching event (a trade by default, or `eventName`) is announced, instead of waiting for the page-wide
 // router.refresh() (throttled, and it re-runs every other fetch on the page). Leading + trailing throttle:
-// a busy feed costs at most one request a second. Skipped while the tab is hidden; the fallback poll catches up.
+// a busy feed costs at most one request a second. Skipped while the tab is hidden, with one catch-up fetch when it becomes visible.
 export function useLiveFirstPage(matches: (payload: SseEventPayload) => boolean, fetchFirstPage: (isStale: () => boolean) => Promise<void>, deps: readonly unknown[], eventName: string = TRADE_CREATED_EVENT): void {
   useEffect(() => {
     let lastRun = 0;
     let trailing: ReturnType<typeof setTimeout> | null = null;
     let disposed = false;
+    let missedWhileHidden = false;
     const run = async () => {
       lastRun = Date.now();
       try { if (!disposed) await fetchFirstPage(() => disposed); } catch { /* the page-wide refresh and the fallback poll still catch up */ }
     };
     const onTradeCreated = (event: Event) => {
       if (!matches((event as CustomEvent<SseEventPayload>).detail)) return;
-      if (document.hidden || trailing !== null) return;
+      if (document.hidden) { missedWhileHidden = true; return; }
+      if (trailing !== null) return;
       const wait = LIVE_FETCH_MIN_INTERVAL_MS - (Date.now() - lastRun);
       if (wait <= 0) { void run(); return; }
       trailing = setTimeout(() => { trailing = null; void run(); }, wait);
     };
+    // A hidden tab skips events; it catches up once, as soon as it is visible again.
+    const onVisible = () => {
+      if (document.hidden || !missedWhileHidden) return;
+      missedWhileHidden = false;
+      void run();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     window.addEventListener(eventName, onTradeCreated);
     return () => {
       disposed = true;
+      document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener(eventName, onTradeCreated);
       if (trailing !== null) clearTimeout(trailing);
     };
