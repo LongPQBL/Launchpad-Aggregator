@@ -9,24 +9,24 @@ async function openMockPool(page: import('@playwright/test').Page) {
   await expect(page.getByRole('tab', { name: 'Price' })).toBeVisible();
 }
 
-test('the token page offers an All range and remembers the line / candle choice', async ({ page }) => {
+test('the token page offers candle sizes and remembers the line / candle choice', async ({ page }) => {
   await page.goto(tokenUrl);
   const candles = page.getByRole('tab', { name: 'Candlestick chart' });
   await expect(candles).toHaveAttribute('aria-selected', 'true'); // candles are the default
-  await page.getByRole('link', { name: 'All' }).first().click();
-  await expect(page).toHaveURL(/range=all/);
+  await page.getByRole('link', { name: '1D' }).first().click();
+  await expect(page).toHaveURL(/range=1d/);
   await page.getByRole('tab', { name: 'Line chart' }).click();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveAttribute('aria-selected', 'true');
   await page.reload();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveAttribute('aria-selected', 'true');
 });
 
-test('Volume and TVL on the token page hide the line / candle switch and keep the range tabs', async ({ page }) => {
+test('Volume and TVL on the token page hide the line / candle switch and keep the candle-size tabs', async ({ page }) => {
   await page.goto(tokenUrl);
   await page.getByRole('tab', { name: 'Volume' }).click();
   await expect(page.getByTestId('history-chart-container')).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveCount(0);
-  await expect(page.getByRole('link', { name: '1W' }).last()).toBeVisible();
+  await expect(page.getByRole('link', { name: '4H' }).last()).toBeVisible();
   await page.getByRole('tab', { name: 'TVL' }).click();
   await expect(page.getByTestId('history-chart-container')).toBeVisible();
 });
@@ -37,17 +37,17 @@ test('a V3/V4 pool page has Liquidity and Depth tabs that show neither range tab
   await page.getByRole('tab', { name: 'Liquidity' }).click();
   await expect(page.getByRole('img', { name: /^Liquidity of/ })).toBeVisible();
   expect(await page.getByTestId('liquidity-bar').count()).toBeGreaterThan(5);
-  await expect(page.getByRole('link', { name: '1W' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '4H' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveCount(0);
   await page.getByRole('tab', { name: 'Depth' }).click();
   await expect(page.getByRole('img', { name: 'Depth chart' })).toBeVisible();
   await expect(page.getByTestId('depth-spread')).toContainText('Spread 0.1% (Fee tier 0.05%)');
   expect(await page.getByTestId('depth-ask-row').count()).toBeGreaterThan(0);
   expect(await page.getByTestId('depth-bid-row').count()).toBeGreaterThan(0);
-  await expect(page.getByRole('link', { name: '1W' })).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '4H' })).toHaveCount(0);
   // Back to Price: the range tabs and the style switch return.
   await page.getByRole('tab', { name: 'Price' }).click();
-  await expect(page.getByRole('link', { name: '1W' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: '4H' }).first()).toBeVisible();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toBeVisible();
 });
 

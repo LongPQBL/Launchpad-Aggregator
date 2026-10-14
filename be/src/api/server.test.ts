@@ -263,9 +263,10 @@ describe('read-only API', () => {
     const daily = await app.inject({ method: 'GET', url });
     expect(daily.statusCode).toBe(200);
     expect(daily.json()).toEqual(history);
-    expect((await app.inject({ method: 'GET', url: `${url}?range=1h` })).statusCode).toBe(200);
-    expect(seen).toEqual([{ intervalSeconds: 300, buckets: 288 }, { intervalSeconds: 60, buckets: 60 }]);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1m` })).statusCode).toBe(200);
+    expect(seen).toEqual([{ intervalSeconds: 3_600, buckets: 168 }, { intervalSeconds: 60, buckets: 120 }]); // the default tab is 1h
     expect((await app.inject({ method: 'GET', url: `${url}?range=7` })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1w` })).statusCode).toBe(400); // the old range ids are gone
     const without = await createApiServer({ feOrigin: 'http://localhost:3000', data: data() });
     expect((await without.inject({ method: 'GET', url })).statusCode).toBe(503);
   });
@@ -278,14 +279,15 @@ describe('read-only API', () => {
       listCandles: async (_c, _t, interval) => { seen.push(interval); return { items: [candle(now - 60), candle(now - 7200)], complete: true }; },
     } });
     const url = `/v1/launches/4663/${address}/candles`;
-    const hour = await app.inject({ method: 'GET', url: `${url}?range=1h` });
-    expect(hour.statusCode).toBe(200);
+    const minute = await app.inject({ method: 'GET', url: `${url}?range=1m` });
+    expect(minute.statusCode).toBe(200);
     expect(seen).toEqual([60]);
-    expect(hour.json().items).toHaveLength(1); // the two-hour-old candle is outside the 1h window
-    expect((await app.inject({ method: 'GET', url: `${url}?range=1y` })).statusCode).toBe(200);
-    expect((await app.inject({ method: 'GET', url: `${url}?range=all` })).statusCode).toBe(200);
-    expect(seen).toEqual([60, 86_400, 86_400]); // 1y and all both read daily candles
-    expect((await app.inject({ method: 'GET', url: `${url}?range=5m` })).statusCode).toBe(400);
+    expect(minute.json().items).toHaveLength(2); // both candles are inside the 1m tab's 120-bar window (two hours)
+    const fiveMinutes = await app.inject({ method: 'GET', url: `${url}?range=5m` });
+    expect(fiveMinutes.statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1d` })).statusCode).toBe(200);
+    expect(seen).toEqual([60, 300, 86_400]); // each tab reads candles of its own size
+    expect((await app.inject({ method: 'GET', url: `${url}?range=1y` })).statusCode).toBe(400);
     await app.close();
   });
 

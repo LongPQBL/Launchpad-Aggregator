@@ -152,16 +152,16 @@ describe('client', () => {
       for (let i = 0; i < 4; i += 1) fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null, complete: true }));
 
       await getLaunchTransactions(4663, token, { venue: 'curve' });
-      await getLaunchCandles(4663, token, { range: '1w', venue: 'curve' });
-      await getLaunchHistory(4663, token, '1w', 'curve');
+      await getLaunchCandles(4663, token, { range: '4h', venue: 'curve' });
+      await getLaunchHistory(4663, token, '4h', 'curve');
       await getLaunchTransactions(4663, token);
 
       const urls = fetchMock.mock.calls.map(([url]) => new URL(String(url)));
       expect(urls[0]!.searchParams.get('venue')).toBe('curve');
       expect(urls[1]!.searchParams.get('venue')).toBe('curve');
       expect(urls[2]!.searchParams.get('venue')).toBe('curve');
-      expect(urls[1]!.searchParams.get('range')).toBe('1w');
-      expect(urls[2]!.searchParams.get('range')).toBe('1w');
+      expect(urls[1]!.searchParams.get('range')).toBe('4h');
+      expect(urls[2]!.searchParams.get('range')).toBe('4h');
       expect(urls[3]!.searchParams.has('venue')).toBe(false);
     });
 

@@ -10,7 +10,7 @@ import type { SseEventPayload } from '@/hooks/resource-keys';
 import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { cn } from '@/lib/utils';
 import { PoolChart } from './pool-chart';
-import { PoolHistoryChart, trimLeadingEmpty } from './pool-history-chart';
+import { PoolHistoryChart } from './pool-history-chart';
 import { PoolDepthChart, PoolLiquidityChart } from './pool-liquidity';
 
 
@@ -171,7 +171,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
       {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart, chartStyle })}</div>}
       {(selected === 'liquidity' || selected === 'curve' || selected === 'depth') && extra?.[selected]?.({ tabs: kindTabs })}
       {history && (selected === 'volume' || selected === 'tvl') && (
-        <PoolHistoryChart items={activeRange === 'all' ? trimLeadingEmpty(data?.items ?? []) : data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
+        <PoolHistoryChart items={data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
           intervalSeconds={data?.intervalSeconds} loading={loading} error={failed} allPools={allPools} unvaluedPools={data?.unvaluedPools ?? history.unvaluedPools ?? 0}
           leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} />} trailing={kindTabs} />
       )}

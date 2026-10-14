@@ -32,13 +32,13 @@ describe('PoolChartPanel', () => {
     expect(screen.queryByRole('tab', { name: 'TVL' })).not.toBeInTheDocument();
   });
 
-  it('keeps the range tabs under Volume and refetches the series for the chosen range', async () => {
+  it('keeps the candle-size tabs under Volume and refetches the series for the chosen size', async () => {
     vi.mocked(getPoolHistory).mockResolvedValue({ items: [{ day: 10 * DAY, tradeCount: 1, volumeUsd: '7', tvlUsd: null }], complete: true });
     render(<PoolChartPanel {...props} />);
     fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
-    expect(screen.getAllByRole('link', { name: '1W' }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getAllByRole('link', { name: '1W' }).at(-1)!);
-    expect(getPoolHistory).toHaveBeenCalledWith(pool, '1w');
+    expect(screen.getAllByRole('link', { name: '4H' }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole('link', { name: '4H' }).at(-1)!);
+    expect(getPoolHistory).toHaveBeenCalledWith(pool, '4h');
     await waitFor(() => expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$7'));
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Volume');
   });
@@ -78,10 +78,10 @@ describe('PoolChartPanel', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Liquidity' }));
     await waitFor(() => expect(screen.getByRole('img', { name: /^liquidity of/i })).toBeInTheDocument());
     expect(screen.queryByRole('tab', { name: 'Candlestick chart' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: '1W' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '4H' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Liquidity' })).toHaveAttribute('aria-selected', 'true');
     fireEvent.click(screen.getByRole('tab', { name: 'Depth' }));
     await waitFor(() => expect(screen.getByRole('img', { name: 'Depth chart' })).toBeInTheDocument());
-    expect(screen.queryByRole('link', { name: '1W' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '4H' })).not.toBeInTheDocument();
   });
 });

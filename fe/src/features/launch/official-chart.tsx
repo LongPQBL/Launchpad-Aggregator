@@ -209,9 +209,9 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     loadedKeyRef.current = `${currency}:${range}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- server data (candles/currency) defines what is loaded; a range-only change must still fetch
   }, [candles, currency]);
-  // Up to a week the axis shows the time of day; a month or more shows dates only.
+  // Bars shorter than a day show the time of day on the axis; daily bars show dates only.
   useEffect(() => {
-    chartApi?.applyOptions({ timeScale: { timeVisible: activeRange === '1h' || activeRange === '1d' || activeRange === '1w' } });
+    chartApi?.applyOptions({ timeScale: { timeVisible: activeRange !== '1d' } });
   }, [chartApi, activeRange]);
   useEffect(() => {
     onHoverPointRef.current?.(null);
@@ -377,7 +377,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           point={chartStyle === 'line' && latestCandle ? { time: latestCandle.bucketStart, value: toChartValue(latestCandle.close) } : null} />
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-      <nav aria-label="Chart range" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+      <nav aria-label="Candle size" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
         {CHART_RANGES.map((item) => (
           <a key={item.id} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?currency=${activeCurrency}&range=${item.id}`}
             aria-current={item.id === activeRange ? 'page' : undefined}
@@ -393,7 +393,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
 // The same range tabs as the price chart's own, for charts that fetch a different series (Volume / TVL history).
 export function ChartRangeTabs({ active, onSelect }: { active: ChartRangeId; onSelect: (range: ChartRangeId) => void }) {
   return (
-    <nav aria-label="Chart range" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+    <nav aria-label="Candle size" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
       {CHART_RANGES.map((item) => (
         <a key={item.id} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?range=${item.id}`}
           aria-current={item.id === active ? 'page' : undefined}

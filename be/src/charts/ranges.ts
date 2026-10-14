@@ -1,16 +1,16 @@
-export const CHART_RANGES = ['1h', '1d', '1w', '1m', '1y', 'all'] as const;
+// A chart tab names the size of one candle / bar (1m, 5m, 1h, 4h, 1d), like TradingView and DexScreener; the window is a fixed number of those
+// bars ending now. (The query parameter keeps its old name, `range`.)
+export const CHART_RANGES = ['1m', '5m', '1h', '4h', '1d'] as const;
 export type ChartRange = (typeof CHART_RANGES)[number];
-export const DEFAULT_RANGE: ChartRange = '1d';
+export const DEFAULT_RANGE: ChartRange = '1h';
 
-// The one place that decides how much time a chart tab shows and how coarse its buckets are.
+// The one place that decides how many bars a chart tab shows.
 const SPECS = {
-  '1h': { windowSeconds: 3_600, intervalSeconds: 60 },
-  '1d': { windowSeconds: 86_400, intervalSeconds: 300 },
-  '1w': { windowSeconds: 604_800, intervalSeconds: 3_600 },
-  '1m': { windowSeconds: 2_592_000, intervalSeconds: 14_400 },
-  '1y': { windowSeconds: 31_536_000, intervalSeconds: 86_400 },
-  // Everything the history endpoints can serve: daily buckets up to their bucket cap (400 days). The client drops the empty days before the first data.
-  all: { windowSeconds: 400 * 86_400, intervalSeconds: 86_400 },
+  '1m': { windowSeconds: 120 * 60, intervalSeconds: 60 },
+  '5m': { windowSeconds: 144 * 300, intervalSeconds: 300 },
+  '1h': { windowSeconds: 168 * 3_600, intervalSeconds: 3_600 },
+  '4h': { windowSeconds: 180 * 14_400, intervalSeconds: 14_400 },
+  '1d': { windowSeconds: 365 * 86_400, intervalSeconds: 86_400 },
 } as const;
 
 export function parseRange(value: unknown): ChartRange | null {

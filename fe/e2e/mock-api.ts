@@ -129,10 +129,10 @@ const transactions = {
   nextCursor: null,
 };
 
-// Mirrors be/src/charts/ranges.ts: the server picks the bucket size for each range.
-const RANGE_INTERVAL_SECONDS: Record<string, number> = { '1h': 60, '1d': 300, '1w': 3600, '1m': 14_400, '1y': 86_400, all: 86_400 };
+// Mirrors be/src/charts/ranges.ts: a tab is the size of one bar.
+const RANGE_INTERVAL_SECONDS: Record<string, number> = { '1m': 60, '5m': 300, '1h': 3600, '4h': 14_400, '1d': 86_400 };
 function rangeInterval(url: URL): number {
-  return RANGE_INTERVAL_SECONDS[url.searchParams.get('range') ?? '1d'] ?? 300;
+  return RANGE_INTERVAL_SECONDS[url.searchParams.get('range') ?? '1h'] ?? 3600;
 }
 
 // A pool with several price ranges around the current price (tick 0 = 2,540 quote per base), and an order book derived from them.

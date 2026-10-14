@@ -114,7 +114,7 @@ describe('PoolHistoryChart', () => {
   });
 });
 
-import { coarsenVolume, formatUsdAxis, trimLeadingEmpty, withZeroBaseline } from './pool-history-chart';
+import { formatUsdAxis, withZeroBaseline } from './pool-history-chart';
 
 describe('withZeroBaseline', () => {
   it('always starts the TVL axis at 0, also for a flat series so axis ticks are not all identical', () => {
@@ -138,50 +138,6 @@ describe('formatUsdAxis', () => {
   });
 });
 
-describe('trimLeadingEmpty', () => {
-  const empty = (day: number) => ({ day, tradeCount: 0, volumeUsd: '0', tvlUsd: null });
-  it('drops the empty days before the first one with data', () => {
-    const data = { day: 3, tradeCount: 2, volumeUsd: '40', tvlUsd: null };
-    expect(trimLeadingEmpty([empty(1), empty(2), data, empty(4)])).toEqual([data, empty(4)]);
-  });
-  it('starts at the first TVL snapshot too, and keeps everything when nothing has data', () => {
-    const snap = { day: 2, tradeCount: 0, volumeUsd: null, tvlUsd: '10' };
-    expect(trimLeadingEmpty([empty(1), snap])).toEqual([snap]);
-    const none = [empty(1), empty(2)];
-    expect(trimLeadingEmpty(none)).toBe(none);
-  });
-});
-
-describe('coarsenVolume', () => {
-  const bucket = (day: number, volumeUsd: string | null, tradeCount = 1) => ({ day, volumeUsd, tvlUsd: null, tradeCount }) as never;
-  it('sums 5-minute buckets of a day into 24 hourly bars', () => {
-    const start = 1_800_000_000 - (1_800_000_000 % 86_400);
-    const day = Array.from({ length: 288 }, (_, index) => bucket(start + index * 300, '1'));
-    const { items, step } = coarsenVolume(day, 300);
-    expect(step).toBe(3_600);
-    expect(items).toHaveLength(24);
-    expect(items[0]).toMatchObject({ day: start, volumeUsd: '12', tradeCount: 12 });
-  });
-  it('makes a bar unavailable when any bucket in it is, never a smaller sum', () => {
-    const start = 1_800_000_000 - (1_800_000_000 % 86_400);
-    const day = Array.from({ length: 288 }, (_, index) => bucket(start + index * 300, index === 3 ? null : '1'));
-    const { items } = coarsenVolume(day, 300);
-    expect(items[0]!.volumeUsd).toBeNull();
-    expect(items[1]!.volumeUsd).toBe('12');
-  });
-  it('turns a year of daily buckets into weekly bars that start on Monday', () => {
-    const monday = 1_799_539_200; // any day: the weekly bars are aligned to Monday whatever the input
-    const days = Array.from({ length: 365 }, (_, index) => bucket(monday - 100 * 86_400 + index * 86_400, '2'));
-    const { items, step } = coarsenVolume(days, 86_400);
-    expect(step).toBe(604_800);
-    expect(items.length).toBeLessThanOrEqual(60);
-    expect(new Date(items[1]!.day * 1000).getUTCDay()).toBe(1);
-  });
-  it('leaves a short series alone', () => {
-    const few = [bucket(0, '1'), bucket(86_400, '2')];
-    expect(coarsenVolume(few, 86_400)).toEqual({ items: few, step: 86_400 });
-  });
-});
 
 describe('volume with unpriced trades', () => {
   it('says the volume is unavailable instead of drawing a flat $0 line', () => {
