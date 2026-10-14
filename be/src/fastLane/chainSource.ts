@@ -24,11 +24,21 @@ export function createViemChainSource(chain: Chain, urls: { http: string; ws: st
   const socket = createPublicClient({ chain, transport: webSocket(urls.ws, WEBSOCKET_TRANSPORT_OPTIONS) });
   return {
     async getBlock(blockNumber) {
-      const block = await rpc.getBlock({ blockNumber });
-      return block.number === null || block.hash === null ? null : { number: block.number, hash: block.hash, timestamp: Number(block.timestamp) };
+      // Over the WebSocket first: its connection is busy all the time (the log stream), so a call never pays a new TCP/TLS handshake. An idle
+      // HTTP connection is closed by the provider after a few seconds, and the lane asks for a block only every few seconds: measured
+      // 250 ms when the calls are <= 2 s apart, 800-1,200 ms when they are 4-8 s apart. HTTP stays as the fallback.
+      const read = (client: typeof rpc) => client.getBlock({ blockNumber, includeTransactions: true });
+      const block = await read(socket as never).catch(() => read(rpc));
+      // With the transactions: one round trip (~240 ms, measured) answers the header and every sender in the block, where a separate
+      // getTransaction per log costs another ~225 ms each.
+      if (block.number === null || block.hash === null) return null;
+      const senders = new Map<string, string>();
+      for (const transaction of block.transactions) senders.set(transaction.hash.toLowerCase(), transaction.from);
+      return { number: block.number, hash: block.hash, timestamp: Number(block.timestamp), senders };
     },
     async getTransactionSender(txHash) {
-      const transaction = await rpc.getTransaction({ hash: txHash as `0x${string}` });
+      const hash = txHash as `0x${string}`;
+      const transaction = await socket.getTransaction({ hash }).catch(() => rpc.getTransaction({ hash }));
       return transaction.from;
     },
     async getLogs(fromBlock, toBlock) {

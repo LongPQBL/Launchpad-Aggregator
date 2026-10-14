@@ -57,6 +57,27 @@ describe('WebSocket log subscription across a dropped connection', () => {
   }, 30_000);
 });
 
+describe('block and sender lookups', () => {
+  it('go over the WebSocket (no new HTTP connection) and return every sender of the block', async () => {
+    const methods: string[] = [];
+    server = new WebSocketServer({ port: 0 });
+    server.on('connection', (socket) => socket.on('message', (raw) => {
+      const request = JSON.parse(String(raw)) as { id: number; method: string };
+      methods.push(request.method);
+      const block = { number: '0x10', hash: `0x${'b1'.repeat(32)}`, timestamp: '0x65', transactions: [
+        { hash: `0x${'a1'.repeat(32)}`, from: '0x1111111111111111111111111111111111111111', blockNumber: '0x10', blockHash: `0x${'b1'.repeat(32)}`, transactionIndex: '0x0', nonce: '0x0', value: '0x0', gas: '0x0', input: '0x', type: '0x0' },
+        { hash: `0x${'a2'.repeat(32)}`, from: '0x2222222222222222222222222222222222222222', blockNumber: '0x10', blockHash: `0x${'b1'.repeat(32)}`, transactionIndex: '0x1', nonce: '0x0', value: '0x0', gas: '0x0', input: '0x', type: '0x0' }] };
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: request.method === 'eth_getBlockByNumber' ? block : null }));
+    }));
+    const port = (server.address() as { port: number }).port;
+    const source = createViemChainSource(chain, { http: 'http://127.0.0.1:1', ws: `ws://127.0.0.1:${port}` });
+    const header = await source.getBlock(16n);
+    expect(header?.timestamp).toBe(0x65);
+    expect(header?.senders?.get(`0x${'a2'.repeat(32)}`)).toBe('0x2222222222222222222222222222222222222222');
+    expect(methods).toContain('eth_getBlockByNumber');
+  });
+});
+
 async function waitFor(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
   const started = Date.now();
   while (!condition()) {

@@ -118,6 +118,22 @@ browser: they already react to `trade.created`.
   survive a repair pass; a lane row whose block was replaced is deleted by repair and by a `removed` log; gap fill after a simulated drop.
 - Parity command on the real chain for a day before the flag is turned on for anyone.
 
+## Measured on the live chain (2026-10-14, scratch DB with the dev venues, flag on)
+
+- Chain block time -> row in `trades` (timestamps have 1 s resolution, so about 0.5 s too high): first version p50 1.48 s / p90 2.07 s (n=26); after the
+  changes below p50 0.78 s / p90 1.22 s / max 1.26 s (n=14). All 28 trades of the first run were checked against the chain (block hash and log index
+  exist; fee/tax equal the event data).
+- The floor: the log reaches the lane ~0.59 s after the block timestamp (p50, 514 blocks), and one node round trip (~240 ms) is needed for the
+  timestamp and the sender. Database write: ~25 ms per block.
+- What cost time and was fixed: (1) a block read with its transactions answers the header and every sender in one call (was getBlock then one
+  getTransaction per log, ~225 ms each); (2) the sweep's `getLogs` ran inside the queue that live logs use - it now runs outside it; (3) headers
+  of consecutive blocks are read in parallel as soon as their logs arrive; (4) the provider closes an idle HTTP connection after a few seconds
+  and the lane calls the node only every few seconds, so each call paid a new TCP/TLS handshake (800-1,200 ms instead of 250 ms when calls were 4-8 s
+  apart): lookups now go over the WebSocket, which is never idle, with HTTP as the fallback. `fast lane stats` shows `rpcCalls`, `rpcMs`,
+  `rpcMsMax`, `rpcSlowCalls`, `lookupMs`, `applyMs`, `lookupRetries` per process.
+- A WebSocket with no subscription is closed by the provider after a few seconds (a script that only sent requests got "The socket has been
+  closed"); the lane always has a subscription.
+
 ## Rollout and success
 
 Off by default. Turn it on locally, read `/v1/metrics` for both `via` values. Success: lane p50 chain -> API under ~1.5 s, **zero**

@@ -129,6 +129,16 @@ describe('fast lane', () => {
     }
   });
 
+  it('takes the sender from the block read when it carries one: no getTransaction call', async () => {
+    const fake = fakeSource();
+    const log = buyLog();
+    fake.header = { number: 5000n, hash: blockHash, timestamp: 1_700_000_000, senders: new Map([[log.transactionHash.toLowerCase(), '0x9999999999999999999999999999999999999999']]) };
+    await (await lane(fake)).handleLogs([log]);
+    await settle();
+    expect(fake.calls.getTransactionSender).toBe(0);
+    expect((await tradeRows())[0]).toMatchObject({ txHash: log.transactionHash, traderAddress: '0x9999999999999999999999999999999999999999' });
+  });
+
   it('ignores a log from an address that is not a known venue without any RPC call', async () => {
     const fake = fakeSource();
     const instance = await lane(fake);
