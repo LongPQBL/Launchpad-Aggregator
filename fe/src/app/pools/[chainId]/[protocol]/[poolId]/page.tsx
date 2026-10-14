@@ -27,5 +27,5 @@ export default async function PoolDetailPage({ params, searchParams }: Props) {
     getPoolCandles(detail, chartRange).catch(() => null),
     getPoolHistory(detail, chartRange).catch(() => null),
   ]);
-  return <><LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId)]} /><PoolDetail pool={detail} trades={trades} candles={candles} history={history} chartRange={chartRange} /></>;
+  return <><LiveRefreshIndicator resourceKeys={[chainResourceKey(chainId)]} /><PoolDetail pool={detail} trades={trades} candles={candles} history={history} chartRange={chartRange} liveTrades={!first(query.cursor)} /></>;
 }

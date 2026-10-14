@@ -1,6 +1,9 @@
-import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import type { PoolTrade } from '@/api/client';
+import { act, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import { getPoolTrades, type PoolSummary, type PoolTrade } from '@/api/client';
+import { emitPoolChanged } from '@/hooks/live-events';
+vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolTrades: vi.fn() }));
+
 import { PoolTransactionList } from './pool-transaction-list';
 
 function trade(overrides: Partial<PoolTrade> = {}): PoolTrade {
@@ -58,5 +61,26 @@ describe('PoolTransactionList', () => {
       displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase="https://explorer.example" />);
     expect(screen.getByRole('link', { name: /0x1234/ })).toHaveAttribute('href', 'https://explorer.example/address/0x1234567890123456789012345678901234567890');
     expect(screen.getByRole('link', { name: /0xabc/ })).toHaveAttribute('href', 'https://explorer.example/tx/0xabc');
+  });
+
+  describe('live swaps', () => {
+    const livePool = { chainId: 4663, protocol: 'uniswap_v4', poolId: `0x${'ab'.repeat(32)}`, displayedToken: '0x1' } as PoolSummary;
+    const props = { displayedSymbol: 'A', otherSymbol: 'ETH', displayedDecimals: 18, otherDecimals: 18, displayedIsCurrency0: true, explorerBase: null } as const;
+
+    it('merges a swap announced in this pool at the top without a page refresh', async () => {
+      vi.mocked(getPoolTrades).mockResolvedValue({ items: [trade({ txHash: '0xnew', blockNumber: '101' }), trade()], nextCursor: null });
+      render(<PoolTransactionList {...props} trades={[trade()]} livePool={livePool} />);
+      expect(screen.getAllByRole('row')).toHaveLength(2);
+      await act(async () => { emitPoolChanged({ chainId: 4663, poolId: livePool.poolId }); });
+      expect(getPoolTrades).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByRole('row')).toHaveLength(3);
+    });
+
+    it('ignores a swap in another pool', async () => {
+      vi.mocked(getPoolTrades).mockClear();
+      render(<PoolTransactionList {...props} trades={[trade()]} livePool={livePool} />);
+      await act(async () => { emitPoolChanged({ chainId: 4663, poolId: `0x${'cd'.repeat(32)}` }); });
+      expect(getPoolTrades).not.toHaveBeenCalled();
+    });
   });
 });

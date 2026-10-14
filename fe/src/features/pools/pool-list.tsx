@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getLaunchPools, getPools, poolHref, type PoolPage, type PoolSummary } from '@/api/client';
 import { PageHeading } from '@/components/page-heading';
 import { PoolLogo, type PoolLogoToken } from './pool-logo';
-import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
+import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import { mergeRefreshedPage, refreshRowsInPlace } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 import { poolColumnWidth, type PoolColumnId } from './pool-columns';
 import { formatPoolUsd, formatVolumeToTvl, poolAge, short, volumeToTvl } from './pool-format';
@@ -129,6 +131,22 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     setNextCursor(merged.nextCursor);
     setLoadError(false);
   }
+
+  // A swap announced in a listed pool refreshes the numbers of the rows on screen in place (no reshuffling,
+  // no new rows); the page-wide router.refresh() still brings in pools created since.
+  useLiveFirstPage(
+    (payload) => chainId === undefined || payload.chainId === chainId,
+    async (isStale) => {
+      if (tokenAddress && chainId === undefined) return;
+      const fresh = tokenAddress
+        ? await getLaunchPools(chainId!, tokenAddress, { excludeOfficial: true })
+        : await getPools({ chainId });
+      if (isStale()) return;
+      setItems((shown) => refreshRowsInPlace(fresh.items, shown, rowKey));
+    },
+    [chainId, tokenAddress],
+    POOL_CHANGED_EVENT,
+  );
 
   const loadMore = useCallback(async () => {
     if (!nextCursor || loadingRef.current || (tokenAddress && chainId === undefined)) return;

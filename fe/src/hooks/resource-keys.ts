@@ -9,6 +9,8 @@ export function launchResourceKey(chainId: number, tokenAddress: string): string
 export interface SseEventPayload {
   chainId: number;
   tokenAddress?: string;
+  /** pool.changed only: the pool a swap landed in. */
+  poolId?: string;
 }
 
 export function matchesResourceKeys(payload: SseEventPayload, resourceKeys: readonly string[]): boolean {

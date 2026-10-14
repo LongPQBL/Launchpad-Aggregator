@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { formatUnits } from 'viem';
 import { displaySymbol, formatAmount, formatSide } from '@/api/format';
-import type { PoolTrade } from '@/api/client';
+import { getPoolTrades, type PoolSummary, type PoolTrade } from '@/api/client';
+import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
+import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { RollingText } from '@/components/percent-change';
@@ -41,10 +44,32 @@ export interface PoolTransactionListProps {
   otherDecimals: number | null;
   displayedIsCurrency0: boolean;
   explorerBase: string | null;
+  /** When set, a swap announced in this pool is fetched and merged in at the top without a page refresh. */
+  livePool?: PoolSummary;
 }
 
-export function PoolTransactionList({ trades, displayedSymbol, otherSymbol, displayedDecimals, otherDecimals, displayedIsCurrency0, explorerBase }: PoolTransactionListProps) {
+const tradeKey = (trade: PoolTrade) => `${trade.blockNumber}-${trade.txHash}-${trade.logIndex}`;
+
+export function PoolTransactionList({ trades: serverTrades, displayedSymbol, otherSymbol, displayedDecimals, otherDecimals, displayedIsCurrency0, explorerBase, livePool }: PoolTransactionListProps) {
   const now = useNow();
+  const [trades, setTrades] = useState(serverTrades);
+  // A server refresh hands over a new first page; merge it instead of dropping rows fetched live.
+  const [syncedTrades, setSyncedTrades] = useState(serverTrades);
+  if (syncedTrades !== serverTrades) {
+    setSyncedTrades(serverTrades);
+    setTrades(mergeRefreshedPage(serverTrades, null, trades, null, tradeKey).items);
+  }
+  useLiveFirstPage(
+    (payload) => livePool !== undefined && payload.chainId === livePool.chainId && payload.poolId === livePool.poolId.toLowerCase(),
+    async (isStale) => {
+      if (!livePool) return;
+      const page = await getPoolTrades(livePool);
+      if (isStale()) return;
+      setTrades((shown) => mergeRefreshedPage(page.items, null, shown, null, tradeKey).items);
+    },
+    [livePool?.chainId, livePool?.protocol, livePool?.poolId, livePool?.displayedToken],
+    POOL_CHANGED_EVENT,
+  );
   return (
     <Table aria-label="Transactions" className="border-separate border-spacing-y-2">
       <TableHeader>

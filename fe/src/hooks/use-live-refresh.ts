@@ -8,7 +8,7 @@ export { chainResourceKey, launchResourceKey } from './resource-keys';
 
 export type LiveStatus = 'connecting' | 'live' | 'polling';
 
-const SSE_EVENT_TYPES = ['launch.changed', 'trade.created', 'coverage.changed'] as const;
+const SSE_EVENT_TYPES = ['launch.changed', 'trade.created', 'coverage.changed', 'pool.changed'] as const;
 const COALESCE_WINDOW_MS = 300;
 const POLL_INTERVAL_MS = 15_000;
 // A recovery mechanism, not the primary freshness path (spec): the API's internal Postgres LISTEN

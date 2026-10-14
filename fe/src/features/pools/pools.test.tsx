@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { getLaunchPools, getPools, type PoolSummary } from '@/api/client';
+import { emitPoolChanged } from '@/hooks/live-events';
 import { PoolList } from './pool-list';
 import { PoolDetail } from './pool-detail';
 
@@ -272,5 +273,21 @@ describe('Pools UI', () => {
       expect(rows[0]).toHaveTextContent('Official Pons pool');
       expect(rows[1]).not.toHaveTextContent('Official Pons pool');
     });
+  });
+
+  it('refreshes the numbers of listed pools when a swap is announced, keeping their order', async () => {
+    const first: PoolSummary = { ...pool, poolId: `0x${'1'.repeat(64)}`, volume24hUsd: '100' };
+    const second: PoolSummary = { ...pool, poolId: `0x${'2'.repeat(64)}`, volume24hUsd: '200', ponsDesignated: false };
+    vi.mocked(getPools).mockResolvedValue({ items: [{ ...second, volume24hUsd: '900' }, { ...first, volume24hUsd: '150' }], nextCursor: null, supportedProtocols: ['uniswap_v4'] });
+    render(<PoolList page={{ items: [first, second], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} />);
+    const before = screen.getAllByRole('row').slice(1).map((row) => row.textContent ?? '');
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: second.poolId }); });
+    const after = screen.getAllByRole('row').slice(1).map((row) => row.textContent ?? '');
+    expect(getPools).toHaveBeenCalledTimes(1);
+    // The numbers changed, but the official pool stays first and the second stays second.
+    expect(after[0]).not.toEqual(before[0]);
+    expect(after[1]).not.toEqual(before[1]);
+    expect(after[0]).toContain('Official Pons pool');
+    expect(after[1]).not.toContain('Official Pons pool');
   });
 });

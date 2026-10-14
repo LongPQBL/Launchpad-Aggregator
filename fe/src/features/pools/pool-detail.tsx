@@ -17,7 +17,7 @@ import { SwapTrigger } from './swap-trigger';
 import { short as symbol } from './pool-format';
 import { StickyDetailHeader } from '@/components/sticky-detail-header';
 
-export function PoolDetail({ pool, trades, candles, history = null, chartRange }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null; chartRange?: ChartRangeId }) {
+export function PoolDetail({ pool, trades, candles, history = null, chartRange, liveTrades = false }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null; chartRange?: ChartRangeId; liveTrades?: boolean }) {
   const displayedIsCurrency0 = pool.displayedToken === pool.currency0;
   const other = displayedIsCurrency0 ? pool.currency1 : pool.currency0;
   const otherSymbol = displayedIsCurrency0 ? pool.currency1Symbol : pool.currency0Symbol;
@@ -84,6 +84,7 @@ export function PoolDetail({ pool, trades, candles, history = null, chartRange }
               otherDecimals={otherDecimals}
               displayedIsCurrency0={displayedIsCurrency0}
               explorerBase={explorerBase ?? null}
+              livePool={liveTrades ? pool : undefined}
             />
             {trades.nextCursor && <Link className="mt-3 block" href={`${poolHref(pool, pool.displayedToken)}&cursor=${encodeURIComponent(trades.nextCursor)}`}>Next trades</Link>}
           </>
