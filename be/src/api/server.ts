@@ -8,6 +8,7 @@ import { registerSourcesRoutes } from './routes/sources.js';
 import { registerCoverageRoutes } from './routes/coverage.js';
 import { registerLaunchRoutes } from './routes/launches.js';
 import { registerEventsRoute } from './routes/events.js';
+import { createEventMetrics } from './eventMetrics.js';
 import { registerPoolRoutes } from './routes/pools.js';
 import { registerSearchRoutes } from './routes/search.js';
 import { registerWalletRoutes } from './routes/wallets.js';
@@ -171,7 +172,11 @@ export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
   registerPoolRoutes(app, deps);
   registerSearchRoutes(app, deps);
   registerWalletRoutes(app, deps);
-  registerEventsRoute(app, deps.events ?? new ApiEventBus(), deps.security);
+  const eventBus = deps.events ?? new ApiEventBus();
+  const streams = registerEventsRoute(app, eventBus, deps.security);
+  // Operational numbers for whoever runs the API: how many browsers are connected and how late the pipeline delivers (see eventMetrics.ts).
+  const eventMetrics = createEventMetrics(eventBus);
+  app.get('/v1/metrics', { schema: { hide: true } }, async () => ({ openEventStreams: streams.openStreams(), ...eventMetrics.snapshot() }));
   app.get('/openapi.json', { schema: { hide: true } }, async () => app.swagger());
   await app.ready();
   return app;

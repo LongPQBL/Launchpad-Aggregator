@@ -160,7 +160,7 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     sourceLogId: null, priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
     priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }
 
@@ -227,7 +227,7 @@ async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unk
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }
 async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
@@ -249,7 +249,7 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }
 
@@ -376,7 +376,7 @@ async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
     traderAddress: trade.traderAddress,
   }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress });
+  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
   return 'applied';
 }
 

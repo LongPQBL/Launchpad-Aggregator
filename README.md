@@ -159,6 +159,10 @@ cùng bảng `scan_jobs` của bộ indexer RPC đã bỏ.
 Worker giá USD chính thức: `npm run -w be prices:worker` (giải quyết feed Chainlink còn chờ và đồng bộ các round oracle; chu kỳ
 `PRICE_WORKER_INTERVAL_SECONDS`, mặc định 30 giây).
 
+**Đo độ trễ liên tục:** `GET /v1/metrics` (JSON) cho biết số luồng SSE đang mở và, với từng loại sự kiện, tổng số đã nhận cùng độ trễ
+p50/p90/max trên 200 mẫu gần nhất. Độ trễ = thời điểm API nhận sự kiện trừ timestamp của block gây ra nó (`trade.created`, `pool.changed`),
+tức chặng chain → Envio → sync → Postgres. Dùng nó để so trước/sau khi mua gói HyperSync.
+
 **Số liệu danh sách launch theo thời gian thực:** khi một giao dịch được báo (`trade.created`), số liệu lưu sẵn của launch (giá, FDV, TVL,
 % thay đổi) được tính lại ngay (tối đa 1 lần mỗi 2 giây cho mỗi launch) rồi mới báo `launch.changed` để trình duyệt tải lại. Mặc định việc
 này chạy ngay trong tiến trình API (tiện cho một API cục bộ). Khi chạy nhiều API, tắt bản trong API bằng `LIVE_LAUNCH_STATS_IN_API=false`

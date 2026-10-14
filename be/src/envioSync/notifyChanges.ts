@@ -3,7 +3,7 @@ import type { DbOrTx } from '../db/client.js';
 
 export type ChangeKind = 'launch.changed' | 'trade.created' | 'coverage.changed' | 'pool.changed';
 /** `poolId`/`poolTokens` are set only on `pool.changed`: a swap landed in that pool (any protocol; V4 ids are 32 bytes, V3/V2 20) and these are its two currencies, so a list of one token's pools can pick up a pool it does not show yet. */
-export interface ChangeNotification { kind: ChangeKind; chainId: number; tokenAddress?: string; poolId?: string; poolTokens?: readonly string[] }
+export interface ChangeNotification { kind: ChangeKind; chainId: number; tokenAddress?: string; poolId?: string; poolTokens?: readonly string[]; /** Unix seconds of the block that caused it (trade.created, pool.changed): lets the API measure how late it hears of a chain event. */ blockTimestamp?: number }
 
 /**
  * Publishes compact `launchpad_events` notifications via `pg_notify`, called from inside the same
@@ -24,6 +24,7 @@ export async function notifyChanged(tx: DbOrTx, changes: readonly ChangeNotifica
       ...(change.tokenAddress ? { tokenAddress: change.tokenAddress.toLowerCase() } : {}),
       ...(change.poolId ? { poolId: change.poolId.toLowerCase() } : {}),
       ...(change.poolTokens?.length ? { poolTokens: change.poolTokens.map((token) => token.toLowerCase()) } : {}),
+      ...(change.blockTimestamp !== undefined ? { blockTimestamp: change.blockTimestamp } : {}),
     });
     await tx.execute(sql`SELECT pg_notify('launchpad_events', ${payload})`);
   }

@@ -17,4 +17,11 @@ describe('database event bridge', () => {
     expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId, poolTokens }))).toEqual({ type: 'pool.changed', chainId: 4663, poolId, poolTokens });
     expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId, poolTokens: ['nope'] }))).toBeNull();
   });
+
+  it('carries the block time of an event and rejects a malformed one', () => {
+    expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"tokenAddress":"0x1111111111111111111111111111111111111111","blockTimestamp":1700000000}'))
+      .toEqual({ type: 'trade.created', chainId: 4663, tokenAddress: '0x1111111111111111111111111111111111111111', blockTimestamp: 1_700_000_000 });
+    expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"blockTimestamp":"soon"}')).toBeNull();
+    expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"blockTimestamp":-5}')).toBeNull();
+  });
 });

@@ -420,4 +420,17 @@ describe('API hardening', () => {
     expect((await app.inject({ url: '/v1/launches?search=a%00b' })).statusCode).toBe(400);
     expect((await app.inject({ url: '/v1/search?q=%00' })).statusCode).toBe(400);
   });
+
+  it('reports open event streams and how late events arrive on /v1/metrics', async () => {
+    const events = new ApiEventBus();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: data(), events });
+    events.publish({ type: 'trade.created', chainId: 4663, tokenAddress: '0x1111111111111111111111111111111111111111', blockTimestamp: Math.floor(Date.now() / 1000) - 6 });
+    const response = await app.inject({ method: 'GET', url: '/v1/metrics' });
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.openEventStreams).toBe(0);
+    expect(body.events['trade.created']).toMatchObject({ total: 1, lag: { samples: 1 } });
+    expect(body.events['trade.created'].lag.p50Seconds).toBeGreaterThanOrEqual(5);
+    await app.close();
+  });
 });

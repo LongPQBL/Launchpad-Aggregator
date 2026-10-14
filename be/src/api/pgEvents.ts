@@ -14,11 +14,13 @@ export function parseDatabaseEvent(payload: string): ApiEvent | null {
       || (event.tokenAddress !== undefined && (typeof event.tokenAddress !== 'string' || !isAddress(event.tokenAddress)))
       || (event.poolId !== undefined && (typeof event.poolId !== 'string' || !/^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(event.poolId)))
       || (event.poolTokens !== undefined && (!Array.isArray(event.poolTokens) || event.poolTokens.length > 2
-        || !event.poolTokens.every((token) => typeof token === 'string' && isAddress(token))))) return null;
+        || !event.poolTokens.every((token) => typeof token === 'string' && isAddress(token))))
+      || (event.blockTimestamp !== undefined && (typeof event.blockTimestamp !== 'number' || !Number.isSafeInteger(event.blockTimestamp) || event.blockTimestamp <= 0))) return null;
     return { type: event.type as ApiEvent['type'], chainId: event.chainId,
       ...(typeof event.tokenAddress === 'string' ? { tokenAddress: event.tokenAddress.toLowerCase() } : {}),
       ...(typeof event.poolId === 'string' ? { poolId: event.poolId.toLowerCase() } : {}),
-      ...(Array.isArray(event.poolTokens) ? { poolTokens: (event.poolTokens as string[]).map((token) => token.toLowerCase()) } : {}) };
+      ...(Array.isArray(event.poolTokens) ? { poolTokens: (event.poolTokens as string[]).map((token) => token.toLowerCase()) } : {}),
+      ...(typeof event.blockTimestamp === 'number' ? { blockTimestamp: event.blockTimestamp } : {}) };
   } catch { return null; }
 }
 

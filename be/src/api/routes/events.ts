@@ -6,7 +6,7 @@ const MAX_STREAMS = 500;
 const MAX_STREAMS_PER_IP = 10;
 const HEARTBEAT_MS = 25_000;
 
-export function registerEventsRoute(app: FastifyInstance, events: ApiEventBus, security: SecurityOptions = {}): void {
+export function registerEventsRoute(app: FastifyInstance, events: ApiEventBus, security: SecurityOptions = {}): { openStreams: () => number } {
   const limits = { total: security.maxEventStreams ?? MAX_STREAMS, perIp: security.maxEventStreamsPerIp ?? MAX_STREAMS_PER_IP };
   const perIp = new Map<string, number>();
   let open = 0;
@@ -51,4 +51,5 @@ export function registerEventsRoute(app: FastifyInstance, events: ApiEventBus, s
     request.raw.on('close', release);
     reply.raw.on('error', release);
   });
+  return { openStreams: () => open };
 }
