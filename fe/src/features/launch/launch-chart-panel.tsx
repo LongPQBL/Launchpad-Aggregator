@@ -12,19 +12,21 @@ import { OfficialPriceChart } from './official-price-chart';
 
 // The launch page's chart area: the price chart plus Volume and TVL over the token's pools for one shared time range
 // (scoped to the bonding curve, Volume is the curve's alone).
-export function LaunchChartPanel({ chainId, tokenAddress, history, venue, initialRange = DEFAULT_CHART_RANGE, ...price }: Omit<ComponentProps<typeof OfficialPriceChart>, 'trailing' | 'range' | 'onSelectRange' | 'chartStyle'> & {
+export function LaunchChartPanel({ chainId, tokenAddress, history, venue, quoteUsd = null, initialRange = DEFAULT_CHART_RANGE, ...price }: Omit<ComponentProps<typeof OfficialPriceChart>, 'trailing' | 'range' | 'onSelectRange' | 'chartStyle'> & {
   chainId: number; tokenAddress: string; history: PoolHistory | null;
   /** The range the server rendered `history` and `candles` for (from the page URL). */
   initialRange?: ChartRangeId;
   /** Scope the Volume series to one venue (the bonding curve). A scoped panel has no TVL tab: TVL belongs to the V4 pool. An unscoped panel has one only when
    * the token has a pool to measure: a token still on its bonding curve has none, so the tab is left out instead of showing "Unavailable". */
   venue?: 'curve';
+  /** USD per quote unit, for the bonding-curve chart. */
+  quoteUsd?: number | null;
 }) {
   const loadHistory = useCallback((range: ChartRangeId) => getLaunchHistory(chainId, tokenAddress, range, venue), [chainId, tokenAddress, venue]);
   // The bonding curve (a constant-product curve with a fee) also has a Depth view; a token's many pools have none.
   const extra = venue === 'curve' ? {
     curve: ({ tabs }: { tabs: React.ReactNode }) => (
-      <CurveShapeChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />),
+      <CurveShapeChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} quoteUsd={quoteUsd} trailing={tabs} />),
     depth: ({ tabs }: { tabs: React.ReactNode }) => (
       <CurveDepthChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />),
   } : undefined;

@@ -50,6 +50,11 @@ export interface PoolTransactionListProps {
 
 const tradeKey = (trade: PoolTrade) => `${trade.blockNumber}-${trade.txHash}-${trade.logIndex}`;
 
+// A pool swap's amounts are signed from the pool's side (negative = paid out to the trader); the row shows the size of each leg, the Type column says which way.
+function unsigned(raw: string): string {
+  return raw.startsWith('-') ? raw.slice(1) : raw;
+}
+
 export function PoolTransactionList({ trades: serverTrades, displayedSymbol, otherSymbol, displayedDecimals, otherDecimals, displayedIsCurrency0, explorerBase, livePool }: PoolTransactionListProps) {
   const now = useNow();
   const [trades, setTrades] = useState(serverTrades);
@@ -102,10 +107,10 @@ export function PoolTransactionList({ trades: serverTrades, displayedSymbol, oth
                 className="text-right text-base"
                 title={trade.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
-                {trade.usdValueStatus === 'pending' ? 'Calculating…' : trade.usdValue === null ? '—' : `$${formatAmount(trade.usdValue, 2)}`}
+                {trade.usdValue === null ? '—' : `$${formatAmount(trade.usdValue, 2)}`}
               </TableCell>
-              <TableCell className="text-right text-base">{formatRawAmount(displayedRaw, displayedDecimals)}</TableCell>
-              <TableCell className="text-right text-base">{formatRawAmount(otherRaw, otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
+              <TableCell className="text-right text-base">{formatRawAmount(unsigned(displayedRaw), displayedDecimals)}</TableCell>
+              <TableCell className="text-right text-base">{formatRawAmount(unsigned(otherRaw), otherDecimals)} {displaySymbol(otherSymbol)}</TableCell>
               <TableCell className="text-right text-base">
                 {explorerBase ? (
                   <a href={`${explorerBase}/address/${trade.traderAddress}`} target="_blank" rel="noreferrer noopener">

@@ -218,7 +218,7 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
                   </span>
                 </TableCell>
                 <TableCell className="text-right text-base">
-                  {row.usdValueStatus === 'pending' ? 'Calculating…' : row.usdValue === null ? '—' : formatUsdCompact(row.usdValue, 2)}
+                  {row.usdValue === null ? '—' : formatUsdCompact(row.usdValue, 2)}
                 </TableCell>
                 {[[soldAmount, sold], [receivedAmount, received]].map(([amount, side], index) => (
                   <TableCell key={index} className="text-right text-base">

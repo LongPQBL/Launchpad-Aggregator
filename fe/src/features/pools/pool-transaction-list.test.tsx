@@ -31,6 +31,21 @@ describe('PoolTransactionList', () => {
     expect(screen.getByText(/^1 SANTACOIN$/)).toBeInTheDocument();
   });
 
+  it('shows the size of each leg without the pool-side minus sign', () => {
+    render(<PoolTransactionList trades={[trade({ amount0Raw: '-3000000000000000000', amount1Raw: '190000000000000000' })]} displayedSymbol="NDA" otherSymbol="USDG"
+      displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
+    expect(screen.getAllByRole('cell').map((c) => c.textContent)).toContain('3');
+    expect(screen.queryByText(/^-/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^0\.19 USDG$/)).toBeInTheDocument();
+  });
+
+  it('shows a dash, never "Calculating", for a USD value that is not known yet', () => {
+    render(<PoolTransactionList trades={[trade({ usdValue: null, usdValueStatus: 'pending' })]} displayedSymbol="NDA" otherSymbol="USDG"
+      displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
+    expect(screen.queryByText(/Calculating/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('cell')[2]).toHaveTextContent('—');
+  });
+
   it('shows "—" instead of guessing an amount when decimals are unknown', () => {
     render(<PoolTransactionList trades={[trade()]} displayedSymbol="SANTACOIN" otherSymbol="ETH"
       displayedDecimals={null} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
@@ -48,12 +63,6 @@ describe('PoolTransactionList', () => {
       displayedDecimals={18} otherDecimals={18} displayedIsCurrency0={false} explorerBase={null} />);
     expect(screen.getByText(/^Sell /)).toBeInTheDocument();
     expect(screen.queryByText(/^Buy /)).not.toBeInTheDocument();
-  });
-
-  it('shows a loading state for a pending USD value', () => {
-    render(<PoolTransactionList trades={[trade({ usdValueStatus: 'pending' })]} displayedSymbol="SANTACOIN" otherSymbol="ETH"
-      displayedDecimals={18} otherDecimals={18} displayedIsCurrency0 explorerBase={null} />);
-    expect(screen.getByText(/calculating/i)).toBeInTheDocument();
   });
 
   it('links the wallet and tx hash to the explorer when one is known', () => {

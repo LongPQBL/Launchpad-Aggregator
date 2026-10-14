@@ -177,7 +177,7 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
                 className="text-right text-base"
                 title={row.usdValueStatus === 'priced' ? 'Converted at the historical quote price near this trade\'s own execution time, not the current price' : undefined}
               >
-                {row.usdValueStatus === 'pending' ? 'Calculating…' : formatUsdAmount(row.usdValue)}
+                {formatUsdAmount(row.usdValue)}
               </TableCell>
               <TableCell className="text-right text-base">
                 {explorerBase ? (

@@ -29,4 +29,11 @@ describe('CurveShapeView', () => {
     fireEvent.mouseLeave(svg);
     expect(readout).toHaveTextContent('Now at 20.0% of graduation');
   });
+  it('shows prices and the paid-in amount in USD when the quote has a USD rate', () => {
+    render(<CurveShapeView shape={shape} baseSymbol="EAR" quoteSymbol="ETH" quoteUsd={2500} />);
+    const readout = screen.getByTestId('curve-shape-readout');
+    expect(readout).toHaveTextContent('$0.01'); // 4e-6 ETH x $2,500
+    expect(readout).toHaveTextContent('$5,000 paid in'); // 2 ETH x $2,500
+    expect(readout).not.toHaveTextContent('ETH');
+  });
 });

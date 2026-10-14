@@ -38,11 +38,19 @@ export function rangeSlots(range: ChartRangeId, nowSeconds: number): number[] | 
   return slots;
 }
 
-/** The real points plus an empty point for every slot of the range that has none, in time order. */
+/**
+ * The real points plus an empty point for every slot between a little before the first real point and now, in time order, so the
+ * time axis stays true to time (a quiet stretch keeps its width) while the candles of a token that only just started trading are not
+ * squeezed into a corner of a 24-hour window. With no real point the whole window is filled (an empty chart).
+ */
 export function withWhitespace<T extends { time: number }>(points: readonly T[], range: ChartRangeId, nowSeconds: number): Array<T | { time: number }> {
   const slots = rangeSlots(range, nowSeconds);
   if (!slots) return [...points];
+  const first = points.reduce((min, point) => Math.min(min, point.time), Infinity);
+  const spacing = slots.length > 1 ? slots[1]! - slots[0]! : 1;
+  const padding = Math.max(6, Math.ceil(slots.length * 0.05)) * spacing;
+  const wanted = Number.isFinite(first) ? slots.filter((time) => time >= first - padding) : slots;
   const known = new Set(points.map((point) => point.time));
-  const merged: Array<T | { time: number }> = [...points, ...slots.filter((time) => !known.has(time)).map((time) => ({ time }))];
+  const merged: Array<T | { time: number }> = [...points, ...wanted.filter((time) => !known.has(time)).map((time) => ({ time }))];
   return merged.sort((a, b) => a.time - b.time);
 }

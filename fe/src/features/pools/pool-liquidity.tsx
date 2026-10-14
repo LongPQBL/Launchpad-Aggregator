@@ -156,8 +156,8 @@ export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
 }
 
 /** The Curve tab of a bonding-curve page: the curve's own shape, price against graduation progress, drawn from its reserves. */
-export function CurveShapeChart({ chainId, tokenAddress, baseSymbol, quoteSymbol, trailing }: {
-  chainId: number; tokenAddress: string; baseSymbol: string; quoteSymbol: string; trailing?: ReactNode;
+export function CurveShapeChart({ chainId, tokenAddress, baseSymbol, quoteSymbol, quoteUsd = null, trailing }: {
+  chainId: number; tokenAddress: string; baseSymbol: string; quoteSymbol: string; quoteUsd?: number | null; trailing?: ReactNode;
 }) {
   const loaded = useLoaded(() => getCurveDepth(chainId, tokenAddress), [chainId, tokenAddress], {
     eventName: [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT],
@@ -172,5 +172,5 @@ export function CurveShapeChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
   const shape = quoteReserve !== null && tokenReserve !== null && realQuoteReserve !== null && graduationThreshold !== null && quoteDecimals !== null && tokenDecimals !== null
     ? buildCurveShape({ quoteReserve, tokenReserve, realQuoteReserve, graduationThreshold, quoteDecimals, tokenDecimals }) : null;
   if (!data.complete || shape === null) return <Message trailing={trailing}>{unavailableText(data.unavailableReason)}</Message>;
-  return <CurveShapeView shape={shape} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} trailing={trailing} />;
+  return <CurveShapeView shape={shape} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} quoteUsd={quoteUsd} trailing={trailing} />;
 }

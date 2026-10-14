@@ -20,9 +20,16 @@ function formatTokens(value: number): string {
  * A bonding curve drawn as price against graduation progress: the solid, filled part is what has already been bought, the dashed
  * part is what is left until the curve graduates to its Uniswap pool.
  */
-export function CurveShapeView({ shape, baseSymbol, quoteSymbol, trailing }: { shape: CurveShape; baseSymbol: string; quoteSymbol: string; trailing?: ReactNode }) {
+export function CurveShapeView({ shape, baseSymbol, quoteSymbol, quoteUsd = null, trailing }: {
+  shape: CurveShape; baseSymbol: string; quoteSymbol: string;
+  /** USD per quote unit; when known, prices and paid-in amounts are shown in USD (the quote asset only when it is not). */
+  quoteUsd?: number | null; trailing?: ReactNode;
+}) {
   const gradient = useId();
   const [hover, setHover] = useState<CurvePoint | null>(null);
+  const rate = quoteUsd !== null && Number.isFinite(quoteUsd) && quoteUsd > 0 ? quoteUsd : null;
+  const money = (value: number) => rate === null ? `${formatLevel(value)} ${quoteSymbol}` : `$${formatLevel(value * rate)}`;
+  const level = (value: number) => rate === null ? formatLevel(value) : `$${formatLevel(value * rate)}`;
   const { points, current, graduation } = shape;
   const yMax = graduation.price * 1.05 || 1;
   const x = (progress: number) => LEFT + progress * (WIDTH - LEFT - 2);
@@ -42,9 +49,9 @@ export function CurveShapeView({ shape, baseSymbol, quoteSymbol, trailing }: { s
   return (
     <section aria-label="Bonding curve">
       <div className="mb-2 min-h-20" data-testid="curve-shape-readout">
-        <p className="text-2xl">{formatLevel(shown.price)} {quoteSymbol}</p>
+        <p className="text-2xl">{money(shown.price)}</p>
         <p className="text-sm text-muted-foreground">
-          {hover ? 'At' : 'Now at'} {(shown.progress * 100).toFixed(1)}% of graduation · {formatLevel(shown.quotePaidIn)} {quoteSymbol} paid in
+          {hover ? 'At' : 'Now at'} {(shown.progress * 100).toFixed(1)}% of graduation · {money(shown.quotePaidIn)} paid in
           {shown.tokensSold === null ? '' : ` · ${formatTokens(shown.tokensSold)} ${baseSymbol} sold`}
         </p>
       </div>
@@ -55,15 +62,16 @@ export function CurveShapeView({ shape, baseSymbol, quoteSymbol, trailing }: { s
           </defs>
           {yTicks.map((tick, index) => <g key={index}>
             <line x1={LEFT} x2={WIDTH} y1={y(tick)} y2={y(tick)} stroke="#27272a" strokeWidth="1" />
-            {index > 0 && <text x={WIDTH - 2} y={y(tick) - 3} textAnchor="end" fill="#a1a1aa" fontSize="11">{formatLevel(tick)}</text>}
+            {index > 0 && index < yTicks.length - 1 && <text x={WIDTH - 2} y={y(tick) - 3} textAnchor="end" fill="#a1a1aa" fontSize="11">{level(tick)}</text>}
           </g>)}
           <path data-testid="curve-done-area" d={`${path(done)} L${x(current.progress)},${base} L${x(0)},${base} Z`} fill={`url(#${gradient})`} />
           <path data-testid="curve-done" d={path(done)} fill="none" stroke={GREEN} strokeWidth="2.5" strokeLinejoin="round" />
           <path data-testid="curve-ahead" d={path(ahead)} fill="none" stroke={GREEN} strokeWidth="2" strokeDasharray="6 5" strokeLinejoin="round" opacity="0.7" />
           <line x1={x(current.progress)} x2={x(current.progress)} y1={y(current.price)} y2={base} stroke="#52525b" strokeDasharray="3 3" />
           <circle data-testid="curve-now" cx={x(current.progress)} cy={y(current.price)} r="5" fill={GREEN} stroke="#0a0a0b" strokeWidth="2" />
+          <text x={Math.min(WIDTH - 40, x(current.progress) + 9)} y={y(current.price) - 9} fill="#e4e4e7" fontSize="11">Now</text>
           <circle data-testid="curve-graduation" cx={x(1)} cy={y(graduation.price)} r="4" fill="#0a0a0b" stroke={GREEN} strokeWidth="2" />
-          <text x={x(1) - 8} y={Math.max(14, y(graduation.price) - 8)} textAnchor="end" fill="#a1a1aa" fontSize="11">Graduates · {formatLevel(graduation.price)}</text>
+          <text x={x(1) - 10} y={y(graduation.price) + 16} textAnchor="end" fill="#a1a1aa" fontSize="11">Graduates · {level(graduation.price)}</text>
           {hover && <><line x1={x(hover.progress)} x2={x(hover.progress)} y1={TOP} y2={base} stroke="#52525b" strokeDasharray="3 3" /><circle cx={x(hover.progress)} cy={y(hover.price)} r="4" fill={GREEN} stroke="#0a0a0b" strokeWidth="2" /></>}
           {[0, 0.25, 0.5, 0.75, 1].map((tick, index) => <text key={tick} x={Math.min(WIDTH - 2, Math.max(2, x(tick)))} y={HEIGHT - 8} textAnchor={index === 0 ? 'start' : index === 4 ? 'end' : 'middle'} fill="#a1a1aa" fontSize="11">{tick * 100}%</text>)}
         </svg>

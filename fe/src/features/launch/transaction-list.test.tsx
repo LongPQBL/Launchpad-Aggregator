@@ -132,10 +132,11 @@ describe('TransactionList', () => {
     expect(screen.getAllByRole('row')).toHaveLength(3);
   });
 
-  it('shows a loading state for a pending USD value, keeping the onchain amount visible', () => {
-    render(<TransactionList transactions={[transaction({ usdValueStatus: 'pending' })]} venues={noVenues}
+  it('shows a dash for a USD value that is not known yet, keeping the onchain amount visible', () => {
+    render(<TransactionList transactions={[transaction({ usdValueStatus: 'pending', usdValue: null })]} venues={noVenues}
       tokenSymbol="DELTA" quoteAsset={quoteAsset} />);
-    expect(screen.getByText(/calculating|loading/i)).toBeInTheDocument();
+    expect(screen.queryByText(/calculating|loading/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
 
   it('labels a protocol buyback trade as done by Pons', () => {

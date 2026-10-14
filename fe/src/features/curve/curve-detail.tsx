@@ -85,6 +85,7 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
             tokenAddress={detail.tokenAddress}
             history={history}
             venue="curve"
+            quoteUsd={chartCurrency === 'usd' && detail.quotePriceUsd != null ? Number(detail.quotePriceUsd) : null}
             priceText={priceText}
             priceStale={false}
             candles={candles}
