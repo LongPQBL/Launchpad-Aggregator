@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createDatabase } from '../db/client.js';
-import { isWatched, loadWatchSet } from './watchSet.js';
+import { createWatchSetLoader, isWatched, loadWatchSet } from './watchSet.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -42,5 +42,40 @@ describe('loadWatchSet', () => {
   it('does not list another chain', async () => {
     const set = await loadWatchSet(pool, 1);
     expect(set.curve.has(refs.curve)).toBe(false);
+  });
+});
+
+describe('createWatchSetLoader', () => {
+  const lateRef = '0x7a000000000000000000000000000000000000d4';
+  const lateId = 'watch-late';
+
+  it('reads every venue the first time, then only the ones added since, and a full reload again after the interval', async () => {
+    let clock = 0;
+    const queries: string[] = [];
+    const spy = { query: (text: string, values?: unknown[]) => { queries.push(text); return pool.query(text, values as never); } };
+    const loader = createWatchSetLoader(spy as never, chainId, { fullReloadEveryMs: 1_000, now: () => clock });
+
+    const first = await loader.refresh();
+    expect(first.curve.has(refs.curve)).toBe(true);
+    expect(queries[0]).not.toContain('seq >');
+
+    await pool.query(`INSERT INTO venues (id, chain_id, token_address, kind, ref, source_id, effective_from_block, official)
+      VALUES ($1,$2,$3,'v3_pool',$4,$5,1,true) ON CONFLICT DO NOTHING`, [lateId, chainId, token, lateRef, source]);
+    expect(first.v3_pool.has(lateRef)).toBe(false);
+
+    clock = 500;
+    const second = await loader.refresh();
+    expect(queries[1]).toContain('seq >');
+    expect(second.v3_pool.has(lateRef)).toBe(true);
+    expect(second.curve.has(refs.curve)).toBe(true); // what was already known is kept
+    expect(first.v3_pool.has(lateRef)).toBe(false); // the set handed out earlier is never mutated
+
+    await pool.query('DELETE FROM venues WHERE id = $1', [lateId]);
+    clock = 600;
+    expect((await loader.refresh()).v3_pool.has(lateRef)).toBe(true); // a deleted venue lingers until the full reload (harmless)
+    clock = 2_000;
+    const reloaded = await loader.refresh();
+    expect(queries.at(-1)).not.toContain('seq >');
+    expect(reloaded.v3_pool.has(lateRef)).toBe(false);
   });
 });

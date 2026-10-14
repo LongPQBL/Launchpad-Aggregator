@@ -3,7 +3,7 @@ import type { Database } from '../db/client.js';
 import { applyLiveRows, type LiveEntry } from '../envioSync/incrementalSync.js';
 import { classifyLog, decodeLiveLog, type FastLog } from './decode.js';
 import { advanceLaneBlock, readLaneBlock, recordFastRows, removeLaneTrade } from './store.js';
-import { EMPTY_WATCH_SET, isWatched, loadWatchSet, type WatchSet } from './watchSet.js';
+import { createWatchSetLoader, EMPTY_WATCH_SET, isWatched, type WatchSet } from './watchSet.js';
 
 export interface BlockHeader { number: bigint; hash: string; timestamp: number }
 export interface LaneChainSource {
@@ -65,6 +65,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   let sweepInFlight = false;
 
   let watch: WatchSet = EMPTY_WATCH_SET;
+  const watchLoader = createWatchSetLoader(pool, chainId);
   let lastSwept: bigint | null = null;
   const headers = new Map<string, BlockHeader>();
   const senders = new Map<string, string>();
@@ -182,7 +183,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   }
 
   async function reloadWatchSet(): Promise<void> {
-    watch = await loadWatchSet(pool, chainId);
+    watch = await watchLoader.refresh();
   }
 
   // The WebSocket path: the only one that proves the subscription is alive.

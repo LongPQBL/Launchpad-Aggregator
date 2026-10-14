@@ -294,8 +294,11 @@ export const venues = pgTable('venues', {
   effectiveToBlock: bigint('effective_to_block', { mode: 'bigint' }),
   effectiveToLogIndex: integer('effective_to_log_index'),
   official: boolean('official').notNull(),
+  // Insert order: lets the fast lane's watch set pick up only the venues added since its last read (be/src/fastLane/watchSet.ts).
+  seq: bigint('seq', { mode: 'bigint' }).notNull().generatedAlwaysAsIdentity(),
 }, (table) => [
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),
+  index('venues_seq_idx').on(table.seq),
   index('venues_token_idx').on(table.chainId, table.tokenAddress),
   // be/src/envioSync/incrementalSync.ts's lookupVenue: a trade/swap page row resolves its venue by
   // (chainId, kind, ref) — pool/curve address or V4 Pool ID — not by token, once per applied row.
