@@ -77,9 +77,26 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
   // Reading every tick costs RPC calls; a minute of reuse per pool keeps a busy page from repeating it.
   const poolLiquidityMemo = ttlMemo((_key: string, arg: PoolKey) => readPoolLiquidityAnswer(pool, rpcClient as never, arg), 60_000);
   const emptyMetadata: TokenMetadata = { symbol: null, name: null, logoUri: null };
-  async function currencyMetadata(address: string): Promise<TokenMetadata> {
-    if (!tokenMetadataResolver) return emptyMetadata;
-    try { return await tokenMetadataResolver.resolve(address); } catch { return emptyMetadata; }
+  // A token launched on a launchpad carries its own name, symbol and logo in `launches`; the asset directory only knows quote assets.
+  // Only a found logo is kept (a launch's logo can still arrive from the metadata enrichment).
+  const launchedMetadata = new Map<string, TokenMetadata>();
+  async function launchedTokenMetadata(chainId: number, address: string): Promise<TokenMetadata | null> {
+    const key = `${chainId}:${address.toLowerCase()}`;
+    const cached = launchedMetadata.get(key);
+    if (cached) return cached;
+    const found = (await pool.query('SELECT name, symbol, logo_uri FROM launches WHERE chain_id = $1 AND token_address = $2', [chainId, address.toLowerCase()])).rows[0];
+    if (!found) return null;
+    const metadata = { name: found.name ?? null, symbol: found.symbol ?? null, logoUri: found.logo_uri ?? null };
+    if (metadata.logoUri !== null) launchedMetadata.set(key, metadata);
+    return metadata;
+  }
+  async function currencyMetadata(chainId: number, address: string): Promise<TokenMetadata> {
+    let resolved = emptyMetadata;
+    if (tokenMetadataResolver) try { resolved = await tokenMetadataResolver.resolve(address); } catch { resolved = emptyMetadata; }
+    if (resolved.logoUri !== null && resolved.symbol !== null && resolved.name !== null) return resolved;
+    const launched = await launchedTokenMetadata(chainId, address).catch(() => null);
+    return launched === null ? resolved
+      : { name: resolved.name ?? launched.name, symbol: resolved.symbol ?? launched.symbol, logoUri: resolved.logoUri ?? launched.logoUri };
   }
   async function createdTimestamp(block: string): Promise<number | null> {
     if (blockTimeCache.has(block)) return blockTimeCache.get(block)!;
@@ -138,8 +155,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
         { key, displayedToken, createdTimestamp: created })),
       volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, key),
       createdAtPromise,
-      currencyMetadata(row.currency0),
-      currencyMetadata(row.currency1),
+      currencyMetadata(key.chainId, row.currency0),
+      currencyMetadata(key.chainId, row.currency1),
       assetDecimals(rpcClient, row.currency0),
       assetDecimals(rpcClient, row.currency1),
     ]);

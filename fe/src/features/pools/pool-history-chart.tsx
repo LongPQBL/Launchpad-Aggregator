@@ -13,7 +13,8 @@ const FALLBACK_GREEN = '#22c55e';
 
 /** Volume and TVL are never negative; the crosshair can sit below the baseline, where it would otherwise read "$-0.00". */
 export function formatUsdAxis(value: number): string {
-  return formatUsdCompact(String(Math.max(0, value)), 2);
+  // Below half a cent is zero on this axis (the zero baseline can carry float noise like 1.4e-16).
+  return formatUsdCompact(String(value < 0.005 ? 0 : value), 2);
 }
 
 interface AutoscaleRange { priceRange: { minValue: number; maxValue: number }; margins?: { above: number; below: number } }

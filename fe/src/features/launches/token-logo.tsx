@@ -17,7 +17,8 @@ export interface TokenImageProps {
 // tokens, clipped to halves) so both get the same fallback/SSR-race handling.
 export function TokenImage({ logoUri, symbol, className }: TokenImageProps) {
   const [failed, setFailed] = useState(false);
-  const resolved = resolveLogoUrl(logoUri);
+  // Native ETH is not a token contract, so no API record carries its logo: use the bundled one.
+  const resolved = logoUri === null && symbol === 'ETH' ? '/images/tokens/eth.svg' : resolveLogoUrl(logoUri);
 
   return resolved === null || failed ? (
     <span

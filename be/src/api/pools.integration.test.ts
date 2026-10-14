@@ -77,6 +77,24 @@ describe('pool catalog API reader', () => {
     expect(pool0?.currency1Decimals).toBeNull();
     expect(pool0?.poolBalances).toBeNull();
   });
+  it('takes the name, symbol and logo of a launched pool currency from its launch record', async () => {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ('pool-logo-test',4663,'v1',$1,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [a]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,name,symbol,logo_uri,token_decimals,platform,protocol_version,
+      factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,'pool-logo-test','Pool Logo Coin','PLC','ipfs://pool-logo',18,'pons','v1',$1,$1,999999980,$2,0,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+    [a, '0x' + 'cc'.repeat(32)]);
+    try {
+      const pool0 = await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] });
+      expect(pool0?.currency0LogoUri).toBe('ipfs://pool-logo');
+      expect(pool0?.currency0Symbol).toBe('PLC');
+      expect(pool0?.currency0Name).toBe('Pool Logo Coin');
+      expect(pool0?.currency1LogoUri).toBeNull(); // not a launched token
+    } finally {
+      await pool.query('DELETE FROM launches WHERE token_address = $1', [a]);
+      await pool.query("DELETE FROM sources WHERE id = 'pool-logo-test'");
+    }
+  });
   it('resolves currency decimals on-chain when an rpcClient is configured', async () => {
     // Stub rpcClient so decimals resolution (assetDecimals) doesn't need a real chain —
     // mirrors the pattern in store.integration.test.ts's own txRpcClient fixture.

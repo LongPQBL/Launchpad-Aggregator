@@ -133,6 +133,7 @@ describe('withZeroBaseline', () => {
 describe('formatUsdAxis', () => {
   it('never shows a negative amount for a crosshair below the baseline', () => {
     expect(formatUsdAxis(-0.004)).toBe('$0.00');
+    expect(formatUsdAxis(1.4e-16)).toBe('$0.00');
     expect(formatUsdAxis(1500)).toBe('$1.5K');
   });
 });

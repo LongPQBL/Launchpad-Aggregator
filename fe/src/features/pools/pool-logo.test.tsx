@@ -13,9 +13,9 @@ describe('PoolLogo', () => {
   });
 
   it('falls back to each side\'s initial letter when that side has no logo', () => {
-    render(<PoolLogo token0={{ symbol: 'GUY', logoUri: null }} token1={{ symbol: 'ETH', logoUri: null }} />);
+    render(<PoolLogo token0={{ symbol: 'GUY', logoUri: null }} token1={{ symbol: 'ABC', logoUri: null }} />);
     expect(screen.getByText('G')).toBeInTheDocument();
-    expect(screen.getByText('E')).toBeInTheDocument();
+    expect(screen.getByText('A')).toBeInTheDocument();
   });
 
   it('shows the Robinhood Chain badge in the corner for chain 4663', () => {

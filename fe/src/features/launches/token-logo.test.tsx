@@ -3,6 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { TokenLogo } from './token-logo';
 
 describe('TokenLogo', () => {
+  it('shows the bundled logo for native ETH, which has no token record to carry one', () => {
+    render(<TokenLogo logoUri={null} symbol="ETH" />);
+    expect(screen.getByAltText('Token logo')).toHaveAttribute('src', '/images/tokens/eth.svg');
+  });
+
   afterEach(() => {
     // @ts-expect-error -- restoring jsdom's own default descriptor, not a real browser API
     delete HTMLImageElement.prototype.complete;
