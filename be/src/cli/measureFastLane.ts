@@ -3,8 +3,12 @@ import { getChainConfig, rpcUrlFor } from '../chains/registry.js';
 import { robinhood } from '../chains/robinhood.js';
 import { createViemChainSource } from '../fastLane/chainSource.js';
 import { classifyLog } from '../fastLane/decode.js';
-import { redactError } from '../fastLane/redact.js';
+import { installConsoleRedaction, installFatalErrorHandlers, redactError } from '../fastLane/redact.js';
 import { isWatched, loadWatchSet } from '../fastLane/watchSet.js';
+
+// Before anything can print an RPC URL: libraries (viem's socket reconnect) print errors on their own.
+installConsoleRedaction(console);
+installFatalErrorHandlers(process);
 
 // Counts, for `seconds`, how many logs of each trade event the chain emits and how many belong to a known launch venue. Read-only.
 const seconds = Number(process.argv[2] ?? 60);
