@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { and, eq, inArray, isNull, gte, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, gte, lte, sql } from 'drizzle-orm';
 import type { Database, DbOrTx } from '../db/client.js';
 import { launches, venues, trades, lifecycleTransitions, envioRepairState } from '../db/schema.js';
 import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
@@ -53,13 +53,15 @@ async function deleteLaunches(tx: DbOrTx, chainId: number, tokenAddresses: reado
 // rows as absent from its own raw table and delete them as "stale", wiping both every repair pass
 // (final review, Important 6). ----
 async function appTradeWindow(
-  tx: DbOrTx, chainId: number, venueKinds: readonly string[], sourceEvents: readonly string[], windowStart: bigint,
+  tx: DbOrTx, chainId: number, venueKinds: readonly string[], sourceEvents: readonly string[], windowStart: bigint, fence: bigint,
 ): Promise<AppKeyedRow[]> {
   const venueIds = tx.select({ id: venues.id }).from(venues).where(inArray(venues.kind, venueKinds));
+  // Rows above `fence` are newer than anything Envio has processed (for example rows the WebSocket fast lane wrote): Envio's
+  // canonical set cannot confirm or contradict them yet, so repair must not look at them.
   const rows = await tx.select({ txHash: trades.txHash, logIndex: trades.logIndex, blockHash: trades.blockHash, tokenAddress: trades.tokenAddress })
     .from(trades).where(and(
       eq(trades.chainId, chainId), inArray(trades.venueId, venueIds), inArray(trades.sourceEvent, sourceEvents),
-      isNull(trades.sourceLogId), gte(trades.blockNumber, windowStart),
+      isNull(trades.sourceLogId), gte(trades.blockNumber, windowStart), lte(trades.blockNumber, fence),
     ));
   return rows.map((row) => ({ txHash: row.txHash.toLowerCase(), logIndex: row.logIndex, blockHash: row.blockHash.toLowerCase(), tokenAddress: row.tokenAddress }));
 }
@@ -166,7 +168,7 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
         }
         case 'v1-swap': {
           const envioKeys = await readRawWindowKeys(envioPool, tables['v1-swap'], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['v3_pool'], ['Swap'], windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['v3_pool'], ['Swap'], windowStart, input.fence);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);
@@ -187,7 +189,7 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
         case 'v2-buyback': {
           const sourceEvents = stream === 'v2-curve' ? ['CurveBuy', 'CurveSell'] : ['BuybackLocked'];
           const envioKeys = await readRawWindowKeys(envioPool, tables[stream], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['curve'], sourceEvents, windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['curve'], sourceEvents, windowStart, input.fence);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);
@@ -209,7 +211,7 @@ export async function repairEnvioWindow(envioPool: Pool, appDb: Database, input:
         }
         case 'v4-swap': {
           const envioKeys = await readRawWindowKeys(envioPool, tables['v4-swap'], input.chainId, windowStart, input.fence);
-          const appRows = await appTradeWindow(tx, input.chainId, ['v4_pool'], ['Swap'], windowStart);
+          const appRows = await appTradeWindow(tx, input.chainId, ['v4_pool'], ['Swap'], windowStart, input.fence);
           const stale = staleAppRows(envioKeys, appRows);
           await deleteTrades(tx, input.chainId, stale);
           staleTokens = stale.map((row) => row.tokenAddress);

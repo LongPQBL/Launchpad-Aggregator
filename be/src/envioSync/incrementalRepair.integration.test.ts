@@ -288,3 +288,34 @@ describe('repairEnvioWindow: Envio processed-block rollback behind the cursor', 
     expect(afterCursor.processedWatermark).toBeLessThanOrEqual(rolledBackFence);
   });
 });
+
+describe('repairEnvioWindow: rows newer than the fence', () => {
+  it('keeps a trade above the fence that Envio has not processed yet, and still removes a stale trade below it', async () => {
+    const { token, poolAddress: curveAddress } = freshToken();
+    await db.insert(launches).values({
+      chainId, tokenAddress: token, sourceId: 'pons-v1-legacy', sourceLogId: legacyRawLogId,
+      name: null, symbol: null, tokenDecimals: null, platform: 'pons', protocolVersion: 'v2',
+      factoryAddress: curveAddress, deployerAddress: token, launchBlock: 500n, launchBlockHash: `0x${'aa'.repeat(32)}`,
+      launchTxHash: `0x${'aa'.repeat(32)}`, launchLogIndex: 1, quoteAssetAddress: weth, quoteAssetSymbol: 'WETH',
+      quoteAssetDecimals: 18, lifecycleStatus: 'trading', coreMetadataReadState: 'done',
+    });
+    await db.insert(venues).values({
+      id: `curve-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: curveAddress,
+      sourceId: 'pons-v2-curve', sourceLogId: null, effectiveFromBlock: 500n, official: true,
+    });
+    const trade = (blockNumber: bigint, suffix: string) => ({
+      chainId, tokenAddress: token, venueId: `curve-${token}`, blockNumber, blockHash: `0x${suffix.repeat(32)}`,
+      txHash: `0x${suffix.repeat(32)}`, logIndex: 1, timestamp: 1_700_000_000, side: 'buy' as const,
+      tokenAmountRaw: '1000000000000000000', quoteAmountRaw: '2000000000000000000',
+      quoteAssetAddress: weth, sourceEvent: 'CurveBuy', activityKind: 'user_trade',
+      priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: token,
+    });
+    // fence = 1000: block 1200 is newer than anything Envio has processed (a fast-lane row); block 600 is inside the window.
+    await db.insert(trades).values([trade(1200n, 'd1'), trade(600n, 'd2')]);
+    // Neither has a row in Envio's fixture table.
+    await repairEnvioWindow(envioPool, db, { chainId, fence, depth, tables });
+
+    const remaining = await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+    expect(remaining.map((row) => row.blockNumber)).toEqual([1200n]);
+  });
+});
