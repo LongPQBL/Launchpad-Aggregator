@@ -93,7 +93,7 @@ describe('V4 pool catalog sync', () => {
       await syncV4PoolPage(envio, db, input('swap', 'tail'));
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(received.filter((payload) => payload.includes('pool.changed')).map((payload) => JSON.parse(payload)))
-        .toEqual([{ type: 'pool.changed', chainId, poolId: id }]);
+        .toEqual([{ type: 'pool.changed', chainId, poolId: id, poolTokens: [a, b] }]);
     } finally {
       await listener.query('UNLISTEN launchpad_events');
       await listener.end();

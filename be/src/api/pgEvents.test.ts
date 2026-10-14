@@ -13,5 +13,8 @@ describe('database event bridge', () => {
     const poolId = `0x${'ab'.repeat(32)}`;
     expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId }))).toEqual({ type: 'pool.changed', chainId: 4663, poolId });
     expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId: '0x12' }))).toBeNull();
+    const poolTokens = ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'];
+    expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId, poolTokens }))).toEqual({ type: 'pool.changed', chainId: 4663, poolId, poolTokens });
+    expect(parseDatabaseEvent(JSON.stringify({ type: 'pool.changed', chainId: 4663, poolId, poolTokens: ['nope'] }))).toBeNull();
   });
 });

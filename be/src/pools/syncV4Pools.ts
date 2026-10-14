@@ -100,7 +100,7 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
     sqrtPriceX96: sqrtPriceX96.toString(), traderAddress: String(raw.txFrom).toLowerCase(),
     senderAddress: String(raw.sender).toLowerCase(), fee: Number(raw.fee),
   }).onConflictDoNothing().returning({ txHash: poolTrades.txHash });
-  if (inserted.length > 0) changes?.push({ kind: 'pool.changed', chainId, poolId });
+  if (inserted.length > 0) changes?.push({ kind: 'pool.changed', chainId, poolId, poolTokens: [pool.currency0, pool.currency1] });
   await tx.delete(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.rawId, String(raw.id))));
   return true;
 }

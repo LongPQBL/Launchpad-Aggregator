@@ -12,10 +12,13 @@ export function parseDatabaseEvent(payload: string): ApiEvent | null {
     if (typeof event.type !== 'string' || !eventNames.has(event.type)
       || typeof event.chainId !== 'number' || !Number.isSafeInteger(event.chainId) || event.chainId <= 0
       || (event.tokenAddress !== undefined && (typeof event.tokenAddress !== 'string' || !isAddress(event.tokenAddress)))
-      || (event.poolId !== undefined && (typeof event.poolId !== 'string' || !/^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(event.poolId)))) return null;
+      || (event.poolId !== undefined && (typeof event.poolId !== 'string' || !/^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(event.poolId)))
+      || (event.poolTokens !== undefined && (!Array.isArray(event.poolTokens) || event.poolTokens.length > 2
+        || !event.poolTokens.every((token) => typeof token === 'string' && isAddress(token))))) return null;
     return { type: event.type as ApiEvent['type'], chainId: event.chainId,
       ...(typeof event.tokenAddress === 'string' ? { tokenAddress: event.tokenAddress.toLowerCase() } : {}),
-      ...(typeof event.poolId === 'string' ? { poolId: event.poolId.toLowerCase() } : {}) };
+      ...(typeof event.poolId === 'string' ? { poolId: event.poolId.toLowerCase() } : {}),
+      ...(Array.isArray(event.poolTokens) ? { poolTokens: (event.poolTokens as string[]).map((token) => token.toLowerCase()) } : {}) };
   } catch { return null; }
 }
 
