@@ -71,33 +71,36 @@ export async function claimDueMetadataLaunches(db: Database, now: Date, limit: n
       return [];
     }
     const selected: DueRow[] = [];
-    async function pick(direction: 'ASC' | 'DESC', count: number) {
+    async function pick(direction: 'ASC' | 'DESC', count: number, byVolume = false) {
       if (count <= 0) return;
       // A row qualifies if EITHER its core fields (name/symbol/decimals; V1 graduation; V2 unknown
       // quote asset) or its extended fields are due — each on its own independent retry schedule, so
       // a slow extended-field backoff can never delay a more urgent core-metadata retry.
-      const rows = await client.query<DueRow>(`SELECT chain_id, token_address, launch_block, launch_tx_hash,
-        launch_log_index, metadata_retry_count, logo_read_state, description_read_state,
-        socials_read_state, timestamp_read_state, protocol_version, factory_address,
-        quote_asset_address, quote_asset_symbol, core_metadata_read_state, core_metadata_retry_count
-        FROM launches
-        WHERE chain_id = 4663 AND platform = 'pons' AND protocol_version IN ('v1', 'v2')
+      const rows = await client.query<DueRow>(`SELECT l.chain_id, l.token_address, l.launch_block, l.launch_tx_hash,
+        l.launch_log_index, l.metadata_retry_count, l.logo_read_state, l.description_read_state,
+        l.socials_read_state, l.timestamp_read_state, l.protocol_version, l.factory_address,
+        l.quote_asset_address, l.quote_asset_symbol, l.core_metadata_read_state, l.core_metadata_retry_count
+        FROM launches l
+        ${byVolume ? 'LEFT JOIN launch_volume24h_usd v ON v.chain_id = l.chain_id AND v.token_address = l.token_address' : ''}
+        WHERE l.chain_id = 4663 AND l.platform = 'pons' AND l.protocol_version IN ('v1', 'v2')
           AND (
-            (core_metadata_read_state = 'pending' AND (core_metadata_retry_at IS NULL OR core_metadata_retry_at <= $1))
+            (l.core_metadata_read_state = 'pending' AND (l.core_metadata_retry_at IS NULL OR l.core_metadata_retry_at <= $1))
             OR (
-              (logo_read_state = 'pending' OR description_read_state = 'pending'
-                OR socials_read_state = 'pending' OR timestamp_read_state = 'pending')
-              AND (metadata_retry_at IS NULL OR metadata_retry_at <= $1)
+              (l.logo_read_state = 'pending' OR l.description_read_state = 'pending'
+                OR l.socials_read_state = 'pending' OR l.timestamp_read_state = 'pending')
+              AND (l.metadata_retry_at IS NULL OR l.metadata_retry_at <= $1)
             )
           )
-          AND (metadata_lease_until IS NULL OR metadata_lease_until <= $1)
-          AND NOT (token_address = ANY($2::text[]))
-        ORDER BY launch_block ${direction}, launch_log_index ${direction}, token_address ${direction}
-        LIMIT $3 FOR UPDATE SKIP LOCKED`, [now, selected.map((row) => row.token_address), count]);
+          AND (l.metadata_lease_until IS NULL OR l.metadata_lease_until <= $1)
+          AND NOT (l.token_address = ANY($2::text[]))
+        ORDER BY ${byVolume ? 'v.rank_order ASC NULLS LAST, v.volume_usd DESC NULLS LAST, ' : ''}l.launch_block ${direction}, l.launch_log_index ${direction}, l.token_address ${direction}
+        LIMIT $3 FOR UPDATE OF l SKIP LOCKED`, [now, selected.map((row) => row.token_address), count]);
       selected.push(...rows.rows);
     }
     await pick('DESC', Math.ceil(limit / 2));
-    await pick('ASC', Math.floor(limit / 2));
+    // The second half goes to the launches people see first (highest 24 h volume), then the oldest, so a back-catalog of
+    // thousands does not hold the logos of the launches at the top of the list.
+    await pick('ASC', Math.floor(limit / 2), true);
     await pick('DESC', limit - selected.length);
     if (selected.length === 0) {
       await client.query('COMMIT');

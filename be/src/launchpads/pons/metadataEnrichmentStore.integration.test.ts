@@ -65,6 +65,20 @@ it('claims half newest and half oldest due launches, then enforces the shared mi
   expect(await claimDue(db, new Date(now.getTime() + 30_000), 10, 120_000)).toEqual([]);
 });
 
+it('gives the second half of a pass to the launch with the highest volume before the oldest ones', async () => {
+  for (let n = 1; n <= 12; n++) await addLaunch(n, { launchBlock: BigInt(n) });
+  await pool.query(`INSERT INTO launch_volume24h_usd (chain_id, token_address, volume_usd, rank_category, rank_order, completeness_reason,
+    computed_at, window_end, revision, launch_block, launch_tx_hash, launch_log_index)
+    VALUES (4663, $1, 500, 'positive', 0, 'complete', now(), 1, 1, 7, $2, 7)`, [token(7), `0x${(7).toString(16).padStart(64, '0')}`]);
+  try {
+    const claims = await claimDue(db, now, 10, 120_000);
+    // newest half: 12..8; second half: the volume leader (7), then the oldest (1..4); 5 and 6 wait for a later pass.
+    expect(claims.map((row) => row.tokenAddress).sort()).toEqual([1, 2, 3, 4, 7, 8, 9, 10, 11, 12].map(token).sort());
+  } finally {
+    await pool.query('DELETE FROM launch_volume24h_usd WHERE token_address = $1', [token(7)]);
+  }
+});
+
 it('allows only one concurrent claimant and permits reclaim after lease expiry', async () => {
   const address = await addLaunch(20);
   const [first, second] = await Promise.all([
