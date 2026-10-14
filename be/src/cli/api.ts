@@ -9,12 +9,14 @@ import { createSearchStore } from '../api/searchStore.js';
 import { createWalletStore } from '../api/walletStore.js';
 import { createDatabase } from '../db/client.js';
 import { createRobinhoodPublicClient } from '../chains/robinhood.js';
+import { startRpcKeepWarm } from '../chains/keepWarm.js';
 
 const config = readApiConfig(process.env);
 const { pool } = createDatabase(config.databaseUrl);
 const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
+const stopKeepWarm = startRpcKeepWarm(rpcClient);
 const data = createApiStore(pool, rpcClient, events);
 const pools = createPoolApiStore(pool, rpcClient, undefined, events);
 // Production runs this as its own process (`npm run -w be launch-stats:live`) so several API instances do not each recompute; the default keeps
@@ -41,6 +43,7 @@ try {
   });
 } catch (error) {
   stopLiveStats();
+  stopKeepWarm();
   await stopEvents();
   await pool.end();
   throw error;
@@ -51,6 +54,7 @@ async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
   stopLiveStats();
+  stopKeepWarm();
   await app.close();
   await stopEvents();
   await pool.end();
