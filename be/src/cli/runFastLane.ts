@@ -9,6 +9,7 @@ import { reconcileLaneRows } from '../fastLane/reconcile.js';
 import { socketWatchdogVerdict } from '../fastLane/watchdog.js';
 import { readEnvioProgress } from '../envioSync/envioDb.js';
 import { createGovernor, readEnvioLagBlocks } from '../fastLane/governor.js';
+import { createOracleRounds } from '../fastLane/oracleRounds.js';
 
 // The WebSocket fast lane (docs/superpowers/specs/2026-10-14-websocket-fast-lane-design.md).
 // FAST_LANE_MODE: off (default) | on (always running) | auto (runs only while Envio's pipeline trails the chain head, see governor.ts).
@@ -32,6 +33,7 @@ let pool: ReturnType<typeof createDatabase>['pool'];
 let lane: ReturnType<typeof createFastLane>;
 let envioPool: Pool | null = null;
 let running = false;
+let stopOracle: () => void = () => {};
 const timers: ReturnType<typeof setInterval>[] = [];
 try {
   const databaseUrl = process.env.DATABASE_URL;
@@ -47,11 +49,14 @@ try {
     maxGapBlocks: process.env.FAST_LANE_MAX_GAP_BLOCKS ? BigInt(process.env.FAST_LANE_MAX_GAP_BLOCKS) : undefined,
     log: (message, fields) => console.log(stamp(), redactUrls(message), fields ? redactFields(fields) : ''),
   });
-  const startLane = async () => { await lane.start(); running = true; console.log(stamp(), `fast lane running for chain ${chain.id}`); };
-  const stopLane = async () => { running = false; await lane.stop(); console.log(stamp(), 'fast lane stopped'); };
+  // The oracle rounds ride the same WebSocket and run exactly when the lane does: a trade's USD value needs a round no older than 24 h.
+  const oracle = createOracleRounds({ source, pool, chainId: chain.id, log: (message, fields) => console.log(stamp(), redactUrls(message), fields ? redactFields(fields) : '') });
+  stopOracle = () => oracle.stop();
+  const startLane = async () => { await lane.start(); await oracle.start().catch((error) => console.error(stamp(), `oracle rounds failed to start: ${redactError(error)}`)); running = true; console.log(stamp(), `fast lane running for chain ${chain.id}`); };
+  const stopLane = async () => { running = false; oracle.stop(); await lane.stop(); console.log(stamp(), 'fast lane stopped'); };
   if (mode === 'on') await startLane();
   else console.log(stamp(), 'fast lane in auto mode: waiting for Envio to fall behind');
-  timers.push(setInterval(() => { if (running) console.log(stamp(), 'fast lane stats', lane.stats()); }, 30_000));
+  timers.push(setInterval(() => { if (running) console.log(stamp(), 'fast lane stats', lane.stats(), 'oracle', oracle.stats()); }, 30_000));
 
   // auto: run the lane only while it gains something (Envio trails the head), with hysteresis so it does not flap.
   if (mode === 'auto') {
@@ -129,6 +134,7 @@ async function shutdown(code: number): Promise<void> {
   for (const timer of timers.splice(0)) clearInterval(timer);
   let exitCode = code;
   try {
+    stopOracle();
     await lane.stop();
     await pool.end();
     await envioPool?.end();

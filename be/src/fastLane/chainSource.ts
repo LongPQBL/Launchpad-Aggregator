@@ -1,6 +1,9 @@
-import { createPublicClient, http, webSocket, type Chain, type Log } from 'viem';
+import { createPublicClient, http, parseAbi, webSocket, type Address, type Chain, type Log } from 'viem';
 import { FAST_LANE_EVENTS, type FastLog } from './decode.js';
 import type { LaneChainSource } from './runner.js';
+import { answerUpdatedEvent, type OracleLog, type OracleSource } from './oracleRounds.js';
+
+const decimalsAbi = parseAbi(['function decimals() view returns (uint8)']);
 
 export function toFastLog(log: Log): FastLog | null {
   if (log.blockNumber === null || log.blockHash === null || log.transactionHash === null || log.logIndex === null) return null;
@@ -19,7 +22,7 @@ export const HTTP_TRANSPORT_OPTIONS = { timeout: 3_000, retryCount: 0 } as const
 export const WEBSOCKET_TRANSPORT_OPTIONS = { keepAlive: true, reconnect: { attempts: 1_000_000, delay: 2_000 }, timeout: 3_000 } as const;
 
 /** The lane's view of the chain: WebSocket for the live log stream, plain HTTP for everything it asks for by key. */
-export function createViemChainSource(chain: Chain, urls: { http: string; ws: string }): LaneChainSource {
+export function createViemChainSource(chain: Chain, urls: { http: string; ws: string }): LaneChainSource & OracleSource {
   const rpc = createPublicClient({ chain, transport: http(urls.http, HTTP_TRANSPORT_OPTIONS) });
   const socket = createPublicClient({ chain, transport: webSocket(urls.ws, WEBSOCKET_TRANSPORT_OPTIONS) });
   return {
@@ -46,6 +49,18 @@ export function createViemChainSource(chain: Chain, urls: { http: string; ws: st
       return (logs as Log[]).flatMap((log) => toFastLog(log) ?? []);
     },
     getBlockNumber: () => rpc.getBlockNumber(),
+    async readDecimals(aggregator) {
+      const read = (client: typeof rpc) => client.readContract({ address: aggregator as Address, abi: decimalsAbi, functionName: 'decimals' });
+      return Number(await read(socket as never).catch(() => read(rpc)));
+    },
+    subscribeAnswerUpdated(addresses, onLogs, onError) {
+      return socket.watchEvent({
+        address: addresses as Address[], event: answerUpdatedEvent,
+        onLogs: (logs) => onLogs((logs as Log[]).flatMap((log): OracleLog[] => log.blockNumber === null || log.logIndex === null ? []
+          : [{ address: log.address, topics: log.topics, data: log.data, blockNumber: log.blockNumber, logIndex: log.logIndex, removed: log.removed }])),
+        onError,
+      });
+    },
     subscribeLogs(onLogs, onError) {
       return socket.watchEvent({
         events: FAST_LANE_EVENTS as never,
