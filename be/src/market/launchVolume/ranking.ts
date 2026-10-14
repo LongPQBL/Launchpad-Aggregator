@@ -43,6 +43,8 @@ function normalizeDecimal(value: unknown): string | null {
 
 export async function readVolumeRankingPage(pool: Pool, input: VolumeRankPageInput): Promise<VolumeRankPage> {
   const cursor = input.cursor;
+  // The ORDER BY spells out NULLS LAST on every column so it is exactly launch_volume24h_usd_rank_idx's order: without it the planner read and joined all
+  // 167k rows and sorted them (about 1 s); with it the index is walked and the LIMIT stops after one page (7 ms). Those columns are never null.
   // The row-comparison predicate walks the same order as ORDER BY: positive volume descending, then
   // known zero, then null (rank_order 2, which has no volume and orders by recency alone).
   const result = await pool.query(`
@@ -65,7 +67,7 @@ export async function readVolumeRankingPage(pool: Pool, input: VolumeRankPageInp
             ELSE s.volume_usd < $7::numeric
               OR (s.volume_usd = $7::numeric AND (s.launch_block, s.launch_tx_hash, s.launch_log_index) < ($8::bigint, $9::text, $10::integer))
           END))))
-    ORDER BY s.rank_order, s.volume_usd DESC NULLS LAST, s.launch_block DESC, s.launch_tx_hash DESC, s.launch_log_index DESC
+    ORDER BY s.rank_order, s.volume_usd DESC NULLS LAST, s.launch_block DESC NULLS LAST, s.launch_tx_hash DESC NULLS LAST, s.launch_log_index DESC NULLS LAST
     LIMIT $11`,
   [input.chainId === undefined ? null : [input.chainId].flat(), input.platform === undefined ? null : [input.platform].flat(), input.status ?? null, input.search ?? null,
     cursor !== null, cursor?.rankOrder ?? 0, cursor?.volumeUsd ?? null, cursor?.launchBlock ?? null,
