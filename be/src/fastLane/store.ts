@@ -4,6 +4,9 @@ import { fastLaneRows, fastLaneState, trades } from '../db/schema.js';
 import type { LiveEntry } from '../envioSync/incrementalSync.js';
 import { notifyChanged } from '../envioSync/notifyChanges.js';
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
+import { invalidateCurveReserve } from '../market/curvePricing.js';
+
+const CURVE_EVENTS = new Set(['CurveBuy', 'CurveSell', 'BuybackLocked']);
 
 /** Remembers which rows the lane wrote, with the raw row it fed in, until the parity command has compared them with Envio's. */
 export async function recordFastRows(db: Database, chainId: number, entries: readonly LiveEntry[]): Promise<void> {
@@ -36,11 +39,14 @@ export async function removeLaneTrade(db: Database, chainId: number, key: { txHa
     const deleted = await tx.delete(trades).where(and(
       eq(trades.chainId, chainId), eq(trades.txHash, txHash), eq(trades.logIndex, key.logIndex),
       sql`lower(${trades.blockHash}) = ${key.blockHash.toLowerCase()}`,
-    )).returning({ tokenAddress: trades.tokenAddress });
+    )).returning({ tokenAddress: trades.tokenAddress, sourceEvent: trades.sourceEvent });
     if (deleted.length === 0) return false;
     await tx.delete(fastLaneRows).where(and(eq(fastLaneRows.chainId, chainId), eq(fastLaneRows.txHash, txHash), eq(fastLaneRows.logIndex, key.logIndex)));
     const launchKeys = [...new Set(deleted.map((row) => row.tokenAddress))].map((tokenAddress) => ({ chainId, tokenAddress }));
     await invalidateLaunchVolume(tx, launchKeys, new Date());
+    // The replay's checkpoint may already include the deleted trade: drop it so the next tick re-derives it (repair does the same).
+    const curveLaunches = [...new Set(deleted.filter((row) => CURVE_EVENTS.has(row.sourceEvent)).map((row) => row.tokenAddress))];
+    await invalidateCurveReserve(tx, curveLaunches.map((tokenAddress) => ({ chainId, tokenAddress })));
     await notifyChanged(tx, launchKeys.map((launch) => ({ kind: 'launch.changed' as const, chainId, tokenAddress: launch.tokenAddress })));
     return true;
   });

@@ -28,6 +28,7 @@ afterAll(async () => {
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
   await db.delete(trades).where(eq(trades.chainId, chainId));
   await pool.query('DELETE FROM launch_volume24h_jobs WHERE chain_id = $1', [chainId]);
+  await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM venues WHERE source_id = $1', [source]);
   await pool.query('DELETE FROM launches WHERE source_id = $1', [source]);
   await pool.query('DELETE FROM sources WHERE id = $1', [source]);
@@ -75,5 +76,13 @@ describe('removeLaneTrade', () => {
     expect(await db.select().from(fastLaneRows).where(and(eq(fastLaneRows.chainId, chainId), eq(fastLaneRows.txHash, hash)))).toHaveLength(0);
     const job = await pool.query('SELECT revision FROM launch_volume24h_jobs WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
     expect(job.rows[0]?.revision).toBeGreaterThanOrEqual(1);
+  });
+  it('drops the launch curve reserve checkpoint when it deletes a curve trade, like repair does', async () => {
+    const hash = `0x${'7e'.repeat(32)}`;
+    await insertTrade(hash);
+    await pool.query(`INSERT INTO launch_curve_reserves (chain_id, token_address, quote_reserve_raw, token_reserve_raw, last_block_number, last_log_index, updated_at)
+      VALUES ($1, $2, 1, 1, 901, 4, now()) ON CONFLICT (chain_id, token_address) DO NOTHING`, [chainId, token]);
+    expect(await removeLaneTrade(db, chainId, { txHash: hash, logIndex: 4, blockHash })).toBe(true);
+    expect((await pool.query('SELECT 1 FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token])).rows).toHaveLength(0);
   });
 });

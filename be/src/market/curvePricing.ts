@@ -57,8 +57,19 @@ function backedOffKeys(nowMs: number): string[] {
 }
 
 interface DueLaunch {
-  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number;
+  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number; confirmedBlock: bigint;
 }
+
+// The highest block, per chain, up to which the Envio sync has applied every curve and buyback row (the best of its tail and history
+// lanes for each stream, then the lower of the two streams). Two reasons the replay stops there: a trade the WebSocket fast lane wrote
+// has no Envio raw row (fee/tax) until Envio reaches its block, and the lane can write a trade before an earlier one of the same launch
+// exists, so a checkpoint moved past it would be wrong for good. Trades above it are "not yet", never a failure. A chain whose sync never
+// ran has no cap and prices nothing.
+const CONFIRMED_CURVE_BLOCK_SQL = `
+  SELECT chain_id, min(best) AS confirmed_block FROM (
+    SELECT chain_id, stream, max(processed_watermark) AS best FROM envio_sync_cursors
+    WHERE stream IN ('v2-curve', 'v2-buyback') GROUP BY chain_id, stream
+  ) s GROUP BY chain_id HAVING count(best) = 2`;
 
 interface DueTrade {
   txHash: string; logIndex: number; blockNumber: bigint; sourceEvent: string;
@@ -70,11 +81,12 @@ interface DueTrade {
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
 async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
   const result = await pool.query(`
-    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals
+    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, c.confirmed_block
     FROM launches l
+    JOIN (${CONFIRMED_CURVE_BLOCK_SQL}) c ON c.chain_id = l.chain_id
     JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
     JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
-      AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
+      AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked') AND t.block_number <= c.confirmed_block
     LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
     WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
       AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
@@ -83,6 +95,7 @@ async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly
   return result.rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),
     tokenDecimals: Number(row.token_decimals), quoteAssetDecimals: Number(row.quote_asset_decimals),
+    confirmedBlock: BigInt(String(row.confirmed_block)),
   }));
 }
 
@@ -100,14 +113,14 @@ Promise<{ reserves: CurveReserves; lastBlockNumber: bigint; lastLogIndex: number
 }
 
 async function readDueTrades(pool: Pool, chainId: number, tokenAddress: string,
-  afterBlock: bigint, afterLogIndex: number): Promise<DueTrade[]> {
+  afterBlock: bigint, afterLogIndex: number, confirmedBlock: bigint): Promise<DueTrade[]> {
   const result = await pool.query(`
     SELECT t.tx_hash, t.log_index, t.block_number, t.source_event, t.side, t.token_amount_raw, t.quote_amount_raw
     FROM trades t JOIN venues v ON v.id = t.venue_id
     WHERE t.chain_id = $1 AND t.token_address = $2 AND v.kind = 'curve' AND v.official = true
       AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
-      AND (t.block_number, t.log_index) > ($3, $4)
-    ORDER BY t.block_number ASC, t.log_index ASC`, [chainId, tokenAddress, afterBlock.toString(), afterLogIndex]);
+      AND (t.block_number, t.log_index) > ($3, $4) AND t.block_number <= $5
+    ORDER BY t.block_number ASC, t.log_index ASC`, [chainId, tokenAddress, afterBlock.toString(), afterLogIndex, confirmedBlock.toString()]);
   return result.rows.map((row: Record<string, unknown>) => ({
     txHash: String(row.tx_hash), logIndex: Number(row.log_index), blockNumber: BigInt(String(row.block_number)),
     sourceEvent: String(row.source_event), side: String(row.side),
@@ -155,7 +168,7 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
         if (totalSupply === null) throw new Error('totalSupply() unavailable');
         reserves = { quote: 0n, token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
       }
-      const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex);
+      const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex, launch.confirmedBlock);
       if (dueTrades.length === 0) continue;
       const updates: { txHash: string; logIndex: number; priceNumeratorRaw: string; priceDenominatorRaw: string }[] = [];
       for (const trade of dueTrades) {
