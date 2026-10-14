@@ -28,3 +28,18 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
   await Promise.all(Array.from({ length: Math.min(concurrency, due.rows.length) }, lane));
   return due.rows.length;
 }
+
+// Recomputes one launch's stored figures right away (used when a trade for it was just announced). Returns false when
+// the launch does not exist (for example, it was removed by reorg repair).
+export async function recomputeLaunchStats(pool: Pool, rpcClient: UsdPriceClient, chainId: number, tokenAddress: string,
+  now: Date = new Date()): Promise<boolean> {
+  const head = await readSafeHead(pool);
+  const found = await pool.query(`
+    SELECT l.*, ${launchCoverageSql(1)} AS launch_coverage_complete
+    FROM launches l WHERE l.chain_id = $2 AND l.token_address = $3`, [head?.toString() ?? null, chainId, tokenAddress.toLowerCase()]);
+  const row = found.rows[0];
+  if (!row) return false;
+  const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
+  await writeLaunchStats(pool, chainId, String(row.token_address), stats, now);
+  return true;
+}

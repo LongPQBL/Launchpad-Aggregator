@@ -5,7 +5,7 @@ import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
 import { refreshDueLaunchVolumes } from '../market/launchVolume/worker.js';
 import { markVolumeBackfillComplete, recordVolumeWorkerHeartbeat } from '../market/launchVolume/state.js';
 import { createApiStore } from './store.js';
-import { refreshLaunchStatsOnce } from './launchStatsWorker.js';
+import { recomputeLaunchStats, refreshLaunchStatsOnce } from './launchStatsWorker.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -477,6 +477,15 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(detail!.priceUsd).not.toBeNull();
     expect(Number(detail!.priceUsd)).toBeCloseTo(2691.70223591, 5);
     expect(detail!.tokenDecimals).toBe(18);
+  });
+
+  it('recomputeLaunchStats stores the figures of one launch at once, and reports an unknown launch', async () => {
+    await pool.query('DELETE FROM launch_stats');
+    const client = { readContract: rpcClient() } as never;
+    expect(await recomputeLaunchStats(pool, client, 4663, goodToken.toUpperCase().replace('0X', '0x'))).toBe(true);
+    const stored = await pool.query('SELECT token_address FROM launch_stats');
+    expect(stored.rows.map((row) => row.token_address)).toEqual([goodToken]);
+    expect(await recomputeLaunchStats(pool, client, 4663, '0x9999999999999999999999999999999999999999')).toBe(false);
   });
 
   it('computes 52-week high/low and 1h/1d change from one formatting pass (no duplicate formatRational work)', async () => {

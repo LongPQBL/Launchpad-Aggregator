@@ -34,4 +34,17 @@ describe('swrMemo', () => {
     await expect(first('x')).rejects.toThrow('nope');
     await expect(first('x')).rejects.toThrow('nope'); // not cached: tried again
   });
+  it('invalidate drops matching entries older than the minimum age so the next caller recomputes', async () => {
+    let time = 0;
+    let calls = 0;
+    const memo = swrMemo(async (key: string) => `${key}:${++calls}`, 10, 100, () => time);
+    expect(await memo('a')).toBe('a:1');
+    expect(await memo('b')).toBe('b:2');
+    time = 5;
+    memo.invalidate((key) => key === 'a', 1_000); // too young: kept
+    expect(await memo('a')).toBe('a:1');
+    memo.invalidate((key) => key === 'a', 3); // old enough: dropped, the caller waits for a fresh value
+    expect(await memo('a')).toBe('a:3');
+    expect(await memo('b')).toBe('b:2'); // not matched: untouched
+  });
 });

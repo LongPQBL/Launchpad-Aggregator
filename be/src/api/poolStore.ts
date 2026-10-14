@@ -8,6 +8,9 @@ import { readPoolDailyHistory, readPoolHistory, type PoolDayHistory } from '../p
 import { sumUsdValues } from '../pools/valuation.js';
 import { readPoolLiquidityAnswer, type PoolLiquidityAnswer } from '../pools/liquidity.js';
 import { swrMemo, ttlMemo } from './ttlMemo.js';
+import type { ApiEventBus } from './events.js';
+
+const POOL_STATS_REFRESH_MIN_AGE_MS = 1_000;
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
 export interface PoolSummary extends PoolStats {
@@ -64,7 +67,8 @@ function encodeCursor(row: Row): string {
 }
 
 export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
-  tokenMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined): PoolApiStore {
+  tokenMetadataResolver = rpcClient ? createTokenMetadataResolver(rpcClient, quoteFeedRegistry) : undefined,
+  events?: ApiEventBus): PoolApiStore {
   const blockTimeCache = new Map<string, number | null>();
   const poolHistoryMemo = intervalTtlMemo(
     (_key: string, arg: { key: PoolKey; window: { intervalSeconds: number; buckets: number } }) =>
@@ -114,6 +118,13 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
   // again and again: fresh for 10 s, then served at once for up to 5 minutes while one background refresh recomputes them.
   const poolStatsMemo = swrMemo((_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) =>
     readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), { rpcClient, createdTimestamp: arg.createdTimestamp }), 10_000, 300_000);
+  // A swap in a pool changes its figures: drop its cached statistics so the refetch the swap triggers in the browser sees them,
+  // at most once a second per pool (a busy pool is not recomputed on every swap).
+  events?.subscribe((event) => {
+    if (event.type !== 'pool.changed' || !event.poolId) return;
+    const marker = `:${event.poolId.toLowerCase()}:`;
+    poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), POOL_STATS_REFRESH_MIN_AGE_MS);
+  });
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     const displayedToken = token ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };

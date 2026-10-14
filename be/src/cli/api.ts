@@ -3,6 +3,7 @@ import { ApiEventBus } from '../api/events.js';
 import { listenForDatabaseEvents } from '../api/pgEvents.js';
 import { createApiServer } from '../api/server.js';
 import { createApiStore } from '../api/store.js';
+import { startLiveLaunchStats } from '../api/liveLaunchStats.js';
 import { createPoolApiStore } from '../api/poolStore.js';
 import { createSearchStore } from '../api/searchStore.js';
 import { createWalletStore } from '../api/walletStore.js';
@@ -15,7 +16,8 @@ const events = new ApiEventBus();
 const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
 const data = createApiStore(pool, rpcClient);
-const pools = createPoolApiStore(pool, rpcClient);
+const pools = createPoolApiStore(pool, rpcClient, undefined, events);
+const stopLiveStats = startLiveLaunchStats(pool, rpcClient, events);
 const app = await createApiServer({ feOrigin: config.feOrigin, data, pools, search: createSearchStore(pool, rpcClient), wallets: createWalletStore(pool), events });
 
 try {
@@ -28,6 +30,7 @@ try {
     app.log.info(failed === 0 ? 'Warmed the launch and pool lists' : `Warm-up finished with ${failed} failure(s)`);
   });
 } catch (error) {
+  stopLiveStats();
   await stopEvents();
   await pool.end();
   throw error;
@@ -37,6 +40,7 @@ let stopping = false;
 async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
+  stopLiveStats();
   await app.close();
   await stopEvents();
   await pool.end();
