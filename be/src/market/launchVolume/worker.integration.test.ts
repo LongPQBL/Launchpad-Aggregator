@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { createDatabase } from '../../db/client.js';
 import { invalidateLaunchVolume, type LaunchKey } from './store.js';
 import { refreshDueLaunchVolumes, sweepLaunchVolumes } from './worker.js';
@@ -77,6 +77,24 @@ describe('refreshDueLaunchVolumes', () => {
     expect(Number((await scoreRow()).volume_usd)).toBeCloseTo(3);
     expect(new Date((await jobRow()).due_at).getTime()).toBe((windowEnd - 100 + 86_401) * 1000);
     expect(await jobRow()).toMatchObject({ lease_id: null });
+  });
+
+  it('announces launch.changed after it publishes a score, so the browser refetches the new volume', async () => {
+    const listener = new Client({ connectionString: databaseUrl });
+    await listener.connect();
+    const received: string[] = [];
+    listener.on('notification', (message) => { if (message.payload) received.push(message.payload); });
+    await listener.query('LISTEN launchpad_events');
+    try {
+      await invalidateLaunchVolume(db, [key], new Date(now.getTime() - 1_000));
+      await refreshDueLaunchVolumes(pool, now, 10, headAtCompletion);
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.map((payload) => JSON.parse(payload)))
+        .toContainEqual({ type: 'launch.changed', chainId, tokenAddress: token });
+    } finally {
+      await listener.query('UNLISTEN launchpad_events');
+      await listener.end();
+    }
   });
 
   it('schedules the expiry of the earliest trade, and that expiry removes it from the total with no new trade', async () => {

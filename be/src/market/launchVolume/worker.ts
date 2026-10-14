@@ -18,11 +18,13 @@ export async function refreshDueLaunchVolumes(
   if (claims.length === 0) return report;
 
   const windowEnd = Math.floor(now.getTime() / 1000);
+  const published: { chainId: number; tokenAddress: string }[] = [];
   for (const claim of claims) {
     try {
       const score = await calculateLaunchVolume(pool, claim.key, windowEnd, headBlock);
       if (await publishVolumeScore(pool, claim, score)) {
         report.published += 1;
+        published.push(claim.key);
         if (score.nextExpiryAt) await scheduleLaunchVolumeExpiry(pool, claim.key, score.nextExpiryAt);
       } else {
         report.superseded += 1;
@@ -32,7 +34,17 @@ export async function refreshDueLaunchVolumes(
       await releaseVolumeClaim(pool, claim, new Date(now.getTime() + RETRY_DELAY_MS), error instanceof Error ? error.message : String(error));
     }
   }
+  await announceVolumeChanges(pool, published);
   return report;
+}
+
+// A published score changes what the launch list shows. The worker is its own process, so it tells the API (which pushes it to browsers)
+// through the same Postgres channel the sync uses, after the score is committed.
+async function announceVolumeChanges(pool: Pool, keys: readonly { chainId: number; tokenAddress: string }[]): Promise<void> {
+  for (const key of keys) {
+    const payload = JSON.stringify({ type: 'launch.changed', chainId: key.chainId, tokenAddress: key.tokenAddress.toLowerCase() });
+    try { await pool.query('SELECT pg_notify($1, $2)', ['launchpad_events', payload]); } catch { /* the browser's periodic refresh still catches up */ }
+  }
 }
 
 // Catches work the event path can miss: an expiry whose scheduled job was lost, and an
