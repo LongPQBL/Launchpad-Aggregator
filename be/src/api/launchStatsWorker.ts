@@ -7,7 +7,7 @@ import { writeLaunchStats } from './launchStatsStore.js';
 export const LAUNCH_STATS_MAX_AGE_SECONDS = 300;
 
 // Recomputes the RPC-backed figures for the launches whose stats are missing or older than the max age,
-// oldest first (a launch never computed yet goes in order of its 24 h volume, so the ones at the top of the list come first). The list and detail pages only read the stored result.
+// by 24 h volume (the launches at the top of the list first), then oldest first. The list and detail pages only read the stored result.
 export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClient, limit: number, now: Date,
   concurrency = 1): Promise<number> {
   const head = await readSafeHead(pool);
@@ -16,7 +16,7 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
     FROM launches l LEFT JOIN launch_stats s ON s.chain_id = l.chain_id AND s.token_address = l.token_address
     LEFT JOIN launch_volume24h_usd v ON v.chain_id = l.chain_id AND v.token_address = l.token_address
     WHERE l.chain_id = 4663 AND (s.computed_at IS NULL OR s.computed_at < $2)
-    ORDER BY s.computed_at ASC NULLS FIRST, v.rank_order ASC NULLS LAST, v.volume_usd DESC NULLS LAST, l.launch_block DESC
+    ORDER BY v.rank_order ASC NULLS LAST, v.volume_usd DESC NULLS LAST, s.computed_at ASC NULLS FIRST, l.launch_block DESC
     LIMIT $3`, [head?.toString() ?? null, new Date(now.getTime() - LAUNCH_STATS_MAX_AGE_SECONDS * 1000), limit]);
   let next = 0;
   const lane = async () => {
