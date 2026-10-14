@@ -14,7 +14,7 @@ vi.mock('./notifyChanges.js', async (importOriginal) => {
   return { ...actual, notifyChanged: vi.fn((...args: Parameters<typeof actual.notifyChanged>) => actual.notifyChanged(...args)) };
 });
 const { notifyChanged } = await import('./notifyChanges.js');
-const { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage, repriceNullPricedTrades, lookupLaunch } = await import('./incrementalSync.js');
+const { applyEnvioPage, confirmedSourceBlock, retryUnresolvedEvents, syncSourceCoverage, repriceNullPricedTrades, lookupLaunch, applyLiveRows } = await import('./incrementalSync.js');
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -688,5 +688,51 @@ describe('applyEnvioPage: volume ranking invalidation', () => {
     await resetCursor('v1-swap', 'history');
     await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-swap', lane: 'history', fence: 500n, limit: 10, tables });
     expect(await volumeJobRevision(token)).toBeUndefined();
+  });
+});
+
+describe('applyLiveRows', () => {
+  async function volumeRevision(token: string): Promise<number | undefined> {
+    return (await pool.query('SELECT revision FROM launch_volume24h_jobs WHERE chain_id = $1 AND token_address = $2', [chainId, token])).rows[0]?.revision;
+  }
+  function liveSwap(poolAddress: string, suffix: string, blockNumber: number) {
+    return {
+      stream: 'v1-swap' as const,
+      raw: {
+        id: `live-${suffix}`, chainId, poolAddress, txFrom: '0x1234567890123456789012345678901234567890',
+        amount0: '100000000000000000', amount1: '-200000000000000000000', sqrtPriceX96: '2005366647941715384651103712059394',
+        blockNumber: String(blockNumber), blockHash: `0x${'ee'.repeat(32)}`, txHash: `0x${createHash('sha256').update(`live-${suffix}`).digest('hex')}`,
+        logIndex: 1, timestamp: 1_700_000_000,
+      },
+    };
+  }
+
+  it('inserts the trade like an Envio page would, bumps the volume job and announces trade.created once, even when the same row is applied again', async () => {
+    await resetCursor('v1-launch', 'history');
+    const { token, poolAddress, txHash } = freshToken();
+    await insertLaunchRow(`live-launch-${token}`, token, poolAddress, txHash, 100, 1);
+    await applyEnvioPage(envioPool, db, { chainId, stream: 'v1-launch', lane: 'history', fence: 500n, limit: 10, tables });
+    const before = await volumeRevision(token);
+
+    const entry = liveSwap(poolAddress, token, 110);
+    const first = await applyLiveRows(db, chainId, [entry]);
+    expect(first).toMatchObject({ applied: 1, unresolved: 0, outcomes: ['applied'] });
+    const rows = await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ txHash: entry.raw.txHash, logIndex: 1, sourceEvent: 'Swap' });
+    expect(await volumeRevision(token)).toBe((before ?? 0) + 1);
+    const announced = vi.mocked(notifyChanged).mock.calls.at(-1)![1];
+    expect(announced).toEqual([expect.objectContaining({ kind: 'trade.created', chainId, tokenAddress: token })]);
+
+    await applyLiveRows(db, chainId, [entry]);
+    expect(await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)))).toHaveLength(1);
+    expect(vi.mocked(notifyChanged).mock.calls.at(-1)![1]).toEqual([]); // nothing new: nothing announced
+  });
+
+  it('reports a row whose venue is unknown as unresolved, without inserting it or queueing it', async () => {
+    const queuedBefore = await db.select().from(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId));
+    const result = await applyLiveRows(db, chainId, [liveSwap('0x20ffff000000000000000000000000000000ffff', 'unknown-pool', 120)]);
+    expect(result).toMatchObject({ applied: 0, unresolved: 1, outcomes: ['unresolved'] });
+    expect(await db.select().from(unresolvedEvents).where(eq(unresolvedEvents.chainId, chainId))).toHaveLength(queuedBefore.length);
   });
 });

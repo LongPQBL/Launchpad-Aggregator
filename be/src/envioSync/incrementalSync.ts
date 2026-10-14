@@ -48,7 +48,7 @@ function resolveV1Factory(factoryAddress: string): FactorySource {
 const v2Factory = getPonsFactorySources()[2]!;
 const v4PoolManager = '0x8366a39cC670b4001a1121b8f6A443A643E40951';
 
-type ApplyOutcome = 'applied' | 'unresolved' | 'skipped';
+export type ApplyOutcome = 'applied' | 'unresolved' | 'skipped';
 interface QuoteAssetToEnqueue { chainId: number; quoteAssetAddress: string }
 
 function toLaunchFromRow(row: typeof launches.$inferSelect): Launch {
@@ -464,6 +464,29 @@ async function applyRow(
     case 'v4-initialize': return applyV4Initialize(tx, chainId, raw, changes);
     case 'v4-swap': return applyV4Swap(tx, chainId, raw, changes);
   }
+}
+
+export type LiveStream = 'v1-swap' | 'v2-curve' | 'v2-buyback' | 'v4-swap';
+export interface LiveEntry { stream: LiveStream; raw: Record<string, unknown> }
+export interface ApplyLiveResult { applied: number; unresolved: number; skipped: number; outcomes: readonly ApplyOutcome[] }
+
+/**
+ * Applies raw rows that did not come from an Envio page (the WebSocket fast lane builds them in Envio's own raw shape) with exactly
+ * the hydration `applyEnvioPage` uses. One transaction: rows in the given order, then the launch volume jobs are invalidated and
+ * `trade.created` is announced, so delivery happens after commit. A row whose launch or venue is not in the database yet is only
+ * reported `unresolved` — not queued, since Envio delivers every event itself.
+ */
+export async function applyLiveRows(appDb: Database, chainId: number, entries: readonly LiveEntry[]): Promise<ApplyLiveResult> {
+  const changes: ChangeNotification[] = [];
+  const newQuoteAssets: QuoteAssetToEnqueue[] = [];
+  const outcomes: ApplyOutcome[] = [];
+  await appDb.transaction(async (tx) => {
+    for (const entry of entries) outcomes.push(await applyRow(tx, chainId, entry.stream, entry.raw, newQuoteAssets, changes));
+    await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), new Date());
+    await notifyChanged(tx, changes);
+  });
+  const count = (outcome: ApplyOutcome) => outcomes.filter((value) => value === outcome).length;
+  return { applied: count('applied'), unresolved: count('unresolved'), skipped: count('skipped'), outcomes };
 }
 
 export interface RetryUnresolvedInput {
