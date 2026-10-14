@@ -20,7 +20,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
-import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, type ChartRangeId } from '@/features/chart/ranges';
+import { formatTimeAxisTick } from '@/features/chart/time-axis';
+import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, withWhitespace, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip, DOTTED_BACKGROUND_STYLE, type OhlcHover } from '@/components/chart-decor';
 import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT } from '@/hooks/live-events';
 import { useLiveFirstPage } from '@/hooks/use-live-first-page';
@@ -89,6 +90,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   const requestIdRef = useRef(0);
   // What `chartCandles` currently shows, as `currency:range`; the fetch effect below loads whatever the tabs select next.
   const loadedKeyRef = useRef(`${currency}:${range}`);
+  const fittedKeyRef = useRef<string | null>(null);
   const [activeCurrency, setActiveCurrency] = useState(currency);
   const [activeRange, setActiveRange] = useState(range);
   const [chartCandles, setChartCandles] = useState(candles);
@@ -207,6 +209,10 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     loadedKeyRef.current = `${currency}:${range}`;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- server data (candles/currency) defines what is loaded; a range-only change must still fetch
   }, [candles, currency]);
+  // Up to a week the axis shows the time of day; a month or more shows dates only.
+  useEffect(() => {
+    chartApi?.applyOptions({ timeScale: { timeVisible: activeRange === '1h' || activeRange === '1d' || activeRange === '1w' } });
+  }, [chartApi, activeRange]);
   useEffect(() => {
     onHoverPointRef.current?.(null);
   }, [candles, currency, range]);
@@ -226,7 +232,8 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
       },
       grid: { vertLines: { visible: false }, horzLines: { visible: false } },
       rightPriceScale: { borderColor: '#27272a' },
-      timeScale: { borderColor: '#27272a' },
+      // Evenly spaced time labels (a gap in trading no longer leaves a long stretch of the axis unlabelled).
+      timeScale: { borderColor: '#27272a', uniformDistribution: true, tickMarkFormatter: formatTimeAxisTick },
     });
     chartRef.current = chart;
     setChartApi(chart);
@@ -246,6 +253,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     return () => {
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
+      fittedKeyRef.current = null;
       setChartApi(null);
       chartRef.current = null;
       seriesRef.current = null;
@@ -293,11 +301,11 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     });
 
     if (chartStyle === 'line') {
-      (series as ISeriesApi<'Area'>).setData(
+      (series as ISeriesApi<'Area'>).setData(withWhitespace(
         ascendingCandles.map((candle) => ({ time: candle.bucketStart as UTCTimestamp, value: toChartValue(candle.close) })),
-      );
+        activeRange, Math.floor(Date.now() / 1000)) as Array<{ time: UTCTimestamp; value?: number }> as never);
     } else {
-      (series as ISeriesApi<'Candlestick'>).setData(
+      (series as ISeriesApi<'Candlestick'>).setData(withWhitespace(
         ascendingCandles.map((candle) => ({
           time: candle.bucketStart as UTCTimestamp,
           open: toChartValue(candle.open),
@@ -305,7 +313,14 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           low: toChartValue(candle.low),
           close: toChartValue(candle.close),
         })),
-      );
+        activeRange, Math.floor(Date.now() / 1000)) as never);
+    }
+
+    // Show the whole range when the range, currency or chart style changes; a live update keeps the user's own zoom and pan.
+    const fitKey = `${activeRange}:${activeCurrency}:${chartStyle}`;
+    if (fittedKeyRef.current !== fitKey && ascendingCandles.length > 0) {
+      chartRef.current?.timeScale().fitContent();
+      fittedKeyRef.current = fitKey;
     }
 
     if (priceLineRef.current) series.removePriceLine(priceLineRef.current);
@@ -332,7 +347,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           ]
         : [],
     );
-  }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle, chartStyle]);
+  }, [ascendingCandles, priceFormat, formatAxisValue, graduationTime, tokenSymbol, latestCandle, chartStyle, activeRange, activeCurrency]);
 
   const currencyTabClass = (active: boolean) => active
     ? 'rounded px-2.5 py-1.5 text-foreground bg-background shadow-sm'

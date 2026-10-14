@@ -23,6 +23,7 @@ const createChartMock = vi.fn((..._args: unknown[]) => ({
   remove: removeMock,
   applyOptions: vi.fn(),
   removeSeries: vi.fn(),
+  timeScale: () => ({ fitContent: vi.fn() }),
   subscribeCrosshairMove: subscribeCrosshairMoveMock,
   unsubscribeCrosshairMove: unsubscribeCrosshairMoveMock,
 }));
@@ -369,7 +370,8 @@ describe('LaunchDetail', () => {
     );
 
     expect(setDataMock).toHaveBeenCalledTimes(1);
-    expect(setDataMock.mock.calls[0]![0]).toHaveLength(2);
+    // Only the two given candles carry a price; the rest are empty points that space the time axis.
+    expect((setDataMock.mock.calls[0]![0] as { close?: number }[]).filter((point) => point.close !== undefined)).toHaveLength(2);
   });
 
   it('sorts candles ascending by time before charting, since the API returns them newest-first', () => {
@@ -388,7 +390,8 @@ describe('LaunchDetail', () => {
       />,
     );
 
-    const charted = setDataMock.mock.calls[0]![0] as { time: number }[];
+    // Empty (whitespace) points that space the time axis carry no price; only the real candles count.
+    const charted = (setDataMock.mock.calls[0]![0] as { time: number; close?: number }[]).filter((point) => point.close !== undefined);
     expect(charted.map((c) => c.time)).toEqual([1_700_000_000, 1_700_000_060, 1_700_000_120]);
   });
 

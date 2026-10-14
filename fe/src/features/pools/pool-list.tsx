@@ -17,7 +17,9 @@ function side(address: string): string { return address.toLowerCase(); }
 
 export interface PoolListDisplayedToken { address: string; symbol: string; logoUri: string | null }
 export type PrimaryLaunchVenue =
-  | { kind: 'curve'; token: PoolListDisplayedToken; quoteSymbol: string; chainId: number }
+  | { kind: 'curve'; token: PoolListDisplayedToken; quoteSymbol: string; chainId: number;
+      /** The launch's official 24 h USD volume and its launch time (unix seconds); null when unavailable. A curve has no TVL. */
+      volume24hUsd?: string | null; launchTimestamp?: number | null }
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
 
 type PoolSort = 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
@@ -235,7 +237,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
               <span className="min-w-0"><span className="block text-base">{curveRow.token.symbol} / {curveRow.quoteSymbol}</span><span className="text-sm text-muted-foreground">Bonding curve · Official Pons pool</span></span>
             </span>
           </div>
-          {['TVL', '24H Volume', '30D Volume', '1D Vol/TVL', 'Age'].map((label) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle"><span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>—</span></div>)}
+          {([['TVL', '—'], ['24H Volume', formatPoolUsd(curveRow.volume24hUsd ?? null)], ['30D Volume', '—'], ['1D Vol/TVL', '—'], ['Age', poolAge(curveRow.launchTimestamp ?? null)]] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle"><span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span></div>)}
         </div>}
         {displayedRows.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
           <div role="cell" className={cn('pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle')}>

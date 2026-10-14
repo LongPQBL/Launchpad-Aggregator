@@ -74,6 +74,8 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
       chainId: detail.chainId,
       token: { address: detail.tokenAddress, symbol: displaySymbol(detail.symbol), logoUri: detail.logoUri },
       quoteSymbol: displaySymbol(detail.quoteAsset.symbol),
+      volume24hUsd: detail.officialVolume24hUsd,
+      launchTimestamp: detail.launchTimestamp === null ? null : Number(detail.launchTimestamp),
     }
       : activeV4Venue ? { kind: 'pool' as const, pool: v4Pool, poolId: activeV4Venue.ref, protocol: 'uniswap_v4' }
         : activeV3Venue ? { kind: 'pool' as const, pool: null, poolId: activeV3Venue.ref, protocol: 'uniswap_v3' }

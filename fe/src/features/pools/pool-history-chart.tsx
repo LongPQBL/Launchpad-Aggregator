@@ -1,5 +1,6 @@
 'use client';
 
+import { formatTimeAxisTick } from '@/features/chart/time-axis';
 import { AreaSeries, HistogramSeries, LineType, createChart, type IChartApi, type ISeriesApi, type MouseEventParams, type SeriesType, type Time, type UTCTimestamp } from 'lightweight-charts';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { PoolDayHistory } from '@/api/client';
@@ -144,7 +145,7 @@ export function PoolHistoryChart({ items: rawItems, complete, metric, intervalSe
         ? { horzLine: { visible: false, labelVisible: false } }
         : { vertLine: { visible: false, labelVisible: false }, horzLine: { visible: false, labelVisible: false } },
       rightPriceScale: { borderColor: '#27272a' },
-      timeScale: { borderColor: '#27272a', timeVisible: step < DAY_SECONDS, secondsVisible: false },
+      timeScale: { borderColor: '#27272a', timeVisible: step < DAY_SECONDS, secondsVisible: false, uniformDistribution: true, tickMarkFormatter: formatTimeAxisTick },
       localization: { priceFormatter: (value: number) => formatUsdAxis(value) },
     });
     const series = metric === 'volume'
