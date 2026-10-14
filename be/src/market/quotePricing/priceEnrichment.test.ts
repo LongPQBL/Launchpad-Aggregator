@@ -63,4 +63,19 @@ describe('enrichPricesOnce', () => {
     expect(priceJobStore.finishPriceJob).toHaveBeenCalledWith(expect.anything(), expect.anything(), { ok: false, errorKind: 'transport', error: 'RPC timeout' }, expect.anything());
     expect(report.pending).toBe(1);
   });
+
+  it('announces coverage.changed for the chain after a round backfill finishes, so pages with pending USD values look again', async () => {
+    vi.mocked(priceJobStore.claimDuePriceJobs).mockResolvedValue([
+      { id: 'j5', jobType: 'round_backfill', quoteAssetAddress: null, feedAddress: '0xagg3', rangeStart: 1000, rangeEnd: 2000, attempts: 0, leaseId: 'l5' },
+    ]);
+    vi.mocked(roundBackfill.backfillRoundsForFeed).mockResolvedValue(3);
+    vi.mocked(priceJobStore.finishPriceJob).mockResolvedValue(true);
+    const query = vi.fn(async () => ({ rows: [] }));
+    await enrichPricesOnce({ query } as never, {} as never, 4663, new Date(), vi.fn());
+    expect(query).toHaveBeenCalledWith('SELECT pg_notify($1, $2)', ['launchpad_events', JSON.stringify({ type: 'coverage.changed', chainId: 4663 })]);
+    query.mockClear();
+    vi.mocked(priceJobStore.finishPriceJob).mockResolvedValue(false); // the lease was lost: someone else owns the result
+    await enrichPricesOnce({ query } as never, {} as never, 4663, new Date(), vi.fn());
+    expect(query).not.toHaveBeenCalled();
+  });
 });

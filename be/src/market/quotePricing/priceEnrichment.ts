@@ -5,6 +5,11 @@ import { discoverAndVerifyFeed, type DiscoveryClient } from './feedDiscovery.js'
 import { upsertQuoteFeed } from './feedRegistry.js';
 import { backfillRoundsForFeed, type BackfillRpcClient } from './roundBackfill.js';
 
+// A chain-wide `coverage.changed` makes every page watching the chain refetch; announced through Postgres because the price worker is its own process.
+async function announcePricesChanged(pool: Pool, chainId: number): Promise<void> {
+  try { await pool.query('SELECT pg_notify($1, $2)', ['launchpad_events', JSON.stringify({ type: 'coverage.changed', chainId })]); } catch { /* the page's own retry still catches up */ }
+}
+
 export async function enrichPricesOnce(
   pool: Pool, client: DiscoveryClient & BackfillRpcClient, chainId: number, now: Date,
   lookupBySymbol: (address: string) => Promise<Address | null>, limit = 10,
@@ -36,7 +41,10 @@ export async function enrichPricesOnce(
     } else {
       try {
         await backfillRoundsForFeed(client, pool, chainId, job.feedAddress as Address, job.rangeStart!, job.rangeEnd!);
-        await finishPriceJob(pool, job, { ok: true }, now);
+        const finished = await finishPriceJob(pool, job, { ok: true }, now);
+        // Trades whose USD value was "pending" for want of this round are valued at read time from now on: tell the browsers on this chain
+        // to look again, instead of leaving them to poll.
+        if (finished) await announcePricesChanged(pool, chainId);
         done++;
       } catch (error) {
         await finishPriceJob(pool, job, { ok: false, errorKind: 'transport', error: (error as Error).message }, now);
