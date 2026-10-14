@@ -1,9 +1,15 @@
 import type { Pool } from 'pg';
 
+// A source counts as caught up when it is within COVERAGE_HEAD_TOLERANCE_BLOCKS of the head (default 0:
+// exactly at the head). With a rate-limited indexer that always trails the head by a few blocks, a small
+// tolerance keeps price/volume visible, the number then being as of that block instead of withheld.
+const headTolerance = Number.parseInt(process.env.COVERAGE_HEAD_TOLERANCE_BLOCKS ?? '0', 10);
+const toleranceBlocks = Number.isSafeInteger(headTolerance) && headTolerance > 0 ? headTolerance : 0;
+
 export const SAFE_HEAD_SQL = `SELECT GREATEST(
   (SELECT max(number) FROM observed_blocks WHERE chain_id = 4663),
   (SELECT head_block FROM envio_chain_progress WHERE chain_id = 4663)
-) AS safe_head`;
+) - ${toleranceBlocks} AS safe_head`;
 
 export async function readSafeHead(pool: Pick<Pool, 'query'>): Promise<bigint | null> {
   const result = await pool.query(SAFE_HEAD_SQL);
