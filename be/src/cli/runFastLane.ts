@@ -8,10 +8,14 @@ import { installConsoleRedaction, installFatalErrorHandlers, redactError, redact
 import { reconcileLaneRows } from '../fastLane/reconcile.js';
 import { socketWatchdogVerdict } from '../fastLane/watchdog.js';
 import { readEnvioProgress } from '../envioSync/envioDb.js';
+import { createGovernor, readEnvioLagBlocks } from '../fastLane/governor.js';
 
-// The WebSocket fast lane (docs/superpowers/specs/2026-10-14-websocket-fast-lane-design.md). Off unless FAST_LANE_ENABLED=true.
-if (process.env.FAST_LANE_ENABLED !== 'true') {
-  console.log('Fast lane is off (set FAST_LANE_ENABLED=true to run it).');
+// The WebSocket fast lane (docs/superpowers/specs/2026-10-14-websocket-fast-lane-design.md).
+// FAST_LANE_MODE: off (default) | on (always running) | auto (runs only while Envio's pipeline trails the chain head, see governor.ts).
+// FAST_LANE_ENABLED=true is the older spelling of mode `on`.
+const mode = process.env.FAST_LANE_MODE ?? (process.env.FAST_LANE_ENABLED === 'true' ? 'on' : 'off');
+if (mode !== 'on' && mode !== 'auto') {
+  console.log('Fast lane is off (set FAST_LANE_MODE=auto to run it only while Envio is behind, or FAST_LANE_MODE=on to always run it).');
   process.exit(0);
 }
 // Before anything can print an RPC URL: libraries (viem's socket reconnect) print errors on their own.
@@ -27,6 +31,7 @@ function redactFields(fields: Record<string, unknown>): Record<string, unknown> 
 let pool: ReturnType<typeof createDatabase>['pool'];
 let lane: ReturnType<typeof createFastLane>;
 let envioPool: Pool | null = null;
+let running = false;
 const timers: ReturnType<typeof setInterval>[] = [];
 try {
   const databaseUrl = process.env.DATABASE_URL;
@@ -42,12 +47,40 @@ try {
     maxGapBlocks: process.env.FAST_LANE_MAX_GAP_BLOCKS ? BigInt(process.env.FAST_LANE_MAX_GAP_BLOCKS) : undefined,
     log: (message, fields) => console.log(stamp(), redactUrls(message), fields ? redactFields(fields) : ''),
   });
-  await lane.start();
-  console.log(stamp(), `fast lane running for chain ${chain.id}`);
-  timers.push(setInterval(() => console.log(stamp(), 'fast lane stats', lane.stats()), 30_000));
+  const startLane = async () => { await lane.start(); running = true; console.log(stamp(), `fast lane running for chain ${chain.id}`); };
+  const stopLane = async () => { running = false; await lane.stop(); console.log(stamp(), 'fast lane stopped'); };
+  if (mode === 'on') await startLane();
+  else console.log(stamp(), 'fast lane in auto mode: waiting for Envio to fall behind');
+  timers.push(setInterval(() => { if (running) console.log(stamp(), 'fast lane stats', lane.stats()); }, 30_000));
+
+  // auto: run the lane only while it gains something (Envio trails the head), with hysteresis so it does not flap.
+  if (mode === 'auto') {
+    const governor = createGovernor({
+      onLagBlocks: process.env.FAST_LANE_AUTO_ON_LAG_BLOCKS ? Number(process.env.FAST_LANE_AUTO_ON_LAG_BLOCKS) : undefined,
+      offLagBlocks: process.env.FAST_LANE_AUTO_OFF_LAG_BLOCKS ? Number(process.env.FAST_LANE_AUTO_OFF_LAG_BLOCKS) : undefined,
+    });
+    let sampling = false;
+    timers.push(setInterval(() => {
+      if (sampling) return;
+      sampling = true;
+      void (async () => {
+        try {
+          const lag = await readEnvioLagBlocks(pool, chain.id, await source.getBlockNumber());
+          const change = governor.observe(lag);
+          if (change === 'on') { console.log(stamp(), `Envio trails the head by ${lag ?? 'an unknown number of'} blocks: starting the fast lane`); await startLane(); }
+          if (change === 'off') { console.log(stamp(), `Envio keeps up (${lag} blocks behind): stopping the fast lane`); await stopLane(); }
+        } catch (error) {
+          console.error(stamp(), `fast lane governor sample failed: ${redactError(error)}`);
+        } finally {
+          sampling = false;
+        }
+      })();
+    }, Number(process.env.FAST_LANE_AUTO_SAMPLE_SECONDS ?? 10) * 1000));
+  }
 
   // A dead subscription is silent, not an error: warn while it lasts, then exit so the supervisor restarts the process.
   timers.push(setInterval(() => {
+    if (!running) return;
     const silent = lane.socketSilentForSeconds();
     const verdict = socketWatchdogVerdict(silent);
     if (verdict === 'warn') console.warn(stamp(), `fast lane: no WebSocket log for ${Math.round(silent)} s`);

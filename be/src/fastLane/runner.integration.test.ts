@@ -139,6 +139,28 @@ describe('fast lane', () => {
     expect((await tradeRows())[0]).toMatchObject({ txHash: log.transactionHash, traderAddress: '0x9999999999999999999999999999999999999999' });
   });
 
+  it('can be stopped and started again (the auto mode does it), subscribing each time and keeping its timers in step', async () => {
+    const fake = fakeSource();
+    let subscribed = 0; let unsubscribed = 0;
+    fake.subscribeLogs = () => { subscribed += 1; return () => { unsubscribed += 1; }; };
+    let headReads = 0;
+    const readHead = fake.getBlockNumber;
+    fake.getBlockNumber = async () => { headReads += 1; return readHead(); };
+    const instance = createFastLane({ source: fake, db, pool }, { chainId, lookupRetryDelayMs: 1, sweepEveryMs: 20, watchRefreshEveryMs: 20 });
+    await instance.start();
+    await instance.stop();
+    const readsWhileStopped = headReads;
+    await settle();
+    expect(headReads).toBe(readsWhileStopped); // no timer runs while it is stopped
+    await instance.start();
+    await settle();
+    expect(subscribed).toBe(2);
+    expect(unsubscribed).toBe(1);
+    expect(headReads).toBeGreaterThan(readsWhileStopped); // the sweep timer runs again after the restart
+    await instance.stop();
+    expect(unsubscribed).toBe(2);
+  });
+
   it('ignores a log from an address that is not a known venue without any RPC call', async () => {
     const fake = fakeSource();
     const instance = await lane(fake);
