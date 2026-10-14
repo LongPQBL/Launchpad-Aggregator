@@ -62,3 +62,32 @@ test('the pool price chart moves its newest candle when a swap lands in that poo
   await candleRequest;
   await expect.poll(() => newestCandleClose(page), { timeout: 3_000 }).not.toBe(before);
 });
+
+// The Volume bars are a canvas too; the headline total above them is the readable part.
+async function volumeTotal(page: import('@playwright/test').Page): Promise<string> {
+  return (await page.getByTestId('pool-history-readout').locator('[aria-label]').first().getAttribute('aria-label', { timeout: 1_000 }).catch(() => '')) ?? '';
+}
+
+test('the Volume total on the token page grows when a swap is announced', async ({ page, request }) => {
+  await page.goto(`/launches/${CHAIN_ID}/${LIVE_TOKEN_ADDRESS}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Volume' }).click();
+  await expect.poll(() => volumeTotal(page)).not.toBe('');
+  const before = await volumeTotal(page);
+  const historyRequest = page.waitForRequest((r) => r.url().includes('/history'), { timeout: 1_500 });
+  await postSwap(request);
+  await historyRequest;
+  await expect.poll(() => volumeTotal(page), { timeout: 3_000 }).not.toBe(before);
+});
+
+test('the Volume total on the pool page grows when a swap lands in that pool', async ({ page, request }) => {
+  const poolId = `0x${(LIVE_POOL_INDEX + 1).toString(16).padStart(64, '0')}`;
+  const currency0 = `0x${(LIVE_POOL_INDEX + 101).toString(16).padStart(40, '0')}`;
+  await page.goto(`/pools/${CHAIN_ID}/uniswap_v4/${poolId}?displayedToken=${currency0}`, { waitUntil: 'networkidle' });
+  await page.getByRole('tab', { name: 'Volume' }).click();
+  await expect.poll(() => volumeTotal(page)).not.toBe('');
+  const before = await volumeTotal(page);
+  const historyRequest = page.waitForRequest((r) => r.url().includes('/history'), { timeout: 1_500 });
+  await postSwap(request);
+  await historyRequest;
+  await expect.poll(() => volumeTotal(page), { timeout: 3_000 }).not.toBe(before);
+});

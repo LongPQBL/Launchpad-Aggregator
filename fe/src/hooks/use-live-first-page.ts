@@ -9,7 +9,7 @@ export const LIVE_FETCH_MIN_INTERVAL_MS = 1_000;
 // Runs `fetchFirstPage` as soon as a matching event (a trade by default, or `eventName`) is announced, instead of waiting for the page-wide
 // router.refresh() (throttled, and it re-runs every other fetch on the page). Leading + trailing throttle:
 // a busy feed costs at most one request a second. Skipped while the tab is hidden, with one catch-up fetch when it becomes visible.
-export function useLiveFirstPage(matches: (payload: SseEventPayload) => boolean, fetchFirstPage: (isStale: () => boolean) => Promise<void>, deps: readonly unknown[], eventName: string = TRADE_CREATED_EVENT): void {
+export function useLiveFirstPage(matches: (payload: SseEventPayload) => boolean, fetchFirstPage: (isStale: () => boolean) => Promise<void>, deps: readonly unknown[], eventName: string | readonly string[] = TRADE_CREATED_EVENT): void {
   useEffect(() => {
     let lastRun = 0;
     let trailing: ReturnType<typeof setTimeout> | null = null;
@@ -34,13 +34,14 @@ export function useLiveFirstPage(matches: (payload: SseEventPayload) => boolean,
       void run();
     };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener(eventName, onTradeCreated);
+    const names = typeof eventName === 'string' ? [eventName] : eventName;
+    for (const name of names) window.addEventListener(name, onTradeCreated);
     return () => {
       disposed = true;
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener(eventName, onTradeCreated);
+      for (const name of names) window.removeEventListener(name, onTradeCreated);
       if (trailing !== null) clearTimeout(trailing);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, eventName]);
+  }, [...deps, typeof eventName === 'string' ? eventName : eventName.join('|')]);
 }

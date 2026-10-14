@@ -1,6 +1,10 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { getLaunchHistory } from '@/api/client';
+import { emitLaunchChanged, emitPoolChanged } from '@/hooks/live-events';
 import { LaunchChartPanel } from './launch-chart-panel';
+
+vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getLaunchHistory: vi.fn() }));
 
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
@@ -58,5 +62,21 @@ describe('LaunchChartPanel', () => {
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={null} />);
     expect(screen.getByTestId('launch-price-chart')).toBeInTheDocument();
     expect(screen.queryByRole('tablist', { name: 'Chart type' })).not.toBeInTheDocument();
+  });
+
+  it("reloads Volume and TVL when the launch changes or a swap lands in a pool holding the token, and not for others", async () => {
+    vi.mocked(getLaunchHistory).mockReset();
+    vi.mocked(getLaunchHistory).mockResolvedValue({ items: [{ day: 864_000, tradeCount: 3, volumeUsd: '4200', tvlUsd: '40000' }], complete: true });
+    render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xAbC" history={history} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    await act(async () => { emitLaunchChanged({ chainId: 4663, tokenAddress: '0xother' }); });
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xpool', poolTokens: ['0xother1', '0xother2'] }); });
+    expect(getLaunchHistory).not.toHaveBeenCalled();
+    await act(async () => { emitLaunchChanged({ chainId: 4663, tokenAddress: '0xabc' }); });
+    expect(getLaunchHistory).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByLabelText('$4.2K')).toBeInTheDocument());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xpool', poolTokens: ['0xabc', '0xother2'] }); });
+    expect(getLaunchHistory).toHaveBeenCalledTimes(2);
   });
 });

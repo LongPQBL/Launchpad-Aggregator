@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getPoolHistory, getPoolLiquidity } from '@/api/client';
 import type { PoolDayHistory } from '@/api/client';
+import { act } from '@testing-library/react';
+import { emitPoolChanged } from '@/hooks/live-events';
 import { PoolChartPanel } from './pool-chart-panel';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getPoolHistory: vi.fn(), getPoolLiquidity: vi.fn() }));
@@ -39,6 +41,18 @@ describe('PoolChartPanel', () => {
     expect(getPoolHistory).toHaveBeenCalledWith(pool, '1w');
     await waitFor(() => expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('$7'));
     expect(screen.getByTestId('pool-history-readout')).toHaveTextContent('Volume');
+  });
+
+  it("reloads the Volume series of the range on screen when a swap lands in this pool, and not for another pool", async () => {
+    vi.mocked(getPoolHistory).mockResolvedValue({ items: [{ day: 10 * DAY, tradeCount: 2, volumeUsd: '2500', tvlUsd: null }], complete: true });
+    render(<PoolChartPanel {...props} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xother' }); });
+    expect(getPoolHistory).not.toHaveBeenCalled();
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: '0xpool' }); });
+    expect(getPoolHistory).toHaveBeenCalledTimes(1);
+    // The figure rolls digit by digit, so read its accessible label rather than the animated text.
+    await waitFor(() => expect(screen.getByLabelText('$2.5K')).toBeInTheDocument());
   });
 
   it('shows no switcher when only the price chart is available (a V2 pair has no Liquidity or Depth)', () => {

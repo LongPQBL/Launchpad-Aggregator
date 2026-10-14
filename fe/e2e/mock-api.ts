@@ -435,13 +435,15 @@ export function startMockApi(port: number): Server {
       const intervalSeconds = rangeInterval(url);
       const rangeBuckets: Record<number, number> = { 60: 60, 300: 288, 3600: 168, 14_400: 180, 86_400: 365 };
       const count = rangeBuckets[intervalSeconds] ?? 96;
+      // Each swap of the live launch / live pool adds volume to the newest bucket (the rollups the real workers keep).
+      const liveSwaps = isLiveToken ? liveTransactions.length : route.toLowerCase().includes(mockPools[LIVE_POOL_INDEX]!.poolId.toLowerCase()) ? livePoolTrades.length : 0;
       // `count` buckets ending now, with an unavailable bucket and real zeros among them.
       res.end(JSON.stringify({
         intervalSeconds,
         items: Array.from({ length: count }, (_, index) => ({
           day: Math.floor(1_780_000_000 / intervalSeconds) * intervalSeconds - (count - 1 - index) * intervalSeconds,
           tradeCount: index % 4 === 0 ? 0 : 1 + (index % 7),
-          volumeUsd: index === 11 ? null : index % 4 === 0 ? '0' : String(100 + index * 25),
+          volumeUsd: index === 11 ? null : index === count - 1 ? String(100 + index * 25 + 1000 * liveSwaps) : index % 4 === 0 ? '0' : String(100 + index * 25),
           // A continuous TVL line with one missing snapshot, so the area chart shows both a line and a gap.
           tvlUsd: index === 5 ? null : String(Math.round(40_000 + index * 40 + 5_000 * Math.sin(index / 14) + 1_500 * Math.sin(index / 4))),
         })),

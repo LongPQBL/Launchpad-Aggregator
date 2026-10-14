@@ -5,6 +5,9 @@ import { getPoolHistory, type PoolCandlePage, type PoolHistory, type PoolSummary
 import { CHART_KINDS, type ChartKind } from '@/features/chart/chart-kinds';
 import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartRangeTabs, type PriceChartStyle } from '@/features/launch/official-chart';
+import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import type { SseEventPayload } from '@/hooks/resource-keys';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { cn } from '@/lib/utils';
 import { PoolChart } from './pool-chart';
 import { PoolHistoryChart, trimLeadingEmpty } from './pool-history-chart';
@@ -63,7 +66,7 @@ function ChartKindTabs({ kinds, selected, onSelect }: { kinds: readonly ChartKin
 // and picks which chart is drawn. All kinds share one time range (the server picks the bucket size): the price chart
 // stays mounted (just hidden), follows the shared range and keeps its zoom, while Volume / TVL load their series per
 // range. `showTvl` is on for the launch page and off for the pool page, which has no TVL chart.
-export function ChartTypePanel({ loadHistory, history, price, headerClassName, showTvl = true, allPools = false, extra, initialRange = DEFAULT_CHART_RANGE }: {
+export function ChartTypePanel({ loadHistory, history, price, headerClassName, showTvl = true, allPools = false, extra, initialRange = DEFAULT_CHART_RANGE, live }: {
   /** Fetches the Volume / TVL series for a range (the first page arrives as `history`, for `initialRange`). */
   loadHistory: (range: ChartRangeId) => Promise<PoolHistory>;
   history: PoolHistory | null;
@@ -79,6 +82,8 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   extra?: Partial<Record<'liquidity' | 'depth', (options: { tabs: ReactNode }) => ReactNode>>;
   /** The range the server rendered `history` and the price candles for (from the page URL). */
   initialRange?: ChartRangeId;
+  /** When set, a matching announcement reloads the Volume / TVL series for the range on screen. */
+  live?: { eventName: string | readonly string[]; matches: (payload: SseEventPayload) => boolean; key: string };
 }) {
   const kinds: ChartKind[] = [...(price ? ['price' as const] : []), ...(history ? ['volume' as const, ...(showTvl ? ['tvl' as const] : [])] : []),
     ...(extra?.liquidity ? ['liquidity' as const] : []), ...(extra?.depth ? ['depth' as const] : [])];
@@ -109,6 +114,21 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
       if (latestRange.current === next) setLoading(false);
     }
   }, [loadHistory]);
+
+  // An announced change (a swap, recomputed buckets) reloads the series for the range on screen. Other ranges' cached series are dropped:
+  // they are as stale as this one was, and switching to one reloads it.
+  useLiveFirstPage(
+    (payload) => live !== undefined && history !== null && live.matches(payload),
+    async (isStale) => {
+      const range = latestRange.current;
+      const loaded = await loadHistory(range);
+      if (isStale() || latestRange.current !== range) return;
+      cache.current = new Map([[range, loaded]]);
+      setData(loaded);
+    },
+    [live?.key, loadHistory, history !== null],
+    live?.eventName,
+  );
 
   // The price chart updates the URL itself when its own tabs are used; the history view does it here.
   const selectFromHistory = useCallback((next: ChartRangeId) => {
@@ -170,7 +190,9 @@ export function PoolChartPanel({ pool, candles, history, coverageStatus, quoteSy
     liquidity: ({ tabs }: { tabs: ReactNode }) => <PoolLiquidityChart pool={pool} trailing={tabs} />,
     depth: ({ tabs }: { tabs: ReactNode }) => <PoolDepthChart pool={pool} trailing={tabs} />,
   };
-  return <ChartTypePanel loadHistory={loadHistory} history={history} showTvl={false} initialRange={initialRange} extra={extra}
+  const live = { eventName: POOL_CHANGED_EVENT, key: `${pool.chainId}:${pool.protocol}:${pool.poolId}`,
+    matches: (payload: SseEventPayload) => payload.chainId === pool.chainId && payload.poolId === pool.poolId.toLowerCase() };
+  return <ChartTypePanel loadHistory={loadHistory} history={history} showTvl={false} initialRange={initialRange} extra={extra} live={live}
     price={candles ? ({ tabs, range, onSelectRange, chartStyle }) => <PoolChart pool={pool} candles={candles} coverageStatus={coverageStatus} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
       range={range} onSelectRange={onSelectRange} trailing={tabs} chartStyle={chartStyle} /> : null} />;
 }
