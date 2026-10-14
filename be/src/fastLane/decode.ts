@@ -2,7 +2,7 @@ import { decodeEventLog, toEventSelector, type Hex } from 'viem';
 import { v3SwapEvent } from '../launchpads/pons/v1/abi.js';
 import { curveBuyEvent, curveBuybackEvent, curveSellEvent } from '../launchpads/pons/v2/abi.js';
 import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
-import type { LiveEntry, LiveStream } from '../envioSync/incrementalSync.js';
+import { v4PoolManager, type LiveEntry, type LiveStream } from '../envioSync/incrementalSync.js';
 
 export interface FastLog {
   address: string; topics: readonly string[]; data: string;
@@ -20,7 +20,12 @@ const EVENT_BY_SELECTOR = new Map<string, LiveEventName>([
   [toEventSelector(v3SwapEvent), 'V3Swap'], [toEventSelector(v4SwapEvent), 'V4Swap'],
 ]);
 
-/** What a log is and which known venue it would have to belong to — from its topics alone, so a cheap filter can run before any RPC call. */
+const V4_POOL_MANAGER = v4PoolManager.toLowerCase();
+
+/**
+ * What a log is and which known venue it would have to belong to — from its address and topics alone, so a cheap filter can run before any
+ * RPC call. A V4 swap names its pool only in a topic, so it is accepted only from the PoolManager: any contract can emit the same event.
+ */
 export function classifyLog(log: Pick<FastLog, 'address' | 'topics'>): LogClass | null {
   const event = EVENT_BY_SELECTOR.get(log.topics[0]?.toLowerCase() ?? '');
   if (!event) return null;
@@ -30,6 +35,7 @@ export function classifyLog(log: Pick<FastLog, 'address' | 'topics'>): LogClass 
     case 'BuybackLocked': return { event, stream: 'v2-buyback', watchKind: 'curve', watchRef: address };
     case 'V3Swap': return { event, stream: 'v1-swap', watchKind: 'v3_pool', watchRef: address };
     case 'V4Swap': {
+      if (address !== V4_POOL_MANAGER) return null;
       const poolId = log.topics[1];
       return poolId ? { event, stream: 'v4-swap', watchKind: 'v4_pool', watchRef: poolId.toLowerCase() } : null;
     }

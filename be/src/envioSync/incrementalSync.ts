@@ -46,7 +46,8 @@ function resolveV1Factory(factoryAddress: string): FactorySource {
   return factory;
 }
 const v2Factory = getPonsFactorySources()[2]!;
-const v4PoolManager = '0x8366a39cC670b4001a1121b8f6A443A643E40951';
+/** The Uniswap V4 PoolManager on Robinhood Chain: every V4 pool's events come from this one contract. */
+export const v4PoolManager = '0x8366a39cC670b4001a1121b8f6A443A643E40951';
 
 export type ApplyOutcome = 'applied' | 'unresolved' | 'skipped';
 interface QuoteAssetToEnqueue { chainId: number; quoteAssetAddress: string }

@@ -5,6 +5,7 @@ import { encodeAbiParameters, encodeEventTopics } from 'viem';
 import { createDatabase } from '../db/client.js';
 import { fastLaneRows, fastLaneState, launches, trades, venues } from '../db/schema.js';
 import { curveBuyEvent } from '../launchpads/pons/v2/abi.js';
+import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
 import type { FastLog } from './decode.js';
 import { applyLiveRows } from '../envioSync/incrementalSync.js';
 import { decodeLiveLog } from './decode.js';
@@ -21,6 +22,7 @@ const unwatchedCurve = '0x7e000000000000000000000000000000000000c2';
 const weth = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
 const trader = '0x1111111111111111111111111111111111111111';
 const blockHash = `0x${'b7'.repeat(32)}`;
+const watchedPoolId = `0x${'7e'.repeat(32)}`;
 let nextTx = 0;
 
 function buyLog(overrides: Partial<FastLog> = {}, address = curve): FastLog {
@@ -57,6 +59,10 @@ beforeAll(async () => {
   await db.insert(venues).values({
     id: `fast-lane-curve-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: curve, sourceId: source, sourceLogId: null,
     effectiveFromBlock: 100n, official: true,
+  }).onConflictDoNothing();
+  await db.insert(venues).values({
+    id: `fast-lane-v4-${token}`, chainId, tokenAddress: token, kind: 'v4_pool', ref: watchedPoolId, sourceId: source, sourceLogId: null,
+    effectiveFromBlock: 100n, official: false,
   }).onConflictDoNothing();
   await listener.connect();
   listener.on('notification', (message) => { if (message.payload) notifications.push(JSON.parse(message.payload)); });
@@ -110,6 +116,22 @@ describe('fast lane', () => {
     expect(await tradeRows()).toHaveLength(0);
     expect(fake.calls).toEqual({ getBlock: 0, getTransactionSender: 0 });
     expect(instance.stats()).toMatchObject({ received: 1, watched: 0 });
+  });
+
+  it('drops a V4 swap for a watched pool id emitted by a contract other than the PoolManager, without any RPC call', async () => {
+    const fake = fakeSource();
+    const instance = await lane(fake);
+    nextTx += 1;
+    const topics = encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: watchedPoolId as `0x${string}`, sender: trader } }) as string[];
+    const data = encodeAbiParameters(
+      [{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' }, { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+      [-300n, 600n, 79228162514264337593543950336n, 9n, 4, 3000]);
+    const spoof: FastLog = { address: '0x9999999999999999999999999999999999999999', topics, data, blockNumber: 5000n, blockHash,
+      transactionHash: `0x${nextTx.toString(16).padStart(64, '0')}`, logIndex: 3 };
+    await instance.handleLogs([spoof]);
+    expect(await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.txHash, spoof.transactionHash)))).toHaveLength(0);
+    expect(fake.calls).toEqual({ getBlock: 0, getTransactionSender: 0 });
+    expect(instance.stats()).toMatchObject({ received: 1, watched: 0, applied: 0 });
   });
 
   it('skips a log whose block hash is not the one the node reports now (a reorg race)', async () => {

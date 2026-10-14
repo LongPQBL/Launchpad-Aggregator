@@ -56,6 +56,12 @@ describe('classifyLog', () => {
     expect(classifyLog({ address: curve, topics: [] })).toBeNull();
     expect(classifyLog({ address: curve, topics: [v4Log().topics[0]!] })).toBeNull();
   });
+  it('accepts a V4 swap only from the PoolManager: the same topics and data from any other contract are a spoof', () => {
+    const spoof = { ...v4Log(), address: '0x9999999999999999999999999999999999999999' };
+    expect(classifyLog(spoof)).toBeNull();
+    expect(decodeLiveLog(spoof, context)).toBeNull();
+    expect(classifyLog({ ...v4Log(), address: v4Log().address.toLowerCase() })).toMatchObject({ event: 'V4Swap', watchRef: poolId });
+  });
   it('subscribes to exactly the five events', () => {
     expect(FAST_LANE_EVENTS).toHaveLength(5);
   });
