@@ -22,15 +22,26 @@ describe('withLaunchListCache', () => {
     expect(listLaunches).toHaveBeenCalledTimes(3);
   });
 
-  it('drops the cache on an announced change so the refetch it triggers reads fresh data', async () => {
-    const { cached, listLaunches, events } = setup();
+  it('drops an entry on an announced change once it is at least half a second old, but not before', async () => {
+    const { cached, listLaunches, events, advance } = setup();
     await cached.listLaunches({ limit: 50 });
     events.publish({ type: 'launch.changed', chainId: 4663, tokenAddress: '0x1111111111111111111111111111111111111111' });
     await cached.listLaunches({ limit: 50 });
+    expect(listLaunches).toHaveBeenCalledTimes(1); // just computed: kept, so a hot list is recomputed at most twice a second
+    advance(600);
+    events.publish({ type: 'launch.changed', chainId: 4663, tokenAddress: '0x1111111111111111111111111111111111111111' });
+    await cached.listLaunches({ limit: 50 });
     expect(listLaunches).toHaveBeenCalledTimes(2);
+  });
+
+  it('ignores events that change nothing the list reads', async () => {
+    const { cached, listLaunches, events, advance } = setup();
+    await cached.listLaunches({ limit: 50 });
+    advance(600);
+    events.publish({ type: 'trade.created', chainId: 4663, tokenAddress: '0x1111111111111111111111111111111111111111' });
     events.publish({ type: 'pool.changed', chainId: 4663, poolId: `0x${'ab'.repeat(32)}` });
     await cached.listLaunches({ limit: 50 });
-    expect(listLaunches).toHaveBeenCalledTimes(2); // a pool swap does not change the launch list
+    expect(listLaunches).toHaveBeenCalledTimes(1);
   });
 
   it('does not cache paged or searched requests, nor a failed one', async () => {
