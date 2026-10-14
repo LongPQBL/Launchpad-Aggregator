@@ -152,15 +152,18 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   // A swap announced in a listed pool refreshes the numbers of the rows on screen in place (no reshuffling,
   // no new rows); the page-wide router.refresh() still brings in pools created since.
   useLiveFirstPage(
-    // Only a swap in a pool on this list matters; any other pool's swap leaves these rows unchanged.
-    (payload) => payload.poolId !== undefined && itemsRef.current.some((pool) => pool.chainId === payload.chainId && pool.poolId.toLowerCase() === payload.poolId),
+    // A swap in a pool on this list matters. On a token's own list, so does the first swap of a pool that holds the
+    // token but is not listed yet (it may be a new pool). Any other pool's swap leaves these rows unchanged.
+    (payload) => payload.poolId !== undefined && (
+      itemsRef.current.some((pool) => pool.chainId === payload.chainId && pool.poolId.toLowerCase() === payload.poolId)
+      || (tokenAddress !== undefined && chainId === payload.chainId && payload.poolTokens?.includes(tokenAddress.toLowerCase()) === true)),
     async (isStale) => {
       if (tokenAddress && chainId === undefined) return;
       const fresh = tokenAddress
         ? await getLaunchPools(chainId!, tokenAddress, { excludeOfficial: true })
         : await getPools({ chainId });
       if (isStale()) return;
-      setItems((shown) => refreshRowsInPlace(fresh.items, shown, rowKey));
+      setItems((shown) => refreshRowsInPlace(fresh.items, shown, rowKey, false, tokenAddress !== undefined));
     },
     [chainId, tokenAddress],
     POOL_CHANGED_EVENT,

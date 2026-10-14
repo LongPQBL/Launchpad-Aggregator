@@ -312,4 +312,15 @@ describe('Pools UI', () => {
     expect(after[0]).toEqual(before[0]);
     expect(after[1]).not.toEqual(before[1]);
   });
+
+  it("on a token's list, picks up the first swap of a pool that holds the token but is not listed yet", async () => {
+    vi.mocked(getLaunchPools).mockClear();
+    vi.mocked(getLaunchPools).mockResolvedValue({ items: [pool], nextCursor: null, supportedProtocols: ['uniswap_v4'] });
+    render(<PoolList page={{ items: [], nextCursor: null, supportedProtocols: ['uniswap_v4'] }} chainId={4663} tokenAddress={a} />);
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: `0x${'9'.repeat(64)}`, poolTokens: [b, '0x4444444444444444444444444444444444444444'] }); });
+    expect(getLaunchPools).not.toHaveBeenCalled();
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: `0x${'8'.repeat(64)}`, poolTokens: [a, b] }); });
+    expect(getLaunchPools).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+  });
 });

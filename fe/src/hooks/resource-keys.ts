@@ -11,6 +11,8 @@ export interface SseEventPayload {
   tokenAddress?: string;
   /** pool.changed only: the pool a swap landed in. */
   poolId?: string;
+  /** pool.changed only: the pool's two currencies. */
+  poolTokens?: readonly string[];
 }
 
 export function matchesResourceKeys(payload: SseEventPayload, resourceKeys: readonly string[]): boolean {

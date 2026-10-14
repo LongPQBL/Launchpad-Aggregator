@@ -32,4 +32,8 @@ describe('refreshRowsInPlace', () => {
     const fresh = [row('n2', 1), row('n1', 1), row('a', 5), row('b', 6)];
     expect(refreshRowsInPlace(fresh, [row('a', 1), row('b', 2)], k, true)).toEqual([row('n2', 1), row('n1', 1), row('a', 5), row('b', 6)]);
   });
+
+  it('appends rows that are not shown yet when asked, without moving shown ones', () => {
+    expect(refreshRowsInPlace([row('z', 9), row('a', 5)], [row('a', 1), row('b', 2)], k, false, true)).toEqual([row('a', 5), row('b', 2), row('z', 9)]);
+  });
 });
