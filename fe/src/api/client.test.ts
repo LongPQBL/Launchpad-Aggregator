@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, findActiveVenue, getCurveSummary, getLaunchCandles, getLaunchHistory, getLaunchTransactions, getLaunches, getSources, launchHref, type OfficialVenue } from './client';
 
-function jsonResponse(body: unknown, init: { ok?: boolean; status?: number } = {}): Response {
+function jsonResponse(body: unknown, init: { ok?: boolean; status?: number; headers?: Record<string, string> } = {}): Response {
   return {
     ok: init.ok ?? true,
     status: init.status ?? 200,
+    headers: new Headers(init.headers),
     json: async () => body,
   } as Response;
 }
@@ -173,6 +174,16 @@ describe('client', () => {
       fetchMock.mockResolvedValueOnce(jsonResponse({}, { ok: false, status: 404 }));
       expect(await getCurveSummary(4663, token)).toBeNull();
     });
+  });
+
+  it('reads how far behind the volume ranking is from the X-Volume-Ranking-Age header, and omits it otherwise', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }, { headers: { 'X-Volume-Ranking-Age': '180' } }));
+    expect(await getLaunches({})).toEqual({ items: [], nextCursor: null, rankingAgeSeconds: 180 });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }));
+    expect(await getLaunches({})).toEqual({ items: [], nextCursor: null });
+    fetchMock.mockResolvedValueOnce(jsonResponse({ items: [], nextCursor: null }, { headers: { 'X-Volume-Ranking-Age': 'soon' } }));
+    expect(await getLaunches({})).toEqual({ items: [], nextCursor: null });
   });
 });
 

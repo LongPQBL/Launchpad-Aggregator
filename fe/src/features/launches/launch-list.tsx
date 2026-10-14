@@ -191,6 +191,12 @@ function LaunchRowsSkeleton({ count }: { count: number }) {
   ));
 }
 
+// "3 min", "2 h": a coarse age is enough for a notice that the ranking is behind.
+function formatRankingAge(seconds: number): string {
+  if (seconds < 3_600) return `${Math.max(1, Math.round(seconds / 60))} min`;
+  return `${Math.round(seconds / 3_600)} h`;
+}
+
 function launchKey(launch: LaunchSummary): string {
   return `${launch.chainId}-${launch.tokenAddress}`;
 }
@@ -198,6 +204,8 @@ function launchKey(launch: LaunchSummary): string {
 export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab, sort: initialSort, direction: initialDirection, loading = false }: LaunchListProps) {
   const [items, setItems] = useState<readonly LaunchSummary[]>(page?.items ?? []);
   const [nextCursor, setNextCursor] = useState<string | null>(page?.nextCursor ?? null);
+  // Seconds the volume ranking is behind, while the server is serving scores older than its worker's heartbeat allows.
+  const [rankingAge, setRankingAge] = useState<number | undefined>(page?.rankingAgeSeconds);
   const [selectedChains, setSelectedChains] = useState<readonly number[]>(selectedValues(chainId));
   const [selectedPlatforms, setSelectedPlatforms] = useState<readonly string[]>(selectedValues(platform));
   const [activeTab, setActiveTab] = useState(tab === 'recent' ? 'recent' : 'all');
@@ -242,6 +250,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
       if (revision !== filterRevisionRef.current) return;
       setItems(filteredPage.items);
       setNextCursor(filteredPage.nextCursor);
+      setRankingAge(filteredPage.rankingAgeSeconds);
     } catch {
       if (revision !== filterRevisionRef.current) return;
       setItems([]);
@@ -277,6 +286,8 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
   const filterSignature = JSON.stringify([chainId, platform, search, status, tab, initialSort, initialDirection]);
   const appliedSignatureRef = useRef<string | null>(null);
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRankingAge(page?.rankingAgeSeconds);
     const sameFilters = appliedSignatureRef.current === filterSignature;
     appliedSignatureRef.current = filterSignature;
     if (sameFilters && page) {
@@ -313,6 +324,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
         search: appliedSearch, status: selectedStatus, sort: sortBy, ...(queryDirection(sortBy, sortDirection) ? { direction: sortDirection } : {}) });
       if (isStale() || liveRef.current.filtering) return;
       setItems((shown) => refreshRowsInPlace(fresh.items, shown, launchKey, sortBy === 'recent'));
+      setRankingAge(fresh.rankingAgeSeconds);
     },
     [filterKey],
     LAUNCH_CHANGED_EVENT,
@@ -366,6 +378,9 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
 
   return (
     <div className="flex flex-col gap-4">
+      {rankingAge !== undefined && (
+        <p role="status" className="text-xs text-muted-foreground">The volume ranking is catching up: last updated {formatRankingAge(rankingAge)} ago.</p>
+      )}
       {activeTab === 'all' && freshestAsOf !== null && (
         <p className="text-xs text-muted-foreground">Official 24h volume as of <RollingText text={freshestAsOf.replace('T', ' ').slice(0, 16)} /> UTC</p>
       )}

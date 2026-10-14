@@ -160,7 +160,9 @@ export async function createApiServer(deps: ApiDeps): Promise<FastifyInstance> {
     } catch {
       return callback(null, false);
     }
-  }, credentials: false });
+  }, credentials: false,
+  // The browser's own refetches read how far behind the volume ranking is from this header.
+  exposedHeaders: ['X-Volume-Ranking-Age'] });
   await registerSecurity(app, deps.security);
   await app.register(swagger, { openapi: { info: { title: 'Launchpad Aggregator API', version: '0.1.0' } } });
   registerSourcesRoutes(app, deps);

@@ -319,6 +319,8 @@ describe('read-only API', () => {
     expect(loopback.headers['access-control-allow-origin']).toBe('http://127.0.0.1:3000');
     expect(wrongPort.headers['access-control-allow-origin']).toBeUndefined();
     expect(rejected.headers['access-control-allow-origin']).toBeUndefined();
+    // The browser's own list refetches read the ranking age from this header, which a cross-origin page cannot see unless it is exposed.
+    expect(allowed.headers['access-control-expose-headers']).toContain('X-Volume-Ranking-Age');
     await app.close();
   });
 

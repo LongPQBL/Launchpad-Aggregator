@@ -10,6 +10,8 @@ export type LaunchSummary = Required<Omit<RawLaunchSummary, 'quoteAsset'>> & { q
 export interface LaunchPage {
   items: readonly LaunchSummary[];
   nextCursor: string | null;
+  /** Set only when the volume ranking is being served from scores older than the worker's heartbeat allows (X-Volume-Ranking-Age). */
+  rankingAgeSeconds?: number;
 }
 
 export interface LaunchQuery {
@@ -75,8 +77,13 @@ async function request<T>(path: string, searchParams?: Record<string, string | n
   return (await response.json()) as T;
 }
 
+function parseRankingAge(value: string | null): number | undefined {
+  if (value === null || !/^\d+$/.test(value)) return undefined;
+  return Number(value);
+}
+
 export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
-  return request<LaunchPage>('/v1/launches', {
+  const response = await rawFetch('/v1/launches', {
     cursor: query.cursor,
     chainId: query.chainId,
     limit: query.limit,
@@ -86,6 +93,10 @@ export async function getLaunches(query: LaunchQuery): Promise<LaunchPage> {
     sort: query.sort,
     direction: query.direction,
   });
+  if (!response.ok) throw new ApiError(`/v1/launches returned error ${response.status}`, undefined, response.status);
+  const page = (await response.json()) as LaunchPage;
+  const rankingAgeSeconds = parseRankingAge(response.headers.get('x-volume-ranking-age'));
+  return rankingAgeSeconds === undefined ? page : { ...page, rankingAgeSeconds };
 }
 
 export async function getSources(): Promise<SourceList> {

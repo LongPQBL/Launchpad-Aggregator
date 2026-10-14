@@ -682,4 +682,11 @@ describe('LaunchList', () => {
       expect(getLaunches).not.toHaveBeenCalled();
     });
   });
+
+  it('tells the reader when the volume ranking is behind, and says nothing when it is current', () => {
+    const { rerender } = render(<LaunchList page={{ items: [launch()], nextCursor: null, rankingAgeSeconds: 600 }} sources={[]} error={false} />);
+    expect(screen.getByRole('status')).toHaveTextContent('The volume ranking is catching up: last updated 10 min ago.');
+    rerender(<LaunchList page={{ items: [launch()], nextCursor: null }} sources={[]} error={false} />);
+    expect(screen.queryByText(/catching up/)).not.toBeInTheDocument();
+  });
 });
