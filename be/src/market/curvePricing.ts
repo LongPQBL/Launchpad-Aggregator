@@ -66,6 +66,8 @@ interface DueTrade {
   side: string; tokenAmountRaw: bigint; quoteAmountRaw: bigint;
 }
 
+// Newest launches first: those are the ones people are looking at, and a backlog of old launches that keep failing (no raw rows for them) must not
+// starve a launch created minutes ago.
 // Finds launches with a priced-behind (or never-started) curve, not just never-started: a launch
 // already caught up has no row returned here (its checkpoint's (block, logIndex) is >= its latest
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
@@ -80,6 +82,7 @@ async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly
     WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
       AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
       AND (l.chain_id::text || ':' || l.token_address) <> ALL($2::text[])
+    ORDER BY l.launch_block DESC
     LIMIT $1`, [limit, excludedKeys]);
   return result.rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),

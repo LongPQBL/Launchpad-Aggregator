@@ -118,13 +118,15 @@ async function rebuildInterval(client: PoolClient, dirty: readonly DirtyBucket[]
 }
 
 /** Rebuild at most `limit` distinct minute buckets atomically; safe to retry after any crash. */
+// Newest buckets first: they are the ones a page is showing, and they are cheap (few trades); the old ones a price-round backfill marks dirty can each
+// mean rebuilding 100k trades and must not hold a live trade's candle back. Every bucket is still rebuilt.
 export async function refreshDirtyCandles(pool: Pool, limit = 100): Promise<number> {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new Error('Invalid candle refresh limit');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const selected = await client.query(`SELECT chain_id, token_address, bucket_start
-      FROM candle_dirty_buckets ORDER BY bucket_start, chain_id, token_address
+      FROM candle_dirty_buckets ORDER BY bucket_start DESC, chain_id, token_address
       LIMIT $1 FOR UPDATE SKIP LOCKED`, [limit]);
     const dirty: DirtyBucket[] = (selected.rows as Row[]).map((row) => ({
       chainId: Number(row.chain_id), tokenAddress: String(row.token_address), bucketStart: Number(row.bucket_start),
