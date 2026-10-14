@@ -163,6 +163,14 @@ Worker giá USD chính thức: `npm run -w be prices:worker` (giải quyết fee
 p50/p90/max trên 200 mẫu gần nhất. Độ trễ = thời điểm API nhận sự kiện trừ timestamp của block gây ra nó (`trade.created`, `pool.changed`),
 tức chặng chain → Envio → sync → Postgres. Dùng nó để so trước/sau khi mua gói HyperSync.
 
+**Fast lane (WebSocket, mặc định tắt):** một tiến trình riêng ghi giao dịch chính thức của launch (curve buy/sell, buyback, swap V3/V4 của pool
+chính thức) vào `trades` ngay từ log WebSocket của chain, trước khi Envio kịp quét; Envio vẫn là nguồn đúng đắn, nó bổ sung phần lane bỏ sót
+và `incrementalRepair` xoá dòng sai/reorg. Bật bằng `FAST_LANE_ENABLED=true` và `RH_WS_RPC_URL` (URL riêng tư, không đưa vào repo), rồi chạy
+`npm run -w be fast-lane:run`. Đo tốc độ log và trễ WebSocket: `npm run -w be fast-lane:measure -- 90`. So các dòng lane đã ghi với dòng của
+Envio: `npm run -w be fast-lane:parity` (thoát với mã 1 nếu có khác biệt). `GET /v1/metrics` có `lagByVia.fast` và `lagByVia.envio` để so
+độ trễ hai đường. Tắt: bỏ biến `FAST_LANE_ENABLED` rồi dừng tiến trình; không có thành phần nào khác phụ thuộc vào nó. Chưa đo độ trễ
+của lane trên giao dịch thật; mục tiêu là p50 từ chain đến API dưới ~1,5 s và 0 khác biệt parity trong 24 giờ.
+
 **Số liệu danh sách launch theo thời gian thực:** khi một giao dịch được báo (`trade.created`), số liệu lưu sẵn của launch (giá, FDV, TVL,
 % thay đổi) được tính lại ngay (tối đa 1 lần mỗi 2 giây cho mỗi launch) rồi mới báo `launch.changed` để trình duyệt tải lại. Mặc định việc
 này chạy ngay trong tiến trình API (tiện cho một API cục bộ). Khi chạy nhiều API, tắt bản trong API bằng `LIVE_LAUNCH_STATS_IN_API=false`
