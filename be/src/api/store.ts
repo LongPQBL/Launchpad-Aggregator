@@ -114,7 +114,8 @@ function cachedTotalSupply(client: UsdPriceClient, tokenAddress: string) {
 // applies the same rule as computeStats: FDV, extrema, and changes are withheld, TVL is kept.
 function statsForCoverage(stored: StatsFields | undefined, complete: boolean): StatsFields {
   if (!stored) return NULL_STATS;
-  if (complete) return stored;
+  // A row stored before a field existed reads that field as unavailable (null), never undefined.
+  if (complete) return { ...NULL_STATS, ...stored };
   const tvl = Object.fromEntries(Object.keys(NULL_TVL).map((key) => [key, (stored as unknown as Record<string, unknown>)[key]]));
   return { ...NULL_STATS, ...tvl } as StatsFields;
 }
