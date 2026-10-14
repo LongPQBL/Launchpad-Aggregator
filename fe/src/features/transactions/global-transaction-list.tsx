@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TokenLogo } from '@/features/launches/token-logo';
 import { TRANSACTION_COLUMNS, transactionColumnWidth } from '@/features/transactions/transaction-columns';
 import { TypeFilter } from '@/features/transactions/type-filter';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { RollingText } from '@/components/percent-change';
@@ -99,6 +100,23 @@ export function GlobalTransactionList({ transactions, nextCursor: initialCursor,
   }
 
   const chainQuery = selectedChains.length > 0 ? selectedChains : undefined;
+
+  // A trade announced on a shown chain is fetched right away and merged in as the new head of the feed.
+  const latestRef = useRef({ items, nextCursor });
+  useEffect(() => { latestRef.current = { items, nextCursor }; });
+  const chainKey = selectedChains.join(',');
+  useLiveFirstPage(
+    (payload) => selectedChains.length === 0 || selectedChains.includes(payload.chainId),
+    async (isStale) => {
+      const page = await getAllTransactions({ chainId: chainQuery });
+      if (isStale()) return;
+      const { items: previous, nextCursor: previousCursor } = latestRef.current;
+      const merged = mergeRefreshedPage(page.items, page.nextCursor, previous, previousCursor, rowKey);
+      setItems(merged.items);
+      setNextCursor(merged.nextCursor);
+    },
+    [chainKey],
+  );
 
   const changeChains = useCallback(async (values: number[]) => {
     setSelectedChains(values);

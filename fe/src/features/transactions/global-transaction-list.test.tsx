@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getAllTransactions, type GlobalTransaction } from '@/api/client';
+import { emitTradeCreated } from '@/hooks/live-events';
 import { GlobalTransactionList } from './global-transaction-list';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getAllTransactions: vi.fn() }));
@@ -142,5 +143,22 @@ describe('GlobalTransactionList', () => {
 
     rerender(<GlobalTransactionList transactions={[row()]} nextCursor="c1" />);
     expect(screen.getAllByRole('row')).toHaveLength(3);
+  });
+
+  describe('live trades', () => {
+    it('puts a newly announced trade at the top without a page refresh', async () => {
+      vi.mocked(getAllTransactions).mockResolvedValue({ items: [row({ txHash: '0xtx2', blockNumber: '101' }), row()], nextCursor: null });
+      render(<GlobalTransactionList transactions={[row()]} nextCursor={null} />);
+      expect(screen.getAllByRole('row')).toHaveLength(2);
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xaaa' }); });
+      expect(getAllTransactions).toHaveBeenCalledTimes(1);
+      expect(screen.getAllByRole('row')).toHaveLength(3);
+    });
+
+    it('ignores a trade on a chain the filter excludes', async () => {
+      render(<GlobalTransactionList transactions={[row()]} nextCursor={null} selectedChainIds={[1]} />);
+      await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xaaa' }); });
+      expect(getAllTransactions).not.toHaveBeenCalled();
+    });
   });
 });

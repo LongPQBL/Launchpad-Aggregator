@@ -8,8 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { TokenLogo } from '@/features/launches/token-logo';
 import { SIDE_OPTIONS, TypeFilter, type SideFilter } from '@/features/transactions/type-filter';
 import { mergeRefreshedPage } from '@/lib/merge-refreshed-page';
-import { TRADE_CREATED_EVENT } from '@/hooks/live-events';
-import type { SseEventPayload } from '@/hooks/resource-keys';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { formatRelativeTime, useNow } from '@/lib/relative-time';
 import { RollingText } from '@/components/percent-change';
 import { cn } from '@/lib/utils';
@@ -68,8 +67,6 @@ function formatUsdAmount(value: string | null): string {
   return value === null ? formatted : `$${formatted}`;
 }
 
-const LIVE_FETCH_MIN_INTERVAL_MS = 1_000;
-
 export function TransactionList({ transactions, tokenSymbol, quoteAsset, explorerBase, chainId, tokenAddress, nextCursor: initialCursor, venue }: TransactionListProps) {
   const now = useNow();
   const [items, setItems] = useState(transactions);
@@ -97,38 +94,21 @@ export function TransactionList({ transactions, tokenSymbol, quoteAsset, explore
   // other fetch on the page). Leading + trailing throttle: a busy token costs at most one request a second.
   const latestRef = useRef({ items, nextCursor });
   useEffect(() => { latestRef.current = { items, nextCursor }; });
-  useEffect(() => {
-    if (chainId === undefined || !tokenAddress) return;
-    let lastRun = 0;
-    let trailing: ReturnType<typeof setTimeout> | null = null;
-    let disposed = false;
-    const run = async () => {
-      lastRun = Date.now();
-      try {
-        const page = await getLaunchTransactions(chainId, tokenAddress, { venue });
-        if (disposed) return;
-        const { items: previous, nextCursor: previousCursor } = latestRef.current;
-        const merged = mergeRefreshedPage(page.items, page.nextCursor, previous, previousCursor,
-          (row) => `${row.blockNumber}-${row.txHash}-${row.logIndex}`);
-        setItems(merged.items);
-        setNextCursor(merged.nextCursor);
-      } catch { /* the page-wide refresh and the fallback poll still catch up */ }
-    };
-    const onTradeCreated = (event: Event) => {
-      const payload = (event as CustomEvent<SseEventPayload>).detail;
-      if (payload.chainId !== chainId || payload.tokenAddress?.toLowerCase() !== tokenAddress.toLowerCase()) return;
-      if (document.hidden || trailing !== null) return;
-      const wait = LIVE_FETCH_MIN_INTERVAL_MS - (Date.now() - lastRun);
-      if (wait <= 0) { void run(); return; }
-      trailing = setTimeout(() => { trailing = null; void run(); }, wait);
-    };
-    window.addEventListener(TRADE_CREATED_EVENT, onTradeCreated);
-    return () => {
-      disposed = true;
-      window.removeEventListener(TRADE_CREATED_EVENT, onTradeCreated);
-      if (trailing !== null) clearTimeout(trailing);
-    };
-  }, [chainId, tokenAddress, venue]);
+  useLiveFirstPage(
+    (payload) => chainId !== undefined && Boolean(tokenAddress) && payload.chainId === chainId
+      && payload.tokenAddress?.toLowerCase() === tokenAddress?.toLowerCase(),
+    async (isStale) => {
+      if (chainId === undefined || !tokenAddress) return;
+      const page = await getLaunchTransactions(chainId, tokenAddress, { venue });
+      if (isStale()) return;
+      const { items: previous, nextCursor: previousCursor } = latestRef.current;
+      const merged = mergeRefreshedPage(page.items, page.nextCursor, previous, previousCursor,
+        (row) => `${row.blockNumber}-${row.txHash}-${row.logIndex}`);
+      setItems(merged.items);
+      setNextCursor(merged.nextCursor);
+    },
+    [chainId, tokenAddress, venue],
+  );
 
   const loadMore = useCallback(async () => {
     if (chainId === undefined || !tokenAddress || !nextCursor || loadingRef.current) return;
