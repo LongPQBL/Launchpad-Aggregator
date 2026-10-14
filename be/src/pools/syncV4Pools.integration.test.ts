@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { Pool } from 'pg';
+import { Client, Pool } from 'pg';
 import { and, eq } from 'drizzle-orm';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { createDatabase } from '../db/client.js';
@@ -74,6 +74,30 @@ describe('V4 pool catalog sync', () => {
     const swaps = await db.select().from(poolTrades).where(eq(poolTrades.chainId, chainId));
     expect(swaps).toHaveLength(1);
     expect(swaps[0]).toMatchObject({ poolId: id, amount0Raw: '-100', amount1Raw: '200' });
+  });
+
+  it('announces a new swap as pool.changed from the tail lane only, once', async () => {
+    const listener = new Client({ connectionString: databaseUrl });
+    await listener.connect();
+    const received: string[] = [];
+    listener.on('notification', (message) => { if (message.payload) received.push(message.payload); });
+    await listener.query('LISTEN launchpad_events');
+    try {
+      await addInitialize(); await addSwap();
+      await syncV4PoolPage(envio, db, input('initialize'));
+      await syncV4PoolPage(envio, db, input('swap', 'history'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.filter((payload) => payload.includes('pool.changed'))).toHaveLength(0);
+      await db.delete(poolTrades).where(eq(poolTrades.chainId, chainId));
+      await syncV4PoolPage(envio, db, input('swap', 'tail'));
+      await syncV4PoolPage(envio, db, input('swap', 'tail'));
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(received.filter((payload) => payload.includes('pool.changed')).map((payload) => JSON.parse(payload)))
+        .toEqual([{ type: 'pool.changed', chainId, poolId: id }]);
+    } finally {
+      await listener.query('UNLISTEN launchpad_events');
+      await listener.end();
+    }
   });
 
   it('claims finalized coverage only after historical Initialize and Swap scans drain', async () => {

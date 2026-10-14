@@ -1,5 +1,5 @@
-export type ApiEventType = 'launch.changed' | 'trade.created' | 'coverage.changed';
-export interface ApiEvent { type: ApiEventType; chainId: number; tokenAddress?: string }
+export type ApiEventType = 'launch.changed' | 'trade.created' | 'coverage.changed' | 'pool.changed';
+export interface ApiEvent { type: ApiEventType; chainId: number; tokenAddress?: string; poolId?: string }
 export interface SequencedApiEvent extends ApiEvent { id: string }
 
 export class ApiEventBus {

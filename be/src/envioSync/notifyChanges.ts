@@ -1,8 +1,9 @@
 import { sql } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
 
-export type ChangeKind = 'launch.changed' | 'trade.created' | 'coverage.changed';
-export interface ChangeNotification { kind: ChangeKind; chainId: number; tokenAddress?: string }
+export type ChangeKind = 'launch.changed' | 'trade.created' | 'coverage.changed' | 'pool.changed';
+/** `poolId` is set only on `pool.changed`: a swap landed in that pool (any protocol; V4 ids are 32 bytes, V3/V2 20). */
+export interface ChangeNotification { kind: ChangeKind; chainId: number; tokenAddress?: string; poolId?: string }
 
 /**
  * Publishes compact `launchpad_events` notifications via `pg_notify`, called from inside the same
@@ -15,12 +16,13 @@ export async function notifyChanged(tx: DbOrTx, changes: readonly ChangeNotifica
   const seen = new Map<string, ChangeNotification>();
   for (const change of changes) {
     const tokenKey = change.tokenAddress?.toLowerCase() ?? '';
-    seen.set(`${change.kind}:${change.chainId}:${tokenKey}`, change);
+    seen.set(`${change.kind}:${change.chainId}:${tokenKey}:${change.poolId?.toLowerCase() ?? ''}`, change);
   }
   for (const change of seen.values()) {
     const payload = JSON.stringify({
       type: change.kind, chainId: change.chainId,
       ...(change.tokenAddress ? { tokenAddress: change.tokenAddress.toLowerCase() } : {}),
+      ...(change.poolId ? { poolId: change.poolId.toLowerCase() } : {}),
     });
     await tx.execute(sql`SELECT pg_notify('launchpad_events', ${payload})`);
   }

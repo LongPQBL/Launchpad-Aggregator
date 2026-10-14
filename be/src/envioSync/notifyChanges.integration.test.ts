@@ -74,4 +74,19 @@ describe('notifyChanged', () => {
     expect(received).toHaveLength(1);
     expect(JSON.parse(received[0]!.payload!)).toEqual({ type: 'coverage.changed', chainId: 4663 });
   });
+
+  it('sends one pool.changed per pool, however many swaps landed in it', async () => {
+    received.length = 0;
+    const a = `0x${'aa'.repeat(32)}`;
+    const b = `0x${'bb'.repeat(20)}`;
+    await db.transaction(async (tx) => {
+      await notifyChanged(tx, [
+        { kind: 'pool.changed', chainId: 4663, poolId: a }, { kind: 'pool.changed', chainId: 4663, poolId: a.toUpperCase().replace('0X', '0x') },
+        { kind: 'pool.changed', chainId: 4663, poolId: b },
+      ]);
+    });
+    await waitForNotifications(2);
+    expect(received.map((m) => JSON.parse(m.payload!)).sort((x, y) => x.poolId.localeCompare(y.poolId)))
+      .toEqual([{ type: 'pool.changed', chainId: 4663, poolId: a }, { type: 'pool.changed', chainId: 4663, poolId: b }]);
+  });
 });

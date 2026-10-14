@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from 'pg';
 import { isAddress } from 'viem';
 import { ApiEventBus, type ApiEvent } from './events.js';
 
-const eventNames = new Set(['launch.changed', 'trade.created', 'coverage.changed']);
+const eventNames = new Set(['launch.changed', 'trade.created', 'coverage.changed', 'pool.changed']);
 
 export function parseDatabaseEvent(payload: string): ApiEvent | null {
   try {
@@ -11,9 +11,11 @@ export function parseDatabaseEvent(payload: string): ApiEvent | null {
     const event = value as Record<string, unknown>;
     if (typeof event.type !== 'string' || !eventNames.has(event.type)
       || typeof event.chainId !== 'number' || !Number.isSafeInteger(event.chainId) || event.chainId <= 0
-      || (event.tokenAddress !== undefined && (typeof event.tokenAddress !== 'string' || !isAddress(event.tokenAddress)))) return null;
+      || (event.tokenAddress !== undefined && (typeof event.tokenAddress !== 'string' || !isAddress(event.tokenAddress)))
+      || (event.poolId !== undefined && (typeof event.poolId !== 'string' || !/^0x([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$/.test(event.poolId)))) return null;
     return { type: event.type as ApiEvent['type'], chainId: event.chainId,
-      ...(typeof event.tokenAddress === 'string' ? { tokenAddress: event.tokenAddress.toLowerCase() } : {}) };
+      ...(typeof event.tokenAddress === 'string' ? { tokenAddress: event.tokenAddress.toLowerCase() } : {}),
+      ...(typeof event.poolId === 'string' ? { poolId: event.poolId.toLowerCase() } : {}) };
   } catch { return null; }
 }
 

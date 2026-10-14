@@ -6,6 +6,7 @@ import { readRawPage, readRawRowById, readRawWindowKeys } from '../envioSync/inc
 import type { CursorPosition } from '../envioSync/incrementalCursor.js';
 import { upsertVerifiedPool } from './catalog.js';
 import { verifyV4Initialize } from './identity.js';
+import { notifyChanged, type ChangeNotification } from '../envioSync/notifyChanges.js';
 
 export type PoolStream = 'initialize' | 'swap';
 export type PoolLane = 'tail' | 'history';
@@ -69,7 +70,7 @@ async function applyInitialize(tx: DbOrTx, chainId: number, raw: Record<string, 
   await upsertVerifiedPool(tx, pool);
 }
 
-async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>): Promise<boolean> {
+async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes?: ChangeNotification[]): Promise<boolean> {
   const poolId = String(raw.poolId).toLowerCase();
   const [pool] = await tx.select().from(poolCatalog).where(and(eq(poolCatalog.chainId, chainId),
     eq(poolCatalog.protocol, 'uniswap_v4'), eq(poolCatalog.poolId, poolId)));
@@ -92,13 +93,14 @@ async function applySwap(tx: DbOrTx, chainId: number, raw: Record<string, unknow
     throw new Error(`Invalid V4 Swap amounts at raw row ${String(raw.id)}`);
   }
   const event = rawPosition(raw);
-  await tx.insert(poolTrades).values({
+  const inserted = await tx.insert(poolTrades).values({
     chainId, protocol: 'uniswap_v4', poolId, blockNumber: event.blockNumber,
     blockHash: event.blockHash.toLowerCase(), txHash: event.txHash.toLowerCase(), logIndex: event.logIndex,
     timestamp: Number(raw.timestamp), amount0Raw: amount0.toString(), amount1Raw: amount1.toString(),
     sqrtPriceX96: sqrtPriceX96.toString(), traderAddress: String(raw.txFrom).toLowerCase(),
     senderAddress: String(raw.sender).toLowerCase(), fee: Number(raw.fee),
-  }).onConflictDoNothing();
+  }).onConflictDoNothing().returning({ txHash: poolTrades.txHash });
+  if (inserted.length > 0) changes?.push({ kind: 'pool.changed', chainId, poolId });
   await tx.delete(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.rawId, String(raw.id))));
   return true;
 }
@@ -134,15 +136,18 @@ export async function syncV4PoolPage(envioPool: Pool, appDb: Database, input: Po
   const nextPosition = page.lastPosition ?? after;
   const processedWatermark = page.rows.length === input.limit && page.lastPosition
     ? (page.lastPosition.blockNumber > 0n ? page.lastPosition.blockNumber - 1n : 0n) : input.fence;
+  // Only the tail lane announces swaps: the history lane replays old blocks and would flood the stream during a backfill.
+  const changes: ChangeNotification[] = [];
   await appDb.transaction(async (tx) => {
     for (const raw of page.rows) {
       if (input.stream === 'initialize') { await applyInitialize(tx, input.chainId, raw); applied += 1; }
-      else if (await applySwap(tx, input.chainId, raw)) applied += 1;
+      else if (await applySwap(tx, input.chainId, raw, input.lane === 'tail' ? changes : undefined)) applied += 1;
       else pending += 1;
     }
     if (input.stream === 'initialize') applied += await retryPending(envioPool, tx, input.chainId, tables.swap, input.limit);
     await tx.update(poolSyncCursors).set({ ...nextPosition, processedWatermark }).where(and(
       eq(poolSyncCursors.chainId, input.chainId), eq(poolSyncCursors.stream, input.stream), eq(poolSyncCursors.lane, input.lane)));
+    await notifyChanged(tx, changes);
   });
   return { applied, pending, cursor: nextPosition, processedWatermark };
 }

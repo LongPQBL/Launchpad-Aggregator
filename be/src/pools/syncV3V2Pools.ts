@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { notifyChanged, type ChangeNotification } from '../envioSync/notifyChanges.js';
 import { and, eq, gte, lte } from 'drizzle-orm';
 import type { Database, DbOrTx } from '../db/client.js';
 import { poolCatalog, poolMembers, poolPendingSwaps, poolSourceAudits, poolSyncCursors, poolTrades } from '../db/schema.js';
@@ -73,7 +74,7 @@ async function queuePending(tx: DbOrTx, chainId: number, source: AdditionalPoolP
     blockNumber: BigInt(String(raw.blockNumber)) }).onConflictDoNothing();
 }
 async function applySwap(envioPool: Pool, tx: DbOrTx, chainId: number, raw: Record<string, unknown>,
-  source: AdditionalPoolProtocol, tables: Tables): Promise<boolean> {
+  source: AdditionalPoolProtocol, tables: Tables, changes?: ChangeNotification[]): Promise<boolean> {
   const poolId = String(source === 'uniswap_v3' ? raw.poolAddress : raw.pairAddress).toLowerCase();
   const [catalog] = await tx.select().from(poolCatalog).where(and(eq(poolCatalog.chainId, chainId),
     eq(poolCatalog.protocol, source), eq(poolCatalog.poolId, poolId)));
@@ -91,12 +92,13 @@ async function applySwap(envioPool: Pool, tx: DbOrTx, chainId: number, raw: Reco
   if (sqrtPriceX96 === null || sqrtPriceX96 <= 0n) {
     await queuePending(tx, chainId, source, poolId, raw); return false;
   }
-  await tx.insert(poolTrades).values({ chainId, protocol: source, poolId,
+  const inserted = await tx.insert(poolTrades).values({ chainId, protocol: source, poolId,
     blockNumber: BigInt(String(raw.blockNumber)), blockHash: String(raw.blockHash).toLowerCase(),
     txHash: String(raw.txHash).toLowerCase(), logIndex: Number(raw.logIndex), timestamp: Number(raw.timestamp),
     amount0Raw: amount0.toString(), amount1Raw: amount1.toString(), sqrtPriceX96: sqrtPriceX96.toString(),
     traderAddress: String(raw.txFrom).toLowerCase(), senderAddress: String(raw.sender).toLowerCase(), fee: catalog.fee,
-  }).onConflictDoNothing();
+  }).onConflictDoNothing().returning({ txHash: poolTrades.txHash });
+  if (inserted.length > 0) changes?.push({ kind: 'pool.changed', chainId, poolId });
   await tx.delete(poolPendingSwaps).where(and(eq(poolPendingSwaps.chainId, chainId), eq(poolPendingSwaps.rawId, String(raw.id))));
   return true;
 }
@@ -131,15 +133,18 @@ export async function syncV3V2PoolPage(envioPool: Pool, appDb: Database,
   const nextPosition = page.lastPosition ?? after;
   const processedWatermark = page.rows.length === input.limit && page.lastPosition
     ? (page.lastPosition.blockNumber > 0n ? page.lastPosition.blockNumber - 1n : 0n) : input.fence;
+  // Only the tail lane announces swaps (see syncV4Pools).
+  const changes: ChangeNotification[] = [];
   await appDb.transaction(async (tx) => {
     for (const raw of page.rows) {
       if (input.stream.endsWith('created')) { await applyCreated(tx, input.chainId, raw, source); applied += 1; }
-      else if (await applySwap(envioPool, tx, input.chainId, raw, source, tables)) applied += 1;
+      else if (await applySwap(envioPool, tx, input.chainId, raw, source, tables, input.lane === 'tail' ? changes : undefined)) applied += 1;
       else pending += 1;
     }
     if (input.stream.endsWith('created')) applied += await retryPending(envioPool, tx, input.chainId, source, tables, input.limit);
     await tx.update(poolSyncCursors).set({ ...nextPosition, processedWatermark }).where(and(
       eq(poolSyncCursors.chainId, input.chainId), eq(poolSyncCursors.stream, input.stream), eq(poolSyncCursors.lane, input.lane)));
+    await notifyChanged(tx, changes);
   });
   return { applied, pending, cursor: nextPosition, processedWatermark };
 }
