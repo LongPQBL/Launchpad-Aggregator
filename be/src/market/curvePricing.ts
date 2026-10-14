@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { parseAbi, type Address } from 'viem';
 import { and, eq } from 'drizzle-orm';
 import type { DbOrTx } from '../db/client.js';
 import { launchCurveReserves } from '../db/schema.js';
@@ -57,7 +58,7 @@ function backedOffKeys(nowMs: number): string[] {
 }
 
 interface DueLaunch {
-  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number;
+  chainId: number; tokenAddress: string; tokenDecimals: number; quoteAssetDecimals: number; curveAddress: string; launchBlock: bigint;
 }
 
 interface DueTrade {
@@ -70,7 +71,7 @@ interface DueTrade {
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
 async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
   const result = await pool.query(`
-    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals
+    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, v.ref AS curve_ref, l.launch_block
     FROM launches l
     JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
     JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
@@ -83,6 +84,7 @@ async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly
   return result.rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),
     tokenDecimals: Number(row.token_decimals), quoteAssetDecimals: Number(row.quote_asset_decimals),
+    curveAddress: String(row.curve_ref), launchBlock: BigInt(String(row.launch_block)),
   }));
 }
 
@@ -132,6 +134,53 @@ Promise<{ feeRaw: bigint; taxRaw: bigint } | null> {
   return { feeRaw: BigInt(laneRow.fee), taxRaw: BigInt(laneRow.tax) };
 }
 
+const curveStateAbi = parseAbi(['function quoteReserve() view returns (uint256)', 'function tokenReserve() view returns (uint256)',
+  'function realQuoteReserve() view returns (uint256)']);
+
+// A function the contract does not have (an older curve) shows up as a revert or an empty answer; anything else (a timeout, a node that has
+// no state for that block) is a failure, not "the contract has no such function".
+function isFunctionAbsent(error: unknown): boolean {
+  const names = new Set(['ContractFunctionRevertedError', 'ContractFunctionZeroDataError', 'AbiDecodingZeroDataError']);
+  for (let current: unknown = error, depth = 0; current && depth < 6; depth += 1) {
+    const name = (current as { name?: unknown }).name;
+    if (typeof name === 'string' && names.has(name)) return true;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+async function readCurveState(client: UsdPriceClient, curve: string, functionName: 'quoteReserve' | 'tokenReserve' | 'realQuoteReserve',
+  blockNumber: bigint): Promise<bigint | null> {
+  try {
+    const value = await client.readContract({ address: curve as Address, abi: curveStateAbi, functionName, blockNumber });
+    return typeof value === 'bigint' ? value : null;
+  } catch (error) {
+    if (isFunctionAbsent(error)) return null;
+    throw error;
+  }
+}
+
+// Some curves start with a virtual quote reserve (EAR: 1.68 ETH): the contract's quoteReserve() is the virtual part plus the real deposits, so a
+// replay that starts from zero quote prices every trade wrongly (checked: first trade paid 1.8e-9 per token, replay said 7e-11). The virtual part
+// never changes, so reading it once at the launch block anchors the replay. A curve without realQuoteReserve() has none.
+async function readVirtualQuote(client: UsdPriceClient, launch: DueLaunch): Promise<bigint> {
+  const [total, real] = await Promise.all([
+    readCurveState(client, launch.curveAddress, 'quoteReserve', launch.launchBlock),
+    readCurveState(client, launch.curveAddress, 'realQuoteReserve', launch.launchBlock)]);
+  return total !== null && real !== null && total > real ? total - real : 0n;
+}
+
+// A replay from the start must end where the chain says the curve was after that trade's block: otherwise a trade is missing (a gap the fast
+// lane left, a history Envio has not reached) or the start was wrong, and writing those prices would be wrong data, not missing data.
+async function assertReplayMatchesChain(client: UsdPriceClient, launch: DueLaunch, reserves: CurveReserves, blockNumber: bigint): Promise<void> {
+  const [quote, token] = await Promise.all([
+    readCurveState(client, launch.curveAddress, 'quoteReserve', blockNumber), readCurveState(client, launch.curveAddress, 'tokenReserve', blockNumber)]);
+  if (quote === null || token === null) return; // a curve that cannot report its reserves cannot be checked
+  if (quote !== reserves.quote || token !== reserves.token) {
+    throw new Error(`Replayed reserves differ from the chain at block ${blockNumber} (quote ${reserves.quote} vs ${quote}, token ${reserves.token} vs ${token}): a trade is missing or the start is wrong`);
+  }
+}
+
 function priceFromReserves(reserves: CurveReserves, tokenDecimals: number, quoteAssetDecimals: number):
 { priceNumeratorRaw: string; priceDenominatorRaw: string } {
   return {
@@ -155,12 +204,14 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
       let reserves: CurveReserves;
       let afterBlock: bigint;
       let afterLogIndex: number;
+      let fromScratch = false;
       if (checkpoint) {
         reserves = checkpoint.reserves; afterBlock = checkpoint.lastBlockNumber; afterLogIndex = checkpoint.lastLogIndex;
       } else {
         const totalSupply = await readTotalSupply(client, launch.tokenAddress as `0x${string}`);
         if (totalSupply === null) throw new Error('totalSupply() unavailable');
-        reserves = { quote: 0n, token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
+        reserves = { quote: await readVirtualQuote(client, launch), token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
+        fromScratch = true;
       }
       const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex);
       if (dueTrades.length === 0) continue;
@@ -178,6 +229,7 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
           ...priceFromReserves(reserves, launch.tokenDecimals, launch.quoteAssetDecimals) });
       }
       const last = dueTrades[dueTrades.length - 1]!;
+      if (fromScratch) await assertReplayMatchesChain(client, launch, reserves, last.blockNumber);
       const dbClient = await pool.connect();
       try {
         await dbClient.query('BEGIN');

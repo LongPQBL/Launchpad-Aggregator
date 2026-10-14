@@ -17,10 +17,17 @@ const totalSupply = 1000n;
 const hash = (c: string) => `0x${c.repeat(64)}`;
 
 const tables = { rawCurveTradeTable: 'envio_fixture_curve_pricing."RawCurveTrade"', rawCurveBuybackTable: 'envio_fixture_curve_pricing."RawCurveBuyback"' };
-const rpcClient = { readContract: async ({ functionName }: { functionName: string }) => {
-  if (functionName === 'totalSupply') return totalSupply;
-  throw new Error(`unexpected ${functionName}`);
-} };
+// A contract without the function: viem reports a revert / empty answer, which the pricing treats as "this curve has no such figure".
+class AbsentFunction extends Error { override name = 'ContractFunctionZeroDataError'; }
+function clientWith(state: Partial<Record<'quoteReserve' | 'tokenReserve' | 'realQuoteReserve', (blockNumber: bigint) => bigint>>) {
+  return { readContract: async ({ functionName, blockNumber }: { functionName: string; blockNumber?: bigint }) => {
+    if (functionName === 'totalSupply') return totalSupply;
+    const read = state[functionName as keyof typeof state];
+    if (read) return read(blockNumber ?? 0n);
+    throw new AbsentFunction(functionName);
+  } };
+}
+const rpcClient = clientWith({}); // a curve with no virtual reserve and no way to check its reserves
 
 async function addTrade(txHash: string, logIndex: number, blockNumber: number, sourceEvent: 'CurveBuy' | 'CurveSell', side: 'buy' | 'sell',
   tokenAmountRaw: bigint, quoteAmountRaw: bigint, feeRaw: bigint, taxRaw: bigint) {
@@ -174,5 +181,35 @@ describe('applyCurvePricingOnce', () => {
       side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
       VALUES ($1,$2,$3,601,$4,$5,1,1700000000,'buy','5','6',$6,'CurveBuy','user_trade',$2)`, [chainId, token, venueId, hash('a'), hash('c'), quote]);
     expect(await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables)).toMatchObject({ failed: 1 });
+  });
+
+  it('starts from the curve\'s virtual quote reserve read at the launch block, so a curve that starts with one is priced from the right reserves', async () => {
+    await addTrade(hash('v1'), 1, 900, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    const client = clientWith({ quoteReserve: () => 50n, realQuoteReserve: () => 0n }); // virtual quote 50, no tokenReserve: not checked
+    await applyCurvePricingOnce(pool, envioPool, client as never, 10, new Date(), tables);
+    const row = (await pool.query('SELECT price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND tx_hash = $2', [chainId, hash('v1')])).rows[0];
+    expect(row).toEqual({ price_numerator_raw: '148', price_denominator_raw: '910' }); // 50 + 98 over 910, not 98 over 910
+  });
+
+  it('writes no price when the replay does not end where the chain says the curve was (a missing trade), and prices it once it does', async () => {
+    await addTrade(hash('v2'), 1, 950, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    const wrong = clientWith({ quoteReserve: () => 5_000n, tokenReserve: () => 910n });
+    const first = await applyCurvePricingOnce(pool, envioPool, wrong as never, 10, new Date(), tables);
+    expect(first).toMatchObject({ pricedTrades: 0, failed: 1 });
+    expect((await pool.query('SELECT price_numerator_raw FROM trades WHERE chain_id = $1 AND tx_hash = $2', [chainId, hash('v2')])).rows[0].price_numerator_raw).toBeNull();
+    expect((await pool.query('SELECT 1 FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token])).rows).toHaveLength(0);
+
+    __resetCurvePricingBackoffForTests();
+    const right = clientWith({ quoteReserve: () => 98n, tokenReserve: () => 910n });
+    expect(await applyCurvePricingOnce(pool, envioPool, right as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 1, failed: 0 });
+  });
+
+  it('treats a node error while reading the reserves as a failure, not as "no virtual reserve"', async () => {
+    await addTrade(hash('v3'), 1, 960, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    const broken = { readContract: async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'totalSupply') return totalSupply;
+      throw new Error('missing trie node');
+    } };
+    expect(await applyCurvePricingOnce(pool, envioPool, broken as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 0, failed: 1 });
   });
 });
