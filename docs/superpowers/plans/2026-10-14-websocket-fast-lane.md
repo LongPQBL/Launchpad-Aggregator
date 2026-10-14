@@ -217,7 +217,7 @@ export async function applyLiveRows(appDb: Database, chainId: number, entries: r
   return { applied: count('applied'), unresolved: count('unresolved'), skipped: count('skipped'), outcomes };
 }
 ```
-(`ApplyOutcome` is the file's existing non-exported type; it is used only in the exported signature as a string union, which TypeScript allows. If lint complains, export it.)
+Also change the file's existing `type ApplyOutcome = 'applied' | 'unresolved' | 'skipped';` to `export type ApplyOutcome = …` (it appears in the exported result type).
 
 - [ ] **Step 4: Run it and see it pass**
 
@@ -790,7 +790,7 @@ import { createDatabase } from '../db/client.js';
 import { fastLaneRows, fastLaneState, launches, trades, venues } from '../db/schema.js';
 import { curveBuyEvent } from '../launchpads/pons/v2/abi.js';
 import type { FastLog } from './decode.js';
-import { createFastLane, type BlockHeader, type LaneChainSource } from './runner.js';
+import { createFastLane, type BlockHeader, type FastLaneOptions, type LaneChainSource } from './runner.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -863,7 +863,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-async function lane(fake: Fake, extra: Record<string, unknown> = {}) {
+async function lane(fake: Fake, extra: Partial<Omit<FastLaneOptions, 'chainId'>> = {}) {
   const instance = createFastLane({ source: fake, db, pool }, { chainId, lookupRetryDelayMs: 1, ...extra });
   await instance.reloadWatchSet();
   return instance;
