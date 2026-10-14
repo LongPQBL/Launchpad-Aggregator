@@ -6,6 +6,8 @@ import { createDatabase } from '../db/client.js';
 import { fastLaneRows, fastLaneState, launches, trades, venues } from '../db/schema.js';
 import { curveBuyEvent } from '../launchpads/pons/v2/abi.js';
 import type { FastLog } from './decode.js';
+import { applyLiveRows } from '../envioSync/incrementalSync.js';
+import { decodeLiveLog } from './decode.js';
 import { createFastLane, type BlockHeader, type FastLaneOptions, type LaneChainSource } from './runner.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -88,7 +90,7 @@ const tradeRows = () => db.select().from(trades).where(and(eq(trades.chainId, ch
 const settle = () => new Promise((resolve) => setTimeout(resolve, 150));
 
 describe('fast lane', () => {
-  it('writes a watched trade with the real trader and block time, records it, advances its block and announces trade.created', async () => {
+  it('writes a watched trade with the real trader and block time, records it, does not move the saved block and announces trade.created', async () => {
     const fake = fakeSource();
     const log = buyLog();
     await (await lane(fake)).handleLogs([log]);
@@ -97,7 +99,7 @@ describe('fast lane', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ txHash: log.transactionHash, logIndex: 2, side: 'buy', sourceEvent: 'CurveBuy', timestamp: 1_700_000_000, traderAddress: trader });
     expect(await db.select().from(fastLaneRows).where(eq(fastLaneRows.chainId, chainId))).toHaveLength(1);
-    expect((await db.select().from(fastLaneState).where(eq(fastLaneState.chainId, chainId)))[0]?.lastBlock).toBe(5000n);
+    expect(await db.select().from(fastLaneState).where(eq(fastLaneState.chainId, chainId))).toHaveLength(0); // only the sweep moves the saved block
     expect(notifications).toContainEqual(expect.objectContaining({ type: 'trade.created', chainId, tokenAddress: token, blockTimestamp: 1_700_000_000 }));
   });
 
@@ -201,5 +203,58 @@ describe('fast lane', () => {
     await instance.sweepOnce();
     expect(getLogs).toHaveBeenCalledTimes(2);
     expect(getLogs.mock.calls[1]![0]).toBe(5001n);
+  });
+
+  it('applies a replacement log after a reorg and skips a late copy of the old-hash log', async () => {
+    const fake = fakeSource();
+    const oldLog = buyLog();
+    const instance = await lane(fake);
+    await instance.handleLogs([oldLog]);
+    await instance.handleLogs([{ ...oldLog, removed: true }]);
+    const newHash = `0x${'c8'.repeat(32)}`;
+    fake.header = { number: 5000n, hash: newHash, timestamp: 1_700_000_005 };
+    const replacement = buyLog({ blockHash: newHash });
+    await instance.handleLogs([replacement]);
+    expect((await tradeRows()).map((r) => r.txHash)).toEqual([replacement.transactionHash]);
+    const skippedBefore = instance.stats().skipped;
+    await instance.handleLogs([buyLog({ blockHash })]); // late copy of the old block
+    expect(await tradeRows()).toHaveLength(1);
+    expect(instance.stats().skipped).toBe(skippedBefore + 1);
+  });
+
+  it('re-reads a cached header whose hash differs before calling it a reorg race', async () => {
+    const fake = fakeSource();
+    const instance = await lane(fake);
+    await instance.handleLogs([buyLog()]); // caches the header
+    const newHash = `0x${'d9'.repeat(32)}`;
+    fake.header = { number: 5000n, hash: newHash, timestamp: 1_700_000_007 };
+    await instance.handleLogs([buyLog({ blockHash: newHash })]);
+    expect(await tradeRows()).toHaveLength(2);
+  });
+
+  it('a sweep range that contains a log the WebSocket already delivered adds no row and no announcement', async () => {
+    const fake = fakeSource();
+    const log = buyLog();
+    fake.logs = [log];
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 4990n });
+    const instance = await lane(fake);
+    await instance.handleLogs([log]);
+    await instance.sweepOnce();
+    await settle();
+    expect(await tradeRows()).toHaveLength(1);
+    expect(fake.calls.getTransactionSender).toBe(1);
+    expect(notifications.filter((n) => n.type === 'trade.created')).toHaveLength(1);
+  });
+
+  it('a trade Envio already wrote stays one row and the lane announces nothing', async () => {
+    const fake = fakeSource();
+    const log = buyLog();
+    await applyLiveRows(db, chainId, [decodeLiveLog(log, { chainId, timestamp: fake.header!.timestamp, txFrom: trader })!]);
+    await settle();
+    notifications.length = 0;
+    await (await lane(fake)).handleLogs([log]);
+    await settle();
+    expect(await tradeRows()).toHaveLength(1);
+    expect(notifications.filter((n) => n.type === 'trade.created')).toHaveLength(0);
   });
 });

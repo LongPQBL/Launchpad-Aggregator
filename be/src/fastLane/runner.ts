@@ -98,15 +98,21 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       .sort((a, b) => a.entry.logIndex - b.entry.logIndex);
     counters.watched += candidates.length;
     if (candidates.length === 0) return;
-    const header = await getHeader(blockNumber);
+    let header = await getHeader(blockNumber);
     if (!header) { counters.skipped += candidates.length; return; }
+    if (candidates.some(({ entry }) => header!.hash.toLowerCase() !== entry.blockHash.toLowerCase())) {
+      // the cached header may predate a reorg: ask the node once more before calling it a mismatch
+      const fresh = await lookup(() => source.getBlock(blockNumber));
+      if (fresh) { header = fresh; headers.set(blockNumber.toString(), fresh); }
+    }
+    const current = header;
     const entries: LiveEntry[] = [];
     const keys: string[] = [];
     for (const { entry } of candidates) {
-      if (header.hash.toLowerCase() !== entry.blockHash.toLowerCase()) { counters.skipped += 1; continue; }
+      if (current.hash.toLowerCase() !== entry.blockHash.toLowerCase()) { counters.skipped += 1; continue; }
       const from = await getSender(entry.transactionHash);
       if (!from) { counters.skipped += 1; continue; }
-      const decoded = decodeLiveLog(entry, { chainId, timestamp: header.timestamp, txFrom: from });
+      const decoded = decodeLiveLog(entry, { chainId, timestamp: current.timestamp, txFrom: from });
       if (!decoded) { counters.skipped += 1; continue; }
       entries.push(decoded);
       keys.push(keyOf(entry));
@@ -117,7 +123,6 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     await recordFastRows(db, chainId, entries.filter((_, index) => result.outcomes[index] === 'applied'));
     keys.forEach((key, index) => { if (result.outcomes[index] === 'applied') handled.add(key); });
     while (handled.size > HANDLED_KEYS_MAX) handled.delete(handled.values().next().value as string);
-    await advanceLaneBlock(db, chainId, blockNumber);
   }
 
   async function processLogs(logs: readonly FastLog[]): Promise<void> {
@@ -125,6 +130,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     for (const removed of logs.filter((entry) => entry.removed)) {
       try {
         if (await removeLaneTrade(db, chainId, { txHash: removed.transactionHash, logIndex: removed.logIndex, blockHash: removed.blockHash })) counters.removed += 1;
+        headers.delete(removed.blockNumber.toString());
         handled.delete(`${removed.transactionHash.toLowerCase()}:${removed.logIndex}`);
       } catch (error) { counters.errors += 1; log('could not remove a reorged trade', { error: (error as Error).message }); }
     }
