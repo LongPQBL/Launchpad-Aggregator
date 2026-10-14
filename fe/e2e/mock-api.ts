@@ -174,11 +174,11 @@ function mockCurveDepth() {
     depth: { asks: build(1, 40), bids: build(-1, 18), spreadPercent: 2 }, complete: true, unavailableReason: null };
 }
 
-function mockCandles(intervalSeconds: number, currency: 'quote' | 'usd') {
+function mockCandles(intervalSeconds: number, currency: 'quote' | 'usd', newestBump = 0) {
   const base = currency === 'usd' ? 0.00012 : 0.0001;
   // A trend with slow waves, like a real market: a smooth price path instead of a straight line.
   const items = Array.from({ length: 60 }, (_, index) => {
-    const close = base * (1 + index * 0.002 + 0.12 * Math.sin(index / 7) + 0.05 * Math.sin(index / 2.5));
+    const close = base * (1 + index * 0.002 + 0.12 * Math.sin(index / 7) + 0.05 * Math.sin(index / 2.5)) * (index === 59 ? 1 + newestBump : 1);
     return {
       intervalSeconds,
       bucketStart: 1_700_000_000 + index * intervalSeconds,
@@ -336,6 +336,8 @@ export function startMockApi(port: number): Server {
         traderAddress: `0x${(0x500 + n).toString(16).padStart(40, '0')}`, side: 'buy', amount0Raw: String(7n * 10n ** 18n), amount1Raw: String(3n * 10n ** 18n),
         priceInQuote: '0.0001', usdValue: '77.00', usdValueStatus: 'priced' }, ...livePoolTrades];
       emit('trade.created', { chainId: CHAIN_ID, tokenAddress: LIVE_TOKEN_ADDRESS });
+      // The real API announces launch.changed once the launch's figures and candles are recomputed.
+      emit('launch.changed', { chainId: CHAIN_ID, tokenAddress: LIVE_TOKEN_ADDRESS });
       emit('pool.changed', { chainId: CHAIN_ID, poolId: livePool.poolId, poolTokens: [livePool.currency0, livePool.currency1] });
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ txHash }));
@@ -406,7 +408,7 @@ export function startMockApi(port: number): Server {
     } else if (route === '/v1/sources') {
       res.end(JSON.stringify({ items: [{ id: 'pons-v2', chainId: CHAIN_ID, platform: 'pons', protocolVersion: 'v2' }] }));
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`) {
-      res.end(JSON.stringify(launchDetail));
+      res.end(JSON.stringify(isLiveToken ? { ...launchDetail, tokenAddress: LIVE_TOKEN_ADDRESS } : launchDetail));
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/trades`) {
       res.end(JSON.stringify(trades));
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/transactions`) {
@@ -416,7 +418,7 @@ export function startMockApi(port: number): Server {
     } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/candles`) {
       const intervalSeconds = rangeInterval(url);
       const currency = url.searchParams.get('currency') === 'usd' ? 'usd' : 'quote';
-      res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
+      res.end(JSON.stringify(mockCandles(intervalSeconds, currency, isLiveToken ? liveTransactions.length * 0.25 : 0)));
     } else if (route === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`) {
       res.end(JSON.stringify(shortDescriptionDetail));
     } else if (route === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/trades`) {
@@ -427,7 +429,8 @@ export function startMockApi(port: number): Server {
       res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(route)) {
       const intervalSeconds = rangeInterval(url);
-      res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote')));
+      const isLiveCandlePool = route.toLowerCase().includes(mockPools[LIVE_POOL_INDEX]!.poolId.toLowerCase());
+      res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote', isLiveCandlePool ? livePoolTrades.length * 0.25 : 0)));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(route) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(route)) {
       const intervalSeconds = rangeInterval(url);
       const rangeBuckets: Record<number, number> = { 60: 60, 300: 288, 3600: 168, 14_400: 180, 86_400: 365 };
