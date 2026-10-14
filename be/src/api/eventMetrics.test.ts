@@ -27,4 +27,17 @@ describe('createEventMetrics', () => {
     for (let i = 0; i < 250; i += 1) bus.publish({ type: 'pool.changed', chainId: 1, poolId: `0x${'ab'.repeat(32)}`, blockTimestamp: 1_000_000_000 - 7 });
     expect(metrics.snapshot().events['pool.changed']!.lag).toMatchObject({ samples: 200, p50Seconds: 7 });
   });
+
+  it('splits the delay by the lane that delivered the event, counting an untagged event as Envio', () => {
+    const nowMs = 1_000_000_000_000;
+    const bus = new ApiEventBus();
+    const metrics = createEventMetrics(bus, () => nowMs);
+    const token = '0x1111111111111111111111111111111111111111';
+    bus.publish({ type: 'trade.created', chainId: 1, tokenAddress: token, blockTimestamp: 1_000_000_000 - 1, via: 'fast' });
+    bus.publish({ type: 'trade.created', chainId: 1, tokenAddress: token, blockTimestamp: 1_000_000_000 - 3 });
+    const entry = metrics.snapshot().events['trade.created']!;
+    expect(entry.lagByVia.fast).toMatchObject({ samples: 1, p50Seconds: 1 });
+    expect(entry.lagByVia.envio).toMatchObject({ samples: 1, p50Seconds: 3 });
+    expect(entry.lag.samples).toBe(2);
+  });
 });

@@ -722,7 +722,7 @@ describe('applyLiveRows', () => {
     expect(rows[0]).toMatchObject({ txHash: entry.raw.txHash, logIndex: 1, sourceEvent: 'Swap' });
     expect(await volumeRevision(token)).toBe((before ?? 0) + 1);
     const announced = vi.mocked(notifyChanged).mock.calls.at(-1)![1];
-    expect(announced).toEqual([expect.objectContaining({ kind: 'trade.created', chainId, tokenAddress: token })]);
+    expect(announced).toEqual([expect.objectContaining({ kind: 'trade.created', chainId, tokenAddress: token, via: 'fast' })]);
 
     await applyLiveRows(db, chainId, [entry]);
     expect(await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)))).toHaveLength(1);

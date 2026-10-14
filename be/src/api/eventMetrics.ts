@@ -6,7 +6,14 @@ const TYPES: readonly ApiEventType[] = ['launch.changed', 'trade.created', 'cove
 export interface LagStats { samples: number; p50Seconds: number | null; p90Seconds: number | null; maxSeconds: number | null }
 export interface EventMetricsSnapshot {
   since: string;
-  events: Record<string, { total: number; lastAt: string | null; lag: LagStats }>;
+  events: Record<string, { total: number; lastAt: string | null; lag: LagStats; lagByVia: { fast: LagStats; envio: LagStats } }>;
+}
+
+function lagStats(samples: readonly number[]): LagStats {
+  if (samples.length === 0) return { samples: 0, p50Seconds: null, p90Seconds: null, maxSeconds: null };
+  const sorted = [...samples].sort((a, b) => a - b);
+  const round = (value: number) => Math.round(value * 10) / 10;
+  return { samples: sorted.length, p50Seconds: round(percentile(sorted, 0.5)), p90Seconds: round(percentile(sorted, 0.9)), maxSeconds: round(sorted.at(-1)!) };
 }
 
 function percentile(sorted: readonly number[], p: number): number {
@@ -20,8 +27,8 @@ function percentile(sorted: readonly number[], p: number): number {
  */
 export function createEventMetrics(events: ApiEventBus, now: () => number = Date.now): { snapshot: () => EventMetricsSnapshot } {
   const startedAt = now();
-  const state = new Map<ApiEventType, { total: number; lastAt: number | null; lags: number[] }>(
-    TYPES.map((type) => [type, { total: 0, lastAt: null, lags: [] }]));
+  const state = new Map<ApiEventType, { total: number; lastAt: number | null; lags: number[]; lagsByVia: { fast: number[]; envio: number[] } }>(
+    TYPES.map((type) => [type, { total: 0, lastAt: null, lags: [], lagsByVia: { fast: [], envio: [] } }]));
   events.subscribe((event) => {
     const entry = state.get(event.type);
     if (!entry) return;
@@ -29,21 +36,23 @@ export function createEventMetrics(events: ApiEventBus, now: () => number = Date
     entry.lastAt = now();
     if (event.blockTimestamp !== undefined) {
       // A block timestamp a little ahead of this clock is clock skew, not a negative delay.
-      entry.lags.push(Math.max(0, now() / 1000 - event.blockTimestamp));
+      const delay = Math.max(0, now() / 1000 - event.blockTimestamp);
+      entry.lags.push(delay);
       if (entry.lags.length > SAMPLES) entry.lags.shift();
+      const lane = entry.lagsByVia[event.via ?? 'envio'];
+      lane.push(delay);
+      if (lane.length > SAMPLES) lane.shift();
     }
   });
   return {
     snapshot() {
       const out: EventMetricsSnapshot['events'] = {};
       for (const [type, entry] of state) {
-        const sorted = [...entry.lags].sort((a, b) => a - b);
-        const round = (value: number) => Math.round(value * 10) / 10;
         out[type] = {
           total: entry.total,
           lastAt: entry.lastAt === null ? null : new Date(entry.lastAt).toISOString(),
-          lag: sorted.length === 0 ? { samples: 0, p50Seconds: null, p90Seconds: null, maxSeconds: null }
-            : { samples: sorted.length, p50Seconds: round(percentile(sorted, 0.5)), p90Seconds: round(percentile(sorted, 0.9)), maxSeconds: round(sorted.at(-1)!) },
+          lag: lagStats(entry.lags),
+          lagByVia: { fast: lagStats(entry.lagsByVia.fast), envio: lagStats(entry.lagsByVia.envio) },
         };
       }
       return { since: new Date(startedAt).toISOString(), events: out };

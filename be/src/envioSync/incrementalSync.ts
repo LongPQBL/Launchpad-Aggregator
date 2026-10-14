@@ -483,7 +483,7 @@ export async function applyLiveRows(appDb: Database, chainId: number, entries: r
   await appDb.transaction(async (tx) => {
     for (const entry of entries) outcomes.push(await applyRow(tx, chainId, entry.stream, entry.raw, newQuoteAssets, changes));
     await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), new Date());
-    await notifyChanged(tx, changes);
+    await notifyChanged(tx, changes.map((change) => ({ ...change, via: 'fast' as const })));
   });
   const count = (outcome: ApplyOutcome) => outcomes.filter((value) => value === outcome).length;
   return { applied: count('applied'), unresolved: count('unresolved'), skipped: count('skipped'), outcomes };

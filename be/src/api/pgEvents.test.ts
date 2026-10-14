@@ -24,4 +24,9 @@ describe('database event bridge', () => {
     expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"blockTimestamp":"soon"}')).toBeNull();
     expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"blockTimestamp":-5}')).toBeNull();
   });
+
+  it('carries which lane delivered an event and rejects an unknown lane', () => {
+    expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"via":"fast"}')).toEqual({ type: 'trade.created', chainId: 4663, via: 'fast' });
+    expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"via":"carrier-pigeon"}')).toBeNull();
+  });
 });
