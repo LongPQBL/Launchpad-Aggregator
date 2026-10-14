@@ -5,12 +5,19 @@ import { createTokenMetadataResolver } from './tokenMetadata.js';
 const nvda = '0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec';
 
 describe('token metadata resolver', () => {
+  it('returns the bundled USDG entry by address, without any RPC or registry call', async () => {
+    const resolver = createTokenMetadataResolver({ readContract: async () => { throw new Error('no RPC expected'); } } as never,
+      { resolveMetadata: async () => { throw new Error('no registry expected'); } });
+    expect(await resolver.resolve('0x5FC5360D0400A0FD4F2AF552ADD042D716F1D168'))
+      .toEqual({ symbol: 'USDG', name: 'Global Dollar', logoUri: '/images/tokens/usdg.png' });
+  });
+
   it('returns the static ETH entry for the zero address without any RPC or registry call', async () => {
     const readContract = vi.fn();
     const resolveMetadata = vi.fn();
     const resolver = createTokenMetadataResolver({ readContract }, { resolveMetadata });
 
-    expect(await resolver.resolve(zeroAddress)).toEqual({ symbol: 'ETH', name: 'Ether', logoUri: null });
+    expect(await resolver.resolve(zeroAddress)).toEqual({ symbol: 'ETH', name: 'Ether', logoUri: '/images/tokens/eth.svg' });
     expect(readContract).not.toHaveBeenCalled();
     expect(resolveMetadata).not.toHaveBeenCalled();
   });

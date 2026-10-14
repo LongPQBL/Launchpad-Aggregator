@@ -122,8 +122,16 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
   }
   // 30-day volume needs a per-pool oracle-priced aggregate, so it is cached for a few minutes: a list page
   // asks for up to 100 pools at once and the figure moves slowly.
-  const volume30d = ttlMemo(async (cacheKey: string, key?: PoolKey): Promise<string | null> => {
-    if (!key) return null;
+  // The first block Envio indexes from (null: full history). A pool created before it has no complete swap history, so its volumes are unknown.
+  const indexedFromBlock = ttlMemo(async (): Promise<bigint | null> => {
+    const value = (await pool.query('SELECT indexed_from_block FROM envio_chain_progress WHERE chain_id = 4663')).rows[0]?.indexed_from_block;
+    return value === null || value === undefined ? null : BigInt(String(value));
+  }, 30_000);
+  const volume30d = ttlMemo(async (cacheKey: string, arg?: { key: PoolKey; createdBlock: string }): Promise<string | null> => {
+    if (!arg) return null;
+    const { key, createdBlock } = arg;
+    const indexedFrom = await indexedFromBlock('indexed-from');
+    if (indexedFrom !== null && BigInt(createdBlock) < indexedFrom) return null;
     try {
       const history = await readPoolDailyHistory(pool, key, { days: 30, asOf: Math.floor(Date.now() / 1000), rpcClient });
       if (!history.complete) return null;
@@ -154,7 +162,7 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
       createdAtPromise.then((created) => poolStatsMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${displayedToken}`,
         { key, displayedToken, createdTimestamp: created })),
-      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, key),
+      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, { key, createdBlock: String(row.block_number) }),
       createdAtPromise,
       currencyMetadata(key.chainId, row.currency0),
       currencyMetadata(key.chainId, row.currency1),

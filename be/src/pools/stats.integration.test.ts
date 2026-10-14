@@ -86,6 +86,26 @@ describe('readPoolStats', () => {
     expect(stats.volume24hUsd).toBe('4');
     expect(Number(stats.volume24hChange)).toBeCloseTo(100);
   });
+  it('reads the price of a pool with no swap in the last 24 h from its current on-chain state', async () => {
+    const stats = await readPoolStats(pool, key, a, 90_000, { rpcClient });
+    expect(stats.volume24hUsd).toBe('0');
+    expect(Number(stats.priceInQuote)).toBeCloseTo(1);
+    expect(stats.priceUsd).not.toBeNull();
+    expect(stats.fdvUsd).not.toBeNull();
+  });
+  it('leaves the volume unknown, not $0, for a pool created before the first indexed block', async () => {
+    const before = (await pool.query('SELECT head_block, indexed_from_block FROM envio_chain_progress WHERE chain_id = $1', [chainId])).rows[0];
+    await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block, indexed_from_block) VALUES ($1, 1000, 500)
+      ON CONFLICT (chain_id) DO UPDATE SET indexed_from_block = 500`, [chainId]);
+    try {
+      expect((await readPoolStats(pool, key, a, 90_000, { rpcClient })).volume24hUsd).toBeNull(); // created at block 99 < 500
+      await pool.query('UPDATE envio_chain_progress SET indexed_from_block = 50 WHERE chain_id = $1', [chainId]);
+      expect((await readPoolStats(pool, key, a, 90_000, { rpcClient })).volume24hUsd).toBe('0'); // indexed from before the pool existed
+    } finally {
+      if (before) await pool.query('UPDATE envio_chain_progress SET head_block = $2, indexed_from_block = $3 WHERE chain_id = $1', [chainId, before.head_block, before.indexed_from_block]);
+      else await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = $1', [chainId]);
+    }
+  });
   it('values each trade at its own historical round and derives pool price for either side', async () => {
     const statsA = await readPoolStats(pool, key, a, 4000, { rpcClient });
     expect(statsA.volume24hUsd).toBe('6');

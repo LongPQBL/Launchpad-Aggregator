@@ -1,0 +1,1 @@
+ALTER TABLE "envio_chain_progress" ADD COLUMN "indexed_from_block" bigint;

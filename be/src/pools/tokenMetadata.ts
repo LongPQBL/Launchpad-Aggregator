@@ -20,7 +20,9 @@ const erc20MetadataAbi = parseAbi([
 // never change), so this is a plain never-expiring cache, not a TTL/lease system like Pons token
 // metadata enrichment — there is no unbounded or fast-growing set of addresses to page through.
 const STATIC: Readonly<Record<string, TokenMetadata>> = {
-  [zeroAddress]: { symbol: 'ETH', name: 'Ether', logoUri: null },
+  [zeroAddress]: { symbol: 'ETH', name: 'Ether', logoUri: '/images/tokens/eth.svg' },
+  // Global Dollar (USDG) is in no asset directory this app reads; its logo is bundled with the web app (by address, never by symbol).
+  '0x5fc5360d0400a0fd4f2af552add042d716f1d168': { symbol: 'USDG', name: 'Global Dollar', logoUri: '/images/tokens/usdg.png' },
 };
 
 export function createTokenMetadataResolver(rpcClient: UsdPriceClient, assetRegistry: AssetMetadataRegistry):

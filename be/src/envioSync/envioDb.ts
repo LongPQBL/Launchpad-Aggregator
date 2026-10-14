@@ -16,9 +16,19 @@ Promise<{ processedBlock: bigint; headBlock: bigint }> {
 // be/src/api/store.ts's safeHead()/coverage() can see it without the API process needing a second
 // database connection to Envio's own Postgres. Written once per real-table sync cycle — see
 // be/src/envioSync/syncAll.ts's runAllSyncsOnce.
-export async function recordEnvioChainProgress(appDb: Database, chainId: number, headBlock: bigint): Promise<void> {
-  await appDb.insert(envioChainProgress).values({ chainId, headBlock })
-    .onConflictDoUpdate({ target: envioChainProgress.chainId, set: { headBlock, updatedAt: new Date() } });
+export async function recordEnvioChainProgress(appDb: Database, chainId: number, headBlock: bigint,
+  indexedFromBlock: bigint | null = indexedFromBlockFromEnv()): Promise<void> {
+  await appDb.insert(envioChainProgress).values({ chainId, headBlock, indexedFromBlock })
+    .onConflictDoUpdate({ target: envioChainProgress.chainId, set: { headBlock, indexedFromBlock, updatedAt: new Date() } });
+}
+
+// ENVIO_INDEXED_FROM_BLOCK is set when Envio was started later than the chain's first relevant block (a short test window). Unset means
+// full history, and nothing is withheld on its account.
+export function indexedFromBlockFromEnv(env: NodeJS.ProcessEnv = process.env): bigint | null {
+  const raw = env.ENVIO_INDEXED_FROM_BLOCK;
+  if (raw === undefined || raw === '') return null;
+  if (!/^\d+$/.test(raw)) throw new Error('ENVIO_INDEXED_FROM_BLOCK must be a block number');
+  return BigInt(raw);
 }
 
 export interface EnvioRawLaunchDbRow {

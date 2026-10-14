@@ -40,7 +40,7 @@ export interface PoolTradeResponse {
   usdValue: string | null; usdValueStatus: 'priced' | 'pending' | 'unavailable';
 }
 
-interface PoolRow { currency0: string; currency1: string; coverage_status: string; fee: number; tick_spacing: number; hooks: string }
+interface PoolRow { currency0: string; currency1: string; coverage_status: string; fee: number; tick_spacing: number; hooks: string; block_number: string | number }
 interface TradeRow {
   amount0_raw: string; amount1_raw: string; sqrt_price_x96: string;
   timestamp: number; block_number: string; log_index: number;
@@ -139,11 +139,11 @@ export async function assetDecimals(client: UsdPriceClient | undefined, address:
 
 async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: PoolRow, displayedIsCurrency0: boolean,
   displayedDecimals: number | null, quoteDecimals: number | null, quoteUsd: number | null): Promise<{
-    poolBalances: PoolBalanceSnapshot | null; tvlUsd: string | null;
+    poolBalances: PoolBalanceSnapshot | null; tvlUsd: string | null; sqrtPriceX96: bigint | null;
   }> {
-  if (displayedDecimals === null || quoteDecimals === null) return { poolBalances: null, tvlUsd: null };
+  if (displayedDecimals === null || quoteDecimals === null) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
   const lens = await readLensSnapshot(client, catalog);
-  if (!lens) return { poolBalances: null, tvlUsd: null };
+  if (!lens) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
   try {
     const { blockNumber, coreAmount0, coreAmount1, sqrtPriceX96 } = lens;
     const priceInQuote = poolPriceInQuote(sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0, 100);
@@ -158,15 +158,15 @@ async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: Poo
       blockNumber, basis: 'pool_principal', sqrtPriceX96,
       tokenIsCurrency0: displayedIsCurrency0,
     }, quoteDecimals, displayedDecimals, quoteUsd);
-    return { poolBalances, tvlUsd };
-  } catch { return { poolBalances: null, tvlUsd: null }; }
+    return { poolBalances, tvlUsd, sqrtPriceX96 };
+  } catch { return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null }; }
 }
 
 /** Read only this pool's swaps. An unpriced positive trade makes 24h USD volume unavailable. */
 export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: string, asOf: number,
   options: { rpcClient?: UsdPriceClient; createdTimestamp?: number | null } = {}): Promise<PoolStats> {
   if (!Number.isSafeInteger(asOf) || asOf < 0) throw new Error('Invalid pool statistics time');
-  const found = await pool.query(`SELECT currency0, currency1, coverage_status, fee, tick_spacing, hooks FROM pool_catalog
+  const found = await pool.query(`SELECT currency0, currency1, coverage_status, fee, tick_spacing, hooks, block_number FROM pool_catalog
     WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND verified=true`, [key.chainId, key.protocol, key.poolId.toLowerCase()]);
   const catalog = found.rows[0] as PoolRow | undefined;
   if (!catalog) throw new Error('Pool not found');
@@ -186,25 +186,16 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const rows = recent.rows as TradeRow[];
   const last = rows.at(-1);
   const complete = catalog.coverage_status === 'caught_up' && rows.length <= MAX_RECENT_TRADES;
-  const priceInQuote = last ? poolPriceInQuote(BigInt(last.sqrt_price_x96), displayedDecimals, quoteDecimals,
-    displayedIsCurrency0) : null;
+  // A pool created before the first block Envio indexes has no complete swap history: its volume is unknown, not $0.
+  const indexedFrom = (await pool.query('SELECT indexed_from_block FROM envio_chain_progress WHERE chain_id = $1', [key.chainId])).rows[0]?.indexed_from_block;
+  const swapHistoryComplete = indexedFrom === null || indexedFrom === undefined || BigInt(String(catalog.block_number)) >= BigInt(String(indexedFrom));
   const quoteFeed = await resolveVerifiedFeed(pool, key.chainId, quoteAddress);
   const currentQuoteUsd = options.rpcClient && quoteFeed
     ? await readUsdPrice(pool, options.rpcClient, key.chainId, quoteAddress, () => asOf * 1000).catch(() => null) : null;
-  const priceUsd = priceInQuote !== null && currentQuoteUsd
-    ? (Number(priceInQuote) * currentQuoteUsd.priceUsd).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 })
-    : null;
-  const supply = options.rpcClient && displayed !== ZERO_ADDRESS
-    ? await readTotalSupply(options.rpcClient, displayed as Address) : null;
-  const priceRational = last ? poolPriceRational(BigInt(last.sqrt_price_x96), displayedDecimals, quoteDecimals,
-    displayedIsCurrency0) : null;
-  const fdvUsd = supply !== null && displayedDecimals !== null
-    ? computeFdvUsd(supply, displayedDecimals, priceRational?.numerator ?? null, priceRational?.denominator ?? null,
-      currentQuoteUsd?.priceUsd ?? null) : null;
   let poolSnapshot = key.protocol === 'uniswap_v4'
     ? await readPoolSnapshot(options.rpcClient, catalog, displayedIsCurrency0, displayedDecimals, quoteDecimals,
       currentQuoteUsd?.priceUsd ?? null)
-    : { poolBalances: null, tvlUsd: null };
+    : { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
   // TVL only needs one side with a verified USD feed. When the quote has none (a pool of two launched tokens read from the one
   // without a feed's side, say), value the pool through the other side instead of leaving it unavailable.
   if (key.protocol === 'uniswap_v4' && poolSnapshot.tvlUsd === null && poolSnapshot.poolBalances !== null && currentQuoteUsd === null
@@ -212,9 +203,24 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     const displayedUsd = await readUsdPrice(pool, options.rpcClient, key.chainId, displayed, () => asOf * 1000).catch(() => null);
     if (displayedUsd) {
       const swapped = await readPoolSnapshot(options.rpcClient, catalog, !displayedIsCurrency0, quoteDecimals, displayedDecimals, displayedUsd.priceUsd);
-      poolSnapshot = { poolBalances: poolSnapshot.poolBalances, tvlUsd: swapped.tvlUsd };
+      poolSnapshot = { poolBalances: poolSnapshot.poolBalances, tvlUsd: swapped.tvlUsd, sqrtPriceX96: poolSnapshot.sqrtPriceX96 };
     }
   }
+
+  // The price comes from the last swap of the day; a pool with no swap in 24 h reads its current price from the chain instead
+  // (the same state its balances come from), so a quiet pool still shows a price.
+  const currentSqrt = last ? BigInt(last.sqrt_price_x96) : poolSnapshot.sqrtPriceX96;
+  const priceInQuote = currentSqrt !== null ? poolPriceInQuote(currentSqrt, displayedDecimals, quoteDecimals, displayedIsCurrency0) : null;
+  const priceUsd = priceInQuote !== null && currentQuoteUsd
+    ? (Number(priceInQuote) * currentQuoteUsd.priceUsd).toLocaleString('en-US', { useGrouping: false, maximumFractionDigits: 100 })
+    : null;
+  const supply = options.rpcClient && displayed !== ZERO_ADDRESS
+    ? await readTotalSupply(options.rpcClient, displayed as Address) : null;
+  const priceRational = currentSqrt !== null ? poolPriceRational(currentSqrt, displayedDecimals, quoteDecimals,
+    displayedIsCurrency0) : null;
+  const fdvUsd = supply !== null && displayedDecimals !== null
+    ? computeFdvUsd(supply, displayedDecimals, priceRational?.numerator ?? null, priceRational?.denominator ?? null,
+      currentQuoteUsd?.priceUsd ?? null) : null;
 
   const tvlChange = complete && key.protocol === 'uniswap_v4'
     ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf, { createdTimestamp: options.createdTimestamp }) : null;
@@ -241,7 +247,7 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
     }
     return sumUsdValues(pricedValues);
   };
-  const volume24hUsd = complete ? await sumVolumeUsd(rows) : null;
+  const volume24hUsd = complete && swapHistoryComplete ? await sumVolumeUsd(rows) : null;
 
   // Previous 24h window ([asOf-48h, asOf-24h)), for the "vs 24h ago" change. Unavailable (null)
   // if it is too large to value completely or any trade in it is unpriced — never treated as zero.

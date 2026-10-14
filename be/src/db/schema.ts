@@ -610,6 +610,8 @@ export const observedBlocks = pgTable('observed_blocks', {
 export const envioChainProgress = pgTable('envio_chain_progress', {
   chainId: integer('chain_id').primaryKey(),
   headBlock: bigint('head_block', { mode: 'bigint' }).notNull(),
+  // First block the Envio deployment indexes from (ENVIO_INDEXED_FROM_BLOCK); null = full history. A pool created before it has no complete swap history.
+  indexedFromBlock: bigint('indexed_from_block', { mode: 'bigint' }),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
