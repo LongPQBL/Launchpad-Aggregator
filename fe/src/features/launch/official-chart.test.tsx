@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, vi } from 'vitest';
 import { OfficialChart } from './official-chart';
 import type { MouseEventParams, Time } from 'lightweight-charts';
+import { emitLaunchChanged, emitPoolChanged } from '@/hooks/live-events';
 
 const { getLaunchCandlesMock, getPoolCandlesMock } = vi.hoisted(() => ({
   getLaunchCandlesMock: vi.fn(), getPoolCandlesMock: vi.fn(),
@@ -175,3 +176,27 @@ describe('OfficialChart range tabs', () => {
     expect(onHoverPoint).toHaveBeenLastCalledWith({ time: 1_699_990_000, close: 0.55, currency: 'usd' });
   });
 });
+
+describe('OfficialChart live candles', () => {
+  it("reloads the candles for the range on screen when its launch's figures change, and ignores another launch", async () => {
+    getLaunchCandlesMock.mockReset();
+    getLaunchCandlesMock.mockResolvedValue({ items: [], complete: true });
+    render(<OfficialChart {...props} source={{ launch: { chainId: 4663, tokenAddress: '0xAbC' } }} range="1w" />);
+    await act(async () => { emitLaunchChanged({ chainId: 4663, tokenAddress: '0xother' }); });
+    expect(getLaunchCandlesMock).not.toHaveBeenCalled();
+    await act(async () => { emitLaunchChanged({ chainId: 4663, tokenAddress: '0xabc' }); });
+    expect(getLaunchCandlesMock).toHaveBeenCalledWith(4663, '0xAbC', { currency: 'quote', range: '1w', venue: undefined });
+  });
+
+  it('reloads a pool chart when a swap lands in that pool only', async () => {
+    getPoolCandlesMock.mockReset();
+    getPoolCandlesMock.mockResolvedValue({ items: [], complete: true });
+    const poolId = `0x${'ab'.repeat(32)}`;
+    render(<OfficialChart {...props} source={{ pool: { chainId: 4663, protocol: 'uniswap_v4', poolId, displayedToken: '0x1' } }} range="1d" />);
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId: `0x${'cd'.repeat(32)}` }); });
+    expect(getPoolCandlesMock).not.toHaveBeenCalled();
+    await act(async () => { emitPoolChanged({ chainId: 4663, poolId }); });
+    expect(getPoolCandlesMock).toHaveBeenCalledTimes(1);
+  });
+});
+

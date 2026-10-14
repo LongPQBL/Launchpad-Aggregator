@@ -22,6 +22,8 @@ import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip, DOTTED_BACKGROUND_STYLE, type OhlcHover } from '@/components/chart-decor';
+import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { CoverageBadge } from './coverage-badge';
 
 /** How the price is drawn: OHLC candles, or a line through each bucket's close. */
@@ -155,6 +157,28 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
         if (requestId === requestIdRef.current) setChartCandles([]);
       });
   }, [activeCurrency, activeRange, source]);
+
+  // A trade (or pool swap) announced for what this chart shows reloads its candles for the range and currency on screen, so the
+  // last candle moves without waiting for the page-wide refresh. A stale answer (the user switched range meanwhile) is dropped.
+  const liveSelectionRef = useRef({ currency: activeCurrency, range: activeRange });
+  useEffect(() => { liveSelectionRef.current = { currency: activeCurrency, range: activeRange }; });
+  const reloadLatest = useCallback(async (isStale: () => boolean) => {
+    const { currency: wantedCurrency, range: wantedRange } = liveSelectionRef.current;
+    const page = source?.launch
+      ? await getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: wantedCurrency, range: wantedRange, venue: source.launch.venue })
+      : source?.pool ? await getPoolCandles(source.pool, wantedRange) : undefined;
+    const now = liveSelectionRef.current;
+    if (!page || isStale() || now.currency !== wantedCurrency || now.range !== wantedRange) return;
+    setChartCandles(page.items);
+  }, [source]);
+  const launchSource = source?.launch;
+  const poolSource = source?.pool;
+  useLiveFirstPage(
+    (payload) => launchSource !== undefined && payload.chainId === launchSource.chainId && payload.tokenAddress?.toLowerCase() === launchSource.tokenAddress.toLowerCase(),
+    reloadLatest, [launchSource?.chainId, launchSource?.tokenAddress, launchSource?.venue], LAUNCH_CHANGED_EVENT);
+  useLiveFirstPage(
+    (payload) => poolSource !== undefined && payload.chainId === poolSource.chainId && payload.poolId === poolSource.poolId.toLowerCase(),
+    reloadLatest, [poolSource?.chainId, poolSource?.protocol, poolSource?.poolId], POOL_CHANGED_EVENT);
 
   useEffect(() => {
     const handlePopState = () => {
