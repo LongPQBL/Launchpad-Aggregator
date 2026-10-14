@@ -385,6 +385,12 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
 
   // Volume and TVL history is cached for seconds to minutes. A launch whose figures or candles were just recomputed, or a pool holding
   // it that just had a swap, makes its cached answers stale: drop them so the refetch the announcement triggers reads the new buckets.
+  // The bonding curve's depth is read from the chain too; a trade of the launch moves its reserves.
+  events?.subscribe((event) => {
+    if ((event.type === 'trade.created' || event.type === 'launch.changed') && event.tokenAddress) {
+      curveDepthMemo.invalidate((key) => key === `${event.chainId}:${event.tokenAddress!.toLowerCase()}`, 1_000);
+    }
+  });
   events?.subscribe((event) => {
     const tokens = event.type === 'launch.changed' && event.tokenAddress ? [event.tokenAddress]
       : event.type === 'pool.changed' ? event.poolTokens ?? [] : [];

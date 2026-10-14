@@ -124,6 +124,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     if (event.type !== 'pool.changed' || !event.poolId) return;
     const marker = `:${event.poolId.toLowerCase()}:`;
     // Its history charts too (the sync's announcement and the candle worker's, which arrives once the buckets are rebuilt).
+    // Liquidity and depth are read from the chain at the latest block, so a swap moves the price they show: drop the cached read (at most once a second).
+    poolLiquidityMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.endsWith(`:${event.poolId!.toLowerCase()}`), POOL_STATS_REFRESH_MIN_AGE_MS);
     poolHistoryMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 250);
     poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), POOL_STATS_REFRESH_MIN_AGE_MS);
   });
