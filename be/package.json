@@ -27,6 +27,7 @@
     "launch-volume:worker": "tsx --env-file-if-exists=.env src/cli/runLaunchVolumeWorker.ts",
     "launch-volume:backfill": "tsx --env-file-if-exists=.env src/cli/backfillLaunchVolumes.ts",
     "launch-volume:reconcile": "tsx --env-file-if-exists=.env src/cli/reconcileLaunchVolumes.ts",
+    "launch-stats:live": "tsx --env-file-if-exists=.env src/cli/runLiveLaunchStats.ts",
     "launch-stats:worker": "tsx --env-file-if-exists=.env src/cli/runLaunchStatsWorker.ts",
     "curve-pricing:worker": "tsx --env-file-if-exists=.env src/cli/runCurvePricingWorker.ts",
     "mode:test": "bash ../scripts/mode.sh test",

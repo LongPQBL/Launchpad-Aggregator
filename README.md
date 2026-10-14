@@ -159,6 +159,12 @@ cùng bảng `scan_jobs` của bộ indexer RPC đã bỏ.
 Worker giá USD chính thức: `npm run -w be prices:worker` (giải quyết feed Chainlink còn chờ và đồng bộ các round oracle; chu kỳ
 `PRICE_WORKER_INTERVAL_SECONDS`, mặc định 30 giây).
 
+**Số liệu danh sách launch theo thời gian thực:** khi một giao dịch được báo (`trade.created`), số liệu lưu sẵn của launch (giá, FDV, TVL,
+% thay đổi) được tính lại ngay (tối đa 1 lần mỗi 2 giây cho mỗi launch) rồi mới báo `launch.changed` để trình duyệt tải lại. Mặc định việc
+này chạy ngay trong tiến trình API (tiện cho một API cục bộ). Khi chạy nhiều API, tắt bản trong API bằng `LIVE_LAUNCH_STATS_IN_API=false`
+và chạy một worker riêng: `npm run -w be launch-stats:live` (`LIVE_LAUNCH_STATS_CONCURRENCY`, mặc định 2); nó nghe Postgres và báo lại qua
+Postgres nên mọi API instance đều nhận được. Worker `launch-stats:worker` cũ vẫn là lưới an toàn làm mới theo chu kỳ.
+
 Khi backfill chạy xong, nó ghi `chart_rollup_state` (`launch_volume_done`, `pool_volume_done`, `launch_usd_candles_done`). Trước đó API trả
 `complete: false` và bucket không có dòng là `null` (không phải $0), vì có thể chỉ là chưa dựng lại.
 

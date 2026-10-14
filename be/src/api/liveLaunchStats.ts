@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import type { UsdPriceClient } from '../market/usdPricing.js';
-import type { ApiEventBus } from './events.js';
+import type { ApiEvent, ApiEventBus } from './events.js';
 import { recomputeLaunchStats } from './launchStatsWorker.js';
 
 export interface LiveLaunchStatsOptions {
@@ -11,6 +11,8 @@ export interface LiveLaunchStatsOptions {
   /** Launches waiting for a turn; beyond it the periodic stats worker is the backstop. */
   maxQueue?: number;
   recompute?: typeof recomputeLaunchStats;
+  /** Where `launch.changed` goes once a launch is recomputed. Default: this process's event bus; a separate worker sends it through Postgres instead. */
+  announce?: (event: ApiEvent) => void;
 }
 
 /**
@@ -23,6 +25,7 @@ export function startLiveLaunchStats(pool: Pool, rpcClient: UsdPriceClient, even
   const concurrency = options.concurrency ?? 2;
   const maxQueue = options.maxQueue ?? 200;
   const recompute = options.recompute ?? recomputeLaunchStats;
+  const announce = options.announce ?? ((event: ApiEvent) => { events.publish(event); });
   const queued = new Map<string, { chainId: number; tokenAddress: string }>();
   const lastStarted = new Map<string, number>();
   let running = 0;
@@ -42,7 +45,7 @@ export function startLiveLaunchStats(pool: Pool, rpcClient: UsdPriceClient, even
       lastStarted.set(key, now);
       running += 1;
       void recompute(pool, rpcClient, launch.chainId, launch.tokenAddress)
-        .then((found) => { if (found && !stopped) events.publish({ type: 'launch.changed', chainId: launch.chainId, tokenAddress: launch.tokenAddress }); })
+        .then((found) => { if (found && !stopped) announce({ type: 'launch.changed', chainId: launch.chainId, tokenAddress: launch.tokenAddress }); })
         .catch(() => { /* the periodic stats worker catches this launch up */ })
         .finally(() => { running -= 1; schedule(0); });
     }

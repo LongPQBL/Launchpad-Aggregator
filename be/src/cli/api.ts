@@ -17,7 +17,9 @@ const stopEvents = await listenForDatabaseEvents(pool, events);
 const rpcClient = createRobinhoodPublicClient(config.rpcUrl);
 const data = createApiStore(pool, rpcClient, events);
 const pools = createPoolApiStore(pool, rpcClient, undefined, events);
-const stopLiveStats = startLiveLaunchStats(pool, rpcClient, events);
+// Production runs this as its own process (`npm run -w be launch-stats:live`) so several API instances do not each recompute; the default keeps
+// a single local API self-sufficient.
+const stopLiveStats = process.env.LIVE_LAUNCH_STATS_IN_API === 'false' ? () => {} : startLiveLaunchStats(pool, rpcClient, events);
 const app = await createApiServer({ feOrigin: config.feOrigin, data, pools, search: createSearchStore(pool, rpcClient), wallets: createWalletStore(pool), events });
 
 try {

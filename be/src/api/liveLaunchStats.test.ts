@@ -81,4 +81,14 @@ describe('startLiveLaunchStats', () => {
     expect(announced).toHaveLength(1);
     stop();
   });
+
+  it('sends launch.changed to a custom announce target instead of the bus (a separate worker uses Postgres)', async () => {
+    const announce = vi.fn();
+    const { bus, announced, stop } = setup(undefined, { announce });
+    bus.publish({ type: 'trade.created', chainId: 4663, tokenAddress: TOKEN });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(announce).toHaveBeenCalledWith({ type: 'launch.changed', chainId: 4663, tokenAddress: TOKEN });
+    expect(announced).toHaveLength(0);
+    stop();
+  });
 });
