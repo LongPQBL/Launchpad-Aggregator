@@ -46,11 +46,13 @@ export function RollingText({ text, value, flash = false }: { text: string; valu
     const timeout = window.setTimeout(() => setTrack((current) => current.tick === track.tick ? { ...current, tone: null } : current), 2_000);
     return () => window.clearTimeout(timeout);
   }, [track.tick, track.tone]);
+  // `suppressHydrationWarning`: a relative time ("5s") is computed from the clock, so the server's text and the first client render can
+  // differ by a second; the next tick corrects it. Without it React discards the server HTML of the whole subtree for every fresh row.
   return (
-    <span className={cn('inline-flex tabular-nums transition-colors duration-300 motion-reduce:transition-none', track.tone === 'up' && 'text-emerald-500', track.tone === 'down' && 'text-red-500')} aria-label={text}>
+    <span suppressHydrationWarning className={cn('inline-flex tabular-nums transition-colors duration-300 motion-reduce:transition-none', track.tone === 'up' && 'text-emerald-500', track.tone === 'down' && 'text-red-500')} aria-label={text}>
       {track.tick === 0
         // Untouched text stays one plain node (copyable, searchable); it only splits into per-digit columns once it changes.
-        ? <span>{text}</span>
+        ? <span suppressHydrationWarning>{text}</span>
         : <span aria-hidden className="inline-flex">
           {[...text].map((char, index) => {
             const previousChar = [...track.previousText][track.previousText.length - (text.length - index)];

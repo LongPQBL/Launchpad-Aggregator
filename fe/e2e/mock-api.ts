@@ -7,6 +7,9 @@ import { createServer, type Server } from 'node:http';
 
 export const TOKEN_ADDRESS = '0xc9e9ab90654f82893d7fd18b62f694992e8cef29';
 export const CHAIN_ID = 4663;
+// A launch and a pool whose trade lists the live-update spec grows through POST /__live/swap; no other spec reads them.
+export const LIVE_TOKEN_ADDRESS = '0xe9e9ab90654f82893d7fd18b62f694992e8cef29';
+export const LIVE_POOL_INDEX = 58;
 // A second, short-description launch — a real-browser negative case for the About section's
 // overflow-gated Show more control, alongside the long-description positive case above. A separate
 // token/route is required (not a query param or page.route override) because this page's initial
@@ -292,6 +295,13 @@ const poolHistory = {
   complete: true,
 };
 
+const sseClients = new Set<import('node:http').ServerResponse>();
+function emit(type: string, payload: Record<string, unknown>) {
+  for (const client of sseClients) client.write(`event: ${type}\ndata: ${JSON.stringify(payload)}\n\n`);
+}
+let liveTransactions: typeof transactions['items'] = [];
+let livePoolTrades: Record<string, unknown>[] = [];
+
 export function startMockApi(port: number): Server {
   const delayMs = Number(process.env.MOCK_API_DELAY_MS ?? 0);
   const server = createServer((req, res) => {
@@ -309,12 +319,39 @@ export function startMockApi(port: number): Server {
     if (url.pathname === '/v1/events') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write(': connected\n\n');
-      req.on('close', () => res.end());
+      sseClients.add(res);
+      req.on('close', () => { sseClients.delete(res); res.end(); });
+      return;
+    }
+
+    // Test control (used by e2e/live.spec.ts): one new swap lands in the live launch and the live pool, and is announced like the real API does.
+    if (url.pathname === '/__live/swap') {
+      const n = liveTransactions.length + 1;
+      const txHash = `0x${(0xa000 + n).toString(16).padStart(64, '0')}`;
+      const now = Math.floor(Date.now() / 1000);
+      liveTransactions = [{ ...transactions.items[1]!, source: 'official', venueId: 'pons-v2-curve:0xtoken', pool: null,
+        blockNumber: String(5000 + n), txHash, logIndex: 0, timestamp: now }, ...liveTransactions];
+      const livePool = mockPools[LIVE_POOL_INDEX]!;
+      livePoolTrades = [{ txHash, logIndex: 0, blockNumber: String(5000 + n), timestamp: now,
+        traderAddress: `0x${(0x500 + n).toString(16).padStart(40, '0')}`, side: 'buy', amount0Raw: String(7n * 10n ** 18n), amount1Raw: String(3n * 10n ** 18n),
+        priceInQuote: '0.0001', usdValue: '77.00', usdValueStatus: 'priced' }, ...livePoolTrades];
+      emit('trade.created', { chainId: CHAIN_ID, tokenAddress: LIVE_TOKEN_ADDRESS });
+      emit('pool.changed', { chainId: CHAIN_ID, poolId: livePool.poolId, poolTokens: [livePool.currency0, livePool.currency1] });
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify({ txHash }));
+      return;
+    }
+    if (url.pathname === '/__live/reset') {
+      liveTransactions = []; livePoolTrades = [];
+      res.end('{}');
       return;
     }
 
     res.setHeader('content-type', 'application/json');
-    if (url.pathname === '/v1/launches') {
+    // The live launch is served like the main one, except for its own growing transaction list.
+    const isLiveToken = url.pathname.includes(LIVE_TOKEN_ADDRESS);
+    const route = url.pathname.replace(LIVE_TOKEN_ADDRESS, TOKEN_ADDRESS);
+    if (route === '/v1/launches') {
       const search = url.searchParams.get('search')?.toLowerCase();
       const status = url.searchParams.get('status');
       const platforms = url.searchParams.get('platform')?.split(',').map((value) => value.trim()).filter(Boolean);
@@ -341,21 +378,21 @@ export function startMockApi(port: number): Server {
         items: secondPage ? matches.slice(50) : matches.slice(0, 50),
         nextCursor: !secondPage && matches.length > 50 ? 'mock-launches-page-2' : null,
       }));
-    } else if (url.pathname === '/v1/pools') {
+    } else if (route === '/v1/pools') {
       const secondPage = url.searchParams.get('cursor') === 'mock-pools-page-2';
       res.end(JSON.stringify({
         items: secondPage ? mockPools.slice(50) : mockPools.slice(0, 50),
         nextCursor: secondPage ? null : 'mock-pools-page-2',
         supportedProtocols: ['uniswap_v4'],
       }));
-    } else if (url.pathname === '/v1/transactions') {
+    } else if (route === '/v1/transactions') {
       // Like the real API: chainId is one id or a comma-separated list; no chainId means every chain.
       const chainIds = url.searchParams.get('chainId')?.split(',').map((value) => Number(value.trim()));
       res.end(JSON.stringify({
         ...globalTransactions,
         items: chainIds ? globalTransactions.items.filter((item) => chainIds.includes(item.token.chainId)) : globalTransactions.items,
       }));
-    } else if (url.pathname === '/v1/search') {
+    } else if (route === '/v1/search') {
       const query = (url.searchParams.get('q') ?? '').toLowerCase();
       const tokens = mockLaunches.filter((launch) => launch.name.toLowerCase().includes(query) || launch.symbol.toLowerCase().includes(query))
         .slice(0, 5).map((launch) => ({ chainId: launch.chainId, tokenAddress: launch.tokenAddress, name: launch.name,
@@ -364,34 +401,34 @@ export function startMockApi(port: number): Server {
         currency0: mockPools[0].currency0, currency1: mockPools[0].currency1,
         launchToken: { address: tokens[0].tokenAddress, name: tokens[0].name, symbol: tokens[0].symbol, logoUri: null } }];
       res.end(JSON.stringify({ tokens, pools }));
-    } else if (/^\/v1\/wallets\/0x[0-9a-fA-F]{40}\/positions$/.test(url.pathname)) {
+    } else if (/^\/v1\/wallets\/0x[0-9a-fA-F]{40}\/positions$/.test(route)) {
       res.end(JSON.stringify({ items: [] }));
-    } else if (url.pathname === '/v1/sources') {
+    } else if (route === '/v1/sources') {
       res.end(JSON.stringify({ items: [{ id: 'pons-v2', chainId: CHAIN_ID, platform: 'pons', protocolVersion: 'v2' }] }));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}`) {
       res.end(JSON.stringify(launchDetail));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/trades`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/trades`) {
       res.end(JSON.stringify(trades));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/transactions`) {
-      res.end(JSON.stringify(transactions));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/pools`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/transactions`) {
+      res.end(JSON.stringify(isLiveToken ? { ...transactions, items: [...liveTransactions, ...transactions.items] } : transactions));
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/pools`) {
       res.end(JSON.stringify({ items: launchPools, nextCursor: null, supportedProtocols: ['uniswap_v4'] }));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/candles`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/candles`) {
       const intervalSeconds = rangeInterval(url);
       const currency = url.searchParams.get('currency') === 'usd' ? 'usd' : 'quote';
       res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}`) {
       res.end(JSON.stringify(shortDescriptionDetail));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/trades`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/trades`) {
       res.end(JSON.stringify(trades));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/candles`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${SHORT_DESCRIPTION_TOKEN_ADDRESS}/candles`) {
       const intervalSeconds = rangeInterval(url);
       const currency = url.searchParams.get('currency') === 'usd' ? 'usd' : 'quote';
       res.end(JSON.stringify(mockCandles(intervalSeconds, currency)));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(url.pathname)) {
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/candles$/.test(route)) {
       const intervalSeconds = rangeInterval(url);
       res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote')));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(url.pathname) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(url.pathname)) {
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(route) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(route)) {
       const intervalSeconds = rangeInterval(url);
       const rangeBuckets: Record<number, number> = { 60: 60, 300: 288, 3600: 168, 14_400: 180, 86_400: 365 };
       const count = rangeBuckets[intervalSeconds] ?? 96;
@@ -407,15 +444,15 @@ export function startMockApi(port: number): Server {
         })),
         complete: true,
         // The launch history covers all of a token's pools and says how many had no USD price.
-        ...(url.pathname.includes('/launches/') ? { poolCount: 3, unvaluedPools: 1 } : {}),
+        ...(route.includes('/launches/') ? { poolCount: 3, unvaluedPools: 1 } : {}),
       }));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/liquidity$/.test(url.pathname)) {
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/liquidity$/.test(route)) {
       res.end(JSON.stringify(mockLiquidity()));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve`) {
       res.end(JSON.stringify({ venueId: 'pons-v2-curve:0xtoken', curveAddress: '0xcurve', active: true, volume24hQuote: '2', tradeCount24h: 5, lastPriceQuote: '0.000004' }));
-    } else if (url.pathname === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve/depth`) {
+    } else if (route === `/v1/launches/${CHAIN_ID}/${TOKEN_ADDRESS}/curve/depth`) {
       res.end(JSON.stringify(mockCurveDepth()));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(url.pathname)) {
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/trades$/.test(route)) {
       const items = Array.from({ length: 8 }, (_, index) => ({
         txHash: `0x${(index + 900).toString(16).padStart(64, '0')}`,
         logIndex: index, blockNumber: String(300 + index), timestamp: 1_780_000_000 - index * 600,
@@ -426,9 +463,10 @@ export function startMockApi(port: number): Server {
         amount1Raw: String(BigInt(98_765 + index * 12_345) * 10n ** 18n),
         priceInQuote: '0.0001', usdValue: (1_234_567 + index * 123_456).toFixed(2), usdValueStatus: 'priced',
       }));
-      res.end(JSON.stringify({ items, nextCursor: null }));
-    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+$/.test(url.pathname)) {
-      const [, , , , protocol, poolIdRaw] = url.pathname.split('/');
+      const isLivePool = route.toLowerCase().includes(mockPools[LIVE_POOL_INDEX]!.poolId.toLowerCase());
+      res.end(JSON.stringify({ items: isLivePool ? [...livePoolTrades, ...items] : items, nextCursor: null }));
+    } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+$/.test(route)) {
+      const [, , , , protocol, poolIdRaw] = route.split('/');
       const poolId = decodeURIComponent(poolIdRaw).toLowerCase();
       const pool = mockPools.find((p) => p.protocol === protocol && p.poolId.toLowerCase() === poolId);
       const displayedToken = url.searchParams.get('displayedToken');
