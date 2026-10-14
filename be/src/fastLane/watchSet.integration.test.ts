@@ -1,0 +1,46 @@
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createDatabase } from '../db/client.js';
+import { isWatched, loadWatchSet } from './watchSet.js';
+
+const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
+if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
+const { pool } = createDatabase(databaseUrl);
+const chainId = 4663;
+const source = 'fast-lane-watch-test';
+const token = '0x7a00000000000000000000000000000000000001';
+const refs = { curve: '0x7a000000000000000000000000000000000000c1', v3: '0x7a000000000000000000000000000000000000a3', v4: `0x${'7a'.repeat(32)}` };
+
+beforeAll(async () => {
+  await pool.query(`INSERT INTO sources (id, chain_id, version, factory_address, start_block, scanned_to_block, confirmed_to_block, status)
+    VALUES ($1, $2, 'v2', $3, 1, 1, 1, 'backfilling') ON CONFLICT DO NOTHING`, [source, chainId, token]);
+  await pool.query(`INSERT INTO launches (chain_id, token_address, source_id, name, symbol, token_decimals, platform, protocol_version,
+    factory_address, deployer_address, launch_block, launch_tx_hash, launch_log_index, quote_asset_address, quote_asset_symbol,
+    quote_asset_decimals, lifecycle_status) VALUES ($1,$2,$3,'W','W',18,'pons','v2',$2,$2,1,$4,0,$2,'WETH',18,'trading') ON CONFLICT DO NOTHING`,
+  [chainId, token, source, `0x${'7a'.repeat(32)}`]);
+  for (const [kind, ref] of [['curve', refs.curve.toUpperCase().replace('0X', '0x')], ['v3_pool', refs.v3], ['v4_pool', refs.v4]] as const) {
+    await pool.query(`INSERT INTO venues (id, chain_id, token_address, kind, ref, source_id, effective_from_block, official)
+      VALUES ($1,$2,$3,$4,$5,$6,1,true) ON CONFLICT DO NOTHING`, [`watch-${kind}`, chainId, token, kind, ref, source]);
+  }
+});
+afterAll(async () => {
+  await pool.query('DELETE FROM venues WHERE source_id = $1', [source]);
+  await pool.query('DELETE FROM launches WHERE source_id = $1', [source]);
+  await pool.query('DELETE FROM sources WHERE id = $1', [source]);
+  await pool.end();
+});
+
+describe('loadWatchSet', () => {
+  it('lists the curve, V3 pool and V4 pool venues of the chain, lower-cased', async () => {
+    const set = await loadWatchSet(pool, chainId);
+    expect(set.curve.has(refs.curve)).toBe(true);
+    expect(set.v3_pool.has(refs.v3)).toBe(true);
+    expect(set.v4_pool.has(refs.v4)).toBe(true);
+    expect(isWatched(set, { watchKind: 'curve', watchRef: refs.curve })).toBe(true);
+    expect(isWatched(set, { watchKind: 'curve', watchRef: refs.v3 })).toBe(false); // right address, wrong kind
+    expect(isWatched(set, { watchKind: 'v4_pool', watchRef: `0x${'00'.repeat(32)}` })).toBe(false);
+  });
+  it('does not list another chain', async () => {
+    const set = await loadWatchSet(pool, 1);
+    expect(set.curve.has(refs.curve)).toBe(false);
+  });
+});

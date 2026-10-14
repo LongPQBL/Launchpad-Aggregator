@@ -610,6 +610,28 @@ export const envioChainProgress = pgTable('envio_chain_progress', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+// The rows the WebSocket fast lane (be/src/fastLane) wrote into `trades`, kept until `fast-lane:parity` has compared them with what Envio
+// produced for the same event. `raw` is the exact raw row the lane fed to applyLiveRows.
+export const fastLaneRows = pgTable('fast_lane_rows', {
+  chainId: integer('chain_id').notNull(),
+  txHash: text('tx_hash').notNull(),
+  logIndex: integer('log_index').notNull(),
+  stream: text('stream').notNull(),
+  raw: jsonb('raw').$type<Record<string, unknown>>().notNull(),
+  blockNumber: bigint('block_number', { mode: 'bigint' }).notNull(),
+  writtenAt: timestamp('written_at').notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
+  index('fast_lane_rows_written_idx').on(table.writtenAt),
+]);
+
+// The highest block the fast lane has fully handled, per chain: where a restart resumes.
+export const fastLaneState = pgTable('fast_lane_state', {
+  chainId: integer('chain_id').primaryKey(),
+  lastBlock: bigint('last_block', { mode: 'bigint' }).notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
 // Durable per-(chain, Envio raw stream, lane) read position for the incremental near-realtime sync
 // (be/src/envioSync/incrementalCursor.ts). "tail" starts near Envio's current head for fresh activity,
 // "history" resumes the earliest unsynced block — see docs/superpowers/specs/2026-10-05-envio-near-realtime-sync-design.md.
