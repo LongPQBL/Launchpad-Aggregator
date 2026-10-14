@@ -157,7 +157,7 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             <section aria-label="Stats">
           <h2 className="text-2xl">Stats</h2>
           <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-3">
-            <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.tvlUsd, 1)} value={detail.tvlUsd} flash /></dd></div>
+            {detail.tvlUnavailableReason === 'bonding_curve' ? null : <div title={tvlTooltip(detail)}><dt className="text-sm text-muted-foreground">TVL</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.tvlUsd, 1)} value={detail.tvlUsd} flash /></dd></div>}
             <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.marketCapUsd, 1)} value={detail.marketCapUsd} flash /></dd></div>
             <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.fdvUsd, 1)} value={detail.fdvUsd} flash /></dd></div>
             <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.officialVolume24hUsd, 1)} value={detail.officialVolume24hUsd} flash /></dd></div>

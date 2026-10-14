@@ -295,6 +295,12 @@ describe('LaunchDetail', () => {
     expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
   });
 
+  it('leaves the TVL stat out for a token on its bonding curve', () => {
+    render(<LaunchDetail detail={detail({ tvlUsd: null, tvlUnavailableReason: 'bonding_curve' })} transactions={{ items: [], nextCursor: null }} candles={null} />);
+    expect(screen.queryByText('TVL')).not.toBeInTheDocument();
+    expect(screen.getByText('Market cap')).toBeInTheDocument();
+  });
+
   it('explains the phase-specific TVL basis and missing quote prices', () => {
     const view = render(<LaunchDetail detail={detail({ tvlUsd: '15.7', tvlBasis: 'curve_real_quote', tvlUnavailableReason: null })}
       transactions={{ items: [], nextCursor: null }} candles={null} />);

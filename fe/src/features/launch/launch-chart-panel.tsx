@@ -16,7 +16,8 @@ export function LaunchChartPanel({ chainId, tokenAddress, history, venue, initia
   chainId: number; tokenAddress: string; history: PoolHistory | null;
   /** The range the server rendered `history` and `candles` for (from the page URL). */
   initialRange?: ChartRangeId;
-  /** Scope the Volume series to one venue (the bonding curve). A scoped panel has no TVL tab: TVL belongs to the V4 pool. */
+  /** Scope the Volume series to one venue (the bonding curve). A scoped panel has no TVL tab: TVL belongs to the V4 pool. An unscoped panel has one only when
+   * the token has a pool to measure: a token still on its bonding curve has none, so the tab is left out instead of showing "Unavailable". */
   venue?: 'curve';
 }) {
   const loadHistory = useCallback((range: ChartRangeId) => getLaunchHistory(chainId, tokenAddress, range, venue), [chainId, tokenAddress, venue]);
@@ -27,6 +28,6 @@ export function LaunchChartPanel({ chainId, tokenAddress, history, venue, initia
   const live = { eventName: venue === undefined ? [LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT] : LAUNCH_CHANGED_EVENT, key: `${chainId}:${tokenAddress}:${venue ?? ''}`,
     matches: (payload: SseEventPayload) => payload.chainId === chainId && (payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase()
       || (venue === undefined && payload.poolTokens?.includes(tokenAddress.toLowerCase()) === true)) };
-  return <ChartTypePanel loadHistory={loadHistory} history={history} initialRange={initialRange} showTvl={venue === undefined} allPools={venue === undefined} extra={extra} live={live} headerClassName="min-h-8 text-2xl"
+  return <ChartTypePanel loadHistory={loadHistory} history={history} initialRange={initialRange} showTvl={venue === undefined && (history?.poolCount ?? 0) > 0} allPools={venue === undefined} extra={extra} live={live} headerClassName="min-h-8 text-2xl"
     price={({ tabs, range, onSelectRange, chartStyle }) => <OfficialPriceChart {...price} range={range} onSelectRange={onSelectRange} trailing={tabs} chartStyle={chartStyle} />} />;
 }

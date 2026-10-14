@@ -555,7 +555,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     }
   });
 
-  it('shows curve TVL from current real USDG reserve even while historical coverage is incomplete', async () => {
+  it('has no TVL for a token on its bonding curve and spends no read on it, while its other figures still compute', async () => {
     const usdg = '0x5fc5360d0400a0fd4f2af552add042d716f1d168';
     const usdgFeed = '0x61b7e5650328764b076a108eff5fa7282a1b9ad2';
     const curve = '0xf17871c268122408f677073066bb36fecddc1ba0';
@@ -584,9 +584,11 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.coverageStatus).toBe('backfilling');
-      expect(detail?.tvlUsd).toBe('15.700717');
-      expect(detail?.tvlBasis).toBe('curve_real_quote');
-      expect(detail?.tvlPriceSource).toBe('chainlink');
+      expect(detail?.tvlUsd).toBeNull();
+      expect(detail?.tvlUnavailableReason).toBe('bonding_curve');
+      // No factory phase, curve reserve or block read was made for the TVL.
+      expect(readContract.mock.calls.map(([call]) => (call as { functionName: string }).functionName)).not.toContain('getLaunchedToken');
+      expect(readContract.mock.calls.map(([call]) => (call as { functionName: string }).functionName)).not.toContain('realQuoteReserve');
     } finally {
       await pool.query(`UPDATE launches SET protocol_version='v1',quote_asset_address=$1,
         quote_asset_symbol='ETH',quote_asset_decimals=18 WHERE token_address=$2`, [ETH_ADDRESS, goodToken]);

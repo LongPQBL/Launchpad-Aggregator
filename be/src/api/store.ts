@@ -130,6 +130,9 @@ async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Prom
     [number(row.chain_id), string(row.token_address)]);
     const current = venueResult.rows[0] as Row | undefined;
     const kind = current?.kind;
+    // A token still on its bonding curve has no TVL to show: the curve is not liquidity in a pool. Skipping it spares the block, oracle, factory and
+    // reserve reads that every stats refresh of every such launch would make.
+    if (kind === 'curve') return { ...NULL_TVL, tvlUnavailableReason: 'bonding_curve' };
     const venue = current && (kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')
       ? { kind: kind as VenueAmountInput['kind'], ref: string(current.ref) } : null;
     return await readCurrentTvl(pool, rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
