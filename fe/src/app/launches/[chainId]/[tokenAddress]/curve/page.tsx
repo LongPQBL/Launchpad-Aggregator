@@ -41,16 +41,18 @@ export default async function CurveDetailPage({ params, searchParams }: CurveDet
   // No launch, or a launch without a bonding-curve venue (not a Pons curve launch): nothing to show here.
   if (detail === null || summary === null) notFound();
 
+  // While the launch is still on its curve every trade is a curve trade, so the launch-wide USD candles are the curve's own.
+  const chartCurrency: 'quote' | 'usd' = summary.active ? 'usd' : 'quote';
   const [transactions, candles, history] = await Promise.all([
     getLaunchTransactions(chainId, tokenAddress, { venue: 'curve' }).catch(() => null),
-    getLaunchCandles(chainId, tokenAddress, { currency: 'quote', range: chartRange, venue: 'curve' }).catch(() => null),
+    getLaunchCandles(chainId, tokenAddress, { currency: chartCurrency, range: chartRange, ...(chartCurrency === 'quote' ? { venue: 'curve' as const } : {}) }).catch(() => null),
     getLaunchHistory(chainId, tokenAddress, chartRange, 'curve').catch(() => null),
   ]);
 
   return (
     <>
       <LiveRefreshIndicator resourceKeys={[launchResourceKey(chainId, tokenAddress)]} />
-      <CurveDetail detail={detail} summary={summary} transactions={transactions} candles={candles} history={history} chartRange={chartRange} />
+      <CurveDetail detail={detail} summary={summary} transactions={transactions} candles={candles} history={history} chartRange={chartRange} chartCurrency={chartCurrency} />
     </>
   );
 }

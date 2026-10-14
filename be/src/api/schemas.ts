@@ -181,6 +181,8 @@ export const curveDepthResponse = { type: 'object', properties: {
   blockNumber: { type: 'string', nullable: true }, price: { type: 'number', nullable: true }, priceInverse: { type: 'number', nullable: true },
   feeBps: { type: 'integer', nullable: true }, creatorTaxBps: { type: 'integer', nullable: true },
   graduationThreshold: { type: 'string', nullable: true }, realQuoteReserve: { type: 'string', nullable: true },
+  quoteReserve: { type: 'string', nullable: true }, tokenReserve: { type: 'string', nullable: true },
+  quoteDecimals: { type: 'integer', nullable: true }, tokenDecimals: { type: 'integer', nullable: true },
   asksEndAtGraduation: { type: 'boolean' }, bidsEndAtEmptyReserve: { type: 'boolean' },
   depth: { type: 'object', nullable: true, properties: { asks: { type: 'array', items: depthRow }, bids: { type: 'array', items: depthRow }, spreadPercent: { type: 'number', nullable: true } } },
   complete: { type: 'boolean' }, unavailableReason: { type: 'string', nullable: true },

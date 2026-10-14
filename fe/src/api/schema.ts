@@ -550,6 +550,10 @@ export interface paths {
                             creatorTaxBps?: number | null;
                             graduationThreshold?: string | null;
                             realQuoteReserve?: string | null;
+                            quoteReserve?: string | null;
+                            tokenReserve?: string | null;
+                            quoteDecimals?: number | null;
+                            tokenDecimals?: number | null;
                             asksEndAtGraduation?: boolean;
                             bidsEndAtEmptyReserve?: boolean;
                             depth?: {

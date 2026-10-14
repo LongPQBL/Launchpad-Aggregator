@@ -274,6 +274,8 @@ export async function getPoolLiquidity(pool: Pick<PoolSummary, 'chainId' | 'prot
 
 export interface CurveDepth {
   blockNumber: string | null; price: number | null; priceInverse: number | null; feeBps: number | null; creatorTaxBps: number | null;
+  graduationThreshold: string | null; realQuoteReserve: string | null;
+  quoteReserve: string | null; tokenReserve: string | null; quoteDecimals: number | null; tokenDecimals: number | null;
   asksEndAtGraduation: boolean; bidsEndAtEmptyReserve: boolean; depth: DepthData | null; complete: boolean; unavailableReason: string | null;
 }
 // Depth of the launch's bonding curve; null (404) when it has no curve venue.

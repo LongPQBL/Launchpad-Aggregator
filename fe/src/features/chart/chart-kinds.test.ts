@@ -7,6 +7,6 @@ describe('CHART_KINDS', () => {
     expect(Object.entries(CHART_KINDS).filter(([, spec]) => spec.usesChartStyle).map(([kind]) => kind)).toEqual(['price']);
   });
   it('labels every kind', () => {
-    expect(Object.values(CHART_KINDS).map((spec) => spec.label)).toEqual(['Price', 'Volume', 'TVL', 'Liquidity', 'Depth']);
+    expect(Object.values(CHART_KINDS).map((spec) => spec.label)).toEqual(['Price', 'Volume', 'TVL', 'Liquidity', 'Curve', 'Depth']);
   });
 });

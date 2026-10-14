@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { chainExplorerBase, chainName } from '@/api/chains';
-import { displaySymbol, formatPrice, formatQuote } from '@/api/format';
+import { displaySymbol, formatPrice, formatQuote, formatUsd, formatUsdCompact } from '@/api/format';
 import { poolHref, type CandlePage, type CurveSummary, type LaunchDetail, type PoolHistory, type TransactionPage } from '@/api/client';
 import { ChevronRight } from '@/components/chevron-right';
 import { StickyDetailHeader } from '@/components/sticky-detail-header';
@@ -21,11 +21,13 @@ export interface CurveDetailProps {
   candles: CandlePage | null;
   history: PoolHistory | null;
   chartRange: ChartRangeId;
+  /** 'usd' while the launch is on its curve (then the launch-wide USD candles are the curve's own), otherwise the quote asset. */
+  chartCurrency?: 'quote' | 'usd';
 }
 
 // A Pons launch's bonding curve on its own, shaped like the pool page: unlike the launch page, whose chart
 // and trade list merge the curve with the V4 pool, everything here is scoped to the curve venue.
-export function CurveDetail({ detail, summary, transactions, candles, history, chartRange }: CurveDetailProps) {
+export function CurveDetail({ detail, summary, transactions, candles, history, chartRange, chartCurrency = 'quote' }: CurveDetailProps) {
   const explorerBase = chainExplorerBase(detail.chainId);
   const tokenSymbol = displaySymbol(detail.symbol);
   const quoteSymbol = displaySymbol(detail.quoteAsset.symbol);
@@ -41,6 +43,11 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
     [detail.quoteAsset.address.toLowerCase()]: detail.quotePriceUsd ?? null,
   };
   const launchedAt = detail.launchTimestamp === null ? null : Number(detail.launchTimestamp);
+  // USD first, as everywhere else; the quote asset only when there is no USD figure.
+  const priceText = chartCurrency === 'usd' && (detail.priceUsd ?? null) !== null ? formatUsd(detail.priceUsd!, 2)
+    : summary.lastPriceQuote === null ? '—' : formatPrice(summary.lastPriceQuote, quoteSymbol);
+  const volumeUsd = detail.officialVolume24hUsd ?? null;
+  const volumeText = volumeUsd !== null ? formatUsdCompact(volumeUsd, 1) : formatQuote(summary.volume24hQuote, quoteSymbol);
 
   return (
     <article className="space-y-4">
@@ -78,13 +85,13 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
             tokenAddress={detail.tokenAddress}
             history={history}
             venue="curve"
-            priceText={summary.lastPriceQuote === null ? '—' : formatPrice(summary.lastPriceQuote, quoteSymbol)}
+            priceText={priceText}
             priceStale={false}
             candles={candles}
             graduationTime={null}
             quoteSymbol={quoteSymbol}
             coverageStatus={chartCoverageStatus}
-            currency="quote"
+            currency={chartCurrency}
             initialRange={chartRange}
             tokenSymbol={detail.symbol}
             source={{ launch: { chainId: detail.chainId, tokenAddress: detail.tokenAddress, venue: 'curve' } }}
@@ -133,9 +140,9 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
               <CardHeader className="p-5 pb-0"><h2 className="text-2xl">Stats</h2></CardHeader>
               <CardContent className="mt-6 grid gap-x-4 gap-y-5 p-5 pt-0 sm:grid-cols-2">
                 <dl className="contents">
-                  <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="text-lg">{formatQuote(summary.volume24hQuote, quoteSymbol)}</dd></div>
+                  <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="break-words text-lg">{volumeText}</dd></div>
                   <div><dt className="text-sm text-muted-foreground">24H trades</dt><dd className="text-lg">{summary.tradeCount24h}</dd></div>
-                  <div><dt className="text-sm text-muted-foreground">Current price</dt><dd className="text-lg">{summary.lastPriceQuote === null ? '—' : formatPrice(summary.lastPriceQuote, quoteSymbol)}</dd></div>
+                  <div><dt className="text-sm text-muted-foreground">Current price</dt><dd className="break-words text-lg">{priceText}</dd></div>
                   <div><dt className="text-sm text-muted-foreground">Age</dt><dd className="text-lg">{poolAge(launchedAt)}</dd></div>
                 </dl>
               </CardContent>

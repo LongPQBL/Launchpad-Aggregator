@@ -1036,6 +1036,22 @@
                       "type": "string",
                       "nullable": true
                     },
+                    "quoteReserve": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "tokenReserve": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "quoteDecimals": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "tokenDecimals": {
+                      "type": "integer",
+                      "nullable": true
+                    },
                     "asksEndAtGraduation": {
                       "type": "boolean"
                     },

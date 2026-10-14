@@ -79,14 +79,14 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   /** Volume / TVL cover every pool of a token (the token page); only the wording of the notes under the chart differs. */
   allPools?: boolean;
   /** Charts that need neither a range nor a style (Liquidity, Depth): given the tab switcher to place under them. */
-  extra?: Partial<Record<'liquidity' | 'depth', (options: { tabs: ReactNode }) => ReactNode>>;
+  extra?: Partial<Record<'liquidity' | 'curve' | 'depth', (options: { tabs: ReactNode }) => ReactNode>>;
   /** The range the server rendered `history` and the price candles for (from the page URL). */
   initialRange?: ChartRangeId;
   /** When set, a matching announcement reloads the Volume / TVL series for the range on screen. */
   live?: { eventName: string | readonly string[]; matches: (payload: SseEventPayload) => boolean; key: string };
 }) {
   const kinds: ChartKind[] = [...(price ? ['price' as const] : []), ...(history ? ['volume' as const, ...(showTvl ? ['tvl' as const] : [])] : []),
-    ...(extra?.liquidity ? ['liquidity' as const] : []), ...(extra?.depth ? ['depth' as const] : [])];
+    ...(extra?.liquidity ? ['liquidity' as const] : []), ...(extra?.curve ? ['curve' as const] : []), ...(extra?.depth ? ['depth' as const] : [])];
   const [selected, setSelected] = useState<ChartKind>(kinds[0] ?? 'price');
   const [chartStyle, setChartStyle] = usePriceChartStyle();
   const [activeRange, setActiveRange] = useState(initialRange);
@@ -169,7 +169,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
     <>
       {/* eslint-disable-next-line react-hooks/refs -- the callback only reads the stale-answer ref when the user clicks, never while rendering */}
       {price && <div hidden={selected !== 'price'}>{price({ tabs, range: activeRange, onSelectRange: selectFromChart, chartStyle })}</div>}
-      {(selected === 'liquidity' || selected === 'depth') && extra?.[selected]?.({ tabs: kindTabs })}
+      {(selected === 'liquidity' || selected === 'curve' || selected === 'depth') && extra?.[selected]?.({ tabs: kindTabs })}
       {history && (selected === 'volume' || selected === 'tvl') && (
         <PoolHistoryChart items={activeRange === 'all' ? trimLeadingEmpty(data?.items ?? []) : data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
           intervalSeconds={data?.intervalSeconds} loading={loading} error={failed} allPools={allPools} unvaluedPools={data?.unvaluedPools ?? history.unvaluedPools ?? 0}

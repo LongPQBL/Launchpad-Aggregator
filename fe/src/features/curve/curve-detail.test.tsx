@@ -59,6 +59,14 @@ describe('CurveDetail', () => {
     expect(within(stats).getByText(formatPrice('0.002', 'ETH'))).toBeInTheDocument();
   });
 
+  it('shows the price and the 24H volume in USD while the launch is on its curve and a USD figure exists', () => {
+    renderDetail({ detail: detail({ priceUsd: '0.0000042', officialVolume24hUsd: '39200' } as Partial<LaunchDetail>), chartCurrency: 'usd' });
+    const stats = screen.getByRole('region', { name: 'Stats' });
+    expect(within(stats).getByText('$39.2K')).toBeInTheDocument();
+    expect(within(stats).getByText('$0.0000042')).toBeInTheDocument();
+    expect(within(stats).queryByText('12.5 ETH')).not.toBeInTheDocument();
+  });
+
   it('shows an em dash, never 0, when the curve has no priced trade yet', () => {
     renderDetail({ summary: summary({ lastPriceQuote: null, tradeCount24h: 0, volume24hQuote: '0' }) });
     const stats = screen.getByRole('region', { name: 'Stats' });

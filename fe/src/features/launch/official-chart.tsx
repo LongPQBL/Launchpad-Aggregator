@@ -145,7 +145,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
     if (key === loadedKeyRef.current) return;
     loadedKeyRef.current = key;
     const fetchPage = source?.launch
-      ? getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: activeCurrency, range: activeRange, venue: source.launch.venue })
+      ? getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: activeCurrency, range: activeRange, venue: activeCurrency === 'usd' ? undefined : source.launch.venue })
       : source?.pool
         ? getPoolCandles(source.pool, activeRange)
         : undefined;
@@ -167,7 +167,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   const reloadLatest = useCallback(async (isStale: () => boolean) => {
     const { currency: wantedCurrency, range: wantedRange } = liveSelectionRef.current;
     const page = source?.launch
-      ? await getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: wantedCurrency, range: wantedRange, venue: source.launch.venue })
+      ? await getLaunchCandles(source.launch.chainId, source.launch.tokenAddress, { currency: wantedCurrency, range: wantedRange, venue: wantedCurrency === 'usd' ? undefined : source.launch.venue })
       : source?.pool ? await getPoolCandles(source.pool, wantedRange) : undefined;
     const now = liveSelectionRef.current;
     if (!page || isStale() || now.currency !== wantedCurrency || now.range !== wantedRange) return;

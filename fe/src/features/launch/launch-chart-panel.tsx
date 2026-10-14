@@ -4,7 +4,7 @@ import { useCallback, type ComponentProps } from 'react';
 import { getLaunchHistory, type PoolHistory } from '@/api/client';
 import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartTypePanel } from '@/features/pools/pool-chart-panel';
-import { CurveDepthChart } from '@/features/pools/pool-liquidity';
+import { CurveDepthChart, CurveShapeChart } from '@/features/pools/pool-liquidity';
 import { displaySymbol } from '@/api/format';
 import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT } from '@/hooks/live-events';
 import type { SseEventPayload } from '@/hooks/resource-keys';
@@ -22,8 +22,12 @@ export function LaunchChartPanel({ chainId, tokenAddress, history, venue, initia
 }) {
   const loadHistory = useCallback((range: ChartRangeId) => getLaunchHistory(chainId, tokenAddress, range, venue), [chainId, tokenAddress, venue]);
   // The bonding curve (a constant-product curve with a fee) also has a Depth view; a token's many pools have none.
-  const extra = venue === 'curve' ? { depth: ({ tabs }: { tabs: React.ReactNode }) => (
-    <CurveDepthChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />) } : undefined;
+  const extra = venue === 'curve' ? {
+    curve: ({ tabs }: { tabs: React.ReactNode }) => (
+      <CurveShapeChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />),
+    depth: ({ tabs }: { tabs: React.ReactNode }) => (
+      <CurveDepthChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />),
+  } : undefined;
   // Volume and TVL cover every pool of the token: the launch's own announcements and any swap in a pool holding it (via the pool's tokens).
   const live = { eventName: venue === undefined ? [LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT] : LAUNCH_CHANGED_EVENT, key: `${chainId}:${tokenAddress}:${venue ?? ''}`,
     matches: (payload: SseEventPayload) => payload.chainId === chainId && (payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase()

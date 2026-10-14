@@ -62,6 +62,8 @@ const curveAbi = parseAbi([
 export interface CurveDepthAnswer {
   blockNumber: string | null; price: number | null; priceInverse: number | null; feeBps: number | null; creatorTaxBps: number | null;
   graduationThreshold: string | null; realQuoteReserve: string | null;
+  /** The curve's virtual reserves (raw) and the asset decimals: enough to draw the whole curve, price against graduation progress. */
+  quoteReserve: string | null; tokenReserve: string | null; quoteDecimals: number | null; tokenDecimals: number | null;
   asksEndAtGraduation: boolean; bidsEndAtEmptyReserve: boolean; depth: DepthResult | null; complete: boolean;
   unavailableReason: 'read_failed' | 'graduated' | 'decimals_unavailable' | null;
 }
@@ -75,6 +77,7 @@ export async function readCurveDepthAnswer(pool: Pool, client: LiquidityClient, 
   const row = found.rows[0] as { curve: string; factory_address: string; token_decimals: number | null; quote_asset_decimals: number | null } | undefined;
   if (!row) return null;
   const base: CurveDepthAnswer = { blockNumber: null, price: null, priceInverse: null, feeBps: null, creatorTaxBps: null, graduationThreshold: null, realQuoteReserve: null,
+    quoteReserve: null, tokenReserve: null, quoteDecimals: null, tokenDecimals: null,
     asksEndAtGraduation: false, bidsEndAtEmptyReserve: false, depth: null, complete: false, unavailableReason: null };
   if (row.token_decimals === null || row.quote_asset_decimals === null) return { ...base, unavailableReason: 'decimals_unavailable' };
   try {
@@ -90,7 +93,8 @@ export async function readCurveDepthAnswer(pool: Pool, client: LiquidityClient, 
       realQuoteReserve: realQuoteReserve as bigint, graduationThreshold: info.graduationThreshold };
     if (state.quoteReserve <= 0n || state.tokenReserve <= 0n) return { ...base, blockNumber: blockNumber.toString(), unavailableReason: 'read_failed' };
     const common = { blockNumber: blockNumber.toString(), feeBps: Number(feeBps), creatorTaxBps: Number(info.creatorTaxBps), graduationThreshold: info.graduationThreshold.toString(),
-      realQuoteReserve: state.realQuoteReserve.toString() };
+      realQuoteReserve: state.realQuoteReserve.toString(), quoteReserve: state.quoteReserve.toString(), tokenReserve: state.tokenReserve.toString(),
+      quoteDecimals: row.quote_asset_decimals, tokenDecimals: row.token_decimals };
     if (info.phase !== 0) return { ...base, ...common, unavailableReason: 'graduated' };
     const decimals = { quote: row.quote_asset_decimals, token: row.token_decimals };
     const price = (Number(state.quoteReserve) / Number(state.tokenReserve)) * 10 ** (decimals.token - decimals.quote);

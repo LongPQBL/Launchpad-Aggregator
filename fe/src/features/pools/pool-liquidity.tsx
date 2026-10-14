@@ -4,6 +4,8 @@ import { useState, type ReactNode } from 'react';
 import { getCurveDepth, getPoolLiquidity, type PoolLiquidity, type PoolSummary } from '@/api/client';
 import { displaySymbol } from '@/api/format';
 import { DOTTED_BACKGROUND_STYLE } from '@/components/chart-decor';
+import { buildCurveShape } from '@/features/chart/curve-shape';
+import { CurveShapeView } from '@/features/chart/curve-shape-view';
 import { DepthView, formatLevel } from '@/features/chart/depth-view';
 import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT, TRADE_CREATED_EVENT } from '@/hooks/live-events';
 import { useLoaded } from '@/hooks/use-loaded';
@@ -151,4 +153,24 @@ export function CurveDepthChart({ chainId, tokenAddress, baseSymbol, quoteSymbol
         spreadLabel={`Spread ${data.depth.spreadPercent === null ? '—' : formatLevel(data.depth.spreadPercent)}% (Fee ${fee}%)`} />
     </div>
   );
+}
+
+/** The Curve tab of a bonding-curve page: the curve's own shape, price against graduation progress, drawn from its reserves. */
+export function CurveShapeChart({ chainId, tokenAddress, baseSymbol, quoteSymbol, trailing }: {
+  chainId: number; tokenAddress: string; baseSymbol: string; quoteSymbol: string; trailing?: ReactNode;
+}) {
+  const loaded = useLoaded(() => getCurveDepth(chainId, tokenAddress), [chainId, tokenAddress], {
+    eventName: [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT],
+    minIntervalMs: RPC_BACKED_MIN_INTERVAL_MS,
+    matches: (payload) => payload.chainId === chainId && payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase(),
+  });
+  if (loaded.status === 'loading') return <div role="status" aria-label="Loading curve" className="h-80 w-full animate-pulse rounded-lg bg-muted" />;
+  if (loaded.status === 'error') return <Message role="alert" trailing={trailing}>Could not load the bonding curve.</Message>;
+  const data = loaded.data;
+  if (data === null) return <Message trailing={trailing}>This launch has no bonding curve.</Message>;
+  const { quoteReserve, tokenReserve, realQuoteReserve, graduationThreshold, quoteDecimals, tokenDecimals } = data;
+  const shape = quoteReserve !== null && tokenReserve !== null && realQuoteReserve !== null && graduationThreshold !== null && quoteDecimals !== null && tokenDecimals !== null
+    ? buildCurveShape({ quoteReserve, tokenReserve, realQuoteReserve, graduationThreshold, quoteDecimals, tokenDecimals }) : null;
+  if (!data.complete || shape === null) return <Message trailing={trailing}>{unavailableText(data.unavailableReason)}</Message>;
+  return <CurveShapeView shape={shape} baseSymbol={baseSymbol} quoteSymbol={quoteSymbol} trailing={trailing} />;
 }
