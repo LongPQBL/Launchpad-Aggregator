@@ -71,9 +71,12 @@ export function formatPercent(value: string | null): { text: string; className: 
   // Direction follows the rounded figure: -0.001 displays as 0.00%, so it must not render as a red down arrow.
   const rounded = Math.abs(Number(value)).toFixed(2);
   const numeric = Number(rounded) === 0 ? 0 : Number(value);
-  if (numeric > 0) return { text: `${rounded}%`, className: 'text-success', direction: 'up' };
-  if (numeric < 0) return { text: `${rounded}%`, className: 'text-destructive', direction: 'down' };
-  return { text: `${rounded}%`, className: 'text-muted-foreground', direction: 'flat' };
+  // A move of thousands of percent (a new token's first day) is shown compact (1.59K%) so it never overflows its column.
+  const shown = Math.abs(numeric) >= 1000
+    ? new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(Math.abs(numeric)) : rounded;
+  if (numeric > 0) return { text: `${shown}%`, className: 'text-success', direction: 'up' };
+  if (numeric < 0) return { text: `${shown}%`, className: 'text-destructive', direction: 'down' };
+  return { text: `${shown}%`, className: 'text-muted-foreground', direction: 'flat' };
 }
 
 // A near-realtime-synced launch is visible before its core metadata (name/symbol/decimals) resolves —

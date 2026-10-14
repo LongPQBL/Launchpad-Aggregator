@@ -12,7 +12,7 @@ const launchSummary = {
   lifecycleStatus: 'trading', officialVolume24h: null, coverageStatus: 'backfilling',
   fdvUsd: null, marketCapUsd: null, priceUsd: null, tvlUsd: null, tvlBasis: null, tvlBlockNumber: null,
   tvlPriceSource: null, tvlPriceUpdatedAt: null, tvlUnavailableReason: 'unavailable',
-  week52High: null, week52Low: null,
+  week52High: null, week52Low: null, week52HighUsd: null, week52LowUsd: null,
   logoUri: null, websiteUrl: null, twitterUrl: null, launchTimestamp: null,
   change1h: null, change1d: null,
   officialVolume24hUsd: null, officialVolume24hUsdApprox: false, officialVolume24hUsdAsOf: null,

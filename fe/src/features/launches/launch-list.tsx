@@ -472,7 +472,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">24H Volume</span>
                   <span title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
-                    <RollingText text={launch.officialVolume24hUsd !== null ? `~${formatUsdCompact(launch.officialVolume24hUsd, 1)}` : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} value={launch.officialVolume24hUsd ?? launch.officialVolume24h} flash />
+                    <RollingText text={launch.officialVolume24hUsd !== null ? formatUsdCompact(launch.officialVolume24hUsd, 1) : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} value={launch.officialVolume24hUsd ?? launch.officialVolume24h} flash />
                   </span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">

@@ -161,8 +161,8 @@ export function LaunchDetail({ detail, transactions, candles, pools, v4Pool = nu
             <div><dt className="text-sm text-muted-foreground">Market cap</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.marketCapUsd, 1)} value={detail.marketCapUsd} flash /></dd></div>
             <div><dt className="text-sm text-muted-foreground">FDV</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.fdvUsd, 1)} value={detail.fdvUsd} flash /></dd></div>
             <div><dt className="text-sm text-muted-foreground">1 day volume</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsdCompact(detail.officialVolume24hUsd, 1)} value={detail.officialVolume24hUsd} flash /></dd></div>
-            <div><dt className="text-sm text-muted-foreground">52W High</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatPrice(detail.week52High, detail.quoteAsset.symbol)} value={detail.week52High} flash /></dd></div>
-            <div><dt className="text-sm text-muted-foreground">52W Low</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatPrice(detail.week52Low, detail.quoteAsset.symbol)} value={detail.week52Low} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">52W High</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsd(detail.week52HighUsd, 2)} value={detail.week52HighUsd} flash /></dd></div>
+            <div><dt className="text-sm text-muted-foreground">52W Low</dt><dd className="mt-0.5 text-2xl"><RollingText text={formatUsd(detail.week52LowUsd, 2)} value={detail.week52LowUsd} flash /></dd></div>
               </dl>
             </section>
 

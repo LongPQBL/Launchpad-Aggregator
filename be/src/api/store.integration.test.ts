@@ -784,6 +784,16 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     }
   });
 
+  it('serves the 24 h USD volume on the launch detail too, not only in the list', async () => {
+    const detail = await store.getLaunch(4663, launchA);
+    expect(detail?.officialVolume24hUsd).not.toBeNull();
+    expect(Number(detail?.officialVolume24hUsd)).toBeGreaterThan(0);
+    expect(detail?.officialVolume24hUsdAsOf).not.toBeNull();
+    // A launch the ranking has no figure for (a null score) keeps the volume unavailable instead of 0.
+    const unscored = await store.getLaunch(4663, tokens[0]);
+    expect(unscored?.officialVolume24hUsd).toBeNull();
+  });
+
   it('gives a known zero-trade launch with complete coverage a real "0", never null', async () => {
     const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
     const zero = page.items.find((item) => item.tokenAddress === launchC);

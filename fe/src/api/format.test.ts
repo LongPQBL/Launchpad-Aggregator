@@ -56,6 +56,9 @@ describe('formatPercent', () => {
   });
 
   it('shows "—" instead of a fabricated value when null', () => {
+    expect(formatPercent('1589.34').text).toBe('1.59K%');
+    expect(formatPercent('-3014.95').text).toBe('3.01K%');
+    expect(formatPercent('999.5').text).toBe('999.50%');
     expect(formatPercent(null)).toEqual({ text: '—', className: 'text-muted-foreground', direction: 'flat' });
   });
 

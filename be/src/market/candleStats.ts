@@ -36,3 +36,18 @@ export async function read52WeekHighLowFromCandles(
     )`, params);
   return { high: result.rows[0]?.high ?? null, low: result.rows[0]?.low ?? null, complete: true };
 }
+
+// The 52-week range in USD, from the daily USD candles (each priced at the oracle rate of its own time). A day with an unpriced trade
+// makes the range incomplete, and no daily candle at all means there is nothing to report: neither case becomes a number.
+export async function read52WeekHighLowUsd(
+  pool: Pool, chainId: number, tokenAddress: string, nowSeconds = Math.floor(Date.now() / 1000),
+): Promise<CandleHighLow> {
+  const firstDay = Math.floor((nowSeconds - FIFTY_TWO_WEEKS) / DAY) * DAY;
+  const result = await pool.query(`SELECT max(high)::text AS high, min(low)::text AS low, count(*)::int AS days,
+      coalesce(sum(unpriced_count), 0)::int AS unpriced
+    FROM launch_usd_candle_buckets WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = 86400 AND bucket_start >= $3`,
+  [chainId, tokenAddress.toLowerCase(), firstDay]);
+  const row = result.rows[0];
+  if (!row || row.days === 0 || row.unpriced > 0 || row.high === null) return { high: null, low: null, complete: false };
+  return { high: row.high, low: row.low, complete: true };
+}

@@ -419,6 +419,14 @@
                             "type": "string",
                             "nullable": true
                           },
+                          "week52HighUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "week52LowUsd": {
+                            "type": "string",
+                            "nullable": true
+                          },
                           "logoUri": {
                             "type": "string",
                             "nullable": true
@@ -589,6 +597,14 @@
                       "nullable": true
                     },
                     "week52Low": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "week52HighUsd": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "week52LowUsd": {
                       "type": "string",
                       "nullable": true
                     },

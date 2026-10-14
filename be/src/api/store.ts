@@ -6,7 +6,7 @@ import { readLaunchParityCoverage } from '../coverage/repairRanges.js';
 import { launchCoverageSql, SAFE_HEAD_SQL } from '../coverage/launchCoverageSql.js';
 import { formatRational } from '../market/price.js';
 import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
-import { read52WeekHighLowFromCandles } from '../market/candleStats.js';
+import { read52WeekHighLowFromCandles, read52WeekHighLowUsd } from '../market/candleStats.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
@@ -66,8 +66,9 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
   };
 }
 
-export interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; priceUsd: string | null; week52High: string | null; week52Low: string | null; change1h: string | null; change1d: string | null }
-const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: null, week52High: null, week52Low: null, change1h: null, change1d: null, ...NULL_TVL };
+export interface StatsFields extends TvlFields { fdvUsd: string | null; marketCapUsd: string | null; priceUsd: string | null; week52High: string | null; week52Low: string | null;
+  week52HighUsd: string | null; week52LowUsd: string | null; change1h: string | null; change1d: string | null }
+const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: null, week52High: null, week52Low: null, week52HighUsd: null, week52LowUsd: null, change1h: null, change1d: null, ...NULL_TVL };
 
 // The launch page recomputes these per request; the RPC answers change on the scale of minutes, and
 // the page is re-fetched on every visit, so a short per-(pool, client) cache keeps repeat loads fast.
@@ -175,6 +176,7 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
       : null;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
+    const usdExtrema = await read52WeekHighLowUsd(pool, number(row.chain_id), string(row.token_address), nowSeconds);
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
     let high: string | null;
     let low: string | null;
@@ -225,7 +227,8 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
     const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
     const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
 
-    return { fdvUsd, marketCapUsd: fdvUsd, priceUsd, week52High: high, week52Low: low, change1h, change1d, ...(await tvlPromise) };
+    return { fdvUsd, marketCapUsd: fdvUsd, priceUsd, week52High: high, week52Low: low,
+      week52HighUsd: usdExtrema.complete ? usdExtrema.high : null, week52LowUsd: usdExtrema.complete ? usdExtrema.low : null, change1h, change1d, ...(await tvlPromise) };
   } catch {
     return { ...NULL_STATS, ...(await tvlPromise) };
   }
@@ -462,7 +465,13 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
       const stats = statsForCoverage((await readLaunchStats(pool, [{ chainId, tokenAddress: tokenAddress.toLowerCase() }])).get(`${chainId}:${tokenAddress.toLowerCase()}`), complete);
+      const volumeRow = (await pool.query(`SELECT volume_usd::text AS volume_usd, rank_category, window_end FROM launch_volume24h_usd
+        WHERE chain_id = $1 AND token_address = $2`, [chainId, tokenAddress.toLowerCase()])).rows[0] as Row | undefined;
+      const volumeKnown = volumeRow !== undefined && volumeRow.rank_category !== 'null' && volumeRow.volume_usd !== null;
       return { ...summary(row, complete, stats),
+        officialVolume24hUsd: volumeKnown ? nullableString(volumeRow.volume_usd) : null,
+        officialVolume24hUsdApprox: volumeRow?.rank_category === 'positive',
+        officialVolume24hUsdAsOf: volumeKnown ? new Date(number(volumeRow.window_end) * 1000).toISOString() : null,
         description: row.description === null || row.description === undefined ? null : string(row.description),
         officialVenues: venueRows.rows.map((venue: Row) => ({
         id: string(venue.id), kind: string(venue.kind), ref: string(venue.ref),

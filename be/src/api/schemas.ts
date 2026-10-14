@@ -43,6 +43,7 @@ export const launchSummary = { type: 'object', properties: {
   tvlBlockNumber: { type: 'string', nullable: true }, tvlPriceSource: { type: 'string', nullable: true },
   tvlPriceUpdatedAt: { type: 'integer', nullable: true }, tvlUnavailableReason: { type: 'string', nullable: true },
   week52High: { type: 'string', nullable: true }, week52Low: { type: 'string', nullable: true },
+  week52HighUsd: { type: 'string', nullable: true }, week52LowUsd: { type: 'string', nullable: true },
   logoUri: { type: 'string', nullable: true },
   websiteUrl: { type: 'string', nullable: true }, twitterUrl: { type: 'string', nullable: true },
   launchTimestamp: { type: 'string', nullable: true },

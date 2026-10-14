@@ -34,8 +34,8 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     tvlPriceSource: null,
     tvlPriceUpdatedAt: null,
     tvlUnavailableReason: 'unavailable',
-    week52High: null,
-    week52Low: null,
+    week52High: null, week52HighUsd: null,
+    week52Low: null, week52LowUsd: null,
     logoUri: null,
     websiteUrl: null,
     twitterUrl: null,
@@ -441,7 +441,7 @@ describe('LaunchList', () => {
     expect(header).toHaveAttribute('aria-sort', direction === 'asc' ? 'ascending' : 'descending');
   });
 
-  it('shows the approximate USD 24H Volume when available, with the quote amount still accessible', () => {
+  it('shows the USD 24H Volume when available, with the quote amount still accessible', () => {
     render(
       <LaunchList
         page={{ items: [launch({ officialVolume24hUsd: '1234.56', officialVolume24hUsdApprox: true, officialVolume24h: '0.5' })], nextCursor: null }}
@@ -450,7 +450,7 @@ describe('LaunchList', () => {
       />,
     );
     const table = screen.getByRole('table', { name: /launch list/i });
-    expect(within(table).getByText(/~\$1\.2K/)).toBeInTheDocument();
+    expect(within(table).getByText('$1.2K')).toBeInTheDocument();
   });
 
   it('explains that the volume ranking is updating on 503, and points to the recent tab instead of a generic error', () => {

@@ -109,8 +109,8 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     tvlPriceSource: null,
     tvlPriceUpdatedAt: null,
     tvlUnavailableReason: 'unavailable',
-    week52High: null,
-    week52Low: null,
+    week52High: null, week52HighUsd: null,
+    week52Low: null, week52LowUsd: null,
     logoUri: null,
     description: null,
     websiteUrl: null,
@@ -277,7 +277,7 @@ describe('LaunchDetail', () => {
   it('shows a Stats heading with TVL, market cap, FDV, 1 day volume (USD), and 52-week high/low, in that order', () => {
     render(
       <LaunchDetail
-        detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001',
+        detail={detail({ fdvUsd: '269.17', marketCapUsd: '269.17', tvlUsd: '1200.50', week52High: '0.08', week52Low: '0.001', week52HighUsd: '0.08', week52LowUsd: '0.001',
           officialVolume24hUsd: '10.4' })}
         transactions={{ items: [], nextCursor: null }}
         candles={{ items: [], complete: true }}
@@ -290,7 +290,7 @@ describe('LaunchDetail', () => {
     expect(terms.map((term) => term.textContent)).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
     expect(terms[0]).toHaveClass('text-sm');
     expect(definitions[0]).toHaveClass('text-2xl');
-    expect(definitions.map((definition) => definition.textContent)).toEqual(['$1.2K', '$269.2', '$269.2', '$10.4', '0.0800 ROBIN', '0.00100 ROBIN']);
+    expect(definitions.map((definition) => definition.textContent)).toEqual(['$1.2K', '$269.2', '$269.2', '$10.4', '$0.080', '$0.0010']);
     const statLabels = terms.map((el) => el.textContent);
     expect(statLabels).toEqual(['TVL', 'Market cap', 'FDV', '1 day volume', '52W High', '52W Low']);
   });

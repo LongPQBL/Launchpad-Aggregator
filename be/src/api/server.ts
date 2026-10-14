@@ -34,7 +34,7 @@ export interface LaunchSummary {
   fdvUsd: string | null; marketCapUsd: string | null; priceUsd: string | null;
   tvlUsd: string | null; tvlBasis: string | null; tvlBlockNumber: string | null;
   tvlPriceSource: string | null; tvlPriceUpdatedAt: number | null; tvlUnavailableReason: string | null;
-  week52High: string | null; week52Low: string | null;
+  week52High: string | null; week52Low: string | null; week52HighUsd: string | null; week52LowUsd: string | null;
   logoUri: string | null; websiteUrl: string | null; twitterUrl: string | null;
   launchTimestamp: string | null; change1h: string | null; change1d: string | null;
   officialVolume24hUsd: string | null; officialVolume24hUsdApprox: boolean; officialVolume24hUsdAsOf: string | null;

@@ -233,6 +233,8 @@ export interface paths {
                                 tvlUnavailableReason?: string | null;
                                 week52High?: string | null;
                                 week52Low?: string | null;
+                                week52HighUsd?: string | null;
+                                week52LowUsd?: string | null;
                                 logoUri?: string | null;
                                 websiteUrl?: string | null;
                                 twitterUrl?: string | null;
@@ -310,6 +312,8 @@ export interface paths {
                             tvlUnavailableReason?: string | null;
                             week52High?: string | null;
                             week52Low?: string | null;
+                            week52HighUsd?: string | null;
+                            week52LowUsd?: string | null;
                             logoUri?: string | null;
                             websiteUrl?: string | null;
                             twitterUrl?: string | null;
