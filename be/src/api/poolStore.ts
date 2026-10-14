@@ -147,7 +147,8 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), POOL_STATS_REFRESH_MIN_AGE_MS);
   });
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
-    const displayedToken = token ?? row.currency0;
+    // A pool of a launched token is read from that token's side (its price, FDV, and the quote it is valued against), not by address order.
+    const displayedToken = token ?? row.launch_token_address ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
     const createdAtPromise = createdTimestamp(String(row.block_number));
     const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
@@ -212,13 +213,17 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       return toSummary(row, displayedToken);
     },
     async resolvePoolSide(key, displayedToken) {
-      const result = await pool.query(`SELECT p.currency0,p.currency1 FROM pool_catalog p
+      const result = await pool.query(`SELECT p.currency0,p.currency1,
+        (SELECT l.token_address FROM launches l WHERE l.chain_id=p.chain_id
+          AND l.token_address IN (p.currency0,p.currency1) AND l.platform='pons'
+          ORDER BY CASE WHEN l.token_address=p.currency0 THEN 0 ELSE 1 END LIMIT 1) AS launch_token_address
+        FROM pool_catalog p
         WHERE p.chain_id=$1 AND p.protocol=$2 AND p.pool_id=$3 AND p.verified=true AND ${supportedSourceSql}`,
       [key.chainId, key.protocol, key.poolId.toLowerCase()]);
-      const row = result.rows[0] as { currency0: string; currency1: string } | undefined;
+      const row = result.rows[0] as { currency0: string; currency1: string; launch_token_address: string | null } | undefined;
       if (!row) return null;
       if (displayedToken && displayedToken !== row.currency0 && displayedToken !== row.currency1) return null;
-      return displayedToken ?? row.currency0;
+      return displayedToken ?? row.launch_token_address ?? row.currency0;
     },
     listPoolTrades: (key, token, query) => readPoolTrades(pool, key, token, { ...query, rpcClient }),
     listPoolCandles: (key, token, interval, before) => readPoolCandles(pool, key, token, interval, before, { rpcClient }),

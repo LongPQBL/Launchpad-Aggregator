@@ -201,10 +201,20 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const fdvUsd = supply !== null && displayedDecimals !== null
     ? computeFdvUsd(supply, displayedDecimals, priceRational?.numerator ?? null, priceRational?.denominator ?? null,
       currentQuoteUsd?.priceUsd ?? null) : null;
-  const poolSnapshot = key.protocol === 'uniswap_v4'
+  let poolSnapshot = key.protocol === 'uniswap_v4'
     ? await readPoolSnapshot(options.rpcClient, catalog, displayedIsCurrency0, displayedDecimals, quoteDecimals,
       currentQuoteUsd?.priceUsd ?? null)
     : { poolBalances: null, tvlUsd: null };
+  // TVL only needs one side with a verified USD feed. When the quote has none (a pool of two launched tokens read from the one
+  // without a feed's side, say), value the pool through the other side instead of leaving it unavailable.
+  if (key.protocol === 'uniswap_v4' && poolSnapshot.tvlUsd === null && poolSnapshot.poolBalances !== null && currentQuoteUsd === null
+    && options.rpcClient && (await resolveVerifiedFeed(pool, key.chainId, displayed))) {
+    const displayedUsd = await readUsdPrice(pool, options.rpcClient, key.chainId, displayed, () => asOf * 1000).catch(() => null);
+    if (displayedUsd) {
+      const swapped = await readPoolSnapshot(options.rpcClient, catalog, !displayedIsCurrency0, quoteDecimals, displayedDecimals, displayedUsd.priceUsd);
+      poolSnapshot = { poolBalances: poolSnapshot.poolBalances, tvlUsd: swapped.tvlUsd };
+    }
+  }
 
   const tvlChange = complete && key.protocol === 'uniswap_v4'
     ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf, { createdTimestamp: options.createdTimestamp }) : null;

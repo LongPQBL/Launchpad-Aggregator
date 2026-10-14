@@ -95,6 +95,23 @@ describe('pool catalog API reader', () => {
       await pool.query("DELETE FROM sources WHERE id = 'pool-logo-test'");
     }
   });
+  it('reads a pool of a launched token from that token side by default, whatever its address order', async () => {
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ('pool-side-test',4663,'v1',$1,0,0,0,'backfilling') ON CONFLICT DO NOTHING`, [c]);
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,name,symbol,token_decimals,platform,protocol_version,
+      factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,'pool-side-test','Side Coin','SIDE',18,'pons','v1',$1,$1,999999981,$2,0,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+    [c, '0x' + 'dd'.repeat(32)]);
+    try {
+      // ids[1] is the pool (b, c): c is the launched token although it is currency1.
+      expect((await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[1] }))?.displayedToken).toBe(c);
+      expect(await store.resolvePoolSide({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[1] })).toBe(c);
+      expect((await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[1] }, b))?.displayedToken).toBe(b);
+    } finally {
+      await pool.query('DELETE FROM launches WHERE token_address = $1', [c]);
+      await pool.query("DELETE FROM sources WHERE id = 'pool-side-test'");
+    }
+  });
   it('resolves currency decimals on-chain when an rpcClient is configured', async () => {
     // Stub rpcClient so decimals resolution (assetDecimals) doesn't need a real chain —
     // mirrors the pattern in store.integration.test.ts's own txRpcClient fixture.
