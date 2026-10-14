@@ -77,6 +77,23 @@ describe('listLaunches without raw log provenance', () => {
     }
   });
 
+  it('keeps a launch without a name and symbol out of every list until its metadata arrives', async () => {
+    try {
+      await pool.query('UPDATE launches SET name = NULL, symbol = NULL WHERE token_address = $1', [tokens[0]]);
+      const lists = [
+        await store.listLaunches({ limit: 200 }),
+        await store.listLaunches({ limit: 200, sort: 'fdvUsd', direction: 'desc' }),
+      ];
+      for (const list of lists) {
+        const listed = list.items.map((item) => item.tokenAddress);
+        expect(listed).not.toContain(tokens[0]);
+        expect(listed).toContain(tokens[1]);
+      }
+    } finally {
+      await pool.query(`UPDATE launches SET name = 'Token0', symbol = 'T' WHERE token_address = $1`, [tokens[0]]);
+    }
+  });
+
   it('includes null-source rows and preserves block/tx/log pagination across old and new rows', async () => {
     const first = await store.listLaunches({ limit: 1, chainId: 4663 });
     expect(first.items[0].tokenAddress).toBe(tokens[0]);
@@ -134,9 +151,8 @@ describe('a near-realtime-synced launch with unresolved core metadata', () => {
     expect(detail!.tvlUsd).toBeNull();
 
     const list = await store.listLaunches({ limit: 50, chainId: 4663 });
-    const item = list.items.find((row) => row.tokenAddress === pendingToken);
-    expect(item?.name).toBeNull();
-    expect(item?.symbol).toBeNull();
+    // A launch whose name and symbol are not resolved yet is not listed (the detail page above still serves it).
+    expect(list.items.find((row) => row.tokenAddress === pendingToken)).toBeUndefined();
   });
 });
 
@@ -753,6 +769,19 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
     const ranked = page.items.filter((item) => [launchA, launchB, launchC, launchD].includes(item.tokenAddress));
     expect(ranked.map((item) => item.tokenAddress)).toEqual([launchA, launchB, launchC, launchD]);
+  });
+
+  it('leaves a launch without a name and symbol out of the volume-ranked list', async () => {
+    const before = (await pool.query('SELECT name, symbol FROM launches WHERE token_address = $1', [launchD])).rows[0];
+    try {
+      await pool.query('UPDATE launches SET name = NULL, symbol = NULL WHERE token_address = $1', [launchD]);
+      const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
+      const listed = page.items.map((item) => item.tokenAddress);
+      expect(listed).not.toContain(launchD);
+      expect(listed).toContain(launchA);
+    } finally {
+      await pool.query('UPDATE launches SET name = $2, symbol = $3 WHERE token_address = $1', [launchD, before.name, before.symbol]);
+    }
   });
 
   it('gives a known zero-trade launch with complete coverage a real "0", never null', async () => {

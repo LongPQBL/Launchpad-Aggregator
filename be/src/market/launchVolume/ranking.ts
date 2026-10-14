@@ -58,6 +58,7 @@ export async function readVolumeRankingPage(pool: Pool, input: VolumeRankPageInp
     FROM launch_volume24h_usd s
     JOIN launches l ON l.chain_id = s.chain_id AND l.token_address = s.token_address
     WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1)) AND ($2::text[] IS NULL OR l.platform = ANY($2))
+      AND l.name IS NOT NULL AND l.symbol IS NOT NULL
       AND ($3::text IS NULL OR l.lifecycle_status = $3)
       AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')
       AND ($5::boolean = false OR (

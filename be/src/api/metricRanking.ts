@@ -47,6 +47,7 @@ export async function readMetricRankingPage(pool: Pool, input: MetricRankingInpu
       LEFT JOIN launch_volume24h_usd vr ON vr.chain_id = l.chain_id AND vr.token_address = l.token_address
       WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
         AND ($2::text[] IS NULL OR l.platform = ANY($2))
+        AND l.name IS NOT NULL AND l.symbol IS NOT NULL
         AND ($3::text IS NULL OR l.lifecycle_status = $3)
         AND ($4::text IS NULL OR l.name ILIKE '%' || $4 || '%' OR l.symbol ILIKE '%' || $4 || '%')`;
   const baseSql = statSort

@@ -428,6 +428,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
           AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
           AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
+          AND l.name IS NOT NULL AND l.symbol IS NOT NULL
           AND ($8::text IS NULL OR l.lifecycle_status = $8)
           AND ($10::text[] IS NULL OR l.platform = ANY($10))
         ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5`,
