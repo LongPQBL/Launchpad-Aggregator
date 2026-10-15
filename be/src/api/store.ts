@@ -428,16 +428,25 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
            WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
              AND t.timestamp >= $6) AS official_volume_raw,
           ${launchCoverageSql(9)} AS launch_coverage_complete
-        FROM launches l JOIN sources s ON s.id = l.source_id
-        WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
-          AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
-          AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
-          AND l.name IS NOT NULL AND l.symbol IS NOT NULL
-          AND ($8::text IS NULL OR l.lifecycle_status = $8)
-          AND ($10::text[] IS NULL OR l.platform = ANY($10))
-        ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5`,
+        FROM (
+          -- The page of launches comes first, straight from the (chain, block, tx, log) index, so the join with sources and the volume sum run for 51 rows
+          -- only (joining first made the planner read and sort every launch).
+          SELECT * FROM launches l
+          WHERE ($1::integer[] IS NULL OR l.chain_id = ANY($1))
+            -- With one chain the order of the (chain, block, tx, log) index is the page's order: an equality on the chain lets the planner walk it
+            -- backwards and stop after the page (an = ANY(array) hid that and it read and sorted every launch).
+            AND ($11::integer IS NULL OR l.chain_id = $11)
+            AND ($2::bigint IS NULL OR (l.launch_block, l.launch_tx_hash, l.launch_log_index) < ($2::bigint, $3::text, $4::integer))
+            AND ($7::text IS NULL OR l.name ILIKE '%' || $7 || '%' OR l.symbol ILIKE '%' || $7 || '%')
+            AND l.name IS NOT NULL AND l.symbol IS NOT NULL
+            AND ($8::text IS NULL OR l.lifecycle_status = $8)
+            AND ($10::text[] IS NULL OR l.platform = ANY($10))
+          ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5) l
+        JOIN sources s ON s.id = l.source_id
+        ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC`,
       [query.chainId === undefined ? null : [query.chainId].flat(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
-        query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform === undefined ? null : [query.platform].flat()]);
+        query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform === undefined ? null : [query.platform].flat(),
+        query.chainId !== undefined && [query.chainId].flat().length === 1 ? [query.chainId].flat()[0] : null]);
       const rows = result.rows as Row[];
       const statsByToken = await readLaunchStats(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
       return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),
