@@ -23,7 +23,7 @@ import { isRollupBackfilled } from '../charts/rollupState.js';
 import { ttlMemo } from './ttlMemo.js';
 import type { ApiEventBus } from './events.js';
 import { withLaunchListCache } from './listCache.js';
-import { readLaunchStats } from './launchStatsStore.js';
+import { readLaunchStats, readLaunchStatsSnapshots } from './launchStatsStore.js';
 import { readLaunchHistory } from '../market/launchHistory.js';
 import { readCurveDepthAnswer } from '../pools/curveDepth.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
@@ -43,7 +43,7 @@ function number(value: unknown): number { return Number(value); }
 function nullableString(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
 function nullableNumber(value: unknown): number | null { return value === null || value === undefined ? null : Number(value); }
 
-function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary {
+function summary(row: Row, complete: boolean, stats: StatsFields, statsComputedAt: string | null = null): LaunchSummary {
   const coverageStatus = complete ? 'caught_up' : 'backfilling';
   return {
     chainId: number(row.chain_id), tokenAddress: string(row.token_address), name: nullableString(row.name), symbol: nullableString(row.symbol),
@@ -54,6 +54,7 @@ function summary(row: Row, complete: boolean, stats: StatsFields): LaunchSummary
     officialVolume24h: complete && row.official_volume_raw !== undefined && row.quote_asset_decimals !== null
       ? formatUnits(BigInt(string(row.official_volume_raw)), number(row.quote_asset_decimals)) : null,
     coverageStatus,
+    statsComputedAt,
     logoUri: row.logo_uri === null || row.logo_uri === undefined ? null : string(row.logo_uri),
     websiteUrl: row.website_url === null || row.website_url === undefined ? null : string(row.website_url),
     twitterUrl: row.twitter_url === null || row.twitter_url === undefined ? null : string(row.twitter_url),
@@ -115,9 +116,7 @@ function cachedTotalSupply(client: UsdPriceClient, tokenAddress: string) {
 function statsForCoverage(stored: StatsFields | undefined, complete: boolean): StatsFields {
   if (!stored) return NULL_STATS;
   // A row stored before a field existed reads that field as unavailable (null), never undefined.
-  if (complete) return { ...NULL_STATS, ...stored };
-  const tvl = Object.fromEntries(Object.keys(NULL_TVL).map((key) => [key, (stored as unknown as Record<string, unknown>)[key]]));
-  return { ...NULL_STATS, ...tvl } as StatsFields;
+  return { ...NULL_STATS, ...stored };
 }
 
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
@@ -132,9 +131,6 @@ async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Prom
     [number(row.chain_id), string(row.token_address)]);
     const current = venueResult.rows[0] as Row | undefined;
     const kind = current?.kind;
-    // A token still on its bonding curve has no TVL to show: the curve is not liquidity in a pool. Skipping it spares the block, oracle, factory and
-    // reserve reads that every stats refresh of every such launch would make.
-    if (kind === 'curve') return { ...NULL_TVL, tvlUnavailableReason: 'bonding_curve' };
     const venue = current && (kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')
       ? { kind: kind as VenueAmountInput['kind'], ref: string(current.ref) } : null;
     return await readCurrentTvl(pool, rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
@@ -354,10 +350,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
     const nextCursor = page.nextCursor
       ? encodeVolumeCursor({ version: 2, sort: 'volume24hUsd', issuedAt: nowSeconds, ...page.nextCursor }, secret)
       : null;
-    const statsByToken = await readLaunchStats(pool, page.rows.map((item) => ({ chainId: number(item.raw.chain_id), tokenAddress: string(item.raw.token_address) })));
+    const statsByToken = await readLaunchStatsSnapshots(pool, page.rows.map((item) => ({ chainId: number(item.raw.chain_id), tokenAddress: string(item.raw.token_address) })));
     return {
       items: page.rows.map((item) => ({
-        ...summary(item.raw, item.coverageComplete, statsForCoverage(statsByToken.get(`${number(item.raw.chain_id)}:${string(item.raw.token_address)}`), item.coverageComplete)),
+        ...summary(item.raw, item.coverageComplete, statsForCoverage(statsByToken.get(`${number(item.raw.chain_id)}:${string(item.raw.token_address)}`)?.stats, item.coverageComplete), statsByToken.get(`${number(item.raw.chain_id)}:${string(item.raw.token_address)}`)?.computedAt.toISOString() ?? null),
         officialVolume24hUsd: item.volumeUsd,
         officialVolume24hUsdApprox: item.rankCategory === 'positive',
         officialVolume24hUsdAsOf: item.rankCategory === 'null' ? null : new Date(item.windowEnd * 1000).toISOString(),
@@ -375,11 +371,12 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       sort, direction, chainId: query.chainId, platform: query.platform, status: query.status, search: query.search,
       cursor: query.cursor, limit: query.limit, headBlock: await safeHead(), since: Math.floor(Date.now() / 1000) - 86_400,
     });
-    const statsByToken = await readLaunchStats(pool, result.rows.map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
+    const statsByToken = await readLaunchStatsSnapshots(pool, result.rows.map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
     return {
       items: result.rows.map((row) => {
         const complete = Boolean(row.launch_coverage_complete);
-        const item = summary(row, complete, statsForCoverage(statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`), complete));
+        const snapshot = statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`);
+        const item = summary(row, complete, statsForCoverage(snapshot?.stats, complete), snapshot?.computedAt.toISOString() ?? null);
         if (sort !== 'volume24hUsd') return item;
         const volume = row.rank_category === 'null' || row.volume_usd === null ? null : nullableString(row.volume_usd);
         return { ...item, officialVolume24hUsd: volume, officialVolume24hUsdApprox: row.rank_category === 'positive',
@@ -448,9 +445,11 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform === undefined ? null : [query.platform].flat(),
         query.chainId !== undefined && [query.chainId].flat().length === 1 ? [query.chainId].flat()[0] : null]);
       const rows = result.rows as Row[];
-      const statsByToken = await readLaunchStats(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
-      return page(rows, query.limit, (row) => summary(row, Boolean(row.launch_coverage_complete),
-        statsForCoverage(statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`), Boolean(row.launch_coverage_complete))));
+      const statsByToken = await readLaunchStatsSnapshots(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
+      return page(rows, query.limit, (row) => {
+        const snapshot = statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`);
+        return summary(row, Boolean(row.launch_coverage_complete), statsForCoverage(snapshot?.stats, Boolean(row.launch_coverage_complete)), snapshot?.computedAt.toISOString() ?? null);
+      });
     },
     async getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
       const head = await safeHead();
@@ -474,11 +473,12 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         AND v.official = true AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [chainId, tokenAddress.toLowerCase()]);
       const priced = lastPrice.rows[0] as Row | undefined;
-      const stats = statsForCoverage((await readLaunchStats(pool, [{ chainId, tokenAddress: tokenAddress.toLowerCase() }])).get(`${chainId}:${tokenAddress.toLowerCase()}`), complete);
+      const snapshot = (await readLaunchStatsSnapshots(pool, [{ chainId, tokenAddress: tokenAddress.toLowerCase() }])).get(`${chainId}:${tokenAddress.toLowerCase()}`);
+      const stats = statsForCoverage(snapshot?.stats, complete);
       const volumeRow = (await pool.query(`SELECT volume_usd::text AS volume_usd, rank_category, window_end FROM launch_volume24h_usd
         WHERE chain_id = $1 AND token_address = $2`, [chainId, tokenAddress.toLowerCase()])).rows[0] as Row | undefined;
       const volumeKnown = volumeRow !== undefined && volumeRow.rank_category !== 'null' && volumeRow.volume_usd !== null;
-      return { ...summary(row, complete, stats),
+      return { ...summary(row, complete, stats, snapshot?.computedAt.toISOString() ?? null),
         officialVolume24hUsd: volumeKnown ? nullableString(volumeRow.volume_usd) : null,
         officialVolume24hUsdApprox: volumeRow?.rank_category === 'positive',
         officialVolume24hUsdAsOf: volumeKnown ? new Date(number(volumeRow.window_end) * 1000).toISOString() : null,

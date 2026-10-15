@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
-import { readLaunchStats, writeLaunchStats } from './launchStatsStore.js';
+import { readLaunchStats, readLaunchStatsSnapshots, writeLaunchStats } from './launchStatsStore.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -33,7 +33,7 @@ afterAll(async () => {
 
 describe('launch stats store', () => {
   it('writes a computed stats row and reads it back by launch, leaving launches without a row absent', async () => {
-    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date('2026-10-05T12:00:00Z'));
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date());
     const found = await readLaunchStats(pool, [{ chainId, tokenAddress: tokenWithStats }, { chainId, tokenAddress: tokenWithout }]);
     expect(found.get(`${chainId}:${tokenWithStats}`)).toEqual(stats);
     expect(found.has(`${chainId}:${tokenWithout}`)).toBe(false);
@@ -43,5 +43,13 @@ describe('launch stats store', () => {
     await writeLaunchStats(pool, chainId, tokenWithStats, { ...stats, fdvUsd: '2000' }, new Date());
     const found = await readLaunchStats(pool, [{ chainId, tokenAddress: tokenWithStats }]);
     expect(found.get(`${chainId}:${tokenWithStats}`)?.fdvUsd).toBe('2000');
+  });
+
+  it('returns the stored computation timestamp with retained stats', async () => {
+    const computedAt = new Date(Date.now() - 60_000);
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, computedAt);
+    const snapshot = (await readLaunchStatsSnapshots(pool, [{ chainId, tokenAddress: tokenWithStats }])).get(`${chainId}:${tokenWithStats}`);
+    expect(snapshot?.stats).toEqual(stats);
+    expect(snapshot?.computedAt.getTime()).toBe(computedAt.getTime());
   });
 });

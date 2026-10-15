@@ -38,6 +38,7 @@ export const launchSummary = { type: 'object', properties: {
   platform: { type: 'string' }, protocolVersion: { type: 'string' }, quoteAsset,
   tokenDecimals: { type: 'integer', nullable: true },
   lifecycleStatus: { type: 'string' }, officialVolume24h: { type: 'string', nullable: true }, coverageStatus: { type: 'string' },
+  statsComputedAt: { type: 'string', format: 'date-time', nullable: true },
   fdvUsd: { type: 'string', nullable: true }, marketCapUsd: { type: 'string', nullable: true }, priceUsd: { type: 'string', nullable: true },
   tvlUsd: { type: 'string', nullable: true }, tvlBasis: { type: 'string', nullable: true },
   tvlBlockNumber: { type: 'string', nullable: true }, tvlPriceSource: { type: 'string', nullable: true },
