@@ -80,8 +80,11 @@ export async function claimDueMetadataLaunches(db: Database, now: Date, limit: n
         l.launch_log_index, l.metadata_retry_count, l.logo_read_state, l.description_read_state,
         l.socials_read_state, l.timestamp_read_state, l.protocol_version, l.factory_address,
         l.quote_asset_address, l.quote_asset_symbol, l.core_metadata_read_state, l.core_metadata_retry_count
-        FROM launches l
-        ${byVolume ? 'LEFT JOIN launch_volume24h_usd v ON v.chain_id = l.chain_id AND v.token_address = l.token_address' : ''}
+        FROM ${byVolume
+    ? `(SELECT chain_id, token_address, row_number() OVER (ORDER BY rank_order ASC, volume_usd DESC NULLS LAST) AS rn
+             FROM launch_volume24h_usd WHERE chain_id = 4663 AND rank_order <= 1 ORDER BY rank_order ASC, volume_usd DESC NULLS LAST LIMIT 1000) v
+           JOIN launches l ON l.chain_id = v.chain_id AND l.token_address = v.token_address`
+    : 'launches l'}
         WHERE l.chain_id = 4663 AND l.platform = 'pons' AND l.protocol_version IN ('v1', 'v2')
           AND (
             (l.core_metadata_read_state = 'pending' AND (l.core_metadata_retry_at IS NULL OR l.core_metadata_retry_at <= $1))
@@ -93,14 +96,15 @@ export async function claimDueMetadataLaunches(db: Database, now: Date, limit: n
           )
           AND (l.metadata_lease_until IS NULL OR l.metadata_lease_until <= $1)
           AND NOT (l.token_address = ANY($2::text[]))
-        ORDER BY ${byVolume ? 'v.rank_order ASC NULLS LAST, v.volume_usd DESC NULLS LAST, ' : ''}l.launch_block ${direction}, l.launch_log_index ${direction}, l.token_address ${direction}
+        ORDER BY ${byVolume ? 'v.rn ASC, ' : ''}l.launch_block ${direction}, l.launch_log_index ${direction}, l.token_address ${direction}
         LIMIT $3 FOR UPDATE OF l SKIP LOCKED`, [now, selected.map((row) => row.token_address), count]);
       selected.push(...rows.rows);
     }
     await pick('DESC', Math.ceil(limit / 2));
-    // The second half goes to the launches people see first (highest 24 h volume), then the oldest, so a back-catalog of
-    // thousands does not hold the logos of the launches at the top of the list.
+    // The second half goes first to the launches people see first (the top of the 24 h volume ranking: a bounded join, not an ordering of every
+    // launch), then to the oldest, so a back-catalog of thousands does not hold the logos of the launches at the top of the list.
     await pick('ASC', Math.floor(limit / 2), true);
+    await pick('ASC', limit - selected.length);
     await pick('DESC', limit - selected.length);
     if (selected.length === 0) {
       await client.query('COMMIT');
