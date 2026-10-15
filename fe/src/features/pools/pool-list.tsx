@@ -10,7 +10,7 @@ import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
 import { mergeRefreshedPage, refreshRowsInPlace } from '@/lib/merge-refreshed-page';
 import { cn } from '@/lib/utils';
 import { poolColumnWidth, type PoolColumnId } from './pool-columns';
-import { formatPoolFee, formatPoolUsd, formatVolumeToTvl, poolAge, short, volumeToTvl } from './pool-format';
+import { formatPoolFee, formatPoolUsd, formatVolumeToTvl, isHighFeePool, poolAge, short, volumeToTvl } from './pool-format';
 import { RollingText } from '@/components/percent-change';
 
 function side(address: string): string { return address.toLowerCase(); }
@@ -21,6 +21,8 @@ export type PrimaryLaunchVenue =
       /** The launch's official 24 h USD volume and its launch time (unix seconds); null when unavailable. A curve has no TVL. */
       volume24hUsd?: string | null; launchTimestamp?: number | null }
   | { kind: 'pool'; pool: PoolSummary | null; poolId: string; protocol: string };
+
+const HIDE_HIGH_FEE_KEY = 'hideHighFeePools';
 
 type PoolSort = 'volume24hUsd' | 'tvlUsd' | 'volume30dUsd' | 'volumeToTvl' | 'age';
 const POOL_SORT_COLUMNS: { label: string; sort: PoolSort; defaultDirection: 'asc' | 'desc'; column: PoolColumnId }[] = [
@@ -98,6 +100,10 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState(false);
+  // Show every pool by default; the reader can hide the high-fee ones (kept in this browser).
+  const [hideHighFee, setHideHighFee] = useState(false);
+  const hideHighFeeRef = useRef(false);
+  useEffect(() => { hideHighFeeRef.current = hideHighFee; }, [hideHighFee]);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
   // The order is decided when the user sorts, a page is added, or the list changes size - never by a live
@@ -138,6 +144,9 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedItems, primaryVenue]);
   const curveRow = primaryVenue?.kind === 'curve' ? primaryVenue : null;
+  // The official Pons pool is never hidden, whatever its fee tier says.
+  const shownRows = hideHighFee ? displayedRows.filter((pool) => isOfficial(pool) || !isHighFeePool(pool.fee)) : displayedRows;
+  const highFeeCount = displayedRows.filter((pool) => !isOfficial(pool) && isHighFeePool(pool.fee)).length;
 
   // Merge the server-provided first page when it changes, keeping pages the user already loaded
   // (React's "adjust state during render" pattern).
@@ -162,8 +171,8 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     async (isStale) => {
       if (tokenAddress && chainId === undefined) return;
       const fresh = tokenAddress
-        ? await getLaunchPools(chainId!, tokenAddress, { excludeOfficial: true })
-        : await getPools({ chainId });
+        ? await getLaunchPools(chainId!, tokenAddress, { excludeOfficial: true, hideHighFee: hideHighFeeRef.current || undefined })
+        : await getPools({ chainId, hideHighFee: hideHighFeeRef.current || undefined });
       if (isStale()) return;
       setItems((shown) => refreshRowsInPlace(fresh.items, shown, rowKey, false, tokenAddress !== undefined));
     },
@@ -178,8 +187,8 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     setLoadError(false);
     try {
       const nextPage = tokenAddress
-        ? await getLaunchPools(chainId!, tokenAddress, { cursor: nextCursor, excludeOfficial: true })
-        : await getPools({ cursor: nextCursor, chainId });
+        ? await getLaunchPools(chainId!, tokenAddress, { cursor: nextCursor, excludeOfficial: true, hideHighFee: hideHighFee || undefined })
+        : await getPools({ cursor: nextCursor, chainId, hideHighFee: hideHighFee || undefined });
       setItems((current) => [...current, ...nextPage.items]);
       setNextCursor(nextPage.nextCursor);
     } catch {
@@ -188,7 +197,26 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
       loadingRef.current = false;
       setLoadingMore(false);
     }
-  }, [chainId, nextCursor, tokenAddress]);
+  }, [chainId, hideHighFee, nextCursor, tokenAddress]);
+
+  // The switch: remember it, and read the first page again with or without the high-fee pools so the pages that follow are not mostly hidden rows.
+  const applyHideHighFee = useCallback(async (hide: boolean) => {
+    setHideHighFee(hide);
+    hideHighFeeRef.current = hide;
+    try { window.localStorage.setItem(HIDE_HIGH_FEE_KEY, hide ? 'true' : 'false'); } catch { /* not persisted */ }
+    if (tokenAddress && chainId === undefined) return;
+    try {
+      const first = tokenAddress ? await getLaunchPools(chainId!, tokenAddress, { excludeOfficial: true, hideHighFee: hide }) : await getPools({ chainId, hideHighFee: hide });
+      if (hideHighFeeRef.current !== hide) return; // the switch was flipped again meanwhile
+      setItems(first.items);
+      setNextCursor(first.nextCursor);
+      setLoadError(false);
+    } catch { setLoadError(true); }
+  }, [chainId, tokenAddress]);
+  useEffect(() => {
+    try { if (window.localStorage.getItem(HIDE_HIGH_FEE_KEY) === 'true') void applyHideHighFee(true); } catch { /* not readable */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once on mount
+  }, []);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -203,6 +231,15 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
   return <section aria-label={tokenAddress ? 'Other pools for this token' : 'Pools'} className="space-y-4">
     {(error || !page) && <p role="alert">Could not load pools.</p>}
     {!tokenAddress && page && <PageHeading title="Pools" />}
+    {page && (highFeeCount > 0 || hideHighFee) && (
+      <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
+        <button type="button" role="switch" aria-checked={hideHighFee} aria-label="Hide high-fee pools" onClick={() => void applyHideHighFee(!hideHighFee)}
+          className={cn('relative h-5 w-9 cursor-pointer rounded-full border border-border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', hideHighFee ? 'bg-brand' : 'bg-muted')}>
+          <span aria-hidden="true" className={cn('absolute top-0.5 h-3.5 w-3.5 rounded-full bg-foreground transition-all', hideHighFee ? 'left-[1.15rem]' : 'left-0.5')} />
+        </button>
+        <span>Hide high-fee pools <span className="text-xs">(fee 10% or more{hideHighFee ? '' : `, ${highFeeCount} shown`})</span></span>
+      </div>
+    )}
     {items.length === 0 && !primaryVenue && page && <p>No other verified indexed pools found.</p>}
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">
@@ -239,7 +276,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           </div>
           {([['TVL', '—'], ['24H Volume', formatPoolUsd(curveRow.volume24hUsd ?? null)], ['30D Volume', '—'], ['1D Vol/TVL', '—'], ['Age', poolAge(curveRow.launchTimestamp ?? null)]] as const).map(([label, value]) => <div key={label} role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:text-right md:align-middle"><span className="mr-1 text-xs text-muted-foreground md:hidden">{label}</span><span>{value}</span></div>)}
         </div>}
-        {displayedRows.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
+        {shownRows.map((pool, index) => <div key={`${pool.chainId}:${pool.protocol}:${pool.poolId}`} role="row" className="group relative cursor-pointer rounded-lg bg-transparent p-3 md:table-row md:h-[60px] md:rounded-none md:bg-transparent md:p-0 md:transition-colors md:hover:bg-transparent">
           <div role="cell" className={cn('pointer-events-none text-foreground md:table-cell md:px-4 md:py-0 md:align-middle')}>
             <Link href={poolHref(pool, tokenAddress ?? pool.displayedToken)} aria-label={`View pool ${pairLabel(pool, displayedToken)}`} className="pointer-events-auto absolute inset-0 z-0 rounded-sm focus-visible:z-30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset" />
             {index + 1 + (curveRow ? 1 : 0)}
@@ -247,7 +284,7 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
           <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:px-4 md:py-0 md:align-middle">
             <span className="flex items-center gap-3">
               <PoolLogo size="small" token0={poolLogoToken(pool, pool.currency0, pool.currency0Symbol, pool.currency0LogoUri, displayedToken)} token1={poolLogoToken(pool, pool.currency1, pool.currency1Symbol, pool.currency1LogoUri, displayedToken)} chainId={pool.chainId} />
-              <span className="min-w-0"><span className="block text-base">{pairLabel(pool, displayedToken)}</span><span className="text-sm text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {formatPoolFee(pool.fee, pool.hooks)}{isOfficial(pool) && ' · Official Pons pool'}</span></span>
+              <span className="min-w-0"><span className="block text-base">{pairLabel(pool, displayedToken)}</span><span className="text-sm text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {formatPoolFee(pool.fee, pool.hooks)}{isHighFeePool(pool.fee) && <span className="text-destructive"> · High fee</span>}{isOfficial(pool) && ' · Official Pons pool'}</span></span>
             </span>
           </div>
           {([

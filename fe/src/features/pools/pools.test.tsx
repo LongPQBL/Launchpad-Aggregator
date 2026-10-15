@@ -323,4 +323,47 @@ describe('Pools UI', () => {
     expect(getLaunchPools).toHaveBeenCalledTimes(1);
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
   });
+
+  describe('high-fee pools', () => {
+    const poolWith = (suffix: string, fee: number, overrides: Partial<PoolSummary> = {}): PoolSummary =>
+      ({ ...pool, poolId: `0x${suffix.repeat(64)}`, fee, ponsDesignated: false, ...overrides });
+    const normal = poolWith('1', 3000);
+    const trap = poolWith('2', 900_000);
+    const dynamic = poolWith('3', 0x800000);
+    const official = poolWith('4', 950_000, { ponsDesignated: true });
+    const firstPage = { items: [normal, trap, dynamic, official], nextCursor: null, supportedProtocols: ['uniswap_v4'] };
+    const rows = () => screen.getAllByRole('row').slice(1);
+
+    it('shows every pool by default, and labels the ones with a fee of 10% or more', () => {
+      window.localStorage.removeItem('hideHighFeePools');
+      render(<PoolList page={firstPage} chainId={4663} />);
+      expect(rows()).toHaveLength(4);
+      expect(screen.getAllByText(/High fee/)).toHaveLength(2); // the 90% pool and the official pool with a 95% tier; not the dynamic-fee flag
+      expect(screen.getByRole('switch', { name: 'Hide high-fee pools' })).toHaveAttribute('aria-checked', 'false');
+    });
+
+    it('hides the high-fee pools when the switch is on, keeps the official pool, and reads the first page again without them', async () => {
+      window.localStorage.removeItem('hideHighFeePools');
+      vi.mocked(getPools).mockResolvedValueOnce({ items: [normal, dynamic, official], nextCursor: null, supportedProtocols: ['uniswap_v4'] });
+      render(<PoolList page={firstPage} chainId={4663} />);
+      await act(async () => { fireEvent.click(screen.getByRole('switch', { name: 'Hide high-fee pools' })); });
+      expect(getPools).toHaveBeenLastCalledWith({ chainId: 4663, hideHighFee: true });
+      expect(rows()).toHaveLength(3);
+      expect(screen.queryByText(/90/)).not.toBeInTheDocument();
+      expect(window.localStorage.getItem('hideHighFeePools')).toBe('true');
+    });
+
+    it('turns it back off and brings the high-fee pools back', async () => {
+      window.localStorage.setItem('hideHighFeePools', 'true');
+      vi.mocked(getPools).mockResolvedValueOnce({ items: [normal, dynamic, official], nextCursor: null, supportedProtocols: ['uniswap_v4'] });
+      vi.mocked(getPools).mockResolvedValueOnce(firstPage);
+      render(<PoolList page={firstPage} chainId={4663} />);
+      await act(async () => { await Promise.resolve(); });
+      expect(rows()).toHaveLength(3); // the remembered choice applies on load
+      await act(async () => { fireEvent.click(screen.getByRole('switch', { name: 'Hide high-fee pools' })); });
+      expect(rows()).toHaveLength(4);
+      expect(window.localStorage.getItem('hideHighFeePools')).toBe('false');
+      window.localStorage.removeItem('hideHighFeePools');
+    });
+  });
 });

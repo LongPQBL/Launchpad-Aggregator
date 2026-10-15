@@ -64,3 +64,9 @@ export function formatPoolFee(fee: number, hooks?: string | null): string {
   if (!hooks || hooks.toLowerCase() === NO_HOOK) return percent;
   return fee === 0 ? 'Hook fee' : `${percent} + hook`;
 }
+
+/** A static fee of 10% or more (mirrors the API's HIGH_FEE_PIPS); the dynamic-fee flag is not a rate. Thousands of such pools are created a day, mostly as bait. */
+export const HIGH_FEE_PIPS = 100_000;
+export function isHighFeePool(fee: number): boolean {
+  return fee >= HIGH_FEE_PIPS && (fee & DYNAMIC_FEE_FLAG) === 0;
+}

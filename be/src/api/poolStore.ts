@@ -26,8 +26,13 @@ export interface PoolSummary extends PoolStats {
   /** USD volume over the last 30 UTC days; null when any day is unpriced or the pool is still being indexed. */
   volume30dUsd: string | null;
 }
+// A static fee of 10% or more (fee is in hundredths of a basis point). 0x800000 and above is the dynamic-fee flag, not a rate.
+export const HIGH_FEE_PIPS = 100_000;
+export const DYNAMIC_FEE_FLAG = 0x800000;
 export interface PoolListQuery { limit: number; cursor?: string; chainId?: number; tokenAddress?: string;
-  protocol?: PoolKey['protocol']; excludeOfficial?: boolean }
+  protocol?: PoolKey['protocol']; excludeOfficial?: boolean;
+  /** Leave out pools whose static fee is 10% or more (see HIGH_FEE_PIPS): thousands of these are created a day. A dynamic-fee flag is not a rate and is never hidden. */
+  hideHighFee?: boolean }
 export interface PoolPage { items: PoolSummary[]; nextCursor: string | null; supportedProtocols: readonly string[] }
 export interface PoolApiStore {
   listPools(query: PoolListQuery): Promise<PoolPage>;
@@ -201,6 +206,7 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
         AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id=p.chain_id
           AND m.protocol=p.protocol AND m.pool_id=p.pool_id AND m.token_address=$2))
         AND ($3::text IS NULL OR p.protocol=$3)
+        ${query.hideHighFee ? `AND NOT (p.fee >= ${HIGH_FEE_PIPS} AND p.fee < ${DYNAMIC_FEE_FLAG})` : ''}
         ${query.excludeOfficial ? `AND NOT EXISTS (SELECT 1 FROM venues v WHERE v.chain_id=p.chain_id
           AND v.kind IN ('v4_pool','v3_pool') AND v.ref=p.pool_id AND v.official=true)` : ''}
         ${cursor ? 'AND (p.block_number,p.log_index,p.chain_id,p.protocol,p.pool_id) < ($4::bigint,$5::integer,$6::integer,$7::text,$8::text)' : ''}

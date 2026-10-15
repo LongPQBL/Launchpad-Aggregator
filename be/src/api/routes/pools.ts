@@ -29,6 +29,7 @@ function listQuery(value: Record<string, string | undefined>, tokenAddress?: str
   return { limit: Math.min(limit, 100), ...(chainId ? { chainId } : {}),
     ...(value.cursor ? { cursor: value.cursor } : {}),
     ...(value.protocol ? { protocol: value.protocol as PoolKey['protocol'] } : {}),
+    ...(value.hideHighFee === 'true' ? { hideHighFee: true } : {}),
     ...((tokenAddress ?? value.tokenAddress) ? { tokenAddress: token(tokenAddress ?? value.tokenAddress)! } : {}) };
 }
 function unavailable(reply: { code(n: number): { send(value: object): unknown } }) {

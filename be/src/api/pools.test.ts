@@ -47,6 +47,15 @@ describe('pool API', () => {
     expect(detail.json().poolBalances).toEqual(item.poolBalances);
     await app.close();
   });
+  it('passes hideHighFee=true through on the global and the per-launch lists, and nothing else is read as true', async () => {
+    const { calls, pools, data } = setup();
+    const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });
+    await app.inject({ method: 'GET', url: '/v1/pools?chainId=4663&limit=5&hideHighFee=true' });
+    await app.inject({ method: 'GET', url: `/v1/launches/4663/${token}/pools?hideHighFee=true` });
+    await app.inject({ method: 'GET', url: '/v1/pools?chainId=4663&limit=5&hideHighFee=yes' });
+    expect(calls).toEqual([{ chainId: 4663, limit: 5, hideHighFee: true }, { chainId: 4663, limit: 50, tokenAddress: token, hideHighFee: true }, { chainId: 4663, limit: 5 }]);
+    await app.close();
+  });
   it('rejects malformed identities, unsupported sources, and invalid query', async () => {
     const { pools, data } = setup();
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, pools });

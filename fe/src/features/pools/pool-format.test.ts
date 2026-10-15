@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatPoolFee, formatVolumeToTvl, volumeToTvl } from './pool-format';
+import { formatPoolFee, formatVolumeToTvl, isHighFeePool, volumeToTvl } from './pool-format';
 
 describe('volumeToTvl', () => {
   it('divides 24h volume by liquidity', () => {
@@ -42,5 +42,16 @@ describe('formatPoolFee', () => {
     expect(formatPoolFee(3000, hook)).toBe('0.3% + hook');
     expect(formatPoolFee(0, '0x0000000000000000000000000000000000000000')).toBe('0%');
     expect(formatPoolFee(0, null)).toBe('0%');
+  });
+});
+
+describe('isHighFeePool', () => {
+  it('is a static fee of 10% or more, and never the dynamic-fee flag or a normal tier', () => {
+    expect(isHighFeePool(838_974)).toBe(true);
+    expect(isHighFeePool(100_000)).toBe(true);
+    expect(isHighFeePool(99_999)).toBe(false);
+    expect(isHighFeePool(3000)).toBe(false);
+    expect(isHighFeePool(0)).toBe(false);
+    expect(isHighFeePool(0x800000)).toBe(false);
   });
 });

@@ -67,6 +67,27 @@ describe('pool catalog API reader', () => {
     expect(exact.items.map((x) => x.poolId)).toEqual([ids[0]]);
     expect((await store.listPools({ chainId: 1, limit: 10, tokenAddress: a })).items).toEqual([]);
   });
+  it('hides pools with a static fee of 10% or more on request, never the dynamic-fee flag, and shows everything by default', async () => {
+    const d = '0x3434343434343434343434343434343434343434';
+    const trap = `0x${'7a'.repeat(32)}`;
+    const dynamic = `0x${'7b'.repeat(32)}`;
+    const normal = `0x${'7c'.repeat(32)}`;
+    const rows: [string, number][] = [[trap, 900_000], [dynamic, 0x800000], [normal, 3000]];
+    for (const [index, [id, fee]] of rows.entries()) {
+      await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+        VALUES (4663,'uniswap_v4',$1,$2,$3,$4,60,$5,$6,$7,$7,0,true,'backfilling') ON CONFLICT DO NOTHING`,
+      [id, a, d, fee, '0x0000000000000000000000000000000000000000', 999999900 + index, `0x${String(index + 5).repeat(64)}`]);
+      await pool.query(`INSERT INTO pool_members (chain_id,protocol,pool_id,token_address) VALUES (4663,'uniswap_v4',$1,$2) ON CONFLICT DO NOTHING`, [id, d]);
+    }
+    try {
+      const all = await store.listPools({ limit: 50, tokenAddress: d });
+      expect(all.items.map((item) => item.poolId).sort()).toEqual([trap, dynamic, normal].sort());
+      const filtered = await store.listPools({ limit: 50, tokenAddress: d, hideHighFee: true });
+      expect(filtered.items.map((item) => item.poolId).sort()).toEqual([dynamic, normal].sort());
+    } finally {
+      await pool.query('DELETE FROM pool_catalog WHERE pool_id = ANY($1)', [[trap, dynamic, normal]]);
+    }
+  });
   it('rejects a side outside the verified pair and an invalid cursor', async () => {
     expect(await store.getPool({ chainId: 4663, protocol: 'uniswap_v4', poolId: ids[0] }, c)).toBeNull();
     await expect(store.listPools({ limit: 1, cursor: 'garbage' })).rejects.toThrow('Invalid pool cursor');
