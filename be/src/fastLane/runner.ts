@@ -53,6 +53,8 @@ export interface FastLane {
 
 const HANDLED_KEYS_MAX = 5_000;
 const CACHE_MAX = 512;
+const HEADER_PREFETCH_BATCH_SIZE = 256;
+const HEADER_PREFETCH_CONCURRENCY = 8;
 const SENDER_CACHE_MAX = 4_096;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function trim<K, V>(map: Map<K, V>, max: number): void {
@@ -248,17 +250,24 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
         const cls = classifyLog(entry);
         return cls !== null && isWatched(watch, cls);
       }));
-      let prefetchIndex = 0;
-      await Promise.all(Array.from({ length: Math.min(8, headerBlocks.length) }, async () => {
-        while (prefetchIndex < headerBlocks.length) await getHeader(headerBlocks[prefetchIndex++]!);
-      }));
       // A whole multi-thousand-block chunk can contain minutes of sequential RPC work. Queue one
       // block at a time so live socket batches can run between historical blocks instead of waiting
-      // behind the complete backfill chunk.
-      for (const blockNumber of blockNumbers) {
-        let complete = false;
-        await enqueue(async () => { complete = await processLogs(byBlock.get(blockNumber)!); });
-        if (!complete) return;
+      // behind the complete backfill chunk. Keep each header prefetch batch below the LRU cache size,
+      // then process that batch before loading more; otherwise early headers are evicted and fetched
+      // a second time serially during processBlock.
+      for (let offset = 0; offset < blockNumbers.length; offset += HEADER_PREFETCH_BATCH_SIZE) {
+        const blockBatch = blockNumbers.slice(offset, offset + HEADER_PREFETCH_BATCH_SIZE);
+        const blockBatchSet = new Set(blockBatch);
+        const headersToFetch = headerBlocks.filter((blockNumber) => blockBatchSet.has(blockNumber));
+        let prefetchIndex = 0;
+        await Promise.all(Array.from({ length: Math.min(HEADER_PREFETCH_CONCURRENCY, headersToFetch.length) }, async () => {
+          while (prefetchIndex < headersToFetch.length) await getHeader(headersToFetch[prefetchIndex++]!);
+        }));
+        for (const blockNumber of blockBatch) {
+          let complete = false;
+          await enqueue(async () => { complete = await processLogs(byBlock.get(blockNumber)!); });
+          if (!complete) return;
+        }
       }
     }
     lastSwept = to;

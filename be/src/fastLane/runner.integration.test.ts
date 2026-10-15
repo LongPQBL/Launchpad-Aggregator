@@ -317,6 +317,19 @@ describe('fast lane', () => {
     expect(peak).toBeGreaterThan(1);
   });
 
+  it('keeps prefetched headers inside the cache window to avoid serial refetches', async () => {
+    const fake = fakeSource();
+    fake.head = 1_000n;
+    fake.logs = Array.from({ length: 520 }, (_, index) => buyLog({ blockNumber: BigInt(index + 2) }));
+    fake.getBlock = async (blockNumber) => {
+      fake.calls.getBlock += 1;
+      return { ...fake.header!, number: blockNumber };
+    };
+    const instance = await lane(fake, { sweepChunkBlocks: 2_000n, sweepLagBlocks: 2n });
+    await instance.sweepOnce();
+    expect(fake.calls.getBlock).toBe(520);
+  });
+
   it('records the Envio bridge for each watched venue and bridges a newly added venue through the saved lane block', async () => {
     const fake = fakeSource();
     await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
