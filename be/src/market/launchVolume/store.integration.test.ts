@@ -108,13 +108,14 @@ describe('launch volume store', () => {
     expect(await jobRow(tokenA)).toBeUndefined();
   });
 
-  it('makes a published score unavailable immediately when its launch is invalidated again', async () => {
+  it('retains a published score while its launch is being recalculated', async () => {
     await invalidateLaunchVolume(db, [keyA], new Date(now.getTime() - 1_000));
     const [claim] = await claimVolumeJobs(pool, now, 1);
     await publishVolumeScore(pool, claim, scoreFor('5', 'positive'));
     await invalidateLaunchVolume(db, [keyA], now);
     const score = (await pool.query('SELECT volume_usd, rank_category, rank_order, completeness_reason FROM launch_volume24h_usd WHERE token_address = $1', [tokenA])).rows[0];
-    expect(score).toMatchObject({ volume_usd: null, rank_category: 'null', rank_order: 2, completeness_reason: 'updating' });
+    expect(Number(score.volume_usd)).toBe(5);
+    expect(score).toMatchObject({ rank_category: 'positive', rank_order: 0, completeness_reason: 'updating' });
   });
 
   it('ignores invalidation for a launch that reorg repair already deleted', async () => {

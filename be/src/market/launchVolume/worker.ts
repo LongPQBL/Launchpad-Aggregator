@@ -22,6 +22,10 @@ export async function refreshDueLaunchVolumes(
   for (const claim of claims) {
     try {
       const score = await calculateLaunchVolume(pool, claim.key, windowEnd, headBlock);
+      if (score.completenessReason === 'incomplete_coverage') {
+        await releaseVolumeClaim(pool, claim, new Date(now.getTime() + RETRY_DELAY_MS), 'coverage incomplete; retaining last published score');
+        continue;
+      }
       if (await publishVolumeScore(pool, claim, score)) {
         report.published += 1;
         published.push(claim.key);

@@ -227,8 +227,8 @@ export const launchVolume24hUsd = pgTable('launch_volume24h_usd', {
   index('launch_volume24h_usd_rank_idx').on(table.rankOrder, table.volumeUsd.desc(), table.launchBlock.desc(),
     table.launchTxHash.desc(), table.launchLogIndex.desc()),
   check('launch_volume24h_usd_rank_valid', sql`
-    (${table.rankCategory} = 'positive' AND ${table.rankOrder} = 0 AND ${table.volumeUsd} > 0 AND ${table.completenessReason} = 'complete')
-    OR (${table.rankCategory} = 'zero' AND ${table.rankOrder} = 1 AND ${table.volumeUsd} = 0 AND ${table.completenessReason} = 'complete')
+    (${table.rankCategory} = 'positive' AND ${table.rankOrder} = 0 AND ${table.volumeUsd} > 0 AND ${table.completenessReason} IN ('complete', 'updating'))
+    OR (${table.rankCategory} = 'zero' AND ${table.rankOrder} = 1 AND ${table.volumeUsd} = 0 AND ${table.completenessReason} IN ('complete', 'updating'))
     OR (${table.rankCategory} = 'null' AND ${table.rankOrder} = 2 AND ${table.volumeUsd} IS NULL)
   `),
   check('launch_volume24h_usd_reason_valid', sql`${table.completenessReason} IN ('complete', 'incomplete_coverage', 'unpriced_trade', 'updating')`),

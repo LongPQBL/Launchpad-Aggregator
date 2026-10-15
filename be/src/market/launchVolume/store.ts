@@ -46,7 +46,7 @@ export async function invalidateLaunchVolume(tx: SqlExecutor, keys: readonly Lau
         updated_at = now()`);
     await tx.execute(sql`
       UPDATE launch_volume24h_usd AS s SET
-        volume_usd = NULL, rank_category = 'null', rank_order = 2, completeness_reason = 'updating'
+        completeness_reason = 'updating'
       FROM (VALUES ${values}) AS k(chain_id, token_address)
       WHERE s.chain_id = k.chain_id AND s.token_address = k.token_address`);
   }

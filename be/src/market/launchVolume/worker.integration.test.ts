@@ -79,6 +79,22 @@ describe('refreshDueLaunchVolumes', () => {
     expect(await jobRow()).toMatchObject({ lease_id: null });
   });
 
+  it('keeps the last complete score when neither Envio nor the lane covers the current head', async () => {
+    await invalidateLaunchVolume(db, [key], new Date(now.getTime() - 1_000));
+    await refreshDueLaunchVolumes(pool, now, 10, headAtCompletion);
+    const previous = await scoreRow();
+    await pool.query("UPDATE sources SET confirmed_to_block = 3000 WHERE id = $1", [source]);
+    await invalidateLaunchVolume(db, [key], now);
+
+    const report = await refreshDueLaunchVolumes(pool, now, 10, async () => 4_000n);
+    expect(report).toMatchObject({ claimed: 1, published: 0, failed: 0 });
+    expect(await scoreRow()).toMatchObject({
+      volume_usd: previous.volume_usd, rank_category: previous.rank_category, completeness_reason: 'updating',
+    });
+    expect(new Date((await jobRow()).due_at).getTime()).toBe(now.getTime() + 30_000);
+    await pool.query("UPDATE sources SET confirmed_to_block = 5000 WHERE id = $1", [source]);
+  });
+
   it('announces launch.changed after it publishes a score, so the browser refetches the new volume', async () => {
     const listener = new Client({ connectionString: databaseUrl });
     await listener.connect();
