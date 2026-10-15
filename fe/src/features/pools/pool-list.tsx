@@ -214,7 +214,8 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     } catch { setLoadError(true); }
   }, [chainId, tokenAddress]);
   useEffect(() => {
-    try { if (window.localStorage.getItem(HIDE_HIGH_FEE_KEY) === 'true') void applyHideHighFee(true); } catch { /* not readable */ }
+    // After the first render, never inside the effect body: the remembered choice is applied as an ordinary update.
+    try { if (window.localStorage.getItem(HIDE_HIGH_FEE_KEY) === 'true') void Promise.resolve().then(() => applyHideHighFee(true)); } catch { /* not readable */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- read once on mount
   }, []);
 
