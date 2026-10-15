@@ -10,7 +10,7 @@ export interface TvlFields {
   tvlUsd: string | null;
   tvlBasis: VenueAmounts['basis'] | null;
   tvlBlockNumber: string | null;
-  tvlPriceSource: 'chainlink' | 'peg' | null;
+  tvlPriceSource: 'chainlink' | null;
   tvlPriceUpdatedAt: number | null;
   tvlUnavailableReason: string | null;
 }

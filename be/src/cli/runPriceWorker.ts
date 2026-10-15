@@ -2,7 +2,6 @@ import { Pool } from 'pg';
 import { createRobinhoodPublicClient, robinhood } from '../chains/robinhood.js';
 import { enrichPricesOnce, maintainRollingWindows } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
-import { ensurePeggedRounds } from '../market/quotePricing/peggedAssets.js';
 
 // Keeps the USD quote feeds resolved and their oracle rounds up to date: resolves pending feed-resolution jobs, backfills the rounds of the
 // rolling window and of any enqueued range (see `npm run -w be prices:backfill-history`), one pass every PRICE_WORKER_INTERVAL_SECONDS (default 30).
@@ -18,7 +17,6 @@ process.on('SIGTERM', () => { stopping = true; });
 
 try {
   while (!stopping) {
-    await ensurePeggedRounds(pool, robinhood.id, new Date()).catch((error) => console.error('pegged rounds failed:', error));
     await maintainRollingWindows(pool, robinhood.id, new Date()).catch((error) => console.error('rolling windows failed:', error));
     const report = await enrichPricesOnce(pool, client, robinhood.id, new Date(), quoteFeedRegistry.resolve).catch((error) => {
       console.error('price enrichment failed:', error);

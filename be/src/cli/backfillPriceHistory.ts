@@ -20,7 +20,7 @@ const client = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https
 try {
   const feeds = (await pool.query(`SELECT f.feed_address, min(t.timestamp)::bigint AS first_trade FROM quote_usd_feeds f
     JOIN trades t ON t.chain_id = f.chain_id AND t.quote_asset_address = f.quote_asset_address
-    WHERE f.chain_id = $1 AND f.verification_status = 'verified' AND f.discovery_source <> 'peg' GROUP BY f.feed_address ORDER BY first_trade`, [robinhood.id])).rows
+    WHERE f.chain_id = $1 AND f.verification_status = 'verified' GROUP BY f.feed_address ORDER BY first_trade`, [robinhood.id])).rows
     .filter((row) => only === undefined || String(row.feed_address).toLowerCase() === only)
     .filter((_, index) => index % shard[1]! === shard[0]! - 1);
   console.log(`${feeds.length} feed(s) with trades to value`);
