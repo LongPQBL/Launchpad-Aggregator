@@ -137,7 +137,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     return sender;
   }
 
-  async function processBlock(blockNumber: bigint, blockLogs: FastLog[]): Promise<void> {
+  async function processBlock(blockNumber: bigint, blockLogs: FastLog[]): Promise<boolean> {
     const keyOf = (entry: FastLog) => `${entry.transactionHash.toLowerCase()}:${entry.logIndex}`;
     const candidates = blockLogs
       .map((entry) => ({ entry, cls: classifyLog(entry) }))
@@ -145,10 +145,10 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       .filter((item) => !handled.has(keyOf(item.entry)))
       .sort((a, b) => a.entry.logIndex - b.entry.logIndex);
     counters.watched += candidates.length;
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) return true;
     const lookupStart = now();
     let header = await getHeader(blockNumber);
-    if (!header) { counters.skipped += candidates.length; return; }
+    if (!header) { counters.skipped += candidates.length; return false; }
     if (candidates.some(({ entry }) => header!.hash.toLowerCase() !== entry.blockHash.toLowerCase())) {
       // the cached header may predate a reorg: ask the node once more before calling it a mismatch
       const fresh = await lookup(() => source.getBlock(blockNumber));
@@ -157,22 +157,24 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     const current = header;
     const entries: LiveEntry[] = [];
     const keys: string[] = [];
+    let complete = true;
     // Anything the block read did not already answer is asked for all at once, not one transaction after another.
     await Promise.all([...new Set(candidates.map(({ entry }) => entry.transactionHash.toLowerCase()))].map((txHash) => getSender(txHash)));
     for (const { entry } of candidates) {
-      if (current.hash.toLowerCase() !== entry.blockHash.toLowerCase()) { counters.skipped += 1; continue; }
+      if (current.hash.toLowerCase() !== entry.blockHash.toLowerCase()) { counters.skipped += 1; complete = false; continue; }
       const from = await getSender(entry.transactionHash);
-      if (!from) { counters.skipped += 1; continue; }
+      if (!from) { counters.skipped += 1; complete = false; continue; }
       const decoded = decodeLiveLog(entry, { chainId, timestamp: current.timestamp, txFrom: from });
-      if (!decoded) { counters.skipped += 1; continue; }
+      if (!decoded) { counters.skipped += 1; complete = false; continue; }
       entries.push(decoded);
       keys.push(keyOf(entry));
     }
     counters.lookupMs += now() - lookupStart;
-    if (entries.length === 0) return;
+    if (entries.length === 0) return complete;
     const applyStart = now();
     const result = await applyLiveRows(db, chainId, entries);
     counters.applied += result.applied; counters.unresolved += result.unresolved; counters.skipped += result.skipped;
+    if (result.outcomes.some((outcome) => outcome !== 'applied')) complete = false;
     await recordFastRows(db, chainId, entries.filter((_, index) => result.outcomes[index] === 'applied'));
     keys.forEach((key, index) => { if (result.outcomes[index] === 'applied') handled.add(key); });
     counters.blocks += 1; counters.applyMs += now() - applyStart;
@@ -185,9 +187,10 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       arrivedAt.delete(blockNumber.toString());
     }
     while (handled.size > HANDLED_KEYS_MAX) handled.delete(handled.values().next().value as string);
+    return complete;
   }
 
-  async function processLogs(logs: readonly FastLog[]): Promise<void> {
+  async function processLogs(logs: readonly FastLog[]): Promise<boolean> {
     counters.received += logs.length;
     for (const removed of logs.filter((entry) => entry.removed)) {
       try {
@@ -201,10 +204,12 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       if (entry.removed) continue;
       byBlock.set(entry.blockNumber, [...(byBlock.get(entry.blockNumber) ?? []), entry]);
     }
+    let complete = true;
     for (const blockNumber of [...byBlock.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
-      try { await processBlock(blockNumber, byBlock.get(blockNumber)!); }
-      catch (error) { counters.errors += 1; log('could not apply a block of trades', { blockNumber: blockNumber.toString(), error: (error as Error).message }); }
+      try { if (!await processBlock(blockNumber, byBlock.get(blockNumber)!)) complete = false; }
+      catch (error) { complete = false; counters.errors += 1; log('could not apply a block of trades', { blockNumber: blockNumber.toString(), error: (error as Error).message }); }
     }
+    return complete;
   }
 
   async function sweep(): Promise<void> {
@@ -237,11 +242,23 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       const logs = await source.getLogs(start, end); // the slow part runs outside the queue, so a live log never waits behind it
       const byBlock = new Map<bigint, FastLog[]>();
       for (const entry of logs) byBlock.set(entry.blockNumber, [...(byBlock.get(entry.blockNumber) ?? []), entry]);
+      const blockNumbers = [...byBlock.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      const headerBlocks = blockNumbers.filter((blockNumber) => byBlock.get(blockNumber)!.some((entry) => {
+        if (entry.removed) return false;
+        const cls = classifyLog(entry);
+        return cls !== null && isWatched(watch, cls);
+      }));
+      let prefetchIndex = 0;
+      await Promise.all(Array.from({ length: Math.min(8, headerBlocks.length) }, async () => {
+        while (prefetchIndex < headerBlocks.length) await getHeader(headerBlocks[prefetchIndex++]!);
+      }));
       // A whole multi-thousand-block chunk can contain minutes of sequential RPC work. Queue one
       // block at a time so live socket batches can run between historical blocks instead of waiting
       // behind the complete backfill chunk.
-      for (const blockNumber of [...byBlock.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
-        await enqueue(() => processLogs(byBlock.get(blockNumber)!));
+      for (const blockNumber of blockNumbers) {
+        let complete = false;
+        await enqueue(async () => { complete = await processLogs(byBlock.get(blockNumber)!); });
+        if (!complete) return;
       }
     }
     lastSwept = to;
@@ -272,7 +289,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       void getHeader(blockNumber);
     }
     trim(arrivedAt, CACHE_MAX);
-    return enqueue(() => processLogs(logs));
+    return enqueue(async () => { await processLogs(logs); });
   }
 
   async function sweepSafely(): Promise<void> {

@@ -296,6 +296,27 @@ describe('fast lane', () => {
     await sweepPromise;
   });
 
+  it('prefetches historical block headers concurrently so coverage sweeps can catch up', async () => {
+    const fake = fakeSource();
+    fake.head = 60n;
+    fake.logs = [2n, 3n, 4n].map((blockNumber) => buyLog({ blockNumber }));
+    let active = 0;
+    let peak = 0;
+    fake.getBlock = async (blockNumber) => {
+      fake.calls.getBlock += 1;
+      if (blockNumber <= 4n) {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 40));
+        active -= 1;
+      }
+      return { ...fake.header!, number: blockNumber };
+    };
+    const instance = await lane(fake, { sweepChunkBlocks: 100n, sweepLagBlocks: 2n });
+    await instance.sweepOnce();
+    expect(peak).toBeGreaterThan(1);
+  });
+
   it('records the Envio bridge for each watched venue and bridges a newly added venue through the saved lane block', async () => {
     const fake = fakeSource();
     await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
@@ -342,6 +363,19 @@ describe('fast lane', () => {
     await instance.sweepOnce();
     expect(getLogs).toHaveBeenCalledTimes(2);
     expect(getLogs.mock.calls[1]![0]).toBe(5001n);
+  });
+
+  it('does not advance trusted coverage when a watched sweep log cannot be hydrated', async () => {
+    const fake = fakeSource();
+    fake.header = null;
+    fake.head = 5100n;
+    fake.logs = [buyLog({ blockNumber: 5001n })];
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n, coverageBlock: 5000n });
+    const instance = await lane(fake);
+    await instance.sweepOnce();
+    const state = (await pool.query('SELECT last_block, coverage_block FROM fast_lane_state WHERE chain_id = $1', [chainId])).rows[0];
+    expect(state).toMatchObject({ last_block: '5000', coverage_block: '5000' });
+    expect(await tradeRows()).toHaveLength(0);
   });
 
   it('applies a replacement log after a reorg and skips a late copy of the old-hash log', async () => {
