@@ -15,6 +15,10 @@ describe('forwardRpc', () => {
     expect(await response.json()).toEqual({ jsonrpc: '2.0', id: 1, result: '0x10' });
     expect(fetchImpl).toHaveBeenCalledWith('https://upstream.example/key', expect.objectContaining({ method: 'POST' }));
   });
+  it('forwards a simulation (the transfer-fee check of the trade panel uses eth_simulateV1)', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(new Response('{"jsonrpc":"2.0","id":1,"result":[]}'));
+    expect((await forwardRpc(post(call('eth_simulateV1')), 'https://u.example', fetchImpl as never)).status).toBe(200);
+  });
   it('forwards a batch of allowed calls', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response('[]'));
     const response = await forwardRpc(post([call('eth_call'), call('eth_getBalance')]), 'https://u.example', fetchImpl as never);

@@ -4,6 +4,8 @@ const ALLOWED_METHODS = new Set([
   'eth_chainId', 'net_version', 'eth_blockNumber', 'eth_call', 'eth_estimateGas', 'eth_gasPrice', 'eth_maxPriorityFeePerGas', 'eth_feeHistory',
   'eth_getBalance', 'eth_getCode', 'eth_getStorageAt', 'eth_getTransactionCount', 'eth_getTransactionByHash', 'eth_getTransactionReceipt',
   'eth_getBlockByNumber', 'eth_getBlockByHash', 'eth_getLogs',
+  // A simulation changes no state; the transfer-fee check of the trade panel measures a token with it.
+  'eth_simulateV1', 'eth_createAccessList',
 ]);
 export const MAX_BODY_BYTES = 64 * 1024;
 export const MAX_BATCH = 20;
