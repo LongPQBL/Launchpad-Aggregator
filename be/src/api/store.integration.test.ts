@@ -162,6 +162,7 @@ describe('safe head considers envio_chain_progress (final review, Important 3)',
   const headBlock = 99_999_999_999n;
 
   afterAll(async () => {
+    await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = 4663 AND venue_id = $1', [`4663:v3_pool:${headToken}`]);
     await pool.query('DELETE FROM venues WHERE token_address = $1', [headToken]);
     await pool.query('DELETE FROM launches WHERE token_address = $1', [headToken]);
     await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[headSource, `${headSource}-trades`]]);
@@ -194,6 +195,22 @@ describe('safe head considers envio_chain_progress (final review, Important 3)',
 
     const afterHead = await store.getLaunch(4663, headToken);
     expect(afterHead?.coverageStatus).toBe('caught_up');
+
+    // The lane can replace only this venue's trade watermark. Factory coverage remains Envio-owned.
+    await pool.query('UPDATE sources SET confirmed_to_block = 900 WHERE id = $1', [`${headSource}-trades`]);
+    await pool.query(`INSERT INTO fast_lane_state (chain_id,last_block,coverage_block) VALUES (4663,$1,$1)
+      ON CONFLICT (chain_id) DO UPDATE SET last_block=$1, coverage_block=$1`, [headBlock.toString()]);
+    await pool.query(`INSERT INTO fast_lane_venue_coverage (chain_id,venue_id,envio_bridge_block) VALUES (4663,$1,800)
+      ON CONFLICT (chain_id,venue_id) DO UPDATE SET envio_bridge_block=800`, [`4663:v3_pool:${headToken}`]);
+    const laneCovered = await store.getLaunch(4663, headToken);
+    expect(laneCovered?.coverageStatus).toBe('caught_up');
+
+    await pool.query('UPDATE sources SET confirmed_to_block = 99999999998 WHERE id = $1', [headSource]);
+    const factoryBehind = await store.getLaunch(4663, headToken);
+    expect(factoryBehind?.coverageStatus).toBe('backfilling');
+    await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = 4663 AND venue_id = $1', [`4663:v3_pool:${headToken}`]);
+    await pool.query('DELETE FROM fast_lane_state WHERE chain_id = 4663');
+    await pool.query('UPDATE sources SET confirmed_to_block = $1 WHERE id = $2', [headBlock.toString(), `${headSource}-trades`]);
   });
 });
 
@@ -405,7 +422,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     // non-null fdvUsd, not just that the broken sibling is null (final-review Important 8).
     await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
       VALUES ($1,4663,$2,'v3_pool',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`,
-    [goodVenueId, goodToken, statsSource]);
+    [goodVenueId, goodToken, `${statsSource}-trades`]);
     await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
       side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
       VALUES (4663,$1,$2,1,$3,$4,0,$6,'buy','1000000000000000000','1000000000000000000',$5,'1','1','V3Swap','user_trade',$1)
