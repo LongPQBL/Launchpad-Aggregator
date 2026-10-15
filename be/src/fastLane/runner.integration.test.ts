@@ -4,6 +4,7 @@ import { and, eq } from 'drizzle-orm';
 import { encodeAbiParameters, encodeEventTopics } from 'viem';
 import { createDatabase } from '../db/client.js';
 import { fastLaneRows, fastLaneState, launches, trades, venues } from '../db/schema.js';
+import { readLaneBlock } from './store.js';
 import { curveBuyEvent } from '../launchpads/pons/v2/abi.js';
 import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
 import type { FastLog } from './decode.js';
@@ -73,6 +74,7 @@ beforeEach(async () => {
   await db.delete(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
   await db.delete(fastLaneRows).where(eq(fastLaneRows.chainId, chainId));
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
+  await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = $1', [chainId]);
 });
 afterAll(async () => {
   await listener.query('UNLISTEN launchpad_events');
@@ -80,6 +82,7 @@ afterAll(async () => {
   await db.delete(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
   await db.delete(fastLaneRows).where(eq(fastLaneRows.chainId, chainId));
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
+  await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM launch_volume24h_jobs WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM venues WHERE source_id = $1', [source]);
   await pool.query('DELETE FROM launches WHERE source_id = $1', [source]);
@@ -243,7 +246,7 @@ describe('fast lane', () => {
     fake.header = { number: 5010n, hash: blockHash, timestamp: 1_700_000_050 };
     fake.logs = [log];
     fake.head = 5100n;
-    await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n, coverageBlock: 5000n });
     const getLogs = vi.spyOn(fake, 'getLogs');
     const instance = await lane(fake, { sweepChunkBlocks: 50n, sweepLagBlocks: 2n });
     await instance.sweepOnce();
@@ -256,15 +259,50 @@ describe('fast lane', () => {
     expect(getLogs).not.toHaveBeenCalled(); // nothing new since 5098
   });
 
-  it('skips a gap larger than the limit instead of scanning it', async () => {
+  it('anchors its first sweep at the Envio confirmed fence instead of starting at the current head', async () => {
+    const fake = fakeSource();
+    fake.head = 5100n;
+    const getLogs = vi.spyOn(fake, 'getLogs');
+    const instance = await lane(fake, { sweepChunkBlocks: 2_000n });
+    await instance.sweepOnce();
+    expect(getLogs.mock.calls[0]).toEqual([2n, 2001n]); // the watched source confirms block 1
+    expect(await readLaneBlock(db, chainId)).toBe(5098n);
+    expect((await pool.query('SELECT coverage_block FROM fast_lane_state WHERE chain_id = $1', [chainId])).rows[0]?.coverage_block).toBe('5098');
+  });
+
+  it('records the Envio bridge for each watched venue and bridges a newly added venue through the saved lane block', async () => {
+    const fake = fakeSource();
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
+    const instance = await lane(fake);
+    const first = await pool.query('SELECT envio_bridge_block FROM fast_lane_venue_coverage WHERE chain_id = $1 AND venue_id = $2',
+      [chainId, `fast-lane-curve-${token}`]);
+    expect(first.rows[0]?.envio_bridge_block).toBe('5000');
+
+    const lateRef = '0x7e000000000000000000000000000000000000d5';
+    await db.insert(venues).values({
+      id: `fast-lane-late-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: lateRef, sourceId: source, sourceLogId: null,
+      effectiveFromBlock: 1200n, official: true,
+    }).onConflictDoNothing();
+    await instance.reloadWatchSet();
+    const late = await pool.query('SELECT envio_bridge_block FROM fast_lane_venue_coverage WHERE chain_id = $1 AND venue_id = $2',
+      [chainId, `fast-lane-late-${token}`]);
+    expect(late.rows[0]?.envio_bridge_block).toBe('5000'); // Envio must fill the interval before this venue joined the watch set
+    await db.delete(venues).where(eq(venues.id, `fast-lane-late-${token}`));
+  });
+
+  it('leaves the trusted watermark unchanged when a gap is too large to scan', async () => {
     const fake = fakeSource();
     fake.head = 90_000n;
-    await db.insert(fastLaneState).values({ chainId, lastBlock: 1_000n });
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 1_000n, coverageBlock: 1_000n });
     const getLogs = vi.spyOn(fake, 'getLogs');
     const instance = await lane(fake, { maxGapBlocks: 20_000n });
     await instance.sweepOnce();
     expect(getLogs).not.toHaveBeenCalled();
-    expect((await db.select().from(fastLaneState).where(eq(fastLaneState.chainId, chainId)))[0]?.lastBlock).toBe(89_998n);
+    const state = (await pool.query('SELECT last_block, coverage_block FROM fast_lane_state WHERE chain_id = $1', [chainId])).rows[0];
+    expect(state?.last_block).toBe('89998'); // the resume cursor skips this unrecoverable range
+    expect(state?.coverage_block).toBe('1000'); // the trusted watermark never crosses it
+    expect((await pool.query('SELECT envio_bridge_block FROM fast_lane_venue_coverage WHERE chain_id = $1 AND venue_id = $2',
+      [chainId, `fast-lane-curve-${token}`])).rows[0]?.envio_bridge_block).toBe('89998');
   });
 
   it('counts a failed getLogs and retries the same range on the next sweep', async () => {
@@ -274,6 +312,7 @@ describe('fast lane', () => {
     const instance = await lane(fake);
     await instance.sweepOnce();
     expect(instance.stats().errors).toBe(1);
+    expect(await readLaneBlock(db, chainId)).toBe(5000n); // a failed range must not certify blocks the lane did not inspect
     await instance.sweepOnce();
     expect(getLogs).toHaveBeenCalledTimes(2);
     expect(getLogs.mock.calls[1]![0]).toBe(5001n);

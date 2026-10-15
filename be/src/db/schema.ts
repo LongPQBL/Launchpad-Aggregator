@@ -637,8 +637,22 @@ export const fastLaneRows = pgTable('fast_lane_rows', {
 export const fastLaneState = pgTable('fast_lane_state', {
   chainId: integer('chain_id').primaryKey(),
   lastBlock: bigint('last_block', { mode: 'bigint' }).notNull(),
+  // Highest block the lane has fully swept across every watched range. Unlike lastBlock, this never jumps a skipped gap.
+  coverageBlock: bigint('coverage_block', { mode: 'bigint' }),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
+
+// Envio must confirm through this bridge before the lane can certify a venue's trades. It is set to the source's current
+// confirmed block when the venue first enters the watch set, or to the lane's resume cursor when it is added later.
+export const fastLaneVenueCoverage = pgTable('fast_lane_venue_coverage', {
+  chainId: integer('chain_id').notNull(),
+  venueId: text('venue_id').notNull().references(() => venues.id, { onDelete: 'cascade' }),
+  envioBridgeBlock: bigint('envio_bridge_block', { mode: 'bigint' }).notNull(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => [
+  primaryKey({ columns: [table.chainId, table.venueId] }),
+  index('fast_lane_venue_coverage_chain_idx').on(table.chainId, table.envioBridgeBlock),
+]);
 
 // Durable per-(chain, Envio raw stream, lane) read position for the incremental near-realtime sync
 // (be/src/envioSync/incrementalCursor.ts). "tail" starts near Envio's current head for fresh activity,

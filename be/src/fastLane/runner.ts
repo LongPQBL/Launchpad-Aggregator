@@ -2,7 +2,8 @@ import type { Pool } from 'pg';
 import type { Database } from '../db/client.js';
 import { applyLiveRows, type LiveEntry } from '../envioSync/incrementalSync.js';
 import { classifyLog, decodeLiveLog, type FastLog } from './decode.js';
-import { advanceLaneBlock, readLaneBlock, recordFastRows, removeLaneTrade } from './store.js';
+import { advanceLaneBlock, advanceLaneResumeBlock, ensureLaneVenueCoverage, initializeLaneBlock, raiseLaneVenueBridge,
+  readLaneBlock, readMinimumLaneBridgeBlock, recordFastRows, removeLaneTrade } from './store.js';
 import { createWatchSetLoader, EMPTY_WATCH_SET, isWatched, type WatchSet } from './watchSet.js';
 
 /** `senders` (lower-case tx hash -> `from`) is filled when the block was read with its transactions: one call then answers every lookup. */
@@ -209,13 +210,26 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   async function sweep(): Promise<void> {
     const head = await source.getBlockNumber();
     const to = head - sweepLagBlocks;
-    if (lastSwept === null) lastSwept = (await readLaneBlock(db, chainId)) ?? to; // a lane that never ran starts here, it does not backfill
+    if (lastSwept === null) {
+      const saved = await readLaneBlock(db, chainId);
+      if (saved !== null) lastSwept = saved;
+      else {
+        // Every venue's Envio bridge was persisted when it entered the watch set. Starting at the
+        // minimum bridge makes the first lane sweep contiguous with the canonical rows already in DB.
+        const bridge = await readMinimumLaneBridgeBlock(db, chainId);
+        lastSwept = bridge !== null && bridge < to ? bridge : to;
+        await initializeLaneBlock(db, chainId, lastSwept);
+      }
+    }
     if (to <= lastSwept) return;
     const from = lastSwept + 1n;
     if (to - from + 1n > maxGapBlocks) {
       log('gap larger than the limit; skipping ahead, Envio covers it', { from: from.toString(), to: to.toString() });
+      // Move the restart cursor, but keep the trusted watermark behind and require Envio to bridge
+      // this interval for every venue before later lane blocks can be used as complete coverage.
       lastSwept = to;
-      await advanceLaneBlock(db, chainId, to);
+      await advanceLaneResumeBlock(db, chainId, to);
+      await raiseLaneVenueBridge(db, chainId, to);
       return;
     }
     for (let start = from; start <= to; start += sweepChunkBlocks) {
@@ -229,7 +243,9 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   }
 
   async function reloadWatchSet(): Promise<void> {
-    watch = await watchLoader.refresh();
+    const snapshot = await watchLoader.refresh();
+    await ensureLaneVenueCoverage(db, chainId, snapshot.addedVenues, await readLaneBlock(db, chainId));
+    watch = snapshot;
   }
 
   // The WebSocket path: the only one that proves the subscription is alive.

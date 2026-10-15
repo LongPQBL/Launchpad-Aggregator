@@ -1,10 +1,11 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { fastLaneRows, fastLaneState, trades } from '../db/schema.js';
+import { fastLaneRows, fastLaneState, fastLaneVenueCoverage, trades } from '../db/schema.js';
 import type { LiveEntry } from '../envioSync/incrementalSync.js';
 import { notifyChanged } from '../envioSync/notifyChanges.js';
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import { invalidateCurveReserve } from '../market/curvePricing.js';
+import type { WatchedVenue } from './watchSet.js';
 
 const CURVE_EVENTS = new Set(['CurveBuy', 'CurveSell', 'BuybackLocked']);
 
@@ -22,7 +23,46 @@ export async function readLaneBlock(db: Database, chainId: number): Promise<bigi
   return row?.lastBlock ?? null;
 }
 
+export async function readMinimumLaneBridgeBlock(db: Database, chainId: number): Promise<bigint | null> {
+  const [row] = await db.select({ block: sql<string | null>`min(${fastLaneVenueCoverage.envioBridgeBlock})` })
+    .from(fastLaneVenueCoverage).where(eq(fastLaneVenueCoverage.chainId, chainId));
+  return row?.block === null || row?.block === undefined ? null : BigInt(row.block);
+}
+
+/** Add a coverage bridge for each venue as it enters the watch set. A venue added after a sweep requires Envio to bridge through
+ * the lane cursor first, because the lane could not have seen its earlier trades. */
+export async function ensureLaneVenueCoverage(db: Database, chainId: number, venues: readonly WatchedVenue[], laneBlock: bigint | null): Promise<void> {
+  const official = venues.filter((venue) => venue.official);
+  if (official.length === 0) return;
+  await db.insert(fastLaneVenueCoverage).values(official.map((venue) => ({
+    chainId, venueId: venue.id,
+    envioBridgeBlock: laneBlock !== null && laneBlock > venue.confirmedToBlock ? laneBlock : venue.confirmedToBlock,
+  }))).onConflictDoNothing();
+}
+
+export async function raiseLaneVenueBridge(db: Database, chainId: number, block: bigint): Promise<void> {
+  await db.update(fastLaneVenueCoverage).set({
+    envioBridgeBlock: sql`GREATEST(${fastLaneVenueCoverage.envioBridgeBlock}, ${block})`, updatedAt: new Date(),
+  }).where(eq(fastLaneVenueCoverage.chainId, chainId));
+}
+
+/** Initializes both cursors at an Envio-confirmed fence; the combined source union is complete through this block. */
+export async function initializeLaneBlock(db: Database, chainId: number, block: bigint): Promise<void> {
+  await db.insert(fastLaneState).values({ chainId, lastBlock: block, coverageBlock: block }).onConflictDoNothing();
+}
+
 export async function advanceLaneBlock(db: Database, chainId: number, block: bigint): Promise<void> {
+  await db.insert(fastLaneState).values({ chainId, lastBlock: block }).onConflictDoUpdate({
+    target: fastLaneState.chainId,
+    set: {
+      lastBlock: sql`GREATEST(${fastLaneState.lastBlock}, excluded.last_block)`,
+      coverageBlock: sql`GREATEST(COALESCE(${fastLaneState.coverageBlock}, excluded.last_block), excluded.last_block)`, updatedAt: new Date(),
+    },
+  });
+}
+
+/** Advances only the restart cursor after a gap too large to scan; coverageBlock must remain unchanged. */
+export async function advanceLaneResumeBlock(db: Database, chainId: number, block: bigint): Promise<void> {
   await db.insert(fastLaneState).values({ chainId, lastBlock: block }).onConflictDoUpdate({
     target: fastLaneState.chainId,
     set: { lastBlock: sql`GREATEST(${fastLaneState.lastBlock}, excluded.last_block)`, updatedAt: new Date() },
