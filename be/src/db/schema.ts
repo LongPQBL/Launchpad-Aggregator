@@ -151,6 +151,9 @@ export const launches = pgTable('launches', {
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   index('launches_source_block_idx').on(table.sourceId, table.launchBlock),
   index('launches_chain_block_idx').on(table.chainId, table.launchBlock, table.launchTxHash, table.launchLogIndex),
+  // Trigram indexes: the header search matches `%text%` (ILIKE) on name and symbol, which a plain index cannot serve (a scan of every launch took seconds).
+  index('launches_name_trgm_idx').using('gin', sql`${table.name} gin_trgm_ops`),
+  index('launches_symbol_trgm_idx').using('gin', sql`${table.symbol} gin_trgm_ops`),
   index('launches_metadata_due_idx').on(table.metadataRetryAt, table.launchBlock).where(sql`${table.platform} = 'pons' AND
     (${table.logoReadState} = 'pending' OR ${table.descriptionReadState} = 'pending' OR
      ${table.socialsReadState} = 'pending' OR ${table.timestampReadState} = 'pending')`),

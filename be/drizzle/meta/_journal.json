@@ -407,6 +407,13 @@
       "when": 1792008628788,
       "tag": "0057_indexed_from_block",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792031859906,
+      "tag": "0058_search_trigram",
+      "breakpoints": true
     }
   ]
 }
