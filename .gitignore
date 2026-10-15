@@ -8,3 +8,6 @@ test-results/
 .superpowers/
 .worktrees/
 *.tsbuildinfo
+
+# macOS
+.DS_Store
