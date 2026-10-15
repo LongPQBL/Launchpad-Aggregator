@@ -235,7 +235,14 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     for (let start = from; start <= to; start += sweepChunkBlocks) {
       const end = start + sweepChunkBlocks - 1n < to ? start + sweepChunkBlocks - 1n : to;
       const logs = await source.getLogs(start, end); // the slow part runs outside the queue, so a live log never waits behind it
-      await enqueue(() => processLogs(logs));
+      const byBlock = new Map<bigint, FastLog[]>();
+      for (const entry of logs) byBlock.set(entry.blockNumber, [...(byBlock.get(entry.blockNumber) ?? []), entry]);
+      // A whole multi-thousand-block chunk can contain minutes of sequential RPC work. Queue one
+      // block at a time so live socket batches can run between historical blocks instead of waiting
+      // behind the complete backfill chunk.
+      for (const blockNumber of [...byBlock.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
+        await enqueue(() => processLogs(byBlock.get(blockNumber)!));
+      }
     }
     lastSwept = to;
     await advanceLaneBlock(db, chainId, to);

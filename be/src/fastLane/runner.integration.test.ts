@@ -270,6 +270,32 @@ describe('fast lane', () => {
     expect((await pool.query('SELECT coverage_block FROM fast_lane_state WHERE chain_id = $1', [chainId])).rows[0]?.coverage_block).toBe('5098');
   });
 
+  it('lets live websocket logs pass between blocks in a historical sweep', async () => {
+    const fake = fakeSource();
+    fake.head = 60n;
+    const historical = [2n, 3n, 4n].map((blockNumber) => buyLog({ blockNumber }));
+    fake.logs = historical;
+    let signalFirstBlock!: () => void;
+    const firstBlockStarted = new Promise<void>((resolve) => { signalFirstBlock = resolve; });
+    fake.getBlock = async (blockNumber) => {
+      fake.calls.getBlock += 1;
+      if (blockNumber <= 4n) {
+        signalFirstBlock();
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      return { ...fake.header!, number: blockNumber };
+    };
+    const instance = await lane(fake, { sweepChunkBlocks: 100n, sweepLagBlocks: 2n });
+    let sweepDone = false;
+    const sweepPromise = instance.sweepOnce().then(() => { sweepDone = true; });
+    await firstBlockStarted;
+    const live = buyLog({ blockNumber: 57n });
+    await instance.handleLogs([live]);
+    expect(sweepDone).toBe(false);
+    expect((await tradeRows()).some((row) => row.txHash === live.transactionHash)).toBe(true);
+    await sweepPromise;
+  });
+
   it('records the Envio bridge for each watched venue and bridges a newly added venue through the saved lane block', async () => {
     const fake = fakeSource();
     await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
