@@ -100,8 +100,10 @@ test('the Depth price on the pool page follows a swap in that pool', async ({ pa
   const headline = page.locator('p.text-2xl', { hasText: /^1 .* = / }).first();
   await expect(headline).toBeVisible();
   const before = await headline.textContent();
-  const liquidityRequest = page.waitForRequest((r) => r.url().includes('/liquidity'), { timeout: 1_500 });
+  // The chain-read refetch is throttled to one per 4 s (RPC_BACKED_MIN_INTERVAL_MS) counted from the fetch the tab click started, so under load the
+  // announced swap can wait for that window before it triggers the request.
+  const liquidityRequest = page.waitForRequest((r) => r.url().includes('/liquidity'), { timeout: 6_000 });
   await postSwap(request);
   await liquidityRequest;
-  await expect.poll(async () => headline.textContent(), { timeout: 3_000 }).not.toBe(before);
+  await expect.poll(async () => headline.textContent(), { timeout: 5_000 }).not.toBe(before);
 });
