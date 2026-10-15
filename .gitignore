@@ -11,3 +11,4 @@ test-results/
 
 # macOS
 .DS_Store
+artifacts/**/*.png
