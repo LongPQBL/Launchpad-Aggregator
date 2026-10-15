@@ -161,9 +161,9 @@ export function CurveSwapPanel({
   const buyHint = amounts.source === 'sell' && amountIn > 0n && quote.outputAmount === null && quote.errorMessage
     ? `Quote unavailable: ${quote.errorMessage}` : null;
   const priceFor = (token: PanelToken) => usdPriceFor(usdPrices, token.address);
-  const fixedSelector = (token: PanelToken) => {
+  const fixedSelector = (token: PanelToken, menuPlacement: 'above' | 'below' = 'below') => {
     const option = { key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri };
-    return <TokenSelector options={[option]} selected={option} onSelect={() => {}} chainId={robinhoodChain.id} />;
+    return <TokenSelector options={[option]} selected={option} onSelect={() => {}} chainId={robinhoodChain.id} menuPlacement={menuPlacement} />;
   };
 
   return (
@@ -171,7 +171,7 @@ export function CurveSwapPanel({
       <TradeCard
         sell={{
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
-          selector: fixedSelector(tokenIn),
+          selector: fixedSelector(tokenIn, 'above'),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
           balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${tokenIn.symbol ?? 'token'}`,
           insufficientBalance: hasInsufficientBalance,

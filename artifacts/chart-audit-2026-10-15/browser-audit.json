@@ -1,0 +1,442 @@
+[
+  {
+    "name": "ear-token",
+    "range": "1m",
+    "kind": "Candlestick chart",
+    "filename": "ear-token-1m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n0.31%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume\n$39.3"
+  },
+  {
+    "name": "ear-token",
+    "range": "1m",
+    "kind": "Line chart",
+    "filename": "ear-token-1m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n0.31%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume\n$39.3"
+  },
+  {
+    "name": "ear-token",
+    "range": "1m",
+    "kind": "Volume",
+    "filename": "ear-token-1m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$12.56+Volume · Total, last 2 hours · 118 of 120 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "1m",
+    "kind": "TVL",
+    "filename": "ear-token-1m-tvl.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.48TVL · Latest, Oct 15, 02:02 UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "5m",
+    "kind": "Candlestick chart",
+    "filename": "ear-token-5m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "5m",
+    "kind": "Line chart",
+    "filename": "ear-token-5m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "5m",
+    "kind": "Volume",
+    "filename": "ear-token-5m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 12 hours · 123 of 144 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "5m",
+    "kind": "TVL",
+    "filename": "ear-token-5m-tvl.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.48TVL · Latest, Oct 15, 02:00 UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "1h",
+    "kind": "Candlestick chart",
+    "filename": "ear-token-1h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "1h",
+    "kind": "Line chart",
+    "filename": "ear-token-1h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "1h",
+    "kind": "Volume",
+    "filename": "ear-token-1h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 7 days · 162 of 168 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "1h",
+    "kind": "TVL",
+    "filename": "ear-token-1h-tvl.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.48TVL · Latest, Oct 15, 02:00 UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "4h",
+    "kind": "Candlestick chart",
+    "filename": "ear-token-4h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n2\n.\n0\n9\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "4h",
+    "kind": "Line chart",
+    "filename": "ear-token-4h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n3\n2\n.\n0\n9\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume"
+  },
+  {
+    "name": "ear-token",
+    "range": "4h",
+    "kind": "Volume",
+    "filename": "ear-token-4h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 30 days · 176 of 180 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "4h",
+    "kind": "TVL",
+    "filename": "ear-token-4h-tvl.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.48TVL · Latest, Oct 15, 00:00 UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "1d",
+    "kind": "Candlestick chart",
+    "filename": "ear-token-1d-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n0\n.\n5\n2\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume\n$"
+  },
+  {
+    "name": "ear-token",
+    "range": "1d",
+    "kind": "Line chart",
+    "filename": "ear-token-1d-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nLaunches\nEAR\nEar Coin EAR\n0x281c…509b\n\nPons\n· v2 · Robinhood Chain\n\n—\n▼\n0\n.\n5\n2\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nTVL\nStats\nMarket cap\n—\nFDV\n—\n1 day volume\n$"
+  },
+  {
+    "name": "ear-token",
+    "range": "1d",
+    "kind": "Volume",
+    "filename": "ear-token-1d-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 365 days · 363 of 365 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-token",
+    "range": "1d",
+    "kind": "TVL",
+    "filename": "ear-token-1d-tvl.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.48TVL · Latest, Oct 15, 2026 UTC"
+    ]
+  },
+  {
+    "name": "ear-curve",
+    "range": "1m",
+    "kind": "Candlestick chart",
+    "filename": "ear-curve-1m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n0.31%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTransaction"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1m",
+    "kind": "Line chart",
+    "filename": "ear-curve-1m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n0.31%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTransaction"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1m",
+    "kind": "Volume",
+    "filename": "ear-curve-1m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$12.56+Volume · Total, last 2 hours · 118 of 120 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-curve",
+    "range": "5m",
+    "kind": "Candlestick chart",
+    "filename": "ear-curve-5m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "5m",
+    "kind": "Line chart",
+    "filename": "ear-curve-5m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "5m",
+    "kind": "Volume",
+    "filename": "ear-curve-5m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 12 hours · 123 of 144 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-curve",
+    "range": "1h",
+    "kind": "Candlestick chart",
+    "filename": "ear-curve-1h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1h",
+    "kind": "Line chart",
+    "filename": "ear-curve-1h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n6\n.\n3\n3\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1h",
+    "kind": "Volume",
+    "filename": "ear-curve-1h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 7 days · 162 of 168 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-curve",
+    "range": "4h",
+    "kind": "Candlestick chart",
+    "filename": "ear-curve-4h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n2\n.\n0\n9\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "4h",
+    "kind": "Line chart",
+    "filename": "ear-curve-4h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n3\n2\n.\n0\n9\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTrans"
+  },
+  {
+    "name": "ear-curve",
+    "range": "4h",
+    "kind": "Volume",
+    "filename": "ear-curve-4h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 30 days · 176 of 180 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "ear-curve",
+    "range": "1d",
+    "kind": "Candlestick chart",
+    "filename": "ear-curve-1d-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n0\n.\n5\n2\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTransac"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1d",
+    "kind": "Line chart",
+    "filename": "ear-curve-1d-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nEAR / ETH\nEAR / ETH\nRobinhood Chain\nBonding curve\nOfficial Pons pool\n\n0.00000000169 ETH\n▼\n0\n.\n5\n2\n%\n\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\nVolume\nCurve\nDepth\nTransac"
+  },
+  {
+    "name": "ear-curve",
+    "range": "1d",
+    "kind": "Volume",
+    "filename": "ear-curve-1d-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$39.28K+Volume · Total, last 365 days · 363 of 365 buckets unavailable UTC"
+    ]
+  },
+  {
+    "name": "swap-pool",
+    "range": "1m",
+    "kind": "Candlestick chart",
+    "filename": "swap-pool-1m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1m",
+    "kind": "Line chart",
+    "filename": "swap-pool-1m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n1D\nPrice\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1m",
+    "kind": "Volume",
+    "filename": "swap-pool-1m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$0.00Volume · Total, last 2 hours UTC"
+    ]
+  },
+  {
+    "name": "swap-pool",
+    "range": "5m",
+    "kind": "Candlestick chart",
+    "filename": "swap-pool-5m-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n93.98%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "5m",
+    "kind": "Line chart",
+    "filename": "swap-pool-5m-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n93.98%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "5m",
+    "kind": "Volume",
+    "filename": "swap-pool-5m-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$62.3KVolume · Total, last 12 hours UTC"
+    ]
+  },
+  {
+    "name": "swap-pool",
+    "range": "1h",
+    "kind": "Candlestick chart",
+    "filename": "swap-pool-1h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n6\n.\n7\n6\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1h",
+    "kind": "Line chart",
+    "filename": "swap-pool-1h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n6\n.\n7\n6\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1h",
+    "kind": "Volume",
+    "filename": "swap-pool-1h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$62.3KVolume · Total, last 7 days UTC"
+    ]
+  },
+  {
+    "name": "swap-pool",
+    "range": "4h",
+    "kind": "Candlestick chart",
+    "filename": "swap-pool-4h-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n6\n.\n7\n6\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "4h",
+    "kind": "Line chart",
+    "filename": "swap-pool-4h-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n▼\n6\n.\n7\n6\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n"
+  },
+  {
+    "name": "swap-pool",
+    "range": "4h",
+    "kind": "Volume",
+    "filename": "swap-pool-4h-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$62.3KVolume · Total, last 30 days UTC"
+    ]
+  },
+  {
+    "name": "swap-pool",
+    "range": "1d",
+    "kind": "Candlestick chart",
+    "filename": "swap-pool-1d-candles.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n0\n.\n0\n0\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1d",
+    "kind": "Line chart",
+    "filename": "swap-pool-1d-line.png",
+    "chartCount": 7,
+    "text": "Launchpad Aggregator\nLaunches\nPools\nTransactions\nPortfolio\nConnect\nPools\nNDA / USDG\nNDA / USDG\nRobinhood Chain\nv4\n0%\n0x6b31…4346\nOfficial Pons pool\n\n1 NDA = \n0.00000273 USDG\n (\n$0.000003\n)\n0\n.\n0\n0\n%\n\nCaught up\n\t\n\t\n\n\t\n\t\n1m\n5m\n1H\n4H"
+  },
+  {
+    "name": "swap-pool",
+    "range": "1d",
+    "kind": "Volume",
+    "filename": "swap-pool-1d-volume.png",
+    "chartCount": 7,
+    "readout": [
+      "$62.3KVolume · Total, last 365 days UTC"
+    ]
+  }
+]

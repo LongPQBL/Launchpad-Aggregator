@@ -31,6 +31,22 @@ describe('TokenSelector', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+  it('closes on an outside click or Escape, while clicks inside keep it open', () => {
+    render(<div><span>outside</span><TokenSelector options={[ethOption, wethOption]} selected={ethOption} onSelect={vi.fn()} /></div>);
+    const trigger = screen.getByRole('button', { name: /ETH/ });
+
+    fireEvent.click(trigger);
+    fireEvent.mouseDown(screen.getByRole('option', { name: /WETH/ }));
+    expect(screen.getByRole('listbox')).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByText('outside'));
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
   it('still renders the same button-and-dropdown chrome for a single-option list, not a plain label', () => {
     render(<TokenSelector options={[fixedOption]} selected={fixedOption} onSelect={vi.fn()} />);
     const trigger = screen.getByRole('button', { name: /LAUNCH/ });

@@ -433,7 +433,7 @@ export function startMockApi(port: number): Server {
       res.end(JSON.stringify(mockCandles(intervalSeconds, 'quote', isLiveCandlePool ? livePoolTrades.length * 0.25 : 0)));
     } else if (/^\/v1\/pools\/\d+\/[^/]+\/[^/]+\/history$/.test(route) || /^\/v1\/launches\/\d+\/0x[0-9a-fA-F]{40}\/history$/.test(route)) {
       const intervalSeconds = rangeInterval(url);
-      const rangeBuckets: Record<number, number> = { 60: 60, 300: 288, 3600: 168, 14_400: 180, 86_400: 365 };
+      const rangeBuckets: Record<number, number> = { 60: 120, 300: 144, 3600: 168, 14_400: 180, 86_400: 365 };
       const count = rangeBuckets[intervalSeconds] ?? 96;
       // Each swap of the live launch / live pool adds volume to the newest bucket (the rollups the real workers keep).
       const liveSwaps = isLiveToken ? liveTransactions.length : route.toLowerCase().includes(mockPools[LIVE_POOL_INDEX]!.poolId.toLowerCase()) ? livePoolTrades.length : 0;

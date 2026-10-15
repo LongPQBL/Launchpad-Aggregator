@@ -235,7 +235,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
       <TradeCard
         sell={{
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
-          selector: (<TokenSelector options={sideOptions(tokenIn)} selected={selectedOption(tokenIn)} onSelect={(key) => handleSelect(tokenIn, key)} chainId={robinhoodChain.id} />),
+          selector: (<TokenSelector options={sideOptions(tokenIn)} selected={selectedOption(tokenIn)} onSelect={(key) => handleSelect(tokenIn, key)} chainId={robinhoodChain.id} menuPlacement="above" />),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
           balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${displaySymbol(tokenIn, nativeIn)}`,
           insufficientBalance: hasInsufficientBalance,

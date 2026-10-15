@@ -1,7 +1,7 @@
 import { expect, test } from './fixtures';
 import { CHAIN_ID, LIVE_POOL_INDEX, LIVE_TOKEN_ADDRESS } from './mock-api';
 
-const BE_URL = 'http://127.0.0.1:3101';
+const BE_URL = process.env.E2E_MOCK_API_URL ?? 'http://127.0.0.1:3101';
 // The mock announces a swap like the real API (SSE trade.created / pool.changed) the moment it is posted. The page's own
 // fast path must show it well inside the page-wide refresh's 3 s throttle.
 const SHOWS_WITHIN_MS = 1_500;

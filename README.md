@@ -1,6 +1,6 @@
 # Launchpad Aggregator
 
-Ứng dụng tổng hợp launchpad đa chain đang được xây dựng theo từng adapter. Sản phẩm sẽ có mục Pools gồm cả các pool khác ngoài venue do launchpad chỉ định, với dữ liệu swap và giá USD được index qua Envio. Phần Pools đó chưa triển khai trong giao diện/API hiện tại.
+Ứng dụng tổng hợp launchpad đa chain đang được xây dựng theo từng adapter. Giao diện và API hiện có trang Pools cho các pool liên quan đến token Pons, gồm swap và các chỉ số USD được index qua Envio.
 
 ## Trạng thái hiện tại
 
@@ -123,25 +123,24 @@ cũ thuộc khoảng đang chờ và báo `complete: false`. Sau khi backfill ho
 nhận để API không hiển thị cao/thấp thiếu dữ liệu. Mép đầu khoảng 52 tuần làm tròn xuống phút,
 nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế này chưa xoá bất kỳ giao dịch cũ nào.
 
-**Chart theo khoảng thời gian (1H / 1D / 1W / 1M / 1Y):** các tab của chart giá, Volume và TVL là
-khoảng thời gian xem, server tự chọn cỡ nến/cột (bảng nằm ở `be/src/charts/ranges.ts`):
+**Chart theo cỡ nến/cột (1m / 5m / 1H / 4H / 1D):** mỗi tab đặt kích thước một nến giá hoặc một cột Volume/TVL; server chọn cửa sổ cố định tương ứng (`be/src/charts/ranges.ts`):
 
-| Tab | Khoảng | Bucket |
-|---|---|---|
-| 1H | 1 giờ | 1 phút |
-| 1D | 24 giờ | 5 phút |
-| 1W | 7 ngày | 1 giờ |
-| 1M | 30 ngày | 4 giờ |
-| 1Y | 365 ngày | 1 ngày |
+| Tab | Cỡ nến/cột | Cửa sổ | Số bucket |
+|---|---|---|---|
+| 1m | 1 phút | 2 giờ | 120 |
+| 5m | 5 phút | 12 giờ | 144 |
+| 1H | 1 giờ | 7 ngày | 168 |
+| 4H | 4 giờ | 30 ngày | 180 |
+| 1D | 1 ngày | 365 ngày | 365 |
 
-API nhận `?range=1h|1d|1w|1m|1y` (mặc định `1d`). Volume và TVL được tính sẵn thay vì quét giao dịch
+API nhận `?range=1m|5m|1h|4h|1d` (mặc định `1h`; tên tham số `range` được giữ để tương thích). Volume và TVL được tính sẵn thay vì quét giao dịch
 mỗi lần xem:
 
 - `launch_volume_buckets` / `pool_volume_buckets`: do `candles:worker` và `pools:candles:worker` cập
   nhật trong cùng giao dịch với nến (bucket 1 phút từ giao dịch, các bucket lớn hơn gộp từ bucket nhỏ
   hơn liền kề). Bucket có giao dịch chưa định giá được thì volume là `null`, không phải 0.
 - `pool_tvl_buckets`: giá trị cuối cùng mỗi giờ / 4 giờ / ngày, ghi cùng lúc với mỗi snapshot TVL và
-  giữ sau khi snapshot thô bị xoá. 1W/1M/1Y đọc bảng này; 1H/1D đọc snapshot thô, nên cần chụp dày
+  giữ sau khi snapshot thô bị xoá. Tab 1H/4H/1D đọc bảng này; 1m/5m đọc snapshot thô, nên cần chụp dày
   hơn mặc định. Gợi ý: `POOL_TVL_SNAPSHOT_INTERVAL_SECONDS=60` (mặc định 3600). Đây chỉ là gợi ý, chưa
   áp dụng cho worker nào đang chạy. Lịch sử TVL chỉ bắt đầu từ lúc bắt đầu chụp.
 
@@ -286,7 +285,7 @@ cp fe/.env.example fe/.env.local
 npm run dev -w fe
 ```
 
-Mở `http://localhost:3000`. `BE_API_URL` (đọc phía server, cho các trang Next.js render dữ liệu launch) và `NEXT_PUBLIC_BE_API_URL` (đọc phía trình duyệt, cho kết nối SSE realtime ở `fe/src/hooks/use-live-refresh.ts`) trong `fe/.env.local` phải trỏ cùng một instance API. Khi API tắt hoặc mất kết nối SSE, giao diện hiện lỗi có nút thử lại hoặc chuyển sang polling định kỳ, không hiện trang trắng.
+Mở `http://localhost:3000`. `BE_API_URL` (đọc phía server, cho các trang Next.js render dữ liệu launch) và `NEXT_PUBLIC_BE_API_URL` (đọc phía trình duyệt, cho kết nối SSE realtime ở `fe/src/hooks/use-live-refresh.ts`) trong `fe/.env.local` phải trỏ cùng một instance API. Đặt `RH_HTTP_RPC_URL` trong `fe/.env.local` nếu dùng RPC riêng: trình duyệt gọi `/api/rpc`, route này chuyển tiếp các phương thức đọc tới URL phía server, giới hạn 240 request/phút mỗi client, tối đa 20 lệnh/batch và 64 KiB/request. Không đặt URL có khóa vào biến `NEXT_PUBLIC_*`. Khi API tắt hoặc mất kết nối SSE, giao diện hiện lỗi có nút thử lại hoặc chuyển sang polling định kỳ, không hiện trang trắng.
 
 **Giới hạn coverage hiện tại:** vì backend chưa backfill toàn chain (xem phần Trạng thái hiện tại), FE sẽ hiện huy hiệu “Backfilling” cho hầu hết launch và “No data yet” cho volume/giá còn thiếu, thay vì số 0 hay dữ liệu giả. Đây là hành vi đúng theo thiết kế, không phải lỗi. (FE copy đổi sang tiếng Anh từ 2026-10-01 — xem CLAUDE.md.)
 
@@ -315,7 +314,9 @@ npm run e2e:install -w fe   # tải trình duyệt Chromium cho Playwright, ch�
 npm run test:e2e -w fe
 ```
 
-`npm run test:e2e -w fe` tự khởi động một BE giả (`fe/e2e/mock-api.ts`, dữ liệu cố định, không gọi RPC/PostgreSQL thật) và `next dev` trước khi chạy, nên chạy được trên máy sạch hoặc CI mà không cần backend thật. Test chạy trên cả viewport desktop và mobile, xác nhận luồng danh sách → chi tiết, huy hiệu coverage thiếu hiển thị trung thực, và không có nút ví/giao dịch nào trên giao diện.
+`npm run test:e2e -w fe` tự khởi động BE giả (`fe/e2e/mock-api.ts`) ở cổng 3101 và `next dev` ở cổng 3100; Playwright chạy cả desktop và mobile. Mock không cần backend/PostgreSQL thật. `MOCK_API_DELAY_MS` (mặc định 0) chỉ dùng khi muốn mô phỏng API chậm; bộ e2e không tự đặt biến này. `CI` bật retry và không dùng lại server đang chạy. Test hiện bao gồm chart, giao dịch và swap.
+
+Các biến chỉ dành cho môi trường thử nghiệm với Envio quét một phần lịch sử: `COVERAGE_HEAD_TOLERANCE_BLOCKS` (mặc định 0) nới ngưỡng báo nguồn đã bắt kịp head; `ENVIO_INDEXED_FROM_BLOCK` (mặc định không đặt) ghi block đầu của cửa sổ index để pool cũ không hiện volume thiếu thành `$0`. Đặt chúng ở `be/.env` khi cần; không dùng để khẳng định coverage đầy đủ trên dữ liệu thật.
 
 ## Bước còn lại trước khi coi backend đạt yêu cầu
 

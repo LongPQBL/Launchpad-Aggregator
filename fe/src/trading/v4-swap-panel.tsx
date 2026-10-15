@@ -175,9 +175,9 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices, 
     ? `Quote unavailable: ${quote.errorMessage}` : null;
   const priceFor = (token: V4SwapToken) => usdPriceFor(usdPrices, token.address);
   const quoteState = deriveQuoteState({ source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn, outputAmount: quote.outputAmount, errorMessage: quote.errorMessage });
-  const fixedSelector = (token: V4SwapToken) => {
+  const fixedSelector = (token: V4SwapToken, menuPlacement: 'above' | 'below' = 'below') => {
     const option = { key: token.address, symbol: token.symbol ?? '—', logoUri: token.logoUri ?? null };
-    return <TokenSelector options={[option]} selected={option} onSelect={() => {}} chainId={robinhoodChain.id} />;
+    return <TokenSelector options={[option]} selected={option} onSelect={() => {}} chainId={robinhoodChain.id} menuPlacement={menuPlacement} />;
   };
 
   return (
@@ -185,7 +185,7 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices, 
       <TradeCard
         sell={{
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',
-          selector: fixedSelector(tokenIn),
+          selector: fixedSelector(tokenIn, 'above'),
           usdText: usdText(amountIn, tokenIn.decimals, priceFor(tokenIn)), hint: sellHint,
           balanceText: sellBalance === undefined ? null : `Balance: ${formatBalanceAmount(sellBalance, tokenIn.decimals)} ${tokenIn.symbol ?? 'token'}`,
           insufficientBalance: hasInsufficientBalance,

@@ -29,13 +29,11 @@ describe('TradeCard', () => {
 
   it('moves the dark background to the input the user focuses', () => {
     render(<TradeCard sell={side()} buy={side({ ariaLabel: 'Buy amount' })} onFlip={vi.fn()} />);
-    const sellCard = screen.getByLabelText('Sell amount').closest('.isolate');
+    const sellCard = screen.getByLabelText('Sell amount').closest('.rounded-3xl');
     const buyInput = screen.getByLabelText('Buy amount');
-    const buyCard = buyInput.closest('.isolate');
-    expect(sellCard).toHaveClass('isolate');
+    const buyCard = buyInput.closest('.rounded-3xl');
     expect(sellCard?.querySelector('[aria-hidden="true"]')).toHaveClass('bg-black');
-    expect(buyCard).toHaveClass('isolate');
-    expect(buyCard?.querySelector('[aria-hidden="true"]')).toHaveClass('absolute', '-z-10', 'bg-[#1b1d23]/70');
+    expect(buyCard?.querySelector('[aria-hidden="true"]')).toHaveClass('absolute', 'bg-[#1b1d23]/70');
     expect(buyCard?.querySelector('.relative')).toContainElement(buyInput);
 
     fireEvent.focus(buyInput);

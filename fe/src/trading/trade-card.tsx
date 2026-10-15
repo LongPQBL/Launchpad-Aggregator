@@ -44,7 +44,7 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact =
         <Side label="Sell" side={sell} active={activeSide === 'sell'} onFocus={() => setActiveSide('sell')} />
         <Side label="Buy" side={buy} active={activeSide === 'buy'} onFocus={() => setActiveSide('buy')} />
         <Button type="button" variant="outline" size="sm" aria-label="Flip swap direction"
-          className="absolute top-1/2 left-1/2 z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rounded-xl border-4 border-background bg-muted p-0 text-base"
+          className="absolute top-1/2 left-1/2 z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rounded-xl border-4 border-background bg-muted p-0 text-base hover:bg-[#343842]"
           onClick={onFlip}>
           <span aria-hidden="true">↓</span>
         </Button>
@@ -87,8 +87,8 @@ export function TradeCard({ sell, buy, onFlip, minReceived = null, priceImpact =
 
 function Side({ label, side, active, onFocus }: { label: string; side: TradeCardSide; active: boolean; onFocus: () => void }) {
   return (
-    <div className="relative isolate rounded-3xl p-4">
-      <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 -z-10 rounded-3xl border',
+    <div className="relative rounded-3xl p-4">
+      <div aria-hidden="true" className={cn('pointer-events-none absolute inset-0 z-0 rounded-3xl border',
         active ? 'border-[#343842] bg-black' : 'border-[#343842] bg-[#1b1d23]/70')} />
       <div className={cn('relative flex flex-col gap-2', active && 'text-white')}>
         <span className="text-base leading-5 text-muted-foreground">{label}</span>

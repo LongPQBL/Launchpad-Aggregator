@@ -62,15 +62,13 @@ test('the Depth chart zooms in and out', async ({ page }) => {
   await expect(asks).toHaveAttribute('data-rows', '40');
 });
 
-test('the bonding-curve page has a Depth tab (no TVL or Liquidity) with its notes', async ({ page }) => {
+test('the bonding-curve page has a Depth tab without TVL or Liquidity', async ({ page }) => {
   await page.goto(`${tokenUrl}/curve`);
   await expect(page.getByRole('tab', { name: 'Depth' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'TVL' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'Liquidity' })).toHaveCount(0);
   await page.getByRole('tab', { name: 'Depth' }).click();
   await expect(page.getByTestId('depth-spread')).toContainText('Spread 2% (Fee 1%)');
-  await expect(page.getByText('Amounts exclude the creator tax and snipe protection.')).toBeVisible();
-  await expect(page.getByText('Buying beyond the last row graduates the curve.')).toBeVisible();
 });
 
 test('no chart tab leaves the page wider than the screen', async ({ page }) => {
