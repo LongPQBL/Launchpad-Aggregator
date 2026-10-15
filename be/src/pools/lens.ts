@@ -9,6 +9,27 @@ const lensAbi = parseAbi([
   'function getPoolTVL(address manager, PoolKey key) view returns (PoolTVL result)',
 ]);
 
+// Uniswap V4 hook permission flags that let a hook change what the pool's liquidity holds: beforeSwap, afterAddLiquidity and afterRemoveLiquidity may
+// return a delta (a custom curve, liquidity kept in the hook). afterSwap may return a delta too, but that only moves the hook's own fee out of a swap
+// and leaves the pool's liquidity positions on the standard curve.
+const BEFORE_SWAP_RETURNS_DELTA = 1 << 3;
+const AFTER_ADD_LIQUIDITY_RETURNS_DELTA = 1 << 1;
+const AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA = 1 << 0;
+const LIQUIDITY_CHANGING_FLAGS = BEFORE_SWAP_RETURNS_DELTA | AFTER_ADD_LIQUIDITY_RETURNS_DELTA | AFTER_REMOVE_LIQUIDITY_RETURNS_DELTA;
+
+/**
+ * The lens flags every hook that returns a delta as "custom accounting" and answers it with the hook's own reserves. The pool's core reserves still
+ * describe it when the hook holds nothing of its own (all four hook figures are zero) and its only delta-returning permission is afterSwap (a fee
+ * taken out of swaps, as the Pons hook does); any other case is left unanswered, never read as if it were standard.
+ */
+function hasStandardAccounting(result: object): boolean {
+  const value = result as { hasCustomAccounting?: unknown; hookPermissions?: unknown; hookReserves0?: unknown; hookReserves1?: unknown; hookEffective0?: unknown; hookEffective1?: unknown };
+  if (value.hasCustomAccounting === false) return true;
+  if (value.hasCustomAccounting !== true || typeof value.hookPermissions !== 'number') return false;
+  const noOwnFunds = [value.hookReserves0, value.hookReserves1, value.hookEffective0, value.hookEffective1].every((figure) => figure === 0n);
+  return noOwnFunds && (value.hookPermissions & LIQUIDITY_CHANGING_FLAGS) === 0;
+}
+
 export interface LensPoolKey { currency0: string; currency1: string; fee: number; tick_spacing: number; hooks: string }
 export interface LensSnapshot { blockNumber: bigint; coreAmount0: bigint; coreAmount1: bigint; sqrtPriceX96: bigint }
 
@@ -25,7 +46,7 @@ export async function readLensSnapshot(client: UsdPriceClient | undefined, catal
       || !('sqrtPriceX96' in result) || !('hasCustomAccounting' in result)
       || typeof result.coreAmount0 !== 'bigint' || typeof result.coreAmount1 !== 'bigint'
       || typeof result.sqrtPriceX96 !== 'bigint' || result.coreAmount0 < 0n || result.coreAmount1 < 0n
-      || result.sqrtPriceX96 <= 0n || result.hasCustomAccounting !== false) return null;
+      || result.sqrtPriceX96 <= 0n || !hasStandardAccounting(result)) return null;
     return { blockNumber, coreAmount0: result.coreAmount0, coreAmount1: result.coreAmount1, sqrtPriceX96: result.sqrtPriceX96 };
   } catch { return null; }
 }

@@ -9,6 +9,8 @@ export interface PoolStatsProps {
   protocol: string;
   poolAddress: Address;
   fee: number;
+  /** The pool's hook address; a pool with a hook may charge fees the pool's own fee tier does not show. */
+  hooks?: string | null;
   tvlUsd: string | null;
   volume24hUsd: string | null;
   // Percent change vs the previous 24h window; null renders as "—" (unavailable, not 0%).
@@ -24,16 +26,19 @@ export interface PoolStatsProps {
 
 // 24h fees = volume x fee tier is an exact identity for a constant-fee-tier AMM pool (every swap
 // pays exactly the pool's stated fee), not an estimate — derived here since the API doesn't store
-// it separately. No Total APR: annualizing one day of fees over TVL is a real metric some
+// it separately. A pool with a hook can take its own fee on top of (or instead of) the tier, so its fees are unknown, not volume x tier.
+// No Total APR: annualizing one day of fees over TVL is a real metric some
 // dashboards show, but it was dropped from this page's scope rather than shipped as an estimate.
-function feesUsd(volume24hUsd: string | null, fee: number): string | null {
+const NO_HOOK = '0x0000000000000000000000000000000000000000';
+function feesUsd(volume24hUsd: string | null, fee: number, hooks: string | null | undefined): string | null {
   if (volume24hUsd === null) return null;
+  if (hooks && hooks.toLowerCase() !== NO_HOOK) return null;
   const volume = Number(volume24hUsd);
   if (!Number.isFinite(volume)) return null;
   return String(volume * (fee / 1_000_000));
 }
 
-export function PoolStats({ protocol, poolAddress, fee, tvlUsd, volume24hUsd, volume24hChange = null, tvlChange = null, createdTimestamp, priceInQuote, poolBalances, displayed, other }: PoolStatsProps) {
+export function PoolStats({ protocol, poolAddress, fee, hooks = null, tvlUsd, volume24hUsd, volume24hChange = null, tvlChange = null, createdTimestamp, priceInQuote, poolBalances, displayed, other }: PoolStatsProps) {
   return (
     <Card className="rounded-[20px] border-0 bg-muted">
       <CardHeader className="p-5 pb-0"><h2 className="text-2xl">Stats</h2></CardHeader>
@@ -50,7 +55,7 @@ export function PoolStats({ protocol, poolAddress, fee, tvlUsd, volume24hUsd, vo
             ? <span data-testid="volume-24h-change" className="text-sm"><PercentChange value={volume24hChange} /></span>
             : volume24hUsd !== null && isYoungerThan24h(createdTimestamp)
               && <span data-testid="volume-24h-change" className="text-sm text-muted-foreground">New</span>}</dd></div>
-        <div><dt className="text-sm text-muted-foreground">24H fees</dt><dd className="text-lg"><RollingText text={formatPoolUsd(feesUsd(volume24hUsd, fee))} value={feesUsd(volume24hUsd, fee)} flash /></dd></div>
+        <div><dt className="text-sm text-muted-foreground">24H fees</dt><dd className="text-lg"><RollingText text={formatPoolUsd(feesUsd(volume24hUsd, fee, hooks))} value={feesUsd(volume24hUsd, fee, hooks)} flash /></dd></div>
         <div><dt className="text-sm text-muted-foreground">Age</dt><dd className="text-lg"><RollingText text={poolAge(createdTimestamp)} /></dd></div>
       </CardContent>
     </Card>

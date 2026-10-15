@@ -114,6 +114,7 @@ export function PoolDetail({ pool, trades, candles, history = null, chartRange, 
           protocol={pool.protocol}
           poolAddress={pool.poolId as `0x${string}`}
           fee={pool.fee}
+          hooks={pool.hooks}
           tvlUsd={pool.tvlUsd}
           volume24hUsd={pool.volume24hUsd}
           volume24hChange={pool.volume24hChange}
