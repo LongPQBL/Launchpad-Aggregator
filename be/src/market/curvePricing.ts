@@ -37,6 +37,7 @@ const failures = new Map<string, { count: number; retryAt: number }>();
 
 export function __resetCurvePricingBackoffForTests(): void {
   failures.clear();
+  backlogEmptyAt = null;
 }
 
 function launchKeyOf(chainId: number, tokenAddress: string): string {
@@ -71,28 +72,57 @@ interface DueTrade {
 // disk for tens of seconds on the dev database): the launches of the last RECENT_LAUNCH_BLOCKS blocks, then, only if the batch is not full, the rest.
 const RECENT_LAUNCH_BLOCKS = 400_000n; // about 14 hours on a chain with ~8 blocks a second
 
+// The pass over every launch reads the whole launches and venues tables (seconds of disk on a big database), so once it has found nothing it is
+// not repeated for BACKLOG_RECHECK_MS: a launch that falls behind in the meantime is found by the cheap pass over the newest trades instead.
+const BACKLOG_RECHECK_MS = 5 * 60_000;
+const NEWEST_TRADES_WINDOW = 5_000;
+let backlogEmptyAt: number | null = null;
+
 // Finds launches with a priced-behind (or never-started) curve, not just never-started: a launch
 // already caught up has no row returned here (its checkpoint's (block, logIndex) is >= its latest
 // curve trade's), so a steady-state tick costs one cheap query per batch, not a full rescan.
 async function findDueLaunches(pool: Pool, limit: number, excludedKeys: readonly string[]): Promise<DueLaunch[]> {
   const query = async (minLaunchBlock: bigint, max: number, excluded: readonly string[]) => (await pool.query(`
-    SELECT DISTINCT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, v.ref AS curve_ref, l.launch_block
+    SELECT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, v.ref AS curve_ref, l.launch_block
     FROM launches l
     JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
-    JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
-      AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
     LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
     WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL AND l.launch_block >= $3
-      AND (r.chain_id IS NULL OR (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))
       AND (l.chain_id::text || ':' || l.token_address) <> ALL($2::text[])
+      -- A semi-join probe per launch on trades_token_block_idx (the block bound is the index range, the log index the filter): a launch that is
+      -- caught up costs one short probe, where a join with DISTINCT read every curve trade of the table.
+      AND EXISTS (SELECT 1 FROM trades t WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
+        AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
+        AND (r.chain_id IS NULL OR (t.block_number >= r.last_block_number AND (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))))
     LIMIT $1`, [max, excluded, minLaunchBlock.toString()])).rows as Record<string, unknown>[];
-  const newest = await pool.query('SELECT max(launch_block) AS newest FROM launches');
-  const newestBlock = newest.rows[0]?.newest === null || newest.rows[0]?.newest === undefined ? 0n : BigInt(String(newest.rows[0].newest));
-  const recent = await query(newestBlock > RECENT_LAUNCH_BLOCKS ? newestBlock - RECENT_LAUNCH_BLOCKS : 0n, limit, excludedKeys);
-  let rows = recent;
-  if (rows.length < limit) {
-    const taken = recent.map((row) => `${row.chain_id}:${row.token_address}`);
-    rows = [...recent, ...await query(0n, limit - recent.length, [...excludedKeys, ...taken])];
+  // Pass 0, from the trades side: the launches that traded among the newest trades are the ones whose curve can have fallen behind just now. This
+  // reads the newest rows of one index, however large the tables are.
+  const fromNewestTrades = (await pool.query(`
+    SELECT l.chain_id, l.token_address, l.token_decimals, l.quote_asset_decimals, v.ref AS curve_ref, l.launch_block
+    FROM (SELECT DISTINCT chain_id, token_address FROM (
+        SELECT chain_id, token_address, source_event FROM trades
+        ORDER BY block_number DESC NULLS LAST, tx_hash DESC NULLS LAST, log_index DESC NULLS LAST LIMIT $3) newest
+      WHERE source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')) c
+    JOIN launches l ON l.chain_id = c.chain_id AND l.token_address = c.token_address
+    JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.kind = 'curve' AND v.official = true
+    LEFT JOIN launch_curve_reserves r ON r.chain_id = l.chain_id AND r.token_address = l.token_address
+    WHERE l.token_decimals IS NOT NULL AND l.quote_asset_decimals IS NOT NULL
+      AND (l.chain_id::text || ':' || l.token_address) <> ALL($2::text[])
+      AND EXISTS (SELECT 1 FROM trades t WHERE t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
+        AND t.source_event IN ('CurveBuy', 'CurveSell', 'BuybackLocked')
+        AND (r.chain_id IS NULL OR (t.block_number >= r.last_block_number AND (t.block_number, t.log_index) > (r.last_block_number, r.last_log_index))))
+    LIMIT $1`, [limit, excludedKeys, NEWEST_TRADES_WINDOW])).rows as Record<string, unknown>[];
+  let rows = fromNewestTrades;
+  const takenKeys = () => rows.map((row) => `${row.chain_id}:${row.token_address}`);
+  const nowMs = Date.now();
+  const backlogDue = backlogEmptyAt === null || nowMs - backlogEmptyAt >= BACKLOG_RECHECK_MS;
+  if (rows.length < limit && backlogDue) {
+    const newest = await pool.query('SELECT max(launch_block) AS newest FROM launches');
+    const newestBlock = newest.rows[0]?.newest === null || newest.rows[0]?.newest === undefined ? 0n : BigInt(String(newest.rows[0].newest));
+    const recent = await query(newestBlock > RECENT_LAUNCH_BLOCKS ? newestBlock - RECENT_LAUNCH_BLOCKS : 0n, limit - rows.length, [...excludedKeys, ...takenKeys()]);
+    rows = [...rows, ...recent];
+    if (rows.length < limit) rows = [...rows, ...await query(0n, limit - rows.length, [...excludedKeys, ...takenKeys()])];
+    backlogEmptyAt = rows.length === 0 ? nowMs : null;
   }
   return rows.map((row: Record<string, unknown>) => ({
     chainId: Number(row.chain_id), tokenAddress: String(row.token_address),

@@ -139,6 +139,16 @@ describe('applyCurvePricingOnce', () => {
     expect(row).toEqual({ price_numerator_raw: '55', price_denominator_raw: '960' });
   });
 
+  it('still finds a new trade right after a tick that found nothing, through the newest trades, without rescanning every launch', async () => {
+    await addTrade(hash('7'), 1, 400, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
+    const empty = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables); // nothing due: the full scan is now throttled
+    expect(empty.processed).toBe(0);
+    await addTrade(hash('8'), 2, 401, 'CurveSell', 'sell', 50n, 40n, 2n, 1n);
+    const next = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
+    expect(next.pricedTrades).toBe(1);
+  });
+
   it('backs off a launch whose replay fails so it stops occupying a batch slot, then retries it later', async () => {
     // A priced-behind trade with no matching Envio raw row cannot be replayed.
     await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
