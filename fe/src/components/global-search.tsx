@@ -11,7 +11,7 @@ import { demoSearchResults } from '@/components/global-search-demo';
 import { Dialog } from '@/components/ui/dialog';
 import { PercentChange } from '@/components/percent-change';
 import { TokenImage } from '@/features/launches/token-logo';
-import { formatPoolUsd } from '@/features/pools/pool-format';
+import { formatPoolFee, formatPoolUsd } from '@/features/pools/pool-format';
 import { cn } from '@/lib/utils';
 
 const DEBOUNCE_MS = 250;
@@ -96,7 +96,7 @@ function buildOptions(results: SearchResults): { tokens: Option[]; pools: Option
             token1={{ logoUri: pool.currency1LogoUri, symbol: symbol1 }} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[18px] leading-6">{symbol0} / {symbol1}</span>
-            <span className="block truncate text-[14px] text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {pool.fee / 10_000}%{pool.ponsDesignated && ' · Official Pons pool'}</span>
+            <span className="block truncate text-[14px] text-muted-foreground">{pool.protocol.replace('uniswap_', '')} · {formatPoolFee(pool.fee, pool.hooks)}{pool.ponsDesignated && ' · Official Pons pool'}</span>
           </span>
           <span className="shrink-0 text-right">
             <span className="block text-[18px] leading-6">{formatPoolUsd(pool.volume24hUsd ?? null)}</span>

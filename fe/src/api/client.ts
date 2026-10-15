@@ -231,7 +231,7 @@ export async function getPoolCandles(pool: Pick<PoolSummary, 'chainId' | 'protoc
 export interface SearchTokenHit { chainId: number; tokenAddress: string; name: string | null; symbol: string | null; logoUri: string | null; platform: string;
   priceUsd: string | null; change1d: string | null }
 export interface SearchPoolHit {
-  chainId: number; protocol: string; poolId: string; fee: number; currency0: string; currency1: string;
+  chainId: number; protocol: string; poolId: string; fee: number; hooks?: string | null; currency0: string; currency1: string;
   currency0Symbol: string | null; currency0LogoUri: string | null;
   currency1Symbol: string | null; currency1LogoUri: string | null; volume24hUsd: string | null; ponsDesignated: boolean;
   launchToken: { address: string; name: string | null; symbol: string | null; logoUri: string | null };
@@ -275,7 +275,7 @@ export async function getPoolLiquidity(pool: Pick<PoolSummary, 'chainId' | 'prot
 export interface CurveDepth {
   blockNumber: string | null; price: number | null; priceInverse: number | null; feeBps: number | null; creatorTaxBps: number | null;
   graduationThreshold: string | null; realQuoteReserve: string | null;
-  quoteReserve: string | null; tokenReserve: string | null; quoteDecimals: number | null; tokenDecimals: number | null;
+  quoteReserve: string | null; tokenReserve: string | null; quoteDecimals: number | null; tokenDecimals: number | null; tokenBalance?: string | null;
   asksEndAtGraduation: boolean; bidsEndAtEmptyReserve: boolean; depth: DepthData | null; complete: boolean; unavailableReason: string | null;
 }
 // Depth of the launch's bonding curve; null (404) when it has no curve venue.

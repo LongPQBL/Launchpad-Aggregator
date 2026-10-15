@@ -13,6 +13,8 @@ export interface SearchTokenHit {
 }
 export interface SearchPoolHit {
   chainId: number; protocol: 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2'; poolId: string; fee: number;
+  /** The pool's hook address (a V4 hook can charge fees the pool's own fee tier does not show). */
+  hooks: string | null;
   currency0: string; currency1: string;
   // The launched token that made this pool relevant (every indexed pool has at least one) — what
   // the UI labels the hit with and links the pool page's displayed side to.
@@ -72,7 +74,7 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
           LIMIT $2 OFFSET $9`,
         [contains, limit, prefix, lowered, tokenAddress, chainIds ?? null, safeHead?.toString() ?? null, browsing, offset]),
         pool.query(`SELECT * FROM (SELECT DISTINCT ON (pc.chain_id, pc.protocol, pc.pool_id)
-            pc.chain_id, pc.protocol, pc.pool_id, pc.fee, pc.currency0, pc.currency1, pc.block_number AS sort_block,
+            pc.chain_id, pc.protocol, pc.pool_id, pc.fee, pc.hooks, pc.currency0, pc.currency1, pc.block_number AS sort_block,
             l.token_address, l.name, l.symbol, l.logo_uri,
             CASE WHEN $8::boolean THEN 0 ELSE ${matchRank} END AS match_rank,
             COALESCE(c0.symbol, CASE WHEN pc.currency0 = l.quote_asset_address THEN l.quote_asset_symbol END) AS currency0_symbol,
@@ -102,7 +104,7 @@ export function createSearchStore(pool: Pool, rpcClient?: UsdPriceClient): Searc
         if (seen.has(key)) continue;
         seen.add(key);
         poolHits.push({
-          chainId: Number(row.chain_id), protocol: row.protocol, poolId: String(row.pool_id), fee: Number(row.fee),
+          chainId: Number(row.chain_id), protocol: row.protocol, poolId: String(row.pool_id), fee: Number(row.fee), hooks: row.hooks ?? null,
           currency0: String(row.currency0), currency1: String(row.currency1),
           launchToken: { address: String(row.token_address), name: row.name ?? null, symbol: row.symbol ?? null, logoUri: row.logo_uri ?? null },
           currency0Symbol: row.currency0_symbol ?? null, currency0LogoUri: row.currency0_logo_uri ?? null,

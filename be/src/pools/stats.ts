@@ -5,7 +5,7 @@ import { computeFdvUsd, readTotalSupply } from '../market/tokenStats.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
 import { valueTradeUsd } from '../market/quotePricing/tradeValuation.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
-import { readLensSnapshot } from './lens.js';
+import { readPoolAmounts } from './poolAmounts.js';
 import { readTvlChange } from './tvlSnapshots.js';
 import { calculateTvlUsd } from '../market/tvlValue.js';
 import { poolPriceInQuote, poolPriceRational, sumUsdValues, percentChange } from './valuation.js';
@@ -137,25 +137,28 @@ export async function assetDecimals(client: UsdPriceClient | undefined, address:
   return pending;
 }
 
-async function readPoolSnapshot(client: UsdPriceClient | undefined, catalog: PoolRow, displayedIsCurrency0: boolean,
+// Both sides' amounts and the spot price of any pool type: the V4 reserves lens (pool principal), a V3 pool's token balances (what it holds,
+// uncollected fees included) or a V2 pair's reserves. `quoteUsd` values the quote side; without it only the balances come back.
+async function readPoolSnapshot(client: UsdPriceClient | undefined, key: PoolKey, catalog: PoolRow, displayedIsCurrency0: boolean,
   displayedDecimals: number | null, quoteDecimals: number | null, quoteUsd: number | null): Promise<{
     poolBalances: PoolBalanceSnapshot | null; tvlUsd: string | null; sqrtPriceX96: bigint | null;
   }> {
-  if (displayedDecimals === null || quoteDecimals === null) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
-  const lens = await readLensSnapshot(client, catalog);
-  if (!lens) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
+  if (displayedDecimals === null || quoteDecimals === null || !client) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
+  const amounts = await readPoolAmounts(client, { protocol: key.protocol, poolId: key.poolId, currency0: catalog.currency0, currency1: catalog.currency1,
+    fee: catalog.fee, tick_spacing: catalog.tick_spacing, hooks: catalog.hooks });
+  if (!amounts) return { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
   try {
-    const { blockNumber, coreAmount0, coreAmount1, sqrtPriceX96 } = lens;
+    const { blockNumber, amount0, amount1, sqrtPriceX96 } = amounts;
     const priceInQuote = poolPriceInQuote(sqrtPriceX96, displayedDecimals, quoteDecimals, displayedIsCurrency0, 100);
     const poolBalances = priceInQuote === null ? null : {
-      displayedAmountRaw: (displayedIsCurrency0 ? coreAmount0 : coreAmount1).toString(),
-      otherAmountRaw: (displayedIsCurrency0 ? coreAmount1 : coreAmount0).toString(),
+      displayedAmountRaw: (displayedIsCurrency0 ? amount0 : amount1).toString(),
+      otherAmountRaw: (displayedIsCurrency0 ? amount1 : amount0).toString(),
       priceInQuote,
     };
     const tvlUsd = quoteUsd === null ? null : calculateTvlUsd({
-      tokenRaw: displayedIsCurrency0 ? coreAmount0 : coreAmount1,
-      quoteRaw: displayedIsCurrency0 ? coreAmount1 : coreAmount0,
-      blockNumber, basis: 'pool_principal', sqrtPriceX96,
+      tokenRaw: displayedIsCurrency0 ? amount0 : amount1,
+      quoteRaw: displayedIsCurrency0 ? amount1 : amount0,
+      blockNumber, basis: key.protocol === 'uniswap_v4' ? 'pool_principal' : 'pool_custody', sqrtPriceX96,
       tokenIsCurrency0: displayedIsCurrency0,
     }, quoteDecimals, displayedDecimals, quoteUsd);
     return { poolBalances, tvlUsd, sqrtPriceX96 };
@@ -192,17 +195,15 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const quoteFeed = await resolveVerifiedFeed(pool, key.chainId, quoteAddress);
   const currentQuoteUsd = options.rpcClient && quoteFeed
     ? await readUsdPrice(pool, options.rpcClient, key.chainId, quoteAddress, () => asOf * 1000).catch(() => null) : null;
-  let poolSnapshot = key.protocol === 'uniswap_v4'
-    ? await readPoolSnapshot(options.rpcClient, catalog, displayedIsCurrency0, displayedDecimals, quoteDecimals,
-      currentQuoteUsd?.priceUsd ?? null)
-    : { poolBalances: null, tvlUsd: null, sqrtPriceX96: null };
+  let poolSnapshot = await readPoolSnapshot(options.rpcClient, key, catalog, displayedIsCurrency0, displayedDecimals, quoteDecimals,
+    currentQuoteUsd?.priceUsd ?? null);
   // TVL only needs one side with a verified USD feed. When the quote has none (a pool of two launched tokens read from the one
   // without a feed's side, say), value the pool through the other side instead of leaving it unavailable.
-  if (key.protocol === 'uniswap_v4' && poolSnapshot.tvlUsd === null && poolSnapshot.poolBalances !== null && currentQuoteUsd === null
+  if (poolSnapshot.tvlUsd === null && poolSnapshot.poolBalances !== null && currentQuoteUsd === null
     && options.rpcClient && (await resolveVerifiedFeed(pool, key.chainId, displayed))) {
     const displayedUsd = await readUsdPrice(pool, options.rpcClient, key.chainId, displayed, () => asOf * 1000).catch(() => null);
     if (displayedUsd) {
-      const swapped = await readPoolSnapshot(options.rpcClient, catalog, !displayedIsCurrency0, quoteDecimals, displayedDecimals, displayedUsd.priceUsd);
+      const swapped = await readPoolSnapshot(options.rpcClient, key, catalog, !displayedIsCurrency0, quoteDecimals, displayedDecimals, displayedUsd.priceUsd);
       poolSnapshot = { poolBalances: poolSnapshot.poolBalances, tvlUsd: swapped.tvlUsd, sqrtPriceX96: poolSnapshot.sqrtPriceX96 };
     }
   }

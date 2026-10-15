@@ -39,7 +39,8 @@ function amountFromRaw(raw: bigint | string, decimals: number | null): number | 
 
 export function PoolBalances({ protocol, poolAddress, displayed, other, priceInQuote, poolBalances }: PoolBalancesProps) {
   const decimalsKnown = displayed.decimals !== null && other.decimals !== null;
-  const enabled = protocol !== 'uniswap_v4' && decimalsKnown;
+  // The API reads every pool type (V4 lens, V3 balances, V2 reserves); the browser reads a V3 / V2 pool itself only when the API had no answer.
+  const enabled = protocol !== 'uniswap_v4' && decimalsKnown && !poolBalances;
   const onchainDisplayedAmount = useSideBalance(poolAddress, displayed, enabled);
   const onchainOtherAmount = useSideBalance(poolAddress, other, enabled);
 
@@ -50,11 +51,12 @@ export function PoolBalances({ protocol, poolAddress, displayed, other, priceInQ
   let displayedAmount = onchainDisplayedAmount;
   let otherAmount = onchainOtherAmount;
   let compositionPrice = priceInQuote;
-  if (protocol === 'uniswap_v4') {
-    if (!poolBalances) return <p className="text-sm text-muted-foreground">Pool balances unavailable</p>;
+  if (poolBalances) {
     displayedAmount = amountFromRaw(poolBalances.displayedAmountRaw, displayed.decimals);
     otherAmount = amountFromRaw(poolBalances.otherAmountRaw, other.decimals);
     compositionPrice = poolBalances.priceInQuote;
+  } else if (protocol === 'uniswap_v4') {
+    return <p className="text-sm text-muted-foreground">Pool balances unavailable</p>;
   }
 
   if (displayedAmount === null || otherAmount === null) {

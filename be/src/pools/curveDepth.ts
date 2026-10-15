@@ -54,6 +54,7 @@ export function buildCurveDepth(state: CurveDepthState, decimals: { quote: numbe
   return { asks: asks.rows, bids: bids.rows, spreadPercent: (2 * Number(state.feeBps)) / 100, asksEndAtGraduation: asks.ended, bidsEndAtEmptyReserve: bids.ended };
 }
 
+const erc20BalanceAbi = parseAbi(['function balanceOf(address) view returns (uint256)']);
 const curveAbi = parseAbi([
   'function quoteReserve() view returns (uint256)', 'function tokenReserve() view returns (uint256)',
   'function feeBps() view returns (uint256)', 'function realQuoteReserve() view returns (uint256)',
@@ -64,6 +65,8 @@ export interface CurveDepthAnswer {
   graduationThreshold: string | null; realQuoteReserve: string | null;
   /** The curve's virtual reserves (raw) and the asset decimals: enough to draw the whole curve, price against graduation progress. */
   quoteReserve: string | null; tokenReserve: string | null; quoteDecimals: number | null; tokenDecimals: number | null;
+  /** What the curve really holds: its token balance (ERC-20 balanceOf the curve), and `realQuoteReserve` for the quote side (the virtual reserve is not held). */
+  tokenBalance: string | null;
   asksEndAtGraduation: boolean; bidsEndAtEmptyReserve: boolean; depth: DepthResult | null; complete: boolean;
   unavailableReason: 'read_failed' | 'graduated' | 'decimals_unavailable' | null;
 }
@@ -77,15 +80,16 @@ export async function readCurveDepthAnswer(pool: Pool, client: LiquidityClient, 
   const row = found.rows[0] as { curve: string; factory_address: string; token_decimals: number | null; quote_asset_decimals: number | null } | undefined;
   if (!row) return null;
   const base: CurveDepthAnswer = { blockNumber: null, price: null, priceInverse: null, feeBps: null, creatorTaxBps: null, graduationThreshold: null, realQuoteReserve: null,
-    quoteReserve: null, tokenReserve: null, quoteDecimals: null, tokenDecimals: null,
+    quoteReserve: null, tokenReserve: null, quoteDecimals: null, tokenDecimals: null, tokenBalance: null,
     asksEndAtGraduation: false, bidsEndAtEmptyReserve: false, depth: null, complete: false, unavailableReason: null };
   if (row.token_decimals === null || row.quote_asset_decimals === null) return { ...base, unavailableReason: 'decimals_unavailable' };
   try {
     const blockNumber = await client.getBlockNumber();
     const curve = row.curve as Address;
-    const [quoteReserve, tokenReserve, feeBps, realQuoteReserve, launched] = await Promise.all([
+    const [quoteReserve, tokenReserve, feeBps, realQuoteReserve, launched, tokenBalance] = await Promise.all([
       ...(['quoteReserve', 'tokenReserve', 'feeBps', 'realQuoteReserve'] as const).map((functionName) => client.readContract({ address: curve, abi: curveAbi, functionName, blockNumber })),
       client.readContract({ address: row.factory_address as Address, abi: v2FactoryStateAbi, functionName: 'getLaunchedToken', args: [token as Address], blockNumber }),
+      client.readContract({ address: token as Address, abi: erc20BalanceAbi, functionName: 'balanceOf', args: [curve], blockNumber }).catch(() => null),
     ]);
     const info = launched as { phase: number; graduationThreshold: bigint; creatorTaxBps: number; exists: boolean } | undefined;
     if (![quoteReserve, tokenReserve, feeBps, realQuoteReserve].every((value) => typeof value === 'bigint') || !info?.exists || typeof info.graduationThreshold !== 'bigint') return { ...base, unavailableReason: 'read_failed' };
@@ -94,7 +98,8 @@ export async function readCurveDepthAnswer(pool: Pool, client: LiquidityClient, 
     if (state.quoteReserve <= 0n || state.tokenReserve <= 0n) return { ...base, blockNumber: blockNumber.toString(), unavailableReason: 'read_failed' };
     const common = { blockNumber: blockNumber.toString(), feeBps: Number(feeBps), creatorTaxBps: Number(info.creatorTaxBps), graduationThreshold: info.graduationThreshold.toString(),
       realQuoteReserve: state.realQuoteReserve.toString(), quoteReserve: state.quoteReserve.toString(), tokenReserve: state.tokenReserve.toString(),
-      quoteDecimals: row.quote_asset_decimals, tokenDecimals: row.token_decimals };
+      quoteDecimals: row.quote_asset_decimals, tokenDecimals: row.token_decimals,
+      tokenBalance: typeof tokenBalance === 'bigint' ? tokenBalance.toString() : null };
     if (info.phase !== 0) return { ...base, ...common, unavailableReason: 'graduated' };
     const decimals = { quote: row.quote_asset_decimals, token: row.token_decimals };
     const price = (Number(state.quoteReserve) / Number(state.tokenReserve)) * 10 ** (decimals.token - decimals.quote);

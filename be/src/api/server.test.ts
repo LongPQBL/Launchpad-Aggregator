@@ -222,7 +222,7 @@ describe('read-only API', () => {
 
   it('serves the curve depth, 404s without a curve venue, and 503s without the data method', async () => {
     const depth = { blockNumber: '5', price: 0.000004, priceInverse: 250_000, feeBps: 100, creatorTaxBps: 0, graduationThreshold: '10', realQuoteReserve: '2',
-      quoteReserve: '6', tokenReserve: '1000', quoteDecimals: 18, tokenDecimals: 18,
+      quoteReserve: '6', tokenReserve: '1000', quoteDecimals: 18, tokenDecimals: 18, tokenBalance: '1000',
       asksEndAtGraduation: true, bidsEndAtEmptyReserve: true,
       depth: { asks: [{ price: 0.0000041, amount0: 1, total1: 1, cumulative1: 1 }], bids: [], spreadPercent: 2 }, complete: true, unavailableReason: null };
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data: { ...data(), getCurveDepth: async (_chainId, token) => (token === address ? depth : null) } });

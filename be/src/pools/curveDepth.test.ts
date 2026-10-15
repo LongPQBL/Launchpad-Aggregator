@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildCurveDepth } from './curveDepth.js';
+import { buildCurveDepth, readCurveDepthAnswer } from './curveDepth.js';
 
 const e18 = 10n ** 18n;
 // 4 quote and 1,000,000 tokens of virtual reserves: price 0.000004 quote per token; 1% fee; graduates at 10 quote of real reserve (2 already in).
@@ -48,5 +48,35 @@ describe('buildCurveDepth', () => {
   it('adjusts prices for differing decimals', () => {
     const six = buildCurveDepth({ ...state, quoteReserve: 4_000_000n }, { quote: 6, token: 18 }, 1);
     expect(six.asks[0]!.price).toBeCloseTo(0.000004 * 1.01, 10);
+  });
+});
+
+describe('readCurveDepthAnswer: what the curve really holds', () => {
+  const token = `0x${'a1'.repeat(20)}`;
+  const curve = `0x${'c2'.repeat(20)}`;
+  const pool = { query: async () => ({ rows: [{ curve, factory_address: `0x${'f3'.repeat(20)}`, token_decimals: 18, quote_asset_decimals: 18 }] }) } as never;
+  // A curve with a VIRTUAL quote reserve: quoteReserve is 6 but only 2 was ever paid in (realQuoteReserve); the token side is held for real.
+  const clientWith = (balance: bigint | 'fails') => ({
+    getBlockNumber: async () => 100n,
+    readContract: async ({ functionName }: { functionName: string }) => {
+      if (functionName === 'quoteReserve') return 6n * e18;
+      if (functionName === 'tokenReserve') return 1_000_000n * e18;
+      if (functionName === 'feeBps') return 100n;
+      if (functionName === 'realQuoteReserve') return 2n * e18;
+      if (functionName === 'getLaunchedToken') return { phase: 0, graduationThreshold: 10n * e18, creatorTaxBps: 0, exists: true };
+      if (functionName === 'balanceOf') { if (balance === 'fails') throw new Error('revert'); return balance; }
+      throw new Error(functionName);
+    },
+  }) as never;
+
+  it('reports the token balance of the curve and the real (not virtual) quote reserve, next to the virtual reserves the price comes from', async () => {
+    const answer = await readCurveDepthAnswer(pool, clientWith(900_000n * e18), { chainId: 4663, tokenAddress: token });
+    expect(answer).toMatchObject({ complete: true, tokenBalance: (900_000n * e18).toString(), realQuoteReserve: (2n * e18).toString(), quoteReserve: (6n * e18).toString() });
+    // The quote side that is held is the 2 paid in, never the 6 of the virtual reserve.
+    expect(answer!.realQuoteReserve).not.toBe(answer!.quoteReserve);
+  });
+  it('leaves the token balance unknown when it cannot be read, without failing the depth', async () => {
+    const answer = await readCurveDepthAnswer(pool, clientWith('fails'), { chainId: 4663, tokenAddress: token });
+    expect(answer).toMatchObject({ complete: true, tokenBalance: null });
   });
 });

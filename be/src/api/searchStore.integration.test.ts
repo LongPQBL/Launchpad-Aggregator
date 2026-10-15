@@ -117,6 +117,7 @@ describe('search store', () => {
     expect(result.pools[0]).toHaveProperty('currency1Symbol', 'ZRBA');
     expect(result.pools[0]).toHaveProperty('volume24hUsd');
     expect(result.pools[0]).toHaveProperty('ponsDesignated', false);
+    expect(result.pools[0]).toHaveProperty('hooks'); // the hook address (null or an address) travels with the hit so the UI can label its fee
   });
 
   it('withholds cached token price and change when the launch coverage is incomplete', async () => {

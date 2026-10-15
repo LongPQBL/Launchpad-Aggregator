@@ -14,7 +14,7 @@ import { PoolStats } from './pool-stats';
 import { PoolLinks } from './pool-links';
 import { PoolTransactionList } from './pool-transaction-list';
 import { SwapTrigger } from './swap-trigger';
-import { short as symbol } from './pool-format';
+import { formatPoolFee, short as symbol } from './pool-format';
 import { StickyDetailHeader } from '@/components/sticky-detail-header';
 
 export function PoolDetail({ pool, trades, candles, history = null, chartRange, liveTrades = false }: { pool: PoolSummary; trades: PoolTradePage | null; candles: PoolCandlePage | null; history?: PoolHistory | null; chartRange?: ChartRangeId; liveTrades?: boolean }) {
@@ -61,7 +61,7 @@ export function PoolDetail({ pool, trades, candles, history = null, chartRange, 
           {icon && <Image src={icon} alt="" width={17} height={17} unoptimized className="h-[17px] w-[17px] rounded-full" />}
           <span>{chainName(pool.chainId)}</span>
           <Badge variant="secondary">{pool.protocol.replace('uniswap_', '')}</Badge>
-          <Badge variant="secondary">{pool.fee / 10_000}%</Badge>
+          <Badge variant="secondary">{formatPoolFee(pool.fee, pool.hooks)}</Badge>
           <CopyableTokenAddress address={pool.poolId} addressClassName="!text-base" />
           {pool.ponsDesignated && <span>Official Pons pool</span>}
         </div>

@@ -163,7 +163,7 @@ export const searchResults = { type: 'object', properties: {
     priceUsd: nullableMetric, change1d: nullableMetric,
   } } },
   pools: { type: 'array', items: { type: 'object', properties: {
-    chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' }, fee: { type: 'integer' },
+    chainId: { type: 'integer' }, protocol: { type: 'string' }, poolId: { type: 'string' }, fee: { type: 'integer' }, hooks: { type: 'string', nullable: true },
     currency0: { type: 'string' }, currency1: { type: 'string' },
     currency0Symbol: nullableMetric, currency0LogoUri: nullableMetric,
     currency1Symbol: nullableMetric, currency1LogoUri: nullableMetric, volume24hUsd: nullableMetric,
@@ -182,7 +182,7 @@ export const curveDepthResponse = { type: 'object', properties: {
   feeBps: { type: 'integer', nullable: true }, creatorTaxBps: { type: 'integer', nullable: true },
   graduationThreshold: { type: 'string', nullable: true }, realQuoteReserve: { type: 'string', nullable: true },
   quoteReserve: { type: 'string', nullable: true }, tokenReserve: { type: 'string', nullable: true },
-  quoteDecimals: { type: 'integer', nullable: true }, tokenDecimals: { type: 'integer', nullable: true },
+  quoteDecimals: { type: 'integer', nullable: true }, tokenDecimals: { type: 'integer', nullable: true }, tokenBalance: { type: 'string', nullable: true },
   asksEndAtGraduation: { type: 'boolean' }, bidsEndAtEmptyReserve: { type: 'boolean' },
   depth: { type: 'object', nullable: true, properties: { asks: { type: 'array', items: depthRow }, bids: { type: 'array', items: depthRow }, spreadPercent: { type: 'number', nullable: true } } },
   complete: { type: 'boolean' }, unavailableReason: { type: 'string', nullable: true },

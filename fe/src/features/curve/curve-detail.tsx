@@ -12,6 +12,7 @@ import { TransactionList } from '@/features/launch/transaction-list';
 import { PoolLogo } from '@/features/pools/pool-logo';
 import { poolAge } from '@/features/pools/pool-format';
 import { CurveSwapPanel } from '@/trading/curve-swap-panel';
+import { CurveBalances } from './curve-balances';
 import type { UsdPrices } from '@/trading/trade-usd';
 
 export interface CurveDetailProps {
@@ -140,6 +141,16 @@ export function CurveDetail({ detail, summary, transactions, candles, history, c
             <section aria-label="Stats">
               <CardHeader className="p-5 pb-0"><h2 className="text-2xl">Stats</h2></CardHeader>
               <CardContent className="mt-6 grid gap-x-4 gap-y-5 p-5 pt-0 sm:grid-cols-2">
+                {activeCurveVenue && (
+                  <div className="col-span-full">
+                    <h3 className="text-sm text-muted-foreground">Curve balances</h3>
+                    <div className="mt-1">
+                      <CurveBalances chainId={detail.chainId} curveAddress={activeCurveVenue.ref as `0x${string}`}
+                        token={{ address: detail.tokenAddress as `0x${string}`, symbol: tokenSymbol, decimals: detail.tokenDecimals }}
+                        quote={{ address: detail.quoteAsset.address as `0x${string}`, symbol: quoteSymbol, decimals: detail.quoteAsset.decimals }} />
+                    </div>
+                  </div>
+                )}
                 <dl className="contents">
                   <div><dt className="text-sm text-muted-foreground">24H volume</dt><dd className="break-words text-lg">{volumeText}</dd></div>
                   <div><dt className="text-sm text-muted-foreground">24H trades</dt><dd className="text-lg">{summary.tradeCount24h}</dd></div>

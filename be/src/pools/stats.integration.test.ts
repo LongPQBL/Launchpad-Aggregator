@@ -106,6 +106,35 @@ describe('readPoolStats', () => {
       else await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = $1', [chainId]);
     }
   });
+  it('reads the balances, price and TVL of a V3 pool from its token balances and slot0, and of a V2 pair from its reserves', async () => {
+    const v3 = `0x${'3a'.repeat(20)}`;
+    const v2 = `0x${'2a'.repeat(20)}`;
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES ($1,'uniswap_v3',$2,$3,$4,3000,60,$7,99,$5,$6,0,true,'caught_up'),($1,'uniswap_v2',$8,$3,$4,3000,0,$7,99,$5,$6,1,true,'caught_up')
+      ON CONFLICT (chain_id,protocol,pool_id) DO NOTHING`, [chainId, v3, a, b, tx('c'), tx('d'), '0x0000000000000000000000000000000000000000', v2]);
+    const client = {
+      async getBlockNumber() { return 300n; },
+      async readContract({ functionName, address, args }: { functionName: string; address: string; args?: readonly unknown[] }) {
+        if (functionName === 'decimals') return address.toLowerCase() === feed ? 8 : 18;
+        if (functionName === 'totalSupply') return 1000n * 10n ** 18n;
+        if (functionName === 'latestRoundData') return [1n, 400_000_000n, 0n, 4000n, 1n];
+        if (functionName === 'slot0') return [2n ** 96n, 0, 0, 0, 0, 0, true];
+        if (functionName === 'balanceOf') return String(args?.[0]).toLowerCase() === v3 ? 5n * 10n ** 18n : 0n;
+        if (functionName === 'getReserves') return [8n * 10n ** 18n, 2n * 10n ** 18n, 0];
+        throw new Error(`Unexpected ${functionName}`);
+      },
+    };
+    try {
+      const three = await readPoolStats(pool, { chainId, protocol: 'uniswap_v3', poolId: v3 }, a, 90_000, { rpcClient: client });
+      expect(three.poolBalances).toMatchObject({ displayedAmountRaw: (5n * 10n ** 18n).toString(), otherAmountRaw: (5n * 10n ** 18n).toString() });
+      expect(three.tvlUsd).not.toBeNull();
+      const two = await readPoolStats(pool, { chainId, protocol: 'uniswap_v2', poolId: v2 }, a, 90_000, { rpcClient: client });
+      expect(two.poolBalances).toMatchObject({ displayedAmountRaw: (8n * 10n ** 18n).toString(), otherAmountRaw: (2n * 10n ** 18n).toString() });
+      expect(Number(two.priceInQuote)).toBeCloseTo(0.25); // 2 quote for 8 tokens
+    } finally {
+      await pool.query('DELETE FROM pool_catalog WHERE chain_id = $1 AND pool_id = ANY($2)', [chainId, [v3, v2]]);
+    }
+  });
   it('values each trade at its own historical round and derives pool price for either side', async () => {
     const statsA = await readPoolStats(pool, key, a, 4000, { rpcClient });
     expect(statsA.volume24hUsd).toBe('6');

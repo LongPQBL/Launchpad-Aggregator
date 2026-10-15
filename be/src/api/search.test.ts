@@ -41,7 +41,7 @@ describe('search API', () => {
         platform: 'pons', priceUsd: '0.05', change1d: '12.5' }],
       pools: [{ chainId: 4663, protocol: 'uniswap_v4' as const, poolId: '0xbbb', fee: 3000,
         currency0: '0xaaa', currency1: '0x0', currency0Symbol: 'ZRB', currency0LogoUri: 'zorb.png',
-        currency1Symbol: 'ETH', currency1LogoUri: 'eth.png', volume24hUsd: '1234', ponsDesignated: false,
+        currency1Symbol: 'ETH', currency1LogoUri: 'eth.png', volume24hUsd: '1234', ponsDesignated: false, hooks: null,
         launchToken: { address: '0xaaa', name: 'Zorb', symbol: 'ZRB', logoUri: null } }],
     }; } };
     const app = await createApiServer({ feOrigin: 'http://localhost:3000', data, search });

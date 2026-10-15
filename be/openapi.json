@@ -1052,6 +1052,10 @@
                       "type": "integer",
                       "nullable": true
                     },
+                    "tokenBalance": {
+                      "type": "string",
+                      "nullable": true
+                    },
                     "asksEndAtGraduation": {
                       "type": "boolean"
                     },
@@ -2299,6 +2303,10 @@
                           },
                           "fee": {
                             "type": "integer"
+                          },
+                          "hooks": {
+                            "type": "string",
+                            "nullable": true
                           },
                           "currency0": {
                             "type": "string"

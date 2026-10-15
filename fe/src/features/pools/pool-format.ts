@@ -49,3 +49,18 @@ export function formatVolumeToTvl(ratio: number | null): string {
   if (ratio === null) return '—';
   return ratio >= 1_000 ? compactRatio.format(ratio) : ratio.toFixed(2);
 }
+
+const NO_HOOK = '0x0000000000000000000000000000000000000000';
+const DYNAMIC_FEE_FLAG = 0x800000;
+
+/**
+ * The fee a pool badge shows. A V4 pool's fee is in hundredths of a basis point (3000 = 0.3%), so the percentage is fee / 10,000 and a large
+ * number is a real fee. Two cases the number alone would misstate: the dynamic-fee flag (the hook sets the fee per swap; the field is not a rate)
+ * and a hook (it can take its own fee, so "0%" would read as free).
+ */
+export function formatPoolFee(fee: number, hooks?: string | null): string {
+  if ((fee & DYNAMIC_FEE_FLAG) !== 0) return 'Dynamic fee';
+  const percent = `${fee / 10_000}%`;
+  if (!hooks || hooks.toLowerCase() === NO_HOOK) return percent;
+  return fee === 0 ? 'Hook fee' : `${percent} + hook`;
+}

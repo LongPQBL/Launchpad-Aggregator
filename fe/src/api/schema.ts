@@ -554,6 +554,7 @@ export interface paths {
                             tokenReserve?: string | null;
                             quoteDecimals?: number | null;
                             tokenDecimals?: number | null;
+                            tokenBalance?: string | null;
                             asksEndAtGraduation?: boolean;
                             bidsEndAtEmptyReserve?: boolean;
                             depth?: {
@@ -1193,6 +1194,7 @@ export interface paths {
                                 protocol?: string;
                                 poolId?: string;
                                 fee?: number;
+                                hooks?: string | null;
                                 currency0?: string;
                                 currency1?: string;
                                 currency0Symbol?: string | null;
