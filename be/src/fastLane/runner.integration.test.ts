@@ -369,13 +369,30 @@ describe('fast lane', () => {
     const fake = fakeSource();
     await db.insert(fastLaneState).values({ chainId, lastBlock: 5000n });
     const getLogs = vi.spyOn(fake, 'getLogs').mockRejectedValueOnce(new Error('rate limited'));
-    const instance = await lane(fake);
+    const instance = await lane(fake, { sweepChunkBlocks: 100n });
     await instance.sweepOnce();
     expect(instance.stats().errors).toBe(1);
     expect(await readLaneBlock(db, chainId)).toBe(5000n); // a failed range must not certify blocks the lane did not inspect
     await instance.sweepOnce();
     expect(getLogs).toHaveBeenCalledTimes(2);
     expect(getLogs.mock.calls[1]![0]).toBe(5001n);
+  });
+
+  it('shrinks a timed-out getLogs range and retries the same interval before advancing coverage', async () => {
+    const fake = fakeSource();
+    fake.head = 8_000n;
+    await db.insert(fastLaneState).values({ chainId, lastBlock: 5_000n, coverageBlock: 5_000n });
+    const ranges: [bigint, bigint][] = [];
+    fake.getLogs = async (from, to) => {
+      ranges.push([from, to]);
+      if (to - from + 1n > 500n) throw new Error('request timed out');
+      return [];
+    };
+    const instance = await lane(fake, { sweepChunkBlocks: 2_000n, sweepLagBlocks: 2n });
+    await instance.sweepOnce();
+    expect(ranges.slice(0, 3)).toEqual([[5001n, 7000n], [5001n, 6000n], [5001n, 5500n]]);
+    const state = (await pool.query('SELECT last_block, coverage_block FROM fast_lane_state WHERE chain_id = $1', [chainId])).rows[0];
+    expect(state).toMatchObject({ last_block: '7998', coverage_block: '7998' });
   });
 
   it('does not advance trusted coverage when a watched sweep log cannot be hydrated', async () => {

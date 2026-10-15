@@ -55,6 +55,7 @@ const HANDLED_KEYS_MAX = 5_000;
 const CACHE_MAX = 512;
 const HEADER_PREFETCH_BATCH_SIZE = 256;
 const HEADER_PREFETCH_CONCURRENCY = 8;
+const MIN_SWEEP_CHUNK_BLOCKS = 100n;
 const SENDER_CACHE_MAX = 4_096;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 function trim<K, V>(map: Map<K, V>, max: number): void {
@@ -68,7 +69,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
   const watchRefreshEveryMs = options.watchRefreshEveryMs ?? 10_000;
   const sweepLagBlocks = options.sweepLagBlocks ?? 2n;
   const maxGapBlocks = options.maxGapBlocks ?? 20_000n;
-  const sweepChunkBlocks = options.sweepChunkBlocks ?? 2_000n;
+  let sweepChunkBlocks = options.sweepChunkBlocks ?? 2_000n;
   const lookupRetries = options.lookupRetries ?? 3;
   const lookupRetryDelayMs = options.lookupRetryDelayMs ?? 100;
   const log = options.log ?? (() => {});
@@ -239,9 +240,22 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       await raiseLaneVenueBridge(db, chainId, to);
       return;
     }
-    for (let start = from; start <= to; start += sweepChunkBlocks) {
+    let start = from;
+    while (start <= to) {
       const end = start + sweepChunkBlocks - 1n < to ? start + sweepChunkBlocks - 1n : to;
-      const logs = await source.getLogs(start, end); // the slow part runs outside the queue, so a live log never waits behind it
+      let logs: FastLog[];
+      try {
+        logs = await source.getLogs(start, end); // the slow part runs outside the queue, so a live log never waits behind it
+      } catch (error) {
+        if (sweepChunkBlocks <= MIN_SWEEP_CHUNK_BLOCKS) throw error;
+        const previousSize = sweepChunkBlocks;
+        sweepChunkBlocks = previousSize / 2n < MIN_SWEEP_CHUNK_BLOCKS ? MIN_SWEEP_CHUNK_BLOCKS : previousSize / 2n;
+        log('sweep range failed; reducing chunk size and retrying', {
+          from: start.toString(), to: end.toString(), previousChunkBlocks: previousSize.toString(),
+          nextChunkBlocks: sweepChunkBlocks.toString(), error: (error as Error).message,
+        });
+        continue;
+      }
       const byBlock = new Map<bigint, FastLog[]>();
       for (const entry of logs) byBlock.set(entry.blockNumber, [...(byBlock.get(entry.blockNumber) ?? []), entry]);
       const blockNumbers = [...byBlock.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -269,6 +283,7 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
           if (!complete) return;
         }
       }
+      start = end + 1n;
     }
     lastSwept = to;
     await advanceLaneBlock(db, chainId, to);
