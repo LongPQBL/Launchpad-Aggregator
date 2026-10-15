@@ -3,6 +3,7 @@ import { parseAbi } from 'viem';
 import type { Pool } from 'pg';
 import { assertClientMatchesChain } from '../chains/registry.js';
 import { resolveVerifiedFeed } from './quotePricing/feedRegistry.js';
+import { PEG_DISCOVERY_SOURCE } from './quotePricing/peggedAssets.js';
 
 export interface UsdPriceClient {
   readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[];
@@ -12,7 +13,7 @@ export interface UsdPriceClient {
   chain?: { id: number } | undefined;
 }
 
-export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainlink' }
+export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainlink' | 'peg' }
 
 const aggregatorAbi = parseAbi([
   'function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -86,6 +87,8 @@ export async function readUsdPrice(pool: Pool, client: UsdPriceClient, chainId: 
   const key = `${chainId}:${address}`;
   const feed = await resolveVerifiedFeed(pool, chainId, address);
   if (!feed) return null;
+  // A pegged stablecoin has no oracle to read: it is $1 (see peggedAssets.ts).
+  if (feed.discoverySource === PEG_DISCOVERY_SOURCE) return { priceUsd: 1, updatedAt: Math.floor(now() / 1000), source: 'peg' };
   const cached = cache.get(key);
   if (cached && now() - cached.fetchedAt < CACHE_TTL_MS) return { priceUsd: cached.priceUsd, updatedAt: cached.updatedAt, source: 'chainlink' };
   const failed = failures.get(key);
@@ -115,6 +118,7 @@ export async function readUsdPriceAtBlock(pool: Pool, client: UsdPriceClient, ch
   const address = quoteAssetAddress.toLowerCase();
   const feed = await resolveVerifiedFeed(pool, chainId, address);
   if (!feed) return null;
+  if (feed.discoverySource === PEG_DISCOVERY_SOURCE) return 1;
   const decimals = await readFeedDecimals(client, chainId, feed.feedAddress, address);
   const roundData = await client.readContract({ address: feed.feedAddress, abi: aggregatorAbi, functionName: 'latestRoundData', blockNumber });
   if (!Array.isArray(roundData) || typeof roundData[1] !== 'bigint' || typeof roundData[3] !== 'bigint') return null;

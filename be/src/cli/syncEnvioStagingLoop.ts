@@ -6,6 +6,7 @@ import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepa
   runAdditionalPoolCatalogRepairCycle, additionalPoolRawTablesReady } from '../envioSync/syncAll.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
+import { ensurePeggedRounds } from '../market/quotePricing/peggedAssets.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -30,7 +31,9 @@ const metadataLoop = metadataClient
     if (event.kind === 'enrichment_error' || (event.claimed ?? 0) > 0) console.log('Envio metadata enrichment:', event);
   }, metadataBatchLimit)) : null;
 const priceLoop = metadataClient
-  ? startPriceEnrichmentLoop(() => maintainRollingWindows(pool, 4663, new Date())
+  ? startPriceEnrichmentLoop(() => ensurePeggedRounds(pool, 4663, new Date())
+    .catch((error) => console.error('Pegged-asset rounds failed, will retry next tick:', error))
+    .then(() => maintainRollingWindows(pool, 4663, new Date()))
     .catch((error) => console.error('Rolling-window maintenance failed, will retry next tick:', error))
     .then(() => enrichPricesOnce(pool, metadataClient, 4663, new Date(), quoteFeedRegistry.resolve))
     .then((report) => { if (report.claimed > 0) console.log('Price enrichment:', report); })
