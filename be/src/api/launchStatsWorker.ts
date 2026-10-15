@@ -12,7 +12,7 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
   concurrency = 1): Promise<number> {
   const head = await readSafeHead(pool);
   const staleBefore = new Date(now.getTime() - LAUNCH_STATS_MAX_AGE_SECONDS * 1000);
-  const columns = `l.*, ${launchCoverageSql(1)} AS launch_coverage_complete`;
+  const columns = `l.*, s.computed_at AS stats_computed_at, ${launchCoverageSql(1)} AS launch_coverage_complete`;
   // Three small passes, each ending at `limit` rows in all (one query ordering every launch by volume read the whole table, 10 s under load):
   // the due launches at the top of the volume ranking, then the stalest stored figures, then the newest launches never computed.
   const rows: Record<string, unknown>[] = [];
@@ -36,6 +36,7 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
     rows.push(...(await pool.query(`
       SELECT ${columns}
       FROM launches l
+      LEFT JOIN launch_stats s ON s.chain_id = l.chain_id AND s.token_address = l.token_address
       WHERE l.chain_id = 4663 AND NOT EXISTS (SELECT 1 FROM launch_stats s WHERE s.chain_id = l.chain_id AND s.token_address = l.token_address)
         AND (l.chain_id::text || ':' || l.token_address) <> ALL($3::text[])
       ORDER BY l.launch_block DESC LIMIT $2`, [head?.toString() ?? null, limit - rows.length, taken()])).rows);
@@ -60,8 +61,9 @@ export async function recomputeLaunchStats(pool: Pool, rpcClient: UsdPriceClient
   now: Date = new Date()): Promise<boolean> {
   const head = await readSafeHead(pool);
   const found = await pool.query(`
-    SELECT l.*, ${launchCoverageSql(1)} AS launch_coverage_complete
-    FROM launches l WHERE l.chain_id = $2 AND l.token_address = $3`, [head?.toString() ?? null, chainId, tokenAddress.toLowerCase()]);
+    SELECT l.*, s.computed_at AS stats_computed_at, ${launchCoverageSql(1)} AS launch_coverage_complete
+    FROM launches l LEFT JOIN launch_stats s ON s.chain_id = l.chain_id AND s.token_address = l.token_address
+    WHERE l.chain_id = $2 AND l.token_address = $3`, [head?.toString() ?? null, chainId, tokenAddress.toLowerCase()]);
   const row = found.rows[0];
   if (!row) return false;
   if (!Boolean(row.launch_coverage_complete)) return true;

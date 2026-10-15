@@ -184,7 +184,7 @@ describe('safe head considers envio_chain_progress (final review, Important 3)',
       VALUES (4663,$1,$2,NULL,'HeadTest','HT',18,'pons','v1',$1,$1,1,$3,0,$1,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
     [headToken, headSource, '0x' + 'e'.repeat(64)]);
     await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
-      VALUES ($1,4663,$2,'v3_pool',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`,
+      VALUES ($1,4663,$2,'v3_pool',$2,$3,NULL,1,true) ON CONFLICT (id) DO UPDATE SET source_id = EXCLUDED.source_id, official = true`,
     [`4663:v3_pool:${headToken}`, headToken, headSource]);
 
     const beforeHead = await store.getLaunch(4663, headToken);
@@ -559,17 +559,20 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     }
   });
 
-  it('withholds FDV and 52-week extrema while the launch trade source is backfilling', async () => {
+  it('retains the last published stats while the launch trade source is backfilling', async () => {
+    await pool.query(`INSERT INTO launch_stats (chain_id,token_address,stats,computed_at) VALUES (4663,$1,$2::jsonb,now())
+      ON CONFLICT (chain_id,token_address) DO UPDATE SET stats=EXCLUDED.stats,computed_at=EXCLUDED.computed_at`,
+    [goodToken, JSON.stringify({ fdvUsd: '123', marketCapUsd: '123', priceUsd: '1', week52High: '4', week52Low: '1',
+      week52HighUsd: '4', week52LowUsd: '1', change1h: '2', change1d: '3', tvlUsd: null, tvlBasis: null,
+      tvlBlockNumber: null, tvlPriceSource: null, tvlPriceUpdatedAt: null, tvlUnavailableReason: 'unavailable' })]);
     await pool.query('UPDATE sources SET status = $1, confirmed_to_block = 0 WHERE id = $2', ['backfilling', `${statsSource}-trades`]);
     try {
       const storeWithRpc = createApiStore(pool);
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
-      expect(detail?.coverageStatus).toBe('backfilling');
-      expect(detail?.priceQuote).toBeNull();
-      expect(detail?.fdvUsd).toBeNull();
-      expect(detail?.marketCapUsd).toBeNull();
-      expect(detail?.week52High).toBeNull();
-      expect(detail?.week52Low).toBeNull();
+      expect(detail?.statsComputedAt).not.toBeNull();
+      expect(detail?.fdvUsd).toBe('123');
+      expect(detail?.week52High).toBe('4');
+      expect(detail?.week52Low).toBe('1');
     } finally {
       await pool.query('UPDATE sources SET status = $1, confirmed_to_block = 2000 WHERE id = $2', ['caught_up', `${statsSource}-trades`]);
     }
@@ -618,7 +621,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       const detail = await storeWithRpc.getLaunch(4663, goodToken);
       expect(detail?.coverageStatus).toBe('backfilling');
       expect(detail?.tvlUsd).toBeNull();
-      expect(detail?.tvlUnavailableReason).toBe('bonding_curve');
+      expect(detail?.tvlUnavailableReason).toBe('unavailable');
       // No factory phase, curve reserve or block read was made for the TVL.
       expect(readContract.mock.calls.map(([call]) => (call as { functionName: string }).functionName)).not.toContain('getLaunchedToken');
       expect(readContract.mock.calls.map(([call]) => (call as { functionName: string }).functionName)).not.toContain('realQuoteReserve');

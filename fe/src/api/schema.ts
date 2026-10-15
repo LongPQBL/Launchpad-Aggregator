@@ -222,6 +222,7 @@ export interface paths {
                                 lifecycleStatus?: string;
                                 officialVolume24h?: string | null;
                                 coverageStatus?: string;
+                                statsComputedAt?: string | null;
                                 fdvUsd?: string | null;
                                 marketCapUsd?: string | null;
                                 priceUsd?: string | null;
@@ -301,6 +302,7 @@ export interface paths {
                             lifecycleStatus?: string;
                             officialVolume24h?: string | null;
                             coverageStatus?: string;
+                            statsComputedAt?: string | null;
                             fdvUsd?: string | null;
                             marketCapUsd?: string | null;
                             priceUsd?: string | null;
