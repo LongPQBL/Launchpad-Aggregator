@@ -1,6 +1,15 @@
 services:
   postgres:
     image: postgres:17-alpine
+    # The defaults (128 MB shared buffers, 64 MB /dev/shm) made every list and search read the disk and let parallel queries die with
+    # "could not resize shared memory segment" once the database grew; sized for a Docker VM of about 4 GB.
+    shm_size: 512mb
+    command: >
+      postgres
+      -c shared_buffers=1GB
+      -c effective_cache_size=2GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=256MB
     environment:
       POSTGRES_USER: launchpad
       POSTGRES_PASSWORD: launchpad_local
