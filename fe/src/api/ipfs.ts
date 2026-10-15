@@ -1,13 +1,13 @@
 import { isHttpUrl } from './url';
 
-// Pinata is the only publicly-reachable IPFS gateway verified working against a real token logo
-// this session — ipfs.io returned 429 (rate-limited), cloudflare-ipfs.com's DNS no longer
-// resolves at all. Do not add either without re-verifying.
-const IPFS_GATEWAY = 'https://gateway.pinata.cloud/ipfs/';
-
+// IPFS logos are served by this app's own /api/logo (fetched once, shrunk and cached on the server: the public gateways take seconds per
+// image and the files are often hundreds of kilobytes). Only a CID is accepted; the gateway URL itself is never built in the browser.
 // A real CID (base32 or base58) is alphanumeric; an optional /subresource path may follow it.
-// Rejects path traversal (`..`), query strings, and fragments before they reach the gateway URL.
+// Rejects path traversal (`..`), query strings, and fragments.
 const CID_PATH_PATTERN = /^[A-Za-z0-9]+(\/[^?#]*)?$/;
+const GATEWAY_URL_PATTERN = /^https:\/\/gateway\.pinata\.cloud\/ipfs\/([A-Za-z0-9]+(?:\/[A-Za-z0-9._-]+)*)$/;
+
+function logoProxyUrl(cid: string): string { return `/api/logo?c=${encodeURIComponent(cid)}`; }
 
 export function resolveLogoUrl(uri: string | null): string | null {
   if (uri === null) return null;
@@ -15,7 +15,10 @@ export function resolveLogoUrl(uri: string | null): string | null {
   if (/^\/images\/[A-Za-z0-9/_-]+\.(svg|png|webp|jpe?g)$/.test(uri)) return uri;
   if (uri.startsWith('ipfs://')) {
     const cid = uri.slice('ipfs://'.length);
-    return CID_PATH_PATTERN.test(cid) ? IPFS_GATEWAY + cid : null;
+    return CID_PATH_PATTERN.test(cid) && !cid.includes('..') ? logoProxyUrl(cid) : null;
   }
+  // A launch that stored a Pinata gateway link is the same image as its CID.
+  const gateway = GATEWAY_URL_PATTERN.exec(uri);
+  if (gateway) return logoProxyUrl(gateway[1]!);
   return isHttpUrl(uri) ? uri : null;
 }
