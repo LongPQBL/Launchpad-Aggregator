@@ -43,16 +43,18 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
   }
   const due = { rows };
   let next = 0;
+  let refreshed = 0;
   const lane = async () => {
     while (next < due.rows.length) {
       const row = due.rows[next++];
       if (!Boolean(row.launch_coverage_complete)) continue;
       const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
       await writeLaunchStats(pool, Number(row.chain_id), String(row.token_address), stats, new Date());
+      refreshed += 1;
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, due.rows.length) }, lane));
-  return due.rows.length;
+  return refreshed;
 }
 
 // Recomputes one launch's stored figures right away (used when a trade for it was just announced). Returns false when
