@@ -132,7 +132,7 @@ describe('precomputed official candles', () => {
       await addTrade('8', Math.floor(Date.now() / 1000), 31, 0, '2');
       await refreshDirtyCandles(pool, 1000);
       await new Promise((resolve) => setTimeout(resolve, 200));
-      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'launch.changed', chainId: 4663, tokenAddress: token }]);
+      expect(received.map((payload) => JSON.parse(payload))).toEqual([{ type: 'launch.changed', chainId: 4663, tokenAddress: token, refreshStats: true }]);
     } finally {
       await listener.query('UNLISTEN launchpad_events');
       await listener.end();

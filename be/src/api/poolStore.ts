@@ -44,6 +44,21 @@ export interface PoolApiStore {
   listPoolHistory?(key: PoolKey, window: { intervalSeconds: number; buckets: number }): Promise<{ items: PoolDayHistory[]; complete: boolean; intervalSeconds?: number }>;
 }
 
+const POOL_SUMMARY_CONCURRENCY = 10;
+
+async function mapWithConcurrency<T, R>(items: readonly T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  async function run(): Promise<void> {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await mapper(items[index]!);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, () => run()));
+  return results;
+}
+
 interface Row { chain_id: number; protocol: PoolKey['protocol']; pool_id: string; currency0: string; currency1: string;
   fee: number; tick_spacing: number; hooks: string; block_number: string; log_index: number;
   launch_token_address: string | null; pons_designated: boolean }
@@ -111,7 +126,9 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       if (Number.isSafeInteger(value) && value > 0) timestamp = value;
     } catch { /* Historical block unavailable; leave age unknown. */ }
     if (blockTimeCache.size >= 500) blockTimeCache.clear();
-    blockTimeCache.set(block, timestamp);
+    // RPC errors are transient. Caching null here makes every pool created at that block show no age
+    // for the lifetime of the API process, even after the RPC starts answering again.
+    if (timestamp !== null) blockTimeCache.set(block, timestamp);
     return timestamp;
   }
   async function supportedProtocols(chainId?: number): Promise<PoolKey['protocol'][]> {
@@ -212,7 +229,9 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
         LIMIT $${args.length}`, args);
       const rows = result.rows as Row[];
       const visible = rows.slice(0, query.limit);
-      const items = await Promise.all(visible.map((row) => toSummary(row, query.tokenAddress)));
+      // Each summary makes RPC reads for the current pool state, asset decimals and its creation block.
+      // Bound fan-out so one 100-row page does not overwhelm the RPC and turn transient failures into blank fields.
+      const items = await mapWithConcurrency(visible, POOL_SUMMARY_CONCURRENCY, (row) => toSummary(row, query.tokenAddress));
       return { items, nextCursor: rows.length > query.limit && visible.length > 0 ? encodeCursor(visible.at(-1)!) : null,
         supportedProtocols: supported };
     },

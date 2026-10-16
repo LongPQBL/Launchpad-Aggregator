@@ -165,7 +165,9 @@ async function announceRecentCandleChanges(client: { query: (text: string, value
   const launches = new Map<string, DirtyBucket>();
   for (const bucket of dirty) if (bucket.bucketStart >= recentAfter) launches.set(`${bucket.chainId}:${bucket.tokenAddress.toLowerCase()}`, bucket);
   for (const bucket of launches.values()) {
+    // A trade-triggered stats refresh can run before this transaction and see dirty candles. Ask the live stats worker to
+    // recompute after commit, when the aggregates are readable, then publish the usual launch.changed event to browsers.
     await client.query('SELECT pg_notify($1, $2)', ['launchpad_events',
-      JSON.stringify({ type: 'launch.changed', chainId: bucket.chainId, tokenAddress: bucket.tokenAddress.toLowerCase() })]);
+      JSON.stringify({ type: 'launch.changed', chainId: bucket.chainId, tokenAddress: bucket.tokenAddress.toLowerCase(), refreshStats: true })]);
   }
 }

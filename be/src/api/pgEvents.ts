@@ -16,13 +16,15 @@ export function parseDatabaseEvent(payload: string): ApiEvent | null {
       || (event.poolTokens !== undefined && (!Array.isArray(event.poolTokens) || event.poolTokens.length > 2
         || !event.poolTokens.every((token) => typeof token === 'string' && isAddress(token))))
       || (event.blockTimestamp !== undefined && (typeof event.blockTimestamp !== 'number' || !Number.isSafeInteger(event.blockTimestamp) || event.blockTimestamp <= 0))
-      || (event.via !== undefined && event.via !== 'fast' && event.via !== 'envio')) return null;
+      || (event.via !== undefined && event.via !== 'fast' && event.via !== 'envio')
+      || (event.refreshStats !== undefined && typeof event.refreshStats !== 'boolean')) return null;
     return { type: event.type as ApiEvent['type'], chainId: event.chainId,
       ...(typeof event.tokenAddress === 'string' ? { tokenAddress: event.tokenAddress.toLowerCase() } : {}),
       ...(typeof event.poolId === 'string' ? { poolId: event.poolId.toLowerCase() } : {}),
       ...(Array.isArray(event.poolTokens) ? { poolTokens: (event.poolTokens as string[]).map((token) => token.toLowerCase()) } : {}),
       ...(typeof event.blockTimestamp === 'number' ? { blockTimestamp: event.blockTimestamp } : {}),
-      ...(event.via === 'fast' || event.via === 'envio' ? { via: event.via } : {}) };
+      ...(event.via === 'fast' || event.via === 'envio' ? { via: event.via } : {}),
+      ...(typeof event.refreshStats === 'boolean' ? { refreshStats: event.refreshStats } : {}) };
   } catch { return null; }
 }
 

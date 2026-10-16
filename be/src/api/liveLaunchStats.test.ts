@@ -29,9 +29,18 @@ describe('startLiveLaunchStats', () => {
     stop();
   });
 
+  it('recomputes stats when candle rebuilding announces that recent candle data is ready', async () => {
+    const { bus, recompute, stop } = setup();
+    bus.publish({ type: 'launch.changed', chainId: 4663, tokenAddress: TOKEN, refreshStats: true });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(recompute).toHaveBeenCalledWith(fakePool, fakeClient, 4663, TOKEN);
+    stop();
+  });
+
   it('ignores events that are not trades, and does not react to its own launch.changed', async () => {
     const { bus, recompute, stop } = setup();
     bus.publish({ type: 'launch.changed', chainId: 4663, tokenAddress: TOKEN });
+    bus.publish({ type: 'launch.changed', chainId: 4663, tokenAddress: TOKEN, refreshStats: false });
     bus.publish({ type: 'coverage.changed', chainId: 4663 });
     bus.publish({ type: 'pool.changed', chainId: 4663, poolId: `0x${'ab'.repeat(32)}` });
     await vi.advanceTimersByTimeAsync(5_000);

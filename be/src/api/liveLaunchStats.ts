@@ -16,9 +16,9 @@ export interface LiveLaunchStatsOptions {
 }
 
 /**
- * The launch list reads stored figures (price, FDV, TVL, change) that the stats worker refreshes every few minutes. A trade
- * announced for a launch makes those figures stale, so recompute that launch now and announce `launch.changed` once the new
- * figures are stored: a browser that refetches on that event reads them, instead of the pre-trade values.
+ * Trades trigger a quick stats refresh. A candle worker can also request a refresh after its persisted aggregates are ready:
+ * the first trade-triggered refresh may have seen a dirty candle and stored an incomplete 52-week range. Announce only after
+ * recomputation so a browser refetch reads the new figures.
  */
 export function startLiveLaunchStats(pool: Pool, rpcClient: UsdPriceClient, events: ApiEventBus, options: LiveLaunchStatsOptions = {}): () => void {
   const minIntervalMs = options.minIntervalMs ?? 2_000;
@@ -59,7 +59,7 @@ export function startLiveLaunchStats(pool: Pool, rpcClient: UsdPriceClient, even
   }
 
   const unsubscribe = events.subscribe((event) => {
-    if (event.type !== 'trade.created' || !event.tokenAddress) return;
+    if ((event.type !== 'trade.created' && !(event.type === 'launch.changed' && event.refreshStats === true)) || !event.tokenAddress) return;
     const key = `${event.chainId}:${event.tokenAddress}`;
     if (!queued.has(key) && queued.size >= maxQueue) return;
     queued.set(key, { chainId: event.chainId, tokenAddress: event.tokenAddress });

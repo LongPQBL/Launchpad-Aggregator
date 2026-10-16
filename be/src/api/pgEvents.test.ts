@@ -29,4 +29,11 @@ describe('database event bridge', () => {
     expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"via":"fast"}')).toEqual({ type: 'trade.created', chainId: 4663, via: 'fast' });
     expect(parseDatabaseEvent('{"type":"trade.created","chainId":4663,"via":"carrier-pigeon"}')).toBeNull();
   });
+
+  it('carries a candle refresh request and rejects a malformed one', () => {
+    const event = '{"type":"launch.changed","chainId":4663,"tokenAddress":"0x1111111111111111111111111111111111111111","refreshStats":true}';
+    expect(parseDatabaseEvent(event)).toEqual({ type: 'launch.changed', chainId: 4663,
+      tokenAddress: '0x1111111111111111111111111111111111111111', refreshStats: true });
+    expect(parseDatabaseEvent(event.replace('true', '"yes"'))).toBeNull();
+  });
 });
