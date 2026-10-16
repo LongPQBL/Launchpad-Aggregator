@@ -52,6 +52,8 @@ beforeAll(async () => {
   }
   await db.insert(sources).values({ id: 'pons-v2-lifecycle', chainId, version: 'v2', factoryAddress: v2Factory.factory,
     startBlock: v2Factory.startBlock, scannedToBlock: 0n, confirmedToBlock: 0n, status: 'backfilling' }).onConflictDoNothing();
+  await db.insert(sources).values({ id: 'pons-v2-curve', chainId, version: 'v2', factoryAddress: v2Factory.factory,
+    startBlock: v2Factory.startBlock, scannedToBlock: 0n, confirmedToBlock: 0n, status: 'backfilling' }).onConflictDoNothing();
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_incremental');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS ${rawLaunchTable} (
     id text primary key, "chainId" int, "tokenAddress" text, "deployerAddress" text,
