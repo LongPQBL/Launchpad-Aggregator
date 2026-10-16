@@ -28,13 +28,10 @@ test('a new swap appears on the pool page transactions as soon as it is announce
   await expect(page.locator(`a[href$="${txHash}"]`).first()).toBeVisible({ timeout: SHOWS_WITHIN_MS });
 });
 
-// The candle chart is a canvas; its newest candle is read through the OHLC tooltip while hovering the right edge.
+// Read the latest candle that the chart component has handed to Lightweight Charts. Tooltip hover
+// isn't reliable in touch emulation, and a fixed coordinate can land on an older candle on mobile.
 async function newestCandleClose(page: import('@playwright/test').Page): Promise<string> {
-  const chart = page.getByTestId('official-chart-container').first();
-  const box = (await chart.boundingBox())!;
-  await page.mouse.move(box.x + box.width - 90, box.y + box.height / 2);
-  await page.mouse.move(box.x + box.width - 88, box.y + box.height / 2);
-  return (await page.getByTestId('chart-ohlc-tooltip').first().textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
+  return (await page.getByTestId('official-chart-container').first().getAttribute('data-latest-candle-close')) ?? '';
 }
 
 test('the token price chart moves its newest candle when a swap is announced', async ({ page, request }) => {

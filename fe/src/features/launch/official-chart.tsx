@@ -369,7 +369,8 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
         </div>
       </div>
       <div className="relative" onMouseLeave={() => { setHoverX(null); setOhlcHover(null); }}>
-        <div ref={containerRef} data-testid="official-chart-container" className="h-80 w-full" style={DOTTED_BACKGROUND_STYLE} />
+        <div ref={containerRef} data-testid="official-chart-container" data-latest-candle-close={latestCandle?.close ?? ''}
+          className="h-80 w-full" style={DOTTED_BACKGROUND_STYLE} />
         <ChartLeftFade />
         {chartStyle === 'line' && <ChartDimAfter x={hoverX} />}
         {chartStyle === 'candles' && <ChartOhlcTooltip hover={ohlcHover} format={formatAxisValue} />}
