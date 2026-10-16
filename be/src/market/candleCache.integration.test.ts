@@ -75,7 +75,9 @@ describe('precomputed official candles', () => {
     expect(ready.items).toMatchObject([{ open: '2', close: '2', quoteVolume: '1' }]);
     await addTrade('4', base + 2, 11, 0, '8');
     const pending = await store.listCandles(4663, token, 60, base + 60);
-    expect(pending.items).toEqual([]);
+    // The dirty bucket is served from the canonical trades immediately, before the worker
+    // persists the rebuilt aggregate. The completeness flag stays false until that rebuild lands.
+    expect(pending.items).toMatchObject([{ open: '2', close: '8', high: '8', quoteVolume: '2' }]);
     expect(pending.complete).toBe(false);
     await refreshDirtyCandles(pool, 1000);
     const updated = await store.listCandles(4663, token, 60, base + 60);

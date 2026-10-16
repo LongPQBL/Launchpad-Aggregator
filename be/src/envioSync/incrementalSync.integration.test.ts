@@ -40,6 +40,18 @@ const tables = {
 const testTokens: string[] = [];
 
 beforeAll(async () => {
+  // The CI database is created from migrations and therefore has no production source rows yet.
+  // The page hydrator writes canonical source IDs onto launches/venues, so seed the registry rows
+  // that these fixtures exercise before applying any raw pages.
+  const configured = getPonsFactorySources();
+  for (const source of configured) {
+    for (const id of source.version === 'v1' ? [source.id, `${source.id}-trades`] : [source.id]) {
+      await db.insert(sources).values({ id, chainId, version: source.version, factoryAddress: source.factory,
+        startBlock: source.startBlock, scannedToBlock: 0n, confirmedToBlock: 0n, status: 'backfilling' }).onConflictDoNothing();
+    }
+  }
+  await db.insert(sources).values({ id: 'pons-v2-lifecycle', chainId, version: 'v2', factoryAddress: v2Factory.factory,
+    startBlock: v2Factory.startBlock, scannedToBlock: 0n, confirmedToBlock: 0n, status: 'backfilling' }).onConflictDoNothing();
   await envioPool.query('CREATE SCHEMA IF NOT EXISTS envio_fixture_incremental');
   await envioPool.query(`CREATE TABLE IF NOT EXISTS ${rawLaunchTable} (
     id text primary key, "chainId" int, "tokenAddress" text, "deployerAddress" text,

@@ -406,6 +406,10 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
       VALUES ($1,4663,'v1',$2,0,0,2000,'caught_up') ON CONFLICT DO NOTHING`, [statsSource, goodToken]);
     await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
       VALUES ($1,4663,'v1',$2,0,0,2000,'caught_up') ON CONFLICT DO NOTHING`, [`${statsSource}-trades`, goodToken]);
+    await pool.query(`INSERT INTO sources (id,chain_id,version,factory_address,start_block,scanned_to_block,confirmed_to_block,status)
+      VALUES ('pons-v2-lifecycle',4663,'v2',$1,0,2000,2000,'caught_up') ON CONFLICT (id) DO UPDATE SET
+        scanned_to_block = GREATEST(sources.scanned_to_block, EXCLUDED.scanned_to_block),
+        confirmed_to_block = GREATEST(sources.confirmed_to_block, EXCLUDED.confirmed_to_block), status = 'caught_up'`, [goodToken]);
     await pool.query(`INSERT INTO envio_chain_progress (chain_id, head_block) VALUES (4663, 2000)
       ON CONFLICT (chain_id) DO UPDATE SET head_block = 2000`);
     for (const [i, token] of [goodToken, brokenToken].entries()) {
@@ -442,6 +446,7 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     await pool.query('DELETE FROM sources WHERE id = ANY($1)', [[statsSource, `${statsSource}-trades`]]);
     await pool.query('DELETE FROM envio_chain_progress WHERE chain_id = 4663');
     await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = 4663 AND quote_asset_address = $1', [ETH_ADDRESS]);
+    await pool.query("UPDATE sources SET scanned_to_block = 0, confirmed_to_block = 0, status = 'backfilling' WHERE id = 'pons-v2-lifecycle'");
   });
 
   function rpcClient() {
