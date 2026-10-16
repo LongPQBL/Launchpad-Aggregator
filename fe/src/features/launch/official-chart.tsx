@@ -21,9 +21,9 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
 import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
 import { formatTimeAxisTick } from '@/features/chart/time-axis';
-import { CHART_RANGES, DEFAULT_CHART_RANGE, parseChartRange, withWhitespace, type ChartRangeId } from '@/features/chart/ranges';
+import { DEFAULT_CHART_RANGE, parseChartRange, rangesForStyle, rangeShowsTime, withWhitespace, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip, DOTTED_BACKGROUND_STYLE, type OhlcHover } from '@/components/chart-decor';
-import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT, TRADE_CREATED_EVENT } from '@/hooks/live-events';
 import { useLiveFirstPage } from '@/hooks/use-live-first-page';
 import { CoverageBadge } from './coverage-badge';
 
@@ -177,7 +177,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   const poolSource = source?.pool;
   useLiveFirstPage(
     (payload) => launchSource !== undefined && payload.chainId === launchSource.chainId && payload.tokenAddress?.toLowerCase() === launchSource.tokenAddress.toLowerCase(),
-    reloadLatest, [launchSource?.chainId, launchSource?.tokenAddress, launchSource?.venue], LAUNCH_CHANGED_EVENT);
+    reloadLatest, [launchSource?.chainId, launchSource?.tokenAddress, launchSource?.venue], [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT]);
   useLiveFirstPage(
     (payload) => poolSource !== undefined && payload.chainId === poolSource.chainId && payload.poolId === poolSource.poolId.toLowerCase(),
     reloadLatest, [poolSource?.chainId, poolSource?.protocol, poolSource?.poolId], POOL_CHANGED_EVENT);
@@ -211,7 +211,7 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
   }, [candles, currency]);
   // Bars shorter than a day show the time of day on the axis; daily bars show dates only.
   useEffect(() => {
-    chartApi?.applyOptions({ timeScale: { timeVisible: activeRange !== '1d' } });
+    chartApi?.applyOptions({ timeScale: { timeVisible: rangeShowsTime(activeRange) } });
   }, [chartApi, activeRange]);
   useEffect(() => {
     onHoverPointRef.current?.(null);
@@ -377,8 +377,8 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
           point={chartStyle === 'line' && latestCandle ? { time: latestCandle.bucketStart, value: toChartValue(latestCandle.close) } : null} />
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-      <nav aria-label="Candle size" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
-        {CHART_RANGES.map((item) => (
+      <nav aria-label={chartStyle === 'line' ? 'Time range' : 'Candle size'} className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+        {rangesForStyle(chartStyle).map((item) => (
           <a key={item.id} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?currency=${activeCurrency}&range=${item.id}`}
             aria-current={item.id === activeRange ? 'page' : undefined}
             onClick={(event) => { event.preventDefault(); selectChart(activeCurrency, item.id); }}>{item.label}</a>
@@ -391,10 +391,10 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
 }
 
 // The same range tabs as the price chart's own, for charts that fetch a different series (Volume / TVL history).
-export function ChartRangeTabs({ active, onSelect }: { active: ChartRangeId; onSelect: (range: ChartRangeId) => void }) {
+export function ChartRangeTabs({ active, onSelect, chartStyle = 'candles' }: { active: ChartRangeId; onSelect: (range: ChartRangeId) => void; chartStyle?: PriceChartStyle }) {
   return (
-    <nav aria-label="Candle size" className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
-      {CHART_RANGES.map((item) => (
+    <nav aria-label={chartStyle === 'line' ? 'Time range' : 'Candle size'} className="chart-interval-tabs inline-flex flex-wrap gap-1 rounded-md p-1 text-xs">
+      {rangesForStyle(chartStyle).map((item) => (
         <a key={item.id} className="chart-interval-tab rounded px-2.5 py-1.5" href={`?range=${item.id}`}
           aria-current={item.id === active ? 'page' : undefined}
           onClick={(event) => { event.preventDefault(); onSelect(item.id); }}>{item.label}</a>

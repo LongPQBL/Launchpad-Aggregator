@@ -94,12 +94,22 @@ describe('readLaunchHistory', () => {
   });
 
   it('is not complete while a minute in the window still waits for its rollup', async () => {
-    await pool.query(`INSERT INTO candle_dirty_buckets (chain_id, token_address, bucket_start) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [chainId, token, base]);
-    const stale = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
-    expect(stale.complete).toBe(false);
-    await settle();
-    const fresh = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
-    expect(fresh).toMatchObject({ complete: true, intervalSeconds: 60 });
+    await pool.query(`INSERT INTO trades (chain_id, token_address, venue_id, block_number, block_hash, tx_hash, log_index, timestamp,
+      side, token_amount_raw, quote_amount_raw, quote_asset_address, source_event, activity_kind, trader_address)
+      VALUES ($1,$2,$3,603,$4,$5,1,$6,'buy',$7,$7,$8,'Swap','user_trade',$2) ON CONFLICT DO NOTHING`,
+    [chainId, token, venueId, `0x${'e'.repeat(64)}`, `0x${'f'.repeat(64)}`, base + 30, e18.toString(), quote]);
+    try {
+      await pool.query(`INSERT INTO candle_dirty_buckets (chain_id, token_address, bucket_start) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [chainId, token, base]);
+      const stale = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
+      expect(stale.complete).toBe(false);
+      expect(stale.items[1]?.volumeUsd).toBe('8');
+      await settle();
+      const fresh = await readLaunchHistory(pool, { chainId, tokenAddress: token, intervalSeconds: 60, buckets: 2, asOf: base + 10, complete: true });
+      expect(fresh).toMatchObject({ complete: true, intervalSeconds: 60 });
+    } finally {
+      await pool.query('DELETE FROM trades WHERE chain_id=$1 AND token_address=$2 AND block_number=603', [chainId, token]);
+      await settle();
+    }
   });
 });
 

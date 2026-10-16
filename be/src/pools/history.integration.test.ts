@@ -95,12 +95,12 @@ describe('readPoolDailyHistory', () => {
     expect(history.items[1]).toMatchObject({ day: 10 * DAY, volumeUsd: '6' });
   });
 
-  it('leaves volume unavailable when the pool is not fully indexed', async () => {
+  it('shows committed volume as partial while pool history is still backfilling', async () => {
     await pool.query("UPDATE pool_catalog SET coverage_status='backfilling' WHERE chain_id=$1 AND pool_id=$2", [chainId, poolId]);
     try {
       const history = await readPoolDailyHistory(pool, key, { days: 2, asOf: 11 * DAY + 3600, rpcClient });
       expect(history.complete).toBe(false);
-      expect(history.items.every((item) => item.volumeUsd === null)).toBe(true);
+      expect(history.items.map((item) => item.volumeUsd)).toEqual(['6', '4']);
     } finally {
       await pool.query("UPDATE pool_catalog SET coverage_status='caught_up' WHERE chain_id=$1 AND pool_id=$2", [chainId, poolId]);
     }
@@ -130,6 +130,7 @@ describe('readPoolDailyHistory', () => {
     await swap('8', 210, 11 * DAY + 500, (10n ** 18n).toString());
     const stale = await readPoolHistory(pool, key, { intervalSeconds: 3600, buckets: 2, asOf: 11 * DAY + 3600, rpcClient });
     expect(stale.complete).toBe(false);
+    expect(stale.items[0]?.volumeUsd).toBe('8');
     await settle();
     const fresh = await readPoolHistory(pool, key, { intervalSeconds: 3600, buckets: 2, asOf: 11 * DAY + 3600, rpcClient });
     expect(fresh.complete).toBe(true);

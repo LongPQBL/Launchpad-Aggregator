@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getPoolHistory, type PoolCandlePage, type PoolHistory, type PoolSummary } from '@/api/client';
 import { CHART_KINDS, type ChartKind } from '@/features/chart/chart-kinds';
-import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges';
+import { DEFAULT_CHART_RANGE, defaultRangeFor, rangeIsForStyle, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartRangeTabs, type PriceChartStyle } from '@/features/launch/official-chart';
 import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
 import type { SseEventPayload } from '@/hooks/resource-keys';
@@ -65,7 +65,7 @@ function ChartKindTabs({ kinds, selected, onSelect }: { kinds: readonly ChartKin
 // One chart area: the Price / Volume (/ TVL) switcher sits under the chart, on the right of the range tabs,
 // and picks which chart is drawn. All kinds share one time range (the server picks the bucket size): the price chart
 // stays mounted (just hidden), follows the shared range and keeps its zoom, while Volume / TVL load their series per
-// range. `showTvl` is on for the launch page and off for the pool page, which has no TVL chart.
+// range. Both launch and pool pages can show the TVL series returned by their history endpoint.
 export function ChartTypePanel({ loadHistory, history, price, headerClassName, showTvl = true, allPools = false, extra, initialRange = DEFAULT_CHART_RANGE, live }: {
   /** Fetches the Volume / TVL series for a range (the first page arrives as `history`, for `initialRange`). */
   loadHistory: (range: ChartRangeId) => Promise<PoolHistory>;
@@ -142,6 +142,22 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
 
   const selectFromChart = useCallback((next: ChartRangeId) => { void applyRange(next); }, [applyRange]);
 
+  // Each style has its own tabs (candle sizes / spans of time), so the range follows the style: a range that belongs to the other style is
+  // swapped for the one this style was last on (or its default). Also runs once the saved style is read after hydration.
+  const rangeByStyle = useRef<Record<PriceChartStyle, ChartRangeId>>({ candles: defaultRangeFor('candles'), line: defaultRangeFor('line') });
+  useEffect(() => {
+    const style: PriceChartStyle = rangeIsForStyle(activeRange, 'line') ? 'line' : 'candles';
+    rangeByStyle.current[style] = activeRange;
+  }, [activeRange]);
+  useEffect(() => {
+    if (rangeIsForStyle(activeRange, chartStyle)) return;
+    const next = rangeByStyle.current[chartStyle];
+    const url = new URL(window.location.href);
+    url.searchParams.set('range', next);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    void applyRange(next);
+  }, [chartStyle, activeRange, applyRange]);
+
   const previousHistory = useRef(history);
   useEffect(() => {
     if (previousHistory.current === history) return;
@@ -160,7 +176,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   const kindTabs = kinds.length > 1 ? <ChartKindTabs kinds={kinds} selected={selected} onSelect={setSelected} /> : null;
   // The line / candles switch only means something for the price chart, so it sits beside the kind tabs only there.
   const tabs = (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
       {price && CHART_KINDS[selected].usesChartStyle && <ChartStyleTabs selected={chartStyle} onSelect={setChartStyle} />}
       {kindTabs}
     </div>
@@ -173,7 +189,7 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
       {history && (selected === 'volume' || selected === 'tvl') && (
         <PoolHistoryChart items={data?.items ?? []} complete={data?.complete ?? history.complete} metric={selected} headerClassName={headerClassName}
           intervalSeconds={data?.intervalSeconds} loading={loading} error={failed} allPools={allPools} unvaluedPools={data?.unvaluedPools ?? history.unvaluedPools ?? 0}
-          leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} />} trailing={kindTabs} />
+          leading={<ChartRangeTabs active={activeRange} onSelect={selectFromHistory} chartStyle={chartStyle} />} trailing={kindTabs} />
       )}
     </>
   );
@@ -192,7 +208,7 @@ export function PoolChartPanel({ pool, candles, history, coverageStatus, quoteSy
   };
   const live = { eventName: POOL_CHANGED_EVENT, key: `${pool.chainId}:${pool.protocol}:${pool.poolId}`,
     matches: (payload: SseEventPayload) => payload.chainId === pool.chainId && payload.poolId === pool.poolId.toLowerCase() };
-  return <ChartTypePanel loadHistory={loadHistory} history={history} showTvl={false} initialRange={initialRange} extra={extra} live={live}
+  return <ChartTypePanel loadHistory={loadHistory} history={history} showTvl initialRange={initialRange} extra={extra} live={live}
     price={candles ? ({ tabs, range, onSelectRange, chartStyle }) => <PoolChart pool={pool} candles={candles} coverageStatus={coverageStatus} quoteSymbol={quoteSymbol} tokenSymbol={tokenSymbol}
       range={range} onSelectRange={onSelectRange} trailing={tabs} chartStyle={chartStyle} /> : null} />;
 }

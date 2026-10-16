@@ -23,14 +23,14 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
           FROM launch_volume24h_usd WHERE chain_id = 4663 AND rank_order <= 1 ORDER BY rank_order ASC, volume_usd DESC NULLS LAST LIMIT 1000) r
     JOIN launches l ON l.chain_id = r.chain_id AND l.token_address = r.token_address
     LEFT JOIN launch_stats s ON s.chain_id = l.chain_id AND s.token_address = l.token_address
-    WHERE s.computed_at IS NULL OR s.computed_at < $2
-    ORDER BY r.rn LIMIT $3`, [head?.toString() ?? null, staleBefore, limit])).rows);
+    WHERE s.computed_at IS NULL OR s.computed_at < $2 OR s.refresh_requested_at IS NOT NULL
+    ORDER BY (s.refresh_requested_at IS NULL), r.rn LIMIT $3`, [head?.toString() ?? null, staleBefore, limit])).rows);
   if (rows.length < limit) {
     rows.push(...(await pool.query(`
       SELECT ${columns}
       FROM launch_stats s JOIN launches l ON l.chain_id = s.chain_id AND l.token_address = s.token_address
-      WHERE s.chain_id = 4663 AND s.computed_at < $2 AND (l.chain_id::text || ':' || l.token_address) <> ALL($4::text[])
-      ORDER BY s.computed_at ASC LIMIT $3`, [head?.toString() ?? null, staleBefore, limit - rows.length, taken()])).rows);
+      WHERE s.chain_id = 4663 AND (s.computed_at < $2 OR s.refresh_requested_at IS NOT NULL) AND (l.chain_id::text || ':' || l.token_address) <> ALL($4::text[])
+      ORDER BY s.refresh_requested_at ASC NULLS LAST, s.computed_at ASC LIMIT $3`, [head?.toString() ?? null, staleBefore, limit - rows.length, taken()])).rows);
   }
   if (rows.length < limit) {
     rows.push(...(await pool.query(`
@@ -48,8 +48,9 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
     while (next < due.rows.length) {
       const row = due.rows[next++];
       if (!Boolean(row.launch_coverage_complete)) continue;
+      const startedAt = new Date();
       const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
-      await writeLaunchStats(pool, Number(row.chain_id), String(row.token_address), stats, new Date());
+      await writeLaunchStats(pool, Number(row.chain_id), String(row.token_address), stats, new Date(), startedAt);
       refreshed += 1;
     }
   };
@@ -61,6 +62,7 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
 // the launch does not exist (for example, it was removed by reorg repair).
 export async function recomputeLaunchStats(pool: Pool, rpcClient: UsdPriceClient, chainId: number, tokenAddress: string,
   now: Date = new Date()): Promise<boolean> {
+  const startedAt = new Date();
   const head = await readSafeHead(pool);
   const found = await pool.query(`
     SELECT l.*, s.computed_at AS stats_computed_at, ${launchCoverageSql(1)} AS launch_coverage_complete
@@ -70,6 +72,6 @@ export async function recomputeLaunchStats(pool: Pool, rpcClient: UsdPriceClient
   if (!row) return false;
   if (!Boolean(row.launch_coverage_complete)) return true;
   const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
-  await writeLaunchStats(pool, chainId, String(row.token_address), stats, now);
+  await writeLaunchStats(pool, chainId, String(row.token_address), stats, now, startedAt);
   return true;
 }

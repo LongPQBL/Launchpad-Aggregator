@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { getLaunchHistory } from '@/api/client';
-import { emitLaunchChanged, emitPoolChanged } from '@/hooks/live-events';
+import { emitLaunchChanged, emitPoolChanged, emitTradeCreated } from '@/hooks/live-events';
 import { LaunchChartPanel } from './launch-chart-panel';
 
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), getLaunchHistory: vi.fn() }));
@@ -20,6 +20,15 @@ const history = { items: [{ day: 864_000, tradeCount: 1, volumeUsd: '1500', tvlU
 describe('LaunchChartPanel', () => {
   beforeEach(() => { window.localStorage.clear(); });
 
+  it('reloads Volume on the committed trade event without waiting for launch stats', async () => {
+    vi.mocked(getLaunchHistory).mockReset();
+    vi.mocked(getLaunchHistory).mockResolvedValue({ ...history, items: [{ day: 864_000, tradeCount: 2, volumeUsd: '2000', tvlUsd: '40000' }] });
+    render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xabc' }); });
+    expect(getLaunchHistory).toHaveBeenCalledWith(4663, '0xabc', '1h', undefined);
+  });
+
   it('offers a line / candles switch beside the Price tabs, defaulting to candles, and remembers the choice', () => {
     const { unmount } = render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
     expect(screen.getByRole('tab', { name: 'Candlestick chart' })).toHaveAttribute('aria-selected', 'true');
@@ -30,6 +39,29 @@ describe('LaunchChartPanel', () => {
     unmount();
     render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
     expect(screen.getByRole('tab', { name: 'Line chart' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('shows candle-size tabs for candles and 1H 1D 1W 1M 1Y for the line, on Volume too, each style remembering its own tab', async () => {
+    vi.mocked(getLaunchHistory).mockResolvedValue({ ...history, intervalSeconds: 300 });
+    render(<LaunchChartPanel {...price} chainId={4663} tokenAddress="0xabc" history={history} />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['1m', '5m', '1H', '4H', '1D']);
+    fireEvent.click(screen.getByRole('link', { name: '4H' }));
+    await waitFor(() => expect(getLaunchHistory).toHaveBeenLastCalledWith(4663, '0xabc', '4h', undefined));
+    fireEvent.click(screen.getByRole('tab', { name: 'Price' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Line chart' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    await waitFor(() => expect(getLaunchHistory).toHaveBeenLastCalledWith(4663, '0xabc', 'w1d', undefined));
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['1H', '1D', '1W', '1M', '1Y']);
+    expect(screen.getByRole('link', { name: '1D' })).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(screen.getByRole('link', { name: '1W' }));
+    await waitFor(() => expect(getLaunchHistory).toHaveBeenLastCalledWith(4663, '0xabc', 'w1w', undefined));
+    fireEvent.click(screen.getByRole('tab', { name: 'Price' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Candlestick chart' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
+    // 4H was loaded earlier, so it comes back from the cache; the tabs show it again.
+    await waitFor(() => expect(screen.getByRole('link', { name: '4H' })).toHaveAttribute('aria-current', 'page'));
+    expect(screen.getAllByRole('link').map((link) => link.textContent)).toEqual(['1m', '5m', '1H', '4H', '1D']);
   });
 
   it('hides the line / candles switch on the Volume and TVL charts', () => {

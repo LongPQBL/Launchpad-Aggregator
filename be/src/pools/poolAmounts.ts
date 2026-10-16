@@ -26,9 +26,10 @@ function isAmount(value: unknown): value is bigint { return typeof value === 'bi
  * balances plus `slot0` (uncollected fees included), or a V2 pair's reserves with the price they imply.
  * Null when anything cannot be read or the pool is empty — never a guess.
  */
-export async function readPoolAmounts(client: UsdPriceClient, row: PoolAmountsRow, atBlock?: bigint): Promise<PoolAmounts | null> {
+export async function readPoolAmounts(client: UsdPriceClient, row: PoolAmountsRow, atBlock?: bigint,
+  onReadFailure?: () => void): Promise<PoolAmounts | null> {
   if (row.protocol === 'uniswap_v4') {
-    const lens = await readLensSnapshot(client, row, atBlock);
+    const lens = await readLensSnapshot(client, row, atBlock, onReadFailure);
     return lens ? { blockNumber: lens.blockNumber, amount0: lens.coreAmount0, amount1: lens.coreAmount1, sqrtPriceX96: lens.sqrtPriceX96 } : null;
   }
   if (atBlock === undefined && !client.getBlockNumber) return null;
@@ -48,5 +49,5 @@ export async function readPoolAmounts(client: UsdPriceClient, row: PoolAmountsRo
     ]);
     if (!Array.isArray(slot0) || typeof slot0[0] !== 'bigint' || slot0[0] <= 0n || !isAmount(amount0) || !isAmount(amount1)) return null;
     return { blockNumber, amount0, amount1, sqrtPriceX96: slot0[0] };
-  } catch { return null; }
+  } catch { onReadFailure?.(); return null; }
 }

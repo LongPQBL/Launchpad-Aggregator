@@ -5,12 +5,22 @@ import { NULL_TVL } from '../market/tvlStats.js';
 export interface LaunchKeyRef { chainId: number; tokenAddress: string }
 export interface LaunchStatsSnapshot { stats: StatsFields; computedAt: Date }
 
-export async function writeLaunchStats(pool: Pool, chainId: number, tokenAddress: string, stats: StatsFields, computedAt: Date): Promise<void> {
+// `startedAt` is when the inputs were read: a refresh requested after that moment is not satisfied by this write and stays queued.
+export async function writeLaunchStats(pool: Pool, chainId: number, tokenAddress: string, stats: StatsFields, computedAt: Date,
+  startedAt: Date = computedAt): Promise<void> {
   // Skips a launch that was removed (for example by reorg repair) after it was read for recomputation.
   await pool.query(`INSERT INTO launch_stats (chain_id, token_address, stats, computed_at)
     SELECT chain_id, token_address, $3, $4 FROM launches WHERE chain_id = $1 AND token_address = $2
-    ON CONFLICT (chain_id, token_address) DO UPDATE SET stats = EXCLUDED.stats, computed_at = EXCLUDED.computed_at`,
-  [chainId, tokenAddress.toLowerCase(), JSON.stringify(stats), computedAt]);
+    ON CONFLICT (chain_id, token_address) DO UPDATE SET stats = CASE
+        WHEN EXCLUDED.stats->>'tvlUnavailableReason' IN ('chain_read_failed', 'quote_price_read_failed', 'onchain_read_failed')
+          AND launch_stats.stats->>'tvlUsd' IS NOT NULL
+        THEN EXCLUDED.stats || jsonb_build_object(
+          'tvlUsd', launch_stats.stats->'tvlUsd', 'tvlBasis', launch_stats.stats->'tvlBasis',
+          'tvlBlockNumber', launch_stats.stats->'tvlBlockNumber', 'tvlPriceSource', launch_stats.stats->'tvlPriceSource',
+          'tvlPriceUpdatedAt', launch_stats.stats->'tvlPriceUpdatedAt')
+        ELSE EXCLUDED.stats END, computed_at = EXCLUDED.computed_at,
+      refresh_requested_at = CASE WHEN launch_stats.refresh_requested_at > $5 THEN launch_stats.refresh_requested_at ELSE NULL END`,
+  [chainId, tokenAddress.toLowerCase(), JSON.stringify(stats), computedAt, startedAt]);
 }
 
 // Price, FDV, market cap, TVL and the 1h/1d changes move with the market, so a stored figure older than this is unavailable

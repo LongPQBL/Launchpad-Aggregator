@@ -3,13 +3,14 @@ import { Client } from 'pg';
 import { and, eq } from 'drizzle-orm';
 import { encodeAbiParameters, encodeEventTopics } from 'viem';
 import { createDatabase } from '../db/client.js';
-import { fastLaneRows, fastLaneState, launches, trades, venues } from '../db/schema.js';
+import { fastLaneRows, fastLaneState, launches, poolCatalog, poolTrades, trades, venues } from '../db/schema.js';
 import { readLaneBlock } from './store.js';
-import { curveBuyEvent } from '../launchpads/pons/v2/abi.js';
+import { curveBuyEvent, poolGraduatedEvent } from '../launchpads/pons/v2/abi.js';
 import { v4SwapEvent } from '../launchpads/pons/v2/v4Swaps.js';
-import type { FastLog } from './decode.js';
+import { v2SwapEvent, v2SyncEvent, v4ModifyLiquidityEvent, type FastLog } from './decode.js';
 import { applyLiveRows } from '../envioSync/incrementalSync.js';
 import { decodeLiveLog } from './decode.js';
+import { v4PoolManager } from '../envioSync/incrementalSync.js';
 import { createFastLane, type BlockHeader, type FastLaneOptions, type LaneChainSource } from './runner.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -24,6 +25,7 @@ const weth = '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73';
 const trader = '0x1111111111111111111111111111111111111111';
 const blockHash = `0x${'b7'.repeat(32)}`;
 const watchedPoolId = `0x${'7e'.repeat(32)}`;
+const v2Pair = '0x7e000000000000000000000000000000000000b2';
 let nextTx = 0;
 
 function buyLog(overrides: Partial<FastLog> = {}, address = curve): FastLog {
@@ -61,6 +63,12 @@ beforeAll(async () => {
     id: `fast-lane-curve-${token}`, chainId, tokenAddress: token, kind: 'curve', ref: curve, sourceId: source, sourceLogId: null,
     effectiveFromBlock: 100n, official: true,
   }).onConflictDoNothing();
+  await db.insert(poolCatalog).values({ chainId, protocol: 'uniswap_v4', poolId: watchedPoolId,
+    currency0: weth.toLowerCase(), currency1: token, fee: 3000, tickSpacing: 60, hooks: '0x0000000000000000000000000000000000000000',
+    blockNumber: 100n, blockHash, txHash: `0x${'7e'.repeat(32)}`, logIndex: 0, verified: true }).onConflictDoNothing();
+  await db.insert(poolCatalog).values({ chainId, protocol: 'uniswap_v2', poolId: v2Pair,
+    currency0: weth.toLowerCase(), currency1: token, fee: 3000, tickSpacing: 0, hooks: '0x0000000000000000000000000000000000000000',
+    blockNumber: 100n, blockHash, txHash: `0x${'7e'.repeat(32)}`, logIndex: 1, verified: true }).onConflictDoNothing();
   await db.insert(venues).values({
     id: `fast-lane-v4-${token}`, chainId, tokenAddress: token, kind: 'v4_pool', ref: watchedPoolId, sourceId: source, sourceLogId: null,
     effectiveFromBlock: 100n, official: false,
@@ -72,6 +80,8 @@ beforeAll(async () => {
 beforeEach(async () => {
   notifications.length = 0;
   await db.delete(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+  await db.delete(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, watchedPoolId)));
+  await db.delete(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, v2Pair)));
   await db.delete(fastLaneRows).where(eq(fastLaneRows.chainId, chainId));
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
   await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = $1', [chainId]);
@@ -80,6 +90,10 @@ afterAll(async () => {
   await listener.query('UNLISTEN launchpad_events');
   await listener.end();
   await db.delete(trades).where(and(eq(trades.chainId, chainId), eq(trades.tokenAddress, token)));
+  await db.delete(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, watchedPoolId)));
+  await db.delete(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, v2Pair)));
+  await db.delete(poolCatalog).where(and(eq(poolCatalog.chainId, chainId), eq(poolCatalog.poolId, watchedPoolId)));
+  await db.delete(poolCatalog).where(and(eq(poolCatalog.chainId, chainId), eq(poolCatalog.poolId, v2Pair)));
   await db.delete(fastLaneRows).where(eq(fastLaneRows.chainId, chainId));
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
   await pool.query('DELETE FROM fast_lane_venue_coverage WHERE chain_id = $1', [chainId]);
@@ -187,6 +201,104 @@ describe('fast lane', () => {
     expect(await db.select().from(trades).where(and(eq(trades.chainId, chainId), eq(trades.txHash, spoof.transactionHash)))).toHaveLength(0);
     expect(fake.calls).toEqual({ getBlock: 0, getTransactionSender: 0 });
     expect(instance.stats()).toMatchObject({ received: 1, watched: 0, applied: 0 });
+  });
+
+  it('writes a verified pool swap and publishes pool.changed before Envio', async () => {
+    const fake = fakeSource();
+    nextTx += 1;
+    const topics = encodeEventTopics({ abi: [v4SwapEvent], eventName: 'Swap', args: { id: watchedPoolId as `0x${string}`, sender: trader } }) as string[];
+    const data = encodeAbiParameters(
+      [{ type: 'int128' }, { type: 'int128' }, { type: 'uint160' }, { type: 'uint128' }, { type: 'int24' }, { type: 'uint24' }],
+      [-300n, 600n, 79228162514264337593543950336n, 9n, 4, 3000]);
+    const swap: FastLog = { address: v4PoolManager, topics, data, blockNumber: 5000n, blockHash,
+      transactionHash: `0x${nextTx.toString(16).padStart(64, '0')}`, logIndex: 3 };
+    const instance = await lane(fake);
+    await instance.handleLogs([swap]);
+    await settle();
+    expect(instance.stats()).toMatchObject({ watched: 1, applied: 1, errors: 0 });
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, watchedPoolId)))).toHaveLength(1);
+    expect(notifications).toContainEqual(expect.objectContaining({ type: 'pool.changed', chainId, poolId: watchedPoolId, via: 'fast' }));
+    notifications.length = 0;
+    await instance.handleLogs([{ ...swap, removed: true }]);
+    await settle();
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, watchedPoolId)))).toHaveLength(0);
+    expect(notifications).toContainEqual(expect.objectContaining({ type: 'pool.changed', chainId, poolId: watchedPoolId }));
+  });
+
+  it('publishes a pool change for a liquidity modification without a swap, including its removal', async () => {
+    const fake = fakeSource();
+    nextTx += 1;
+    const log: FastLog = { address: v4PoolManager,
+      topics: encodeEventTopics({ abi: [v4ModifyLiquidityEvent], eventName: 'ModifyLiquidity',
+        args: { id: watchedPoolId as `0x${string}`, sender: trader } }) as string[],
+      data: encodeAbiParameters([{ type: 'int24' }, { type: 'int24' }, { type: 'int256' }, { type: 'bytes32' }],
+        [-60, 60, 1000n, `0x${'00'.repeat(32)}`]),
+      blockNumber: 5000n, blockHash, transactionHash: `0x${nextTx.toString(16).padStart(64, '0')}`, logIndex: 4 };
+    const instance = await lane(fake);
+    await instance.handleLogs([log]);
+    await settle();
+    expect(notifications.filter((row) => row.type === 'pool.changed' && row.poolId === watchedPoolId)).toHaveLength(1);
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, watchedPoolId)))).toHaveLength(0);
+    await instance.handleLogs([log]);
+    await settle();
+    expect(notifications.filter((row) => row.type === 'pool.changed' && row.poolId === watchedPoolId)).toHaveLength(1);
+    await instance.handleLogs([{ ...log, removed: true }]);
+    await settle();
+    expect(notifications.filter((row) => row.type === 'pool.changed' && row.poolId === watchedPoolId)).toHaveLength(2);
+  });
+
+  it('pairs a V2 swap with the preceding Sync and writes a priced pool trade', async () => {
+    const fake = fakeSource();
+    nextTx += 1;
+    const transactionHash = `0x${nextTx.toString(16).padStart(64, '0')}`;
+    const sync: FastLog = { address: v2Pair, topics: encodeEventTopics({ abi: [v2SyncEvent], eventName: 'Sync' }) as string[],
+      data: encodeAbiParameters([{ type: 'uint112' }, { type: 'uint112' }], [1000n, 2000n]),
+      blockNumber: 5000n, blockHash, transactionHash, logIndex: 2 };
+    const swap: FastLog = { address: v2Pair, topics: encodeEventTopics({ abi: [v2SwapEvent], eventName: 'Swap', args: { sender: trader, to: trader } }) as string[],
+      data: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }], [100n, 0n, 0n, 200n]),
+      blockNumber: 5000n, blockHash, transactionHash, logIndex: 3 };
+    const instance = await lane(fake);
+    await instance.handleLogs([sync, swap]);
+    await settle();
+    const rows = await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, v2Pair)));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ amount0Raw: '100', amount1Raw: '-200', traderAddress: trader });
+    expect(instance.stats()).toMatchObject({ applied: 2, errors: 0 });
+    expect(notifications).toContainEqual(expect.objectContaining({ type: 'pool.changed', chainId, poolId: v2Pair, via: 'fast' }));
+    notifications.length = 0;
+    await instance.handleLogs([{ ...swap, removed: true }]);
+    await settle();
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, v2Pair)))).toHaveLength(0);
+    expect(notifications).toContainEqual(expect.objectContaining({ type: 'pool.changed', chainId, poolId: v2Pair }));
+  });
+
+  it('finds the V2 Sync from an HTTP block read when the WebSocket delivers only the Swap', async () => {
+    const fake = fakeSource();
+    nextTx += 1;
+    const transactionHash = `0x${nextTx.toString(16).padStart(64, '0')}`;
+    const sync: FastLog = { address: v2Pair, topics: encodeEventTopics({ abi: [v2SyncEvent], eventName: 'Sync' }) as string[],
+      data: encodeAbiParameters([{ type: 'uint112' }, { type: 'uint112' }], [1000n, 2000n]),
+      blockNumber: 5000n, blockHash, transactionHash, logIndex: 2 };
+    const swap: FastLog = { address: v2Pair, topics: encodeEventTopics({ abi: [v2SwapEvent], eventName: 'Swap', args: { sender: trader, to: trader } }) as string[],
+      data: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }], [100n, 0n, 0n, 200n]),
+      blockNumber: 5000n, blockHash, transactionHash, logIndex: 3 };
+    fake.logs = [sync, swap];
+    await (await lane(fake)).handleLogs([swap]);
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, v2Pair)))).toHaveLength(1);
+  });
+
+  it('announces a launch lifecycle change directly from its verified factory event', async () => {
+    const fake = fakeSource();
+    nextTx += 1;
+    const graduated: FastLog = { address: token,
+      topics: encodeEventTopics({ abi: [poolGraduatedEvent], eventName: 'PoolGraduated', args: { token } }) as string[],
+      data: encodeAbiParameters([{ type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }], [1n, 2n, 3n]),
+      blockNumber: 5000n, blockHash, transactionHash: `0x${nextTx.toString(16).padStart(64, '0')}`, logIndex: 4 };
+    const instance = await lane(fake);
+    await instance.handleLogs([graduated]);
+    await settle();
+    expect(notifications).toContainEqual(expect.objectContaining({ type: 'launch.changed', chainId, tokenAddress: token, via: 'fast' }));
+    expect(instance.stats()).toMatchObject({ watched: 1, applied: 1, errors: 0 });
   });
 
   it('skips a log whose block hash is not the one the node reports now (a reorg race)', async () => {

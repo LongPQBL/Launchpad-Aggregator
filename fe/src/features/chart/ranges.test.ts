@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { rangeSlots, withWhitespace } from './ranges';
+import { DEFAULT_CHART_RANGE, defaultRangeFor, parseChartRange, rangeIsForStyle, rangesForStyle, rangeSlots, withWhitespace } from './ranges';
+
+describe('tabs per chart style', () => {
+  it('keeps the candle-size tabs for candles and uses Uniswap-style spans of time for the line', () => {
+    expect(rangesForStyle('candles').map((item) => item.label)).toEqual(['1m', '5m', '1H', '4H', '1D']);
+    expect(rangesForStyle('line').map((item) => [item.id, item.label])).toEqual([['w1h', '1H'], ['w1d', '1D'], ['w1w', '1W'], ['w1m', '1M'], ['w1y', '1Y']]);
+  });
+  it('defaults to 1H candles and a one-day line', () => {
+    expect(DEFAULT_CHART_RANGE).toBe('1h');
+    expect(defaultRangeFor('candles')).toBe('1h');
+    expect(defaultRangeFor('line')).toBe('w1d');
+  });
+  it('knows which style a range belongs to and parses the line ids from a URL', () => {
+    expect(rangeIsForStyle('4h', 'candles')).toBe(true);
+    expect(rangeIsForStyle('4h', 'line')).toBe(false);
+    expect(rangeIsForStyle('w1w', 'line')).toBe(true);
+    expect(rangeIsForStyle('w1w', 'candles')).toBe(false);
+    expect(parseChartRange('w1m')).toBe('w1m');
+    expect(parseChartRange('w1x')).toBe(DEFAULT_CHART_RANGE);
+  });
+  it('spaces a line tab by its own bar size', () => {
+    const now = 1_800_000_000;
+    const slots = rangeSlots('w1w', now);
+    expect(slots.at(-1)).toBe(Math.floor(now / 3_600) * 3_600);
+    expect(slots.at(-1)! - slots[0]!).toBeGreaterThanOrEqual(7 * 86_400);
+    expect(slots[1]! - slots[0]!).toBe(3_600);
+  });
+});
 
 describe('range time slots', () => {
   const now = 1_800_000_000;

@@ -65,3 +65,18 @@ export async function findRoundAtOrBefore(pool: Pool, chainId: number, feedAddre
     blockNumber: BigInt(String(row.block_number)), logIndex: Number(row.log_index),
   };
 }
+
+export async function findLatestRound(pool: Pool, chainId: number, feedAddress: string): Promise<PriceRound | null> {
+  const result = await pool.query(
+    `SELECT round_id, answer_raw, decimals, started_at, updated_at, block_number, log_index FROM quote_usd_price_rounds
+     WHERE chain_id = $1 AND feed_address = $2 ORDER BY block_number DESC, log_index DESC LIMIT 1`,
+    [chainId, feedAddress.toLowerCase()],
+  );
+  const row = result.rows[0] as Record<string, unknown> | undefined;
+  if (!row) return null;
+  return {
+    roundId: BigInt(String(row.round_id)), answerRaw: BigInt(String(row.answer_raw)), decimals: Number(row.decimals),
+    startedAt: Number(row.started_at), updatedAt: Number(row.updated_at),
+    blockNumber: BigInt(String(row.block_number)), logIndex: Number(row.log_index),
+  };
+}

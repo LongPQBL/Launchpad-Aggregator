@@ -170,8 +170,19 @@ describe('applyCurvePricingOnce', () => {
   it('prices a trade the lane wrote at once, from the fee and tax the lane recorded, with the same result as Envio\'s row', async () => {
     await addTrade(hash('8'), 1, 500, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
     await addLaneTrade(hash('9'), 1, 502, 50n, 60n, 2n, 1n); // no Envio raw row for this one
-    const report = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
-    expect(report).toMatchObject({ pricedTrades: 2, failed: 0 });
+    const listener = await pool.connect();
+    let notification: string | undefined;
+    try {
+      await listener.query('LISTEN launchpad_events');
+      listener.on('notification', (message) => { notification = message.payload; });
+      const report = await applyCurvePricingOnce(pool, envioPool, rpcClient as never, 10, new Date(), tables);
+      expect(report).toMatchObject({ pricedTrades: 2, failed: 0 });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(notification).toBe(JSON.stringify({ type: 'launch.changed', chainId, tokenAddress: token }));
+    } finally {
+      await listener.query('UNLISTEN launchpad_events');
+      listener.release();
+    }
     const lanePrice = (await pool.query(`SELECT price_numerator_raw FROM trades WHERE chain_id = $1 AND tx_hash = $2`, [chainId, hash('9')])).rows[0];
     expect(lanePrice.price_numerator_raw).not.toBeNull();
 

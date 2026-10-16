@@ -52,4 +52,33 @@ describe('launch stats store', () => {
     expect(snapshot?.stats).toEqual(stats);
     expect(snapshot?.computedAt.getTime()).toBe(computedAt.getTime());
   });
+
+  it('keeps serving the stored figures while a refresh is requested, and clears the request only for a write that started after it', async () => {
+    const flag = () => pool.query('SELECT refresh_requested_at FROM launch_stats WHERE chain_id = $1 AND token_address = $2', [chainId, tokenWithStats])
+      .then((r) => r.rows[0].refresh_requested_at as Date | null);
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date());
+    await pool.query('UPDATE launch_stats SET refresh_requested_at = now() WHERE chain_id = $1 AND token_address = $2', [chainId, tokenWithStats]);
+    const found = await readLaunchStats(pool, [{ chainId, tokenAddress: tokenWithStats }]);
+    expect(found.get(`${chainId}:${tokenWithStats}`)?.tvlUsd).toBe('250');
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date(), new Date(Date.now() - 60_000));
+    expect(await flag()).not.toBeNull();
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date(), new Date());
+    expect(await flag()).toBeNull();
+  });
+
+  it('retains stored TVL after a transient RPC price failure but clears it when no verified feed exists', async () => {
+    await writeLaunchStats(pool, chainId, tokenWithStats, stats, new Date());
+    await writeLaunchStats(pool, chainId, tokenWithStats, { ...stats, tvlUsd: null, tvlBasis: null,
+      tvlBlockNumber: null, tvlPriceSource: null, tvlPriceUpdatedAt: null,
+      tvlUnavailableReason: 'quote_price_read_failed' }, new Date());
+    let found = await readLaunchStats(pool, [{ chainId, tokenAddress: tokenWithStats }]);
+    expect(found.get(`${chainId}:${tokenWithStats}`)?.tvlUsd).toBe('250');
+    expect(found.get(`${chainId}:${tokenWithStats}`)?.tvlUnavailableReason).toBe('quote_price_read_failed');
+
+    await writeLaunchStats(pool, chainId, tokenWithStats, { ...stats, tvlUsd: null, tvlBasis: null,
+      tvlBlockNumber: null, tvlPriceSource: null, tvlPriceUpdatedAt: null,
+      tvlUnavailableReason: 'quote_price_unavailable' }, new Date());
+    found = await readLaunchStats(pool, [{ chainId, tokenAddress: tokenWithStats }]);
+    expect(found.get(`${chainId}:${tokenWithStats}`)?.tvlUsd).toBeNull();
+  });
 });

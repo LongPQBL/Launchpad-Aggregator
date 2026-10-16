@@ -5,7 +5,8 @@ import { formatPercent } from '@/api/format';
 import { cn } from '@/lib/utils';
 
 type RollDirection = 'up' | 'down';
-const GLYPH_HEIGHT = '1.25em';
+// One line box of the surrounding text, not a fixed em: a shorter box leaves the rolling glyph above its neighbours.
+const GLYPH_HEIGHT = '1lh';
 
 // One digit that slides to its new value: the outgoing glyph leaves upward and the new one enters
 // from below when the value rose (the reverse when it fell). Everything else is a plain glyph.

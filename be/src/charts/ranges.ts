@@ -1,6 +1,7 @@
-// A chart tab names the size of one candle / bar (1m, 5m, 1h, 4h, 1d), like TradingView and DexScreener; the window is a fixed number of those
-// bars ending now. (The query parameter keeps its old name, `range`.)
-export const CHART_RANGES = ['1m', '5m', '1h', '4h', '1d'] as const;
+// A candle-chart tab names the size of one candle / bar (1m, 5m, 1h, 4h, 1d), like TradingView and DexScreener; the window is a fixed number of
+// those bars ending now. A line-chart tab (w1h .. w1y, shown as 1H 1D 1W 1M 1Y like Uniswap) names a span of time instead and draws it with the
+// bar size that suits it. (The query parameter keeps its old name, `range`.)
+export const CHART_RANGES = ['1m', '5m', '1h', '4h', '1d', 'w1h', 'w1d', 'w1w', 'w1m', 'w1y'] as const;
 export type ChartRange = (typeof CHART_RANGES)[number];
 export const DEFAULT_RANGE: ChartRange = '1h';
 
@@ -11,6 +12,11 @@ const SPECS = {
   '1h': { windowSeconds: 168 * 3_600, intervalSeconds: 3_600 },
   '4h': { windowSeconds: 180 * 14_400, intervalSeconds: 14_400 },
   '1d': { windowSeconds: 365 * 86_400, intervalSeconds: 86_400 },
+  w1h: { windowSeconds: 3_600, intervalSeconds: 60 },
+  w1d: { windowSeconds: 86_400, intervalSeconds: 300 },
+  w1w: { windowSeconds: 7 * 86_400, intervalSeconds: 3_600 },
+  w1m: { windowSeconds: 30 * 86_400, intervalSeconds: 14_400 },
+  w1y: { windowSeconds: 365 * 86_400, intervalSeconds: 86_400 },
 } as const;
 
 export function parseRange(value: unknown): ChartRange | null {

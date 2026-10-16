@@ -48,23 +48,33 @@ export function tvlFromAmounts(row: Pick<CatalogRow, 'protocol' | 'currency0'>, 
   }, quoteIsCurrency0 ? decimals0 : decimals1, quoteIsCurrency0 ? decimals1 : decimals0, quoteUsdPrice);
 }
 
-async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, nowSeconds: number): Promise<boolean> {
+/** Current verified pool TVL from one pinned chain read; does not need the snapshot worker. */
+export async function readCurrentPoolTvl(pool: Pool, client: UsdPriceClient, row: CatalogRow, nowSeconds: number): Promise<{
+  chainId: number; protocol: CatalogRow['protocol']; poolId: string; blockNumber: bigint; capturedAtSeconds: number;
+  coreAmount0Raw: bigint; coreAmount1Raw: bigint; sqrtPriceX96: bigint; quoteAddress: string; tvlUsd: string;
+} | null> {
   const quoteAddress = await pickQuoteSide(pool, row.chain_id, row.currency0, row.currency1);
-  if (quoteAddress === null) return false;
+  if (quoteAddress === null) return null;
   const [decimals0, decimals1] = await Promise.all([assetDecimals(client, row.currency0), assetDecimals(client, row.currency1)]);
-  if (decimals0 === null || decimals1 === null) return false;
+  if (decimals0 === null || decimals1 === null) return null;
   const quoteUsd = await readUsdPrice(pool, client, row.chain_id, quoteAddress, () => nowSeconds * 1000);
-  if (!quoteUsd) return false;
+  if (!quoteUsd) return null;
   const amounts = await readPoolAmounts(client, { protocol: row.protocol, poolId: row.pool_id, currency0: row.currency0, currency1: row.currency1,
     fee: row.fee, tick_spacing: row.tick_spacing, hooks: row.hooks });
-  if (!amounts) return false;
+  if (!amounts) return null;
   const tvlUsd = tvlFromAmounts(row, amounts, quoteAddress, decimals0, decimals1, quoteUsd.priceUsd);
-  if (tvlUsd === null) return false;
-  await insertTvlSnapshot(pool, {
+  if (tvlUsd === null) return null;
+  return {
     chainId: row.chain_id, protocol: row.protocol, poolId: row.pool_id, blockNumber: amounts.blockNumber,
     capturedAtSeconds: nowSeconds, coreAmount0Raw: amounts.amount0, coreAmount1Raw: amounts.amount1,
     sqrtPriceX96: amounts.sqrtPriceX96, quoteAddress, tvlUsd,
-  });
+  };
+}
+
+async function captureOne(pool: Pool, client: UsdPriceClient, row: CatalogRow, nowSeconds: number): Promise<boolean> {
+  const snapshot = await readCurrentPoolTvl(pool, client, row, nowSeconds);
+  if (!snapshot) return false;
+  await insertTvlSnapshot(pool, snapshot);
   return true;
 }
 

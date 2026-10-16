@@ -97,6 +97,7 @@ function detail(overrides: Partial<LaunchDetailData> = {}): LaunchDetailData {
     lifecycleStatus: 'trading',
     officialVolume24h: '12.5',
     coverageStatus: 'caught_up',
+    statsComputedAt: null,
     officialVenues: [venue()],
     priceQuote: '0.0001',
     priceStale: false,

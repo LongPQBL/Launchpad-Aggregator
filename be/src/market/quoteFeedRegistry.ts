@@ -1,6 +1,9 @@
 import type { Address } from 'viem';
 
 const ASSETS_URL = 'https://api.robinhood.com/rhj/assets';
+// Chainlink's own list of the tokens it bridges (CCIP): it gives the contract address of a crypto token on this chain, which Robinhood's asset directory
+// (stock tokens) does not carry. An address is matched to a feed by the symbol the directory lists for it, never by what a token calls itself on chain.
+const CCIP_TOKENS_URL = 'https://docs.chain.link/api/ccip/v1/tokens?environment=mainnet';
 const FEEDS_URL = 'https://reference-data-directory.vercel.app/feeds-robinhood-mainnet.json';
 const REFRESH_MS = 60 * 60 * 1000;
 const RETRY_MS = 60 * 1000;
@@ -19,14 +22,17 @@ function feedSymbol(name: string): string | null {
 }
 
 export function createQuoteFeedRegistry(fetchJson: (url: string) => Promise<unknown>, now: () => number = Date.now):
-{ resolve(address: string): Promise<Address | null>; resolveMetadata(address: string): Promise<RobinhoodAssetMetadata | null> } {
+{ resolve(address: string): Promise<Address | null>; resolveMetadata(address: string): Promise<RobinhoodAssetMetadata | null>;
+  resolveSymbol(address: string): Promise<string | null> } {
   let feeds = new Map<string, Address>();
   let metadata = new Map<string, RobinhoodAssetMetadata>();
+  let symbols = new Map<string, string>();
   let expiresAt = 0;
   let inFlight: Promise<void> | null = null;
 
   async function refresh(): Promise<void> {
-    const [assetsResponse, feedsResponse] = await Promise.all([fetchJson(ASSETS_URL), fetchJson(FEEDS_URL)]);
+    const [assetsResponse, feedsResponse, ccipResponse] = await Promise.all([fetchJson(ASSETS_URL), fetchJson(FEEDS_URL),
+      fetchJson(CCIP_TOKENS_URL).catch(() => null)]);
     if (!assetsResponse || typeof assetsResponse !== 'object' || !('assets' in assetsResponse)
       || !Array.isArray(assetsResponse.assets) || !Array.isArray(feedsResponse)) throw new Error('Invalid quote feed registry response');
     const bySymbol = new Map<string, Address | null>();
@@ -38,6 +44,7 @@ export function createQuoteFeedRegistry(fetchJson: (url: string) => Promise<unkn
     }
     const nextFeeds = new Map<string, Address>();
     const nextMetadata = new Map<string, RobinhoodAssetMetadata>();
+    const nextSymbols = new Map<string, string>();
     for (const asset of assetsResponse.assets as Asset[]) {
       if (asset.status !== 'ASSET_STATUS_ACTIVE' || typeof asset.tokenSymbol !== 'string' || !Array.isArray(asset.deployments)) continue;
       const feed = bySymbol.get(asset.tokenSymbol.toUpperCase());
@@ -50,11 +57,24 @@ export function createQuoteFeedRegistry(fetchJson: (url: string) => Promise<unkn
           const key = deployment.contractAddress.toLowerCase();
           if (feed) nextFeeds.set(key, feed);
           nextMetadata.set(key, assetMetadata);
+          nextSymbols.set(key, asset.tokenSymbol.toUpperCase());
         }
+      }
+    }
+    // Crypto tokens of the CCIP directory on this chain; an address the asset directory already maps keeps its mapping.
+    const ccipTokens = (ccipResponse as { data?: Record<string, Record<string, { tokenAddress?: unknown }>> } | null)?.data;
+    if (ccipTokens && typeof ccipTokens === 'object') {
+      for (const [symbol, chains] of Object.entries(ccipTokens)) {
+        const tokenAddress = chains?.['4663']?.tokenAddress;
+        const feed = bySymbol.get(symbol.toUpperCase());
+        if (typeof tokenAddress !== 'string' || !ADDRESS.test(tokenAddress) || !feed) continue;
+        const key = tokenAddress.toLowerCase();
+        if (!nextFeeds.has(key)) nextFeeds.set(key, feed);
       }
     }
     feeds = nextFeeds;
     metadata = nextMetadata;
+    symbols = nextSymbols;
     expiresAt = now() + REFRESH_MS;
   }
 
@@ -80,6 +100,14 @@ export function createQuoteFeedRegistry(fetchJson: (url: string) => Promise<unkn
         }
       }
       return metadata.get(address.toLowerCase()) ?? null;
+    },
+    async resolveSymbol(address: string): Promise<string | null> {
+      if (!ADDRESS.test(address)) return null;
+      if (now() >= expiresAt) {
+        inFlight ??= refresh().finally(() => { inFlight = null; });
+        try { await inFlight; } catch { expiresAt = now() + RETRY_MS; }
+      }
+      return symbols.get(address.toLowerCase()) ?? null;
     },
   };
 }

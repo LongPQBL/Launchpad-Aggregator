@@ -170,6 +170,15 @@ export async function finishCoreMetadataLaunch(
     quoteSymbolDone, result.quoteAssetSymbol.value, quoteDecimalsDone, result.quoteAssetDecimals.value,
     graduatedToTrue, allDone, retryAt, retryCount, claim.chainId, claim.tokenAddress, claim.leaseId,
   ]);
+  // Market stats may have been computed while token/quote decimals were still unknown. Make that
+  // cached row due as soon as a pricing-critical core field becomes available; otherwise the UI can
+  // keep showing null price/FDV until the ordinary stats freshness window expires.
+  if (updated.rowCount === 1 && ((decimalsDone && result.decimals.value !== null)
+    || (quoteDecimalsDone && result.quoteAssetDecimals.value !== null)
+    || (graduatedDone && claim.protocolVersion === 'v1'))) {
+    await db.$client.query(`UPDATE launch_stats SET refresh_requested_at = now()
+      WHERE chain_id = $1 AND token_address = $2`, [claim.chainId, claim.tokenAddress]);
+  }
   return updated.rowCount === 1;
 }
 

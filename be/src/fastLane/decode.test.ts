@@ -62,8 +62,8 @@ describe('classifyLog', () => {
     expect(decodeLiveLog(spoof, context)).toBeNull();
     expect(classifyLog({ ...v4Log(), address: v4Log().address.toLowerCase() })).toMatchObject({ event: 'V4Swap', watchRef: poolId });
   });
-  it('subscribes to exactly the five events', () => {
-    expect(FAST_LANE_EVENTS).toHaveLength(5);
+  it('subscribes to swap and pool-state events', () => {
+    expect(FAST_LANE_EVENTS).toHaveLength(15);
   });
 });
 
@@ -86,7 +86,7 @@ describe('decodeLiveLog builds the raw row Envio writes for the same event', () 
   it('V3 swap', () => {
     expect(decodeLiveLog(v3Log(), context)).toEqual({ stream: 'v1-swap', raw: {
       id, chainId: 4663, poolAddress: '0x2000000000000000000000000000000000000abc', amount0: '100', amount1: '-200',
-      sqrtPriceX96: '79228162514264337593543950336', ...position } });
+      sqrtPriceX96: '79228162514264337593543950336', sender: trader, ...position } });
   });
   it('V4 swap: pool id and sender, liquidity and tick left at their unused placeholders, fee as a number', () => {
     expect(decodeLiveLog(v4Log(), context)).toEqual({ stream: 'v4-swap', raw: {

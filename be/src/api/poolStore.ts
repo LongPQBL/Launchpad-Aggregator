@@ -2,15 +2,13 @@ import type { Pool } from 'pg';
 import type { UsdPriceClient } from '../market/usdPricing.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
 import { readPoolCandles, type PoolCandleResponse } from '../pools/candleCache.js';
-import { assetDecimals, readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
+import { assetDecimals, readPoolRollingVolume, readPoolStats, readPoolTrades, type PoolStats, type PoolTradeResponse, type PoolKey } from '../pools/stats.js';
 import { intervalTtlMemo } from '../charts/intervalMemo.js';
-import { readPoolDailyHistory, readPoolHistory, type PoolDayHistory } from '../pools/history.js';
-import { sumUsdValues } from '../pools/valuation.js';
+import { readPoolHistory, type PoolDayHistory } from '../pools/history.js';
 import { readPoolLiquidityAnswer, type PoolLiquidityAnswer } from '../pools/liquidity.js';
 import { swrMemo, ttlMemo } from './ttlMemo.js';
 import type { ApiEventBus } from './events.js';
 
-const POOL_STATS_REFRESH_MIN_AGE_MS = 1_000;
 import { createTokenMetadataResolver, type TokenMetadata } from '../pools/tokenMetadata.js';
 
 export interface PoolSummary extends PoolStats {
@@ -125,29 +123,27 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       value === 'uniswap_v3' || value === 'uniswap_v2');
     return ['uniswap_v4', ...additional];
   }
-  // 30-day volume needs a per-pool oracle-priced aggregate, so it is cached for a few minutes: a list page
-  // asks for up to 100 pools at once and the figure moves slowly.
-  // The first block Envio indexes from (null: full history). A pool created before it has no complete swap history, so its volumes are unknown.
-  const indexedFromBlock = ttlMemo(async (): Promise<bigint | null> => {
-    const value = (await pool.query('SELECT indexed_from_block FROM envio_chain_progress WHERE chain_id = 4663')).rows[0]?.indexed_from_block;
-    return value === null || value === undefined ? null : BigInt(String(value));
-  }, 30_000);
   const volume30d = ttlMemo(async (cacheKey: string, arg?: { key: PoolKey; createdBlock: string }): Promise<string | null> => {
     if (!arg) return null;
-    const { key, createdBlock } = arg;
-    const indexedFrom = await indexedFromBlock('indexed-from');
-    if (indexedFrom !== null && BigInt(createdBlock) < indexedFrom) return null;
+    const { key } = arg;
     try {
-      const history = await readPoolDailyHistory(pool, key, { days: 30, asOf: Math.floor(Date.now() / 1000), rpcClient });
-      if (!history.complete) return null;
-      const days = history.items.map((item) => item.volumeUsd);
-      return days.every((value): value is string => value !== null) ? sumUsdValues(days) : null;
+      return await readPoolRollingVolume(pool, key, { seconds: 30 * 86_400, end: Math.floor(Date.now() / 1000), rpcClient });
     } catch { return null; }
-  }, 5 * 60_000);
+  }, 10_000);
   // Per-pool statistics cost about seven queries plus RPC reads each (a list of 50 pools: ~2.5 s), and a list or a live refresh asks for the same pools
   // again and again: fresh for 10 s, then served at once for up to 5 minutes while one background refresh recomputes them.
-  const poolStatsMemo = swrMemo((_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) =>
-    readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), { rpcClient, createdTimestamp: arg.createdTimestamp }), 10_000, 300_000);
+  const lastGoodPoolTvl = new Map<string, { tvlUsd: string; computedAt: number }>();
+  const poolStatsMemo = swrMemo(async (_key: string, arg: { key: PoolKey; displayedToken: string; createdTimestamp: number | null }) => {
+    const remembered = lastGoodPoolTvl.get(_key);
+    const previousTvlUsd = remembered && Date.now() - remembered.computedAt <= 300_000 ? remembered.tvlUsd : null;
+    let previousTvlUsed = false;
+    const stats = await readPoolStats(pool, arg.key, arg.displayedToken, Math.floor(Date.now() / 1000), {
+      rpcClient, createdTimestamp: arg.createdTimestamp, previousTvlUsd, onPreviousTvlUsed: () => { previousTvlUsed = true; },
+    });
+    if (stats.tvlUsd !== null && !previousTvlUsed) lastGoodPoolTvl.set(_key, { tvlUsd: stats.tvlUsd, computedAt: Date.now() });
+    if (remembered && Date.now() - remembered.computedAt > 300_000) lastGoodPoolTvl.delete(_key);
+    return stats;
+  }, 10_000, 300_000);
   // A swap in a pool changes its figures: drop its cached statistics so the refetch the swap triggers in the browser sees them,
   // at most once a second per pool (a busy pool is not recomputed on every swap).
   events?.subscribe((event) => {
@@ -155,9 +151,10 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     const marker = `:${event.poolId.toLowerCase()}:`;
     // Its history charts too (the sync's announcement and the candle worker's, which arrives once the buckets are rebuilt).
     // Liquidity and depth are read from the chain at the latest block, so a swap moves the price they show: drop the cached read (at most once a second).
-    poolLiquidityMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.endsWith(`:${event.poolId!.toLowerCase()}`), POOL_STATS_REFRESH_MIN_AGE_MS);
-    poolHistoryMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 250);
-    poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), POOL_STATS_REFRESH_MIN_AGE_MS);
+    poolLiquidityMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.endsWith(`:${event.poolId!.toLowerCase()}`), 1_000);
+    poolHistoryMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 0);
+    poolStatsMemo.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 0);
+    volume30d.invalidate((key) => key.startsWith(`${event.chainId}:`) && key.toLowerCase().includes(marker), 0);
   });
   async function toSummary(row: Row, token?: string): Promise<PoolSummary> {
     // A pool of a launched token is read from that token's side (its price, FDV, and the quote it is valued against), not by address order.
@@ -167,7 +164,7 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
       createdAtPromise.then((created) => poolStatsMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${displayedToken}`,
         { key, displayedToken, createdTimestamp: created })),
-      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}`, { key, createdBlock: String(row.block_number) }),
+      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}:30d`, { key, createdBlock: String(row.block_number) }),
       createdAtPromise,
       currencyMetadata(key.chainId, row.currency0),
       currencyMetadata(key.chainId, row.currency1),

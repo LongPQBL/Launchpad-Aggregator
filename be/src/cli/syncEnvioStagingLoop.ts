@@ -98,6 +98,7 @@ if (syncTarget === 'staging') {
   let failureStreak = 0;
   let tick = 0;
   let additionalPoolSourcesReady = false;
+  let lastIdleProgressAt = Date.now();
   while (!stopping) {
     const startedAt = new Date().toISOString();
     try {
@@ -110,10 +111,20 @@ if (syncTarget === 'staging') {
       const additionalPoolPages = additionalPoolSourcesReady
         ? await runAdditionalPoolCatalogCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable }) : null;
       failureStreak = 0;
-      console.log(`[${startedAt}] Envio tail pass:`, tail.results);
-      console.log(`[${startedAt}] Envio history pass:`, history.results);
-      console.log(`[${startedAt}] V4 pool catalog pages:`, poolPages);
-      if (additionalPoolPages) console.log(`[${startedAt}] V3/V2 pool catalog pages (parity-gated):`, additionalPoolPages);
+      const hasStreamProgress = (report: typeof tail) => Object.values(report.results)
+        .some((result) => (result?.applied ?? 0) > 0 || (result?.unresolved ?? 0) > 0);
+      const hasPoolProgress = (pages: typeof poolPages | NonNullable<typeof additionalPoolPages>) =>
+        pages.some((page) => page.applied > 0 || page.pending > 0);
+      const madeProgress = hasStreamProgress(tail) || hasStreamProgress(history)
+        || hasPoolProgress(poolPages) || (additionalPoolPages !== null && hasPoolProgress(additionalPoolPages));
+      if (madeProgress) {
+        console.log(`[${startedAt}] Envio incremental progress:`, { tail: tail.results, history: history.results,
+          v4Pools: poolPages, additionalPools: additionalPoolPages });
+        lastIdleProgressAt = Date.now();
+      } else if (Date.now() - lastIdleProgressAt >= 5 * 60_000) {
+        console.log(`[${startedAt}] Envio incremental idle heartbeat: no rows applied; tick ${tick}`);
+        lastIdleProgressAt = Date.now();
+      }
       tick += 1;
       if (tick % repairEveryTicks === 0) {
         const repairReport = await runRepairCycle(envioPool, db, 4663, { progressTable: tables.v1.progressTable });
@@ -122,9 +133,11 @@ if (syncTarget === 'staging') {
         const additionalPoolRepair = additionalPoolSourcesReady
           ? await runAdditionalPoolCatalogRepairCycle(envioPool, db, 4663,
             { progressTable: tables.v1.progressTable }) : null;
-        console.log(`[${startedAt}] Envio reorg repair: ${repairReport.changedLaunchKeys.length} launch(es) affected`);
-        console.log(`[${startedAt}] V4 pool catalog repair:`, poolRepair);
-        if (additionalPoolRepair) console.log(`[${startedAt}] V3/V2 pool catalog repair:`, additionalPoolRepair);
+        if (repairReport.changedLaunchKeys.length || poolRepair.removedPools || poolRepair.removedSwaps
+          || additionalPoolRepair?.some((result) => result.removedPools || result.removedSwaps)) {
+          console.log(`[${startedAt}] Envio reorg repair applied changes:`, { launches: repairReport.changedLaunchKeys.length,
+            v4Pools: poolRepair, additionalPools: additionalPoolRepair });
+        }
       }
     } catch (error) {
       failureStreak += 1;

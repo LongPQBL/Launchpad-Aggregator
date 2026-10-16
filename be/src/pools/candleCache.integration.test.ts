@@ -25,6 +25,21 @@ afterAll(async () => {
 });
 
 describe('pool candle cache', () => {
+  it('shows an inserted swap before the pool candle worker runs', async () => {
+    const hash = `0x${'3'.repeat(64)}`;
+    await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,
+      timestamp,amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)
+      VALUES ($1,$2,0,'uniswap_v4',$3,103,$4,1740,-1,2,$5,$6,$6,3000)`,
+    [chainId, hash, id, hash, (2n ** 96n).toString(), address0]);
+    try {
+      const chart = await readPoolCandles(pool, { chainId, protocol: 'uniswap_v4', poolId: id }, address0, 60, 1800,
+        { rpcClient: { readContract: async () => 18 } });
+      expect(chart.items).toEqual([expect.objectContaining({ bucketStart: 1740, open: '1', close: '1', tradeCount: 1 })]);
+    } finally {
+      await pool.query('DELETE FROM pool_trades WHERE chain_id=$1 AND tx_hash=$2', [chainId, hash]);
+      await pool.query('DELETE FROM pool_candle_dirty_buckets WHERE chain_id=$1 AND pool_id=$2', [chainId, id]);
+    }
+  });
   it('rebuilds only this pool, then removes stale candles after a reorg deletion', async () => {
     await pool.query(`INSERT INTO pool_trades (chain_id,tx_hash,log_index,protocol,pool_id,block_number,block_hash,
       timestamp,amount0_raw,amount1_raw,sqrt_price_x96,trader_address,sender_address,fee)

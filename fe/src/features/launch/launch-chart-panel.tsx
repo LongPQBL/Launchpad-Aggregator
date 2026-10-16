@@ -6,7 +6,7 @@ import { DEFAULT_CHART_RANGE, type ChartRangeId } from '@/features/chart/ranges'
 import { ChartTypePanel } from '@/features/pools/pool-chart-panel';
 import { CurveDepthChart, CurveShapeChart } from '@/features/pools/pool-liquidity';
 import { displaySymbol } from '@/api/format';
-import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT } from '@/hooks/live-events';
+import { LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT, TRADE_CREATED_EVENT } from '@/hooks/live-events';
 import type { SseEventPayload } from '@/hooks/resource-keys';
 import { OfficialPriceChart } from './official-price-chart';
 
@@ -31,7 +31,7 @@ export function LaunchChartPanel({ chainId, tokenAddress, history, venue, quoteU
       <CurveDepthChart chainId={chainId} tokenAddress={tokenAddress} baseSymbol={displaySymbol(price.tokenSymbol ?? null)} quoteSymbol={displaySymbol(price.quoteSymbol)} trailing={tabs} />),
   } : undefined;
   // Volume and TVL cover every pool of the token: the launch's own announcements and any swap in a pool holding it (via the pool's tokens).
-  const live = { eventName: venue === undefined ? [LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT] : LAUNCH_CHANGED_EVENT, key: `${chainId}:${tokenAddress}:${venue ?? ''}`,
+  const live = { eventName: venue === undefined ? [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT, POOL_CHANGED_EVENT] : [TRADE_CREATED_EVENT, LAUNCH_CHANGED_EVENT], key: `${chainId}:${tokenAddress}:${venue ?? ''}`,
     matches: (payload: SseEventPayload) => payload.chainId === chainId && (payload.tokenAddress?.toLowerCase() === tokenAddress.toLowerCase()
       || (venue === undefined && payload.poolTokens?.includes(tokenAddress.toLowerCase()) === true)) };
   return <ChartTypePanel loadHistory={loadHistory} history={history} initialRange={initialRange} showTvl={venue === undefined && (history?.poolCount ?? 0) > 0} allPools={venue === undefined} extra={extra} live={live} headerClassName="min-h-8 text-2xl"

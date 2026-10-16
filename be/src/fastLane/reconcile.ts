@@ -5,6 +5,8 @@ import { fastLaneRows } from '../db/schema.js';
 import { readRawRowByTxLog } from '../envioSync/incrementalPage.js';
 import { applyLiveRows, DEFAULT_STREAM_TABLES, type LiveStream } from '../envioSync/incrementalSync.js';
 import { removeLaneTrade } from './store.js';
+import { applyLivePoolEntries } from './poolStore.js';
+import { v2SqrtPriceX96 } from '../pools/syncV3V2Pools.js';
 
 export interface ReconcileOptions {
   chainId: number;
@@ -12,7 +14,7 @@ export interface ReconcileOptions {
   processedBlock: bigint;
   /** Rows written more recently than this are left alone. */
   olderThanSeconds: number;
-  tables?: Partial<Record<LiveStream, string>>;
+  tables?: Partial<Record<LiveStream | 'v3-pool-swap' | 'v2-pool-swap', string>>;
   limit?: number;
 }
 export interface ReconcileReport {
@@ -40,14 +42,14 @@ const lower = (value: unknown) => String(value).toLowerCase();
  *   conflict, so Envio's own pass could not have replaced it.
  */
 export async function reconcileLaneRows(appDb: Database, envioPool: Pool, options: ReconcileOptions): Promise<ReconcileReport> {
-  const tables = { ...DEFAULT_STREAM_TABLES, ...options.tables };
+  const tables = { ...DEFAULT_STREAM_TABLES, 'v3-pool-swap': 'envio."RawV3Swap"', 'v2-pool-swap': 'envio."RawV2Swap"', ...options.tables };
   const cutoff = new Date(Date.now() - options.olderThanSeconds * 1000);
   const rows = await appDb.select().from(fastLaneRows).where(eq(fastLaneRows.chainId, options.chainId))
     .orderBy(asc(fastLaneRows.writtenAt)).limit(options.limit ?? 1_000);
   const report: ReconcileReport = { kept: 0, removed: 0, replaced: 0, forgotten: 0, pending: 0 };
   for (const row of rows) {
     if (row.writtenAt >= cutoff || row.blockNumber > options.processedBlock) { report.pending += 1; continue; }
-    const stream = row.stream as LiveStream;
+    const stream = row.stream as LiveStream | 'v3-pool-swap' | 'v2-pool-swap';
     const laneBlockHash = lower(row.raw.blockHash);
     const envio = await readRawRowByTxLog(envioPool, tables[stream], options.chainId, row.txHash, row.logIndex);
     if (envio && lower(envio.blockHash) === laneBlockHash) { report.kept += 1; continue; }
@@ -59,8 +61,21 @@ export async function reconcileLaneRows(appDb: Database, envioPool: Pool, option
       report.forgotten += 1;
     }
     if (envio && deleted) {
-      const result = await applyLiveRows(appDb, options.chainId, [{ stream, raw: envio }]);
-      if (result.applied > 0) report.replaced += 1;
+      const launchResult = stream === 'v3-pool-swap' || stream === 'v2-pool-swap' ? null : await applyLiveRows(appDb, options.chainId, [{ stream, raw: envio }]);
+      let poolRaw = envio;
+      if (stream === 'v2-pool-swap') {
+        const sync = await envioPool.query(`SELECT "reserve0", "reserve1" FROM envio."RawV2Sync"
+          WHERE "chainId"=$1 AND "pairAddress"=$2 AND "txHash"=$3 AND "logIndex" < $4
+          ORDER BY "logIndex" DESC LIMIT 1`, [options.chainId, String(envio.pairAddress).toLowerCase(), envio.txHash, envio.logIndex]);
+        const pair = sync.rows[0] as { reserve0: string; reserve1: string } | undefined;
+        const sqrt = pair ? v2SqrtPriceX96(BigInt(pair.reserve0), BigInt(pair.reserve1)) : null;
+        if (sqrt) poolRaw = { ...envio, sqrtPriceX96: sqrt.toString() };
+      }
+      const poolResult = (stream === 'v3-pool-swap' || stream === 'v2-pool-swap' || stream === 'v1-swap' || stream === 'v4-swap')
+        && (stream !== 'v2-pool-swap' || poolRaw.sqrtPriceX96 !== undefined)
+        ? await applyLivePoolEntries(appDb, options.chainId, [{ stream: stream === 'v3-pool-swap' ? 'v1-swap' : stream, raw: poolRaw }])
+        : [];
+      if ((launchResult?.applied ?? 0) > 0 || poolResult.some((outcome) => outcome.inserted)) report.replaced += 1;
     }
   }
   return report;

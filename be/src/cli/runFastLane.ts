@@ -12,11 +12,12 @@ import { createGovernor, readEnvioLagBlocks } from '../fastLane/governor.js';
 import { createOracleRounds } from '../fastLane/oracleRounds.js';
 
 // The WebSocket fast lane (docs/superpowers/specs/2026-10-14-websocket-fast-lane-design.md).
-// FAST_LANE_MODE: off (default) | on (always running) | auto (runs only while Envio's pipeline trails the chain head, see governor.ts).
+// FAST_LANE_MODE: off (default) | on (always running) | auto (runs only while Envio trails) |
+// after-catchup (starts once Envio first reaches the configured head tolerance, then remains on).
 // FAST_LANE_ENABLED=true is the older spelling of mode `on`.
 const mode = process.env.FAST_LANE_MODE ?? (process.env.FAST_LANE_ENABLED === 'true' ? 'on' : 'off');
-if (mode !== 'on' && mode !== 'auto') {
-  console.log('Fast lane is off (set FAST_LANE_MODE=auto to run it only while Envio is behind, or FAST_LANE_MODE=on to always run it).');
+if (mode !== 'on' && mode !== 'auto' && mode !== 'after-catchup') {
+  console.log('Fast lane is off (set FAST_LANE_MODE=auto, after-catchup, or on).');
   process.exit(0);
 }
 // Before anything can print an RPC URL: libraries (viem's socket reconnect) print errors on their own.
@@ -26,6 +27,14 @@ installFatalErrorHandlers(process);
 const RECONCILE_EVERY_MS = 60_000;
 const WATCHDOG_EVERY_MS = 60_000;
 const stamp = () => new Date().toISOString();
+async function readEnvioRealtimeBufferBlock(metricsUrl: string, chainId: number): Promise<bigint | null> {
+  const response = await fetch(metricsUrl, { signal: AbortSignal.timeout(3_000) });
+  if (!response.ok) throw new Error(`Envio metrics returned HTTP ${response.status}`);
+  const metrics = await response.text();
+  const escapedChainId = String(chainId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = metrics.match(new RegExp(`^envio_indexing_buffer_block\\{chainId="${escapedChainId}"\\}\\s+(\\d+)\\s*$`, 'm'));
+  return match ? BigInt(match[1]) : null;
+}
 function redactFields(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, typeof value === 'string' ? redactUrls(value) : value]));
 }
@@ -55,7 +64,8 @@ try {
   const startLane = async () => { await lane.start(); await oracle.start().catch((error) => console.error(stamp(), `oracle rounds failed to start: ${redactError(error)}`)); running = true; console.log(stamp(), `fast lane running for chain ${chain.id}`); };
   const stopLane = async () => { running = false; oracle.stop(); await lane.stop(); console.log(stamp(), 'fast lane stopped'); };
   if (mode === 'on') await startLane();
-  else console.log(stamp(), 'fast lane in auto mode: waiting for Envio to fall behind');
+  else if (mode === 'auto') console.log(stamp(), 'fast lane in auto mode: waiting for Envio to fall behind');
+  else console.log(stamp(), 'fast lane armed: waiting for Envio to catch up, then it will stay on');
   timers.push(setInterval(() => { if (running) console.log(stamp(), 'fast lane stats', lane.stats(), 'oracle', oracle.stats()); }, 30_000));
 
   // auto: run the lane only while it gains something (Envio trails the head), with hysteresis so it does not flap.
@@ -81,6 +91,38 @@ try {
         }
       })();
     }, Number(process.env.FAST_LANE_AUTO_SAMPLE_SECONDS ?? 10) * 1000));
+  }
+
+  // after-catchup is a one-way latch: wait for all official trade streams to reach the head
+  // tolerance once, start the chain WebSocket lane, and never stop it just because Envio later lags.
+  if (mode === 'after-catchup') {
+    const maxLagBlocks = Number(process.env.FAST_LANE_AFTER_CATCHUP_MAX_LAG_BLOCKS ?? 50);
+    const sampleMs = Number(process.env.FAST_LANE_AFTER_CATCHUP_SAMPLE_MS ?? 10_000);
+    const envioMetricsUrl = process.env.ENVIO_METRICS_URL ?? 'http://127.0.0.1:9898/metrics';
+    let sampling = false;
+    timers.push(setInterval(() => {
+      if (running || sampling) return;
+      sampling = true;
+      void (async () => {
+        try {
+          const [envioBufferBlock, chainHead] = await Promise.all([
+            readEnvioRealtimeBufferBlock(envioMetricsUrl, chain.id),
+            source.getBlockNumber(),
+          ]);
+          const lag = envioBufferBlock === null ? null : chainHead - envioBufferBlock < 0n
+            ? 0
+            : Number(chainHead - envioBufferBlock);
+          if (lag !== null && lag <= maxLagBlocks) {
+            console.log(stamp(), `Envio realtime buffer reached the head tolerance (${lag} blocks behind); starting the persistent fast lane`);
+            await startLane();
+          }
+        } catch (error) {
+          console.error(stamp(), `fast lane catch-up sample failed: ${redactError(error)}`);
+        } finally {
+          sampling = false;
+        }
+      })();
+    }, sampleMs));
   }
 
   // A dead subscription is silent, not an error: warn while it lasts, then exit so the supervisor restarts the process.

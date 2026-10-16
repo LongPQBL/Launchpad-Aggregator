@@ -239,6 +239,9 @@ export const launchStats = pgTable('launch_stats', {
   tokenAddress: text('token_address').notNull(),
   stats: jsonb('stats').$type<Record<string, unknown>>().notNull(),
   computedAt: timestamp('computed_at', { withTimezone: true }).notNull(),
+  // Set when the stored figures should be recomputed soon (coverage or core metadata changed). The stored figures keep
+  // being served until they age out; this is only a queue marker for the stats worker.
+  refreshRequestedAt: timestamp('refresh_requested_at', { withTimezone: true }),
 }, (table) => [
   primaryKey({ columns: [table.chainId, table.tokenAddress] }),
   foreignKey({ columns: [table.chainId, table.tokenAddress], foreignColumns: [launches.chainId, launches.tokenAddress] }).onDelete('cascade'),

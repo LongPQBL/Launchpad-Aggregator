@@ -1,7 +1,9 @@
 import type { Pool } from 'pg';
 import type { Database } from '../db/client.js';
 import { applyLiveRows, type LiveEntry } from '../envioSync/incrementalSync.js';
-import { classifyLog, decodeLiveLog, type FastLog } from './decode.js';
+import { classifyLog, decodeLiveLog, decodeV2PoolSwap, decodeV2Sync, lifecycleToken, type FastLog, type V2PoolEntry } from './decode.js';
+import { v2SqrtPriceX96 } from '../pools/syncV3V2Pools.js';
+import { applyLivePoolEntries, publishLiveLaunchStateChanges, publishLivePoolStateChanges } from './poolStore.js';
 import { advanceLaneBlock, advanceLaneResumeBlock, ensureLaneVenueCoverage, initializeLaneBlock, raiseLaneVenueBridge,
   readLaneBlock, readMinimumLaneBridgeBlock, recordFastRows, removeLaneTrade } from './store.js';
 import { createWatchSetLoader, EMPTY_WATCH_SET, isWatched, type WatchSet } from './watchSet.js';
@@ -160,11 +162,44 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     const current = header;
     const entries: LiveEntry[] = [];
     const keys: string[] = [];
+    const v2Entries: V2PoolEntry[] = [];
+    const v2Keys: string[] = [];
+    const stateChanges: { protocol: string; poolId: string; timestamp: number; key: string }[] = [];
+    const launchChanges: { factoryAddress: string; tokenAddress: string; key: string }[] = [];
     let complete = true;
     // Anything the block read did not already answer is asked for all at once, not one transaction after another.
-    await Promise.all([...new Set(candidates.map(({ entry }) => entry.transactionHash.toLowerCase()))].map((txHash) => getSender(txHash)));
-    for (const { entry } of candidates) {
+    await Promise.all([...new Set(candidates.filter(({ cls }) => cls.stream !== null || cls.event === 'V2Swap').map(({ entry }) => entry.transactionHash.toLowerCase()))].map((txHash) => getSender(txHash)));
+    const v2Swaps = candidates.filter(({ cls }) => cls.event === 'V2Swap');
+    const syncLogs = v2Swaps.length > 0 && !v2Swaps.every(({ entry }) => blockLogs.some((other) =>
+      other.transactionHash.toLowerCase() === entry.transactionHash.toLowerCase() && other.address.toLowerCase() === entry.address.toLowerCase()
+      && other.logIndex < entry.logIndex && classifyLog(other)?.event === 'V2Sync'))
+      ? await source.getLogs(blockNumber, blockNumber) : blockLogs;
+    for (const { entry, cls } of candidates) {
       if (current.hash.toLowerCase() !== entry.blockHash.toLowerCase()) { counters.skipped += 1; complete = false; continue; }
+      if (cls.event === 'V2Swap') {
+        const sync = syncLogs.filter((other) => other.transactionHash.toLowerCase() === entry.transactionHash.toLowerCase()
+          && other.address.toLowerCase() === entry.address.toLowerCase() && other.logIndex < entry.logIndex
+          && other.blockHash.toLowerCase() === entry.blockHash.toLowerCase() && classifyLog(other)?.event === 'V2Sync')
+          .sort((a, b) => b.logIndex - a.logIndex)[0];
+        const reserves = sync ? decodeV2Sync(sync) : null;
+        const sqrtPriceX96 = reserves ? v2SqrtPriceX96(reserves.reserve0, reserves.reserve1) : null;
+        const from = await getSender(entry.transactionHash);
+        const decoded = from && sqrtPriceX96 ? decodeV2PoolSwap(entry, { chainId, timestamp: current.timestamp, txFrom: from, sqrtPriceX96 }) : null;
+        if (!decoded) { counters.unresolved += 1; complete = false; continue; }
+        v2Entries.push(decoded); v2Keys.push(keyOf(entry));
+        continue;
+      }
+      if (cls.watchKind === 'lifecycle_factory') {
+        const tokenAddress = lifecycleToken(entry);
+        if (!tokenAddress) { counters.skipped += 1; complete = false; continue; }
+        launchChanges.push({ factoryAddress: cls.watchRef, tokenAddress, key: keyOf(entry) });
+        continue;
+      }
+      if (cls.stream === null) {
+        const protocol = cls.watchKind === 'v2_pool' ? 'uniswap_v2' : cls.watchKind === 'v3_pool' ? 'uniswap_v3' : 'uniswap_v4';
+        stateChanges.push({ protocol, poolId: cls.watchRef, timestamp: current.timestamp, key: keyOf(entry) });
+        continue;
+      }
       const from = await getSender(entry.transactionHash);
       if (!from) { counters.skipped += 1; complete = false; continue; }
       const decoded = decodeLiveLog(entry, { chainId, timestamp: current.timestamp, txFrom: from });
@@ -173,13 +208,36 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
       keys.push(keyOf(entry));
     }
     counters.lookupMs += now() - lookupStart;
-    if (entries.length === 0) return complete;
+    if (entries.length === 0 && v2Entries.length === 0 && stateChanges.length === 0 && launchChanges.length === 0) return complete;
     const applyStart = now();
-    const result = await applyLiveRows(db, chainId, entries);
-    counters.applied += result.applied; counters.unresolved += result.unresolved; counters.skipped += result.skipped;
-    if (result.outcomes.some((outcome) => outcome !== 'applied')) complete = false;
-    await recordFastRows(db, chainId, entries.filter((_, index) => result.outcomes[index] === 'applied'));
-    keys.forEach((key, index) => { if (result.outcomes[index] === 'applied') handled.add(key); });
+    if (entries.length > 0) {
+      const result = await applyLiveRows(db, chainId, entries);
+      const poolOutcomes = await applyLivePoolEntries(db, chainId, entries);
+      const accepted = entries.map((_, index) => result.outcomes[index] === 'applied' || poolOutcomes[index]!.accepted);
+      counters.applied += accepted.filter(Boolean).length;
+      counters.unresolved += result.outcomes.filter((outcome, index) => outcome === 'unresolved' && !poolOutcomes[index]!.accepted).length;
+      counters.skipped += result.outcomes.filter((outcome, index) => outcome === 'skipped' && !poolOutcomes[index]!.accepted).length;
+      if (accepted.some((value) => !value)) complete = false;
+      await recordFastRows(db, chainId, entries.flatMap((entry, index) => {
+        if (result.outcomes[index] !== 'applied' && !poolOutcomes[index]!.inserted) return [];
+        return [{ ...entry, stream: entry.stream === 'v1-swap' && result.outcomes[index] !== 'applied' ? 'v3-pool-swap' : entry.stream }];
+      }));
+      keys.forEach((key, index) => { if (accepted[index]) handled.add(key); });
+    }
+    if (v2Entries.length > 0) {
+      const outcomes = await applyLivePoolEntries(db, chainId, v2Entries);
+      counters.applied += outcomes.filter((outcome) => outcome.accepted).length;
+      counters.unresolved += outcomes.filter((outcome) => !outcome.accepted).length;
+      if (outcomes.some((outcome) => !outcome.accepted)) complete = false;
+      await recordFastRows(db, chainId, v2Entries.filter((_, index) => outcomes[index]!.inserted));
+      v2Keys.forEach((key, index) => { if (outcomes[index]!.accepted) handled.add(key); });
+    }
+    await publishLivePoolStateChanges(db, chainId, stateChanges);
+    stateChanges.forEach((change) => handled.add(change.key));
+    counters.applied += stateChanges.length;
+    await publishLiveLaunchStateChanges(db, chainId, launchChanges);
+    launchChanges.forEach((change) => handled.add(change.key));
+    counters.applied += launchChanges.length;
     counters.blocks += 1; counters.applyMs += now() - applyStart;
     const arrived = arrivedAt.get(blockNumber.toString());
     if (arrived !== undefined) {
@@ -197,6 +255,17 @@ export function createFastLane(deps: { source: LaneChainSource; db: Database; po
     counters.received += logs.length;
     for (const removed of logs.filter((entry) => entry.removed)) {
       try {
+        const cls = classifyLog(removed);
+        if (cls?.watchKind === 'lifecycle_factory' && isWatched(watch, cls)) {
+          const tokenAddress = lifecycleToken(removed);
+          if (tokenAddress) await publishLiveLaunchStateChanges(db, chainId, [{ factoryAddress: cls.watchRef, tokenAddress }]);
+          counters.removed += 1;
+        }
+        if (cls?.stream === null && cls.watchKind !== 'lifecycle_factory' && isWatched(watch, cls)) {
+          await publishLivePoolStateChanges(db, chainId, [{ protocol: cls.watchKind === 'v2_pool' ? 'uniswap_v2' : cls.watchKind === 'v3_pool' ? 'uniswap_v3' : 'uniswap_v4',
+            poolId: cls.watchRef, timestamp: 0 }]);
+          counters.removed += 1;
+        }
         if (await removeLaneTrade(db, chainId, { txHash: removed.transactionHash, logIndex: removed.logIndex, blockHash: removed.blockHash })) counters.removed += 1;
         headers.delete(removed.blockNumber.toString());
         handled.delete(`${removed.transactionHash.toLowerCase()}:${removed.logIndex}`);

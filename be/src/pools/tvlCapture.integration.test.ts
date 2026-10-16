@@ -1,9 +1,10 @@
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
 import { __resetUsdPriceCacheForTests } from '../market/usdPricing.js';
-import { captureTvlSnapshots, runSnapshotCycle } from './tvlCapture.js';
+import { captureTvlSnapshots, readCurrentPoolTvl, runSnapshotCycle } from './tvlCapture.js';
 import { insertTvlSnapshot } from './tvlSnapshots.js';
+import { readPoolHistory } from './history.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -88,6 +89,24 @@ describe('captureTvlSnapshots for a V2 pair', () => {
 });
 
 describe('captureTvlSnapshots', () => {
+  it('reads current TVL without waiting for or writing a snapshot', async () => {
+    const current = await readCurrentPoolTvl(pool, clientWith(goodLens), {
+      chain_id: chainId, protocol: 'uniswap_v4', pool_id: poolId, currency0: a, currency1: b,
+      fee: 3000, tick_spacing: 60, hooks: hook,
+    }, now);
+    expect(Number(current?.tvlUsd)).toBeCloseTo(20);
+    expect(current?.blockNumber).toBe(300n);
+    expect((await rows()).rows).toHaveLength(0);
+  });
+  it('shows current TVL in the open chart bucket before the snapshot worker runs', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now * 1000);
+    try {
+      await pool.query('DELETE FROM pool_tvl_buckets WHERE pool_id=$1', [poolId]);
+      const history = await readPoolHistory(pool, { chainId, protocol: 'uniswap_v4', poolId },
+        { intervalSeconds: 3600, buckets: 1, asOf: now, rpcClient: clientWith(goodLens) });
+      expect(Number(history.items[0]?.tvlUsd)).toBeCloseTo(20);
+    } finally { clock.mockRestore(); }
+  });
   it('records raw amounts and the USD TVL priced through the side that has a verified feed', async () => {
     const result = await captureTvlSnapshots(pool, clientWith(goodLens), now);
     expect(result.captured).toBeGreaterThanOrEqual(1);

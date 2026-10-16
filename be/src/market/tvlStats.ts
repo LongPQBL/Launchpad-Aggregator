@@ -33,9 +33,11 @@ export async function readCurrentTvl(pool: Pool, client: UsdPriceClient & TvlRea
     const [blockResult, quoteResult] = await Promise.allSettled([
       client.getBlockNumber(), readUsdPrice(pool, client, input.chainId, input.quote, now),
     ]);
-    if (blockResult.status === 'rejected') return { ...NULL_TVL, tvlUnavailableReason: 'chain_unavailable' };
+    if (blockResult.status === 'rejected') return { ...NULL_TVL, tvlUnavailableReason: 'chain_read_failed' };
     const blockNumber = blockResult.value;
-    if (quoteResult.status === 'rejected' || !quoteResult.value) return { ...NULL_TVL, tvlBlockNumber: blockNumber.toString(),
+    if (quoteResult.status === 'rejected') return { ...NULL_TVL, tvlBlockNumber: blockNumber.toString(),
+      tvlUnavailableReason: 'quote_price_read_failed' };
+    if (!quoteResult.value) return { ...NULL_TVL, tvlBlockNumber: blockNumber.toString(),
       tvlUnavailableReason: 'quote_price_unavailable' };
     const quotePrice = quoteResult.value;
     const priced = { tvlPriceSource: quotePrice.source, tvlPriceUpdatedAt: quotePrice.updatedAt,

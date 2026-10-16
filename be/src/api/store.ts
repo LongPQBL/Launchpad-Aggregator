@@ -28,6 +28,7 @@ import { readLaunchHistory } from '../market/launchHistory.js';
 import { readCurveDepthAnswer } from '../pools/curveDepth.js';
 import { readCurrentTvl, NULL_TVL, type TvlFields } from '../market/tvlStats.js';
 import type { VenueAmountInput } from '../market/tvlReserves.js';
+import { readVenueSpotPrice } from '../market/venueSpotPrice.js';
 import { decodeCursor, encodeCursor } from './cursor.js';
 import { readMetricRankingPage } from './metricRanking.js';
 import { readConfirmedSourceBlock, STREAM_ORDER } from '../envioSync/incrementalSync.js';
@@ -42,6 +43,10 @@ function string(value: unknown): string { return String(value); }
 function number(value: unknown): number { return Number(value); }
 function nullableString(value: unknown): string | null { return value === null || value === undefined ? null : String(value); }
 function nullableNumber(value: unknown): number | null { return value === null || value === undefined ? null : Number(value); }
+function decimalString(value: unknown): string | null {
+  const text = nullableString(value);
+  return text === null ? null : text.includes('.') ? text.replace(/\.?0+$/, '') : text;
+}
 
 function summary(row: Row, complete: boolean, stats: StatsFields, statsComputedAt: string | null = null): LaunchSummary {
   const coverageStatus = complete ? 'caught_up' : 'backfilling';
@@ -76,7 +81,6 @@ const NULL_STATS: StatsFields = { fdvUsd: null, marketCapUsd: null, priceUsd: nu
 const CHAIN_READ_TTL_MS = 60_000;
 // An announced change drops cached history only if it was computed this long ago: a second announcement shortly after the first
 // (the sync's, then the candle worker's) must still be able to replace an answer that was computed from the not yet rebuilt buckets.
-const HISTORY_INVALIDATE_MIN_AGE_MS = 250;
 const usdPriceMemos = new WeakMap<Pool, WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, Awaited<ReturnType<typeof readUsdPrice>>>>>>();
 const totalSupplyMemos = new WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, bigint | null>>>();
 function cachedUsdPrice(pool: Pool, client: UsdPriceClient, chainId: number, quoteAssetAddress: string) {
@@ -119,26 +123,56 @@ function statsForCoverage(stored: StatsFields | undefined, complete: boolean): S
   return { ...NULL_STATS, ...stored };
 }
 
+// The launch's current official venue: the curve until sweep, then its verified pool. Null when it has none the readers understand.
+// A V4 venue's fee and tick spacing come from the launch when it knows them, otherwise from the verified pool catalog row (the Envio
+// sync learns them from the pool's Initialize event and never writes them onto the launch).
+async function currentOfficialVenue(pool: Pool, row: Row): Promise<{ kind: VenueAmountInput['kind']; ref: string; v4PoolFee: number | null; v4TickSpacing: number | null } | null> {
+  const venueResult = await pool.query(`SELECT v.kind, v.ref, c.fee AS catalog_fee, c.tick_spacing AS catalog_tick_spacing
+    FROM venues v LEFT JOIN pool_catalog c ON v.kind = 'v4_pool' AND c.chain_id = v.chain_id AND c.protocol = 'uniswap_v4'
+      AND c.pool_id = lower(v.ref) AND c.verified = true
+    WHERE v.chain_id = $1 AND v.token_address = $2 AND v.official = true AND v.effective_to_block IS NULL
+    ORDER BY v.effective_from_block DESC, v.effective_from_log_index DESC LIMIT 1`,
+  [number(row.chain_id), string(row.token_address)]);
+  const current = venueResult.rows[0] as Row | undefined;
+  const kind = current?.kind;
+  if (!current || !(kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')) return null;
+  const launchFee = row.v4_pool_fee === null || row.v4_pool_fee === undefined ? null : number(row.v4_pool_fee);
+  const launchSpacing = row.v4_tick_spacing === null || row.v4_tick_spacing === undefined ? null : number(row.v4_tick_spacing);
+  return { kind: kind as VenueAmountInput['kind'], ref: string(current.ref),
+    v4PoolFee: launchFee ?? (current.catalog_fee === null ? null : number(current.catalog_fee)),
+    v4TickSpacing: launchSpacing ?? (current.catalog_tick_spacing === null ? null : number(current.catalog_tick_spacing)) };
+}
+
+// For a launch with no priced trade yet: its price is still defined by the official venue's own state (initial reserves or pool price).
+async function computeVenueSpotPrice(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<{ numerator: bigint; denominator: bigint } | null> {
+  if (row.token_decimals === null || row.quote_asset_decimals === null || !rpcClient.getBlockNumber) return null;
+  try {
+    const [venue, blockNumber] = await Promise.all([currentOfficialVenue(pool, row), rpcClient.getBlockNumber()]);
+    if (!venue) return null;
+    return await readVenueSpotPrice(rpcClient as never, { ...venue, token: string(row.token_address), quote: string(row.quote_asset_address),
+      blockNumber, tokenDecimals: number(row.token_decimals), quoteDecimals: number(row.quote_asset_decimals) });
+  } catch { return null; }
+}
+const spotMemos = new WeakMap<UsdPriceClient, ReturnType<typeof ttlMemo<string, { numerator: bigint; denominator: bigint } | null, { pool: Pool; row: Row }>>>();
+function cachedVenueSpotPrice(pool: Pool, client: UsdPriceClient, row: Row) {
+  let memo = spotMemos.get(client);
+  if (!memo) { memo = ttlMemo((_key: string, arg: { pool: Pool; row: Row }) => computeVenueSpotPrice(arg.pool, client, arg.row), CHAIN_READ_TTL_MS); spotMemos.set(client, memo); }
+  return memo(`${number(row.chain_id)}:${string(row.token_address)}`, { pool, row });
+}
+
 async function computeTvl(pool: Pool, rpcClient: UsdPriceClient, row: Row): Promise<TvlFields> {
   if (row.token_decimals === null || row.quote_asset_decimals === null) {
     // A near-realtime-synced launch awaiting core-metadata enrichment — no fabricated decimals.
     return { ...NULL_TVL, tvlUnavailableReason: 'decimals_unknown' };
   }
   try {
-    const venueResult = await pool.query(`SELECT kind, ref FROM venues WHERE chain_id = $1 AND token_address = $2
-      AND official = true AND effective_to_block IS NULL
-      ORDER BY effective_from_block DESC, effective_from_log_index DESC LIMIT 1`,
-    [number(row.chain_id), string(row.token_address)]);
-    const current = venueResult.rows[0] as Row | undefined;
-    const kind = current?.kind;
-    const venue = current && (kind === 'curve' || kind === 'v3_pool' || kind === 'v4_pool')
-      ? { kind: kind as VenueAmountInput['kind'], ref: string(current.ref) } : null;
+    const venue = await currentOfficialVenue(pool, row);
     return await readCurrentTvl(pool, rpcClient, { chainId: number(row.chain_id), token: string(row.token_address),
       quote: string(row.quote_asset_address), tokenDecimals: number(row.token_decimals),
       quoteDecimals: number(row.quote_asset_decimals), protocolVersion: string(row.protocol_version),
-      factory: string(row.factory_address), lifecycleStatus: string(row.lifecycle_status), venue,
-      v4PoolFee: row.v4_pool_fee === null ? null : number(row.v4_pool_fee),
-      v4TickSpacing: row.v4_tick_spacing === null ? null : number(row.v4_tick_spacing) });
+      factory: string(row.factory_address), lifecycleStatus: string(row.lifecycle_status),
+      venue: venue && { kind: venue.kind, ref: venue.ref },
+      v4PoolFee: venue?.v4PoolFee ?? null, v4TickSpacing: venue?.v4TickSpacing ?? null });
   } catch { return { ...NULL_TVL, tvlUnavailableReason: 'onchain_read_failed' }; }
 }
 
@@ -161,15 +195,16 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
         ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`, [number(row.chain_id), string(row.token_address)]),
     ]);
     const priceRow = priceResult.rows[0] as Row | undefined;
+    // Until the first priced trade, the price is what the official venue's own state says (the curve's initial reserves, a pool's price).
+    const venuePrice = priceRow ? { numerator: BigInt(string(priceRow.price_numerator_raw)), denominator: BigInt(string(priceRow.price_denominator_raw)) }
+      : await cachedVenueSpotPrice(pool, rpcClient, row);
     const fdvUsd = totalSupply !== null && row.token_decimals !== null
-      ? computeFdvUsd(totalSupply, number(row.token_decimals),
-        priceRow ? BigInt(string(priceRow.price_numerator_raw)) : null,
-        priceRow ? BigInt(string(priceRow.price_denominator_raw)) : null,
+      ? computeFdvUsd(totalSupply, number(row.token_decimals), venuePrice?.numerator ?? null, venuePrice?.denominator ?? null,
         usdPrice?.priceUsd ?? null) : null;
     // Same math as computeFdvUsd minus the totalSupply dependency — a per-token USD price only
     // needs the quote asset's USD rate, not the full supply.
-    const priceUsd = priceRow && usdPrice
-      ? (Number(priceRow.price_numerator_raw) / Number(priceRow.price_denominator_raw) * usdPrice.priceUsd).toString()
+    const priceUsd = venuePrice && usdPrice
+      ? (Number(venuePrice.numerator) / Number(venuePrice.denominator) * usdPrice.priceUsd).toString()
       : null;
 
     const nowSeconds = Math.floor(Date.now() / 1000);
@@ -221,8 +256,15 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
       }));
       ({ high, low } = compute52WeekHighLow(pricedTrades.map((t) => ({ high: t.price, low: t.price }))));
     }
-    const change1h = computePriceChange(pricedTrades, nowSeconds, 3600);
-    const change1d = computePriceChange(pricedTrades, nowSeconds, 86400);
+    const launchTimestamp = nullableNumber(row.launch_timestamp);
+    let change1h = computePriceChange(pricedTrades, nowSeconds, 3600, launchTimestamp);
+    let change1d = computePriceChange(pricedTrades, nowSeconds, 86400, launchTimestamp);
+    // With complete coverage and no official trade at all (not merely unpriced ones) the price has not moved: 0, not unknown.
+    if (pricedTrades.length === 0 && (change1h === null || change1d === null)) {
+      const anyTrade = await pool.query(`SELECT 1 FROM trades t JOIN venues v ON v.id = t.venue_id
+        WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true LIMIT 1`, [number(row.chain_id), string(row.token_address)]);
+      if (anyTrade.rowCount === 0) { change1h ??= '0'; change1d ??= '0'; }
+    }
 
     return { fdvUsd, marketCapUsd: fdvUsd, priceUsd, week52High: high, week52Low: low,
       week52HighUsd: usdExtrema.complete ? usdExtrema.high : null, week52LowUsd: usdExtrema.complete ? usdExtrema.low : null, change1h, change1d, ...(await tvlPromise) };
@@ -392,15 +434,17 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
   // The bonding curve's depth is read from the chain too; a trade of the launch moves its reserves.
   events?.subscribe((event) => {
     if ((event.type === 'trade.created' || event.type === 'launch.changed') && event.tokenAddress) {
-      curveDepthMemo.invalidate((key) => key === `${event.chainId}:${event.tokenAddress!.toLowerCase()}`, 1_000);
+      curveDepthMemo.invalidate((key) => key === `${event.chainId}:${event.tokenAddress!.toLowerCase()}`, 0);
     }
   });
   events?.subscribe((event) => {
-    const tokens = event.type === 'launch.changed' && event.tokenAddress ? [event.tokenAddress]
+    const tokens = (event.type === 'launch.changed' || event.type === 'trade.created') && event.tokenAddress ? [event.tokenAddress]
       : event.type === 'pool.changed' ? event.poolTokens ?? [] : [];
     if (tokens.length === 0) return;
     const prefixes = tokens.map((token) => `${event.chainId}:${token.toLowerCase()}:`);
-    launchHistoryMemo.invalidate((key) => prefixes.some((prefix) => key.startsWith(prefix)), HISTORY_INVALIDATE_MIN_AGE_MS);
+    launchHistoryMemo.invalidate((key) => prefixes.some((prefix) => key.startsWith(prefix)), 0);
+    if (rpcClient) tvlMemos.get(pool)?.get(rpcClient)?.invalidate((key) =>
+      tokens.some((token) => key === `${event.chainId}:${token.toLowerCase()}`), 0);
   });
   const store: ApiDeps['data'] = {
     async listSources() {
@@ -424,6 +468,8 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
           (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
            WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
              AND t.timestamp >= $6) AS official_volume_raw,
+          vr.volume_usd::text AS launch_volume_usd, vr.rank_category AS launch_volume_rank_category,
+          vr.window_end AS launch_volume_window_end,
           ${launchCoverageSql(9)} AS launch_coverage_complete
         FROM (
           -- The page of launches comes first, straight from the (chain, block, tx, log) index, so the join with sources and the volume sum run for 51 rows
@@ -440,6 +486,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
             AND ($10::text[] IS NULL OR l.platform = ANY($10))
           ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC LIMIT $5) l
         JOIN sources s ON s.id = l.source_id
+        LEFT JOIN launch_volume24h_usd vr ON vr.chain_id = l.chain_id AND vr.token_address = l.token_address
         ORDER BY l.launch_block DESC, l.launch_tx_hash DESC, l.launch_log_index DESC`,
       [query.chainId === undefined ? null : [query.chainId].flat(), cursor?.blockNumber.toString() ?? null, cursor?.txHash ?? null, cursor?.logIndex ?? null, query.limit + 1, since,
         query.search ?? null, query.status ?? null, head?.toString() ?? null, query.platform === undefined ? null : [query.platform].flat(),
@@ -448,7 +495,13 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       const statsByToken = await readLaunchStatsSnapshots(pool, rows.slice(0, query.limit).map((row) => ({ chainId: number(row.chain_id), tokenAddress: string(row.token_address) })));
       return page(rows, query.limit, (row) => {
         const snapshot = statsByToken.get(`${number(row.chain_id)}:${string(row.token_address)}`);
-        return summary(row, Boolean(row.launch_coverage_complete), statsForCoverage(snapshot?.stats, Boolean(row.launch_coverage_complete)), snapshot?.computedAt.toISOString() ?? null);
+        const item = summary(row, Boolean(row.launch_coverage_complete), statsForCoverage(snapshot?.stats, Boolean(row.launch_coverage_complete)), snapshot?.computedAt.toISOString() ?? null);
+        const volume = row.launch_volume_rank_category === 'null' || row.launch_volume_usd === null
+          ? null : decimalString(row.launch_volume_usd);
+        return { ...item, officialVolume24hUsd: volume,
+          officialVolume24hUsdApprox: row.launch_volume_rank_category === 'positive',
+          officialVolume24hUsdAsOf: volume === null || row.launch_volume_window_end === null
+            ? null : new Date(number(row.launch_volume_window_end) * 1000).toISOString() };
       });
     },
     async getLaunch(chainId: number, tokenAddress: string): Promise<LaunchDetail | null> {
@@ -828,12 +881,48 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       const rows = (await pool.query(`SELECT bucket_start, open, high, low, close, volume_usd, trade_count
         FROM launch_usd_candle_buckets WHERE chain_id = $1 AND token_address = $2 AND interval_seconds = $3
           AND bucket_start >= $4 AND bucket_start < $5 AND unpriced_count = 0
+          AND NOT EXISTS (SELECT 1 FROM candle_dirty_buckets d WHERE d.chain_id = $1 AND d.token_address = $2
+            AND d.bucket_start >= launch_usd_candle_buckets.bucket_start
+            AND d.bucket_start < launch_usd_candle_buckets.bucket_start + $3)
         ORDER BY bucket_start DESC LIMIT 500`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end])).rows as Row[];
+      const dirtyStarts = (await pool.query(`SELECT bucket_start FROM (
+        SELECT DISTINCT (bucket_start / $3::bigint) * $3::bigint AS bucket_start
+        FROM candle_dirty_buckets WHERE chain_id = $1 AND token_address = $2 AND bucket_start >= $4 AND bucket_start < $5
+      ) dirty ORDER BY bucket_start DESC LIMIT 20`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end])).rows.map((row: Row) => number(row.bucket_start));
+      if (dirtyStarts.length > 0) {
+        const live = await pool.query(`WITH valued AS (
+          SELECT d.bucket_start, t.block_number, t.log_index, t.token_amount_raw, l.token_decimals,
+            CASE WHEN r.answer_raw IS NULL OR l.quote_asset_decimals IS NULL OR l.token_decimals IS NULL OR t.token_amount_raw = 0
+              OR t.timestamp - r.updated_at < 0 OR t.timestamp - r.updated_at > 86400 THEN NULL
+              ELSE t.quote_amount_raw::numeric * r.answer_raw::numeric / power(10::numeric, l.quote_asset_decimals + r.decimals) END AS usd
+          FROM unnest($3::bigint[]) AS d(bucket_start)
+          JOIN trades t ON t.chain_id = $1 AND t.token_address = $2
+            AND t.timestamp >= d.bucket_start AND t.timestamp < d.bucket_start + $4
+          JOIN venues v ON v.id = t.venue_id AND v.official = true
+          JOIN launches l ON l.chain_id = t.chain_id AND l.token_address = t.token_address
+          LEFT JOIN quote_usd_feeds f ON f.chain_id = l.chain_id AND f.quote_asset_address = l.quote_asset_address
+            AND f.verification_status = 'verified'
+          LEFT JOIN LATERAL (SELECT answer_raw, decimals, updated_at FROM quote_usd_price_rounds
+            WHERE chain_id = f.chain_id AND feed_address = f.feed_address AND (block_number, log_index) <= (t.block_number, t.log_index)
+            ORDER BY block_number DESC, log_index DESC LIMIT 1) r ON true
+        ), priced AS (
+          SELECT bucket_start, block_number, log_index, usd,
+            CASE WHEN usd IS NULL THEN NULL ELSE usd * power(10::numeric, token_decimals) / token_amount_raw::numeric END AS price
+          FROM valued
+        )
+        SELECT bucket_start, (array_agg(price ORDER BY block_number, log_index) FILTER (WHERE price IS NOT NULL))[1]::numeric(40,20)::text AS open,
+          max(price)::numeric(40,20)::text AS high, min(price)::numeric(40,20)::text AS low,
+          (array_agg(price ORDER BY block_number DESC, log_index DESC) FILTER (WHERE price IS NOT NULL))[1]::numeric(40,20)::text AS close,
+          coalesce(sum(usd), 0)::numeric(40,6)::text AS volume_usd, count(*)::int AS trade_count,
+          (count(*) FILTER (WHERE price IS NULL))::int AS unpriced_count
+        FROM priced GROUP BY bucket_start`, [chainId, tokenAddress.toLowerCase(), dirtyStarts, intervalSeconds]);
+        for (const row of live.rows as Row[]) if (number(row.unpriced_count) === 0) rows.push(row);
+      }
       // Until the backfill has covered history, a missing bucket may just be unprocessed.
       const backfilled = await isRollupBackfilled(pool, 'launch_usd_candles');
       return {
-        complete: Boolean(launch.launch_coverage_complete) && backfilled,
-        items: rows.map((row) => ({
+        complete: Boolean(launch.launch_coverage_complete) && backfilled && dirtyStarts.length === 0,
+        items: rows.sort((a, b) => number(b.bucket_start) - number(a.bucket_start)).slice(0, 500).map((row) => ({
           intervalSeconds, bucketStart: number(row.bucket_start), open: string(row.open), high: string(row.high),
           low: string(row.low), close: string(row.close), volumeUsd: string(row.volume_usd), tradeCount: number(row.trade_count),
         })),
@@ -873,6 +962,37 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
       const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
       const cacheState = await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1');
+      const directCandles = async (bucketStarts?: readonly number[]): Promise<{ items: CandleResponse[]; allPriced: boolean }> => {
+        const result = bucketStarts === undefined
+          ? await pool.query(`SELECT t.* FROM trades t JOIN venues v ON v.id = t.venue_id
+            WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+              AND ($5::text IS NULL OR v.kind = $5)
+              AND t.timestamp >= $3 AND t.timestamp < $4
+            ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), start, end, venueKind ?? null])
+          : await pool.query(`SELECT t.* FROM unnest($3::bigint[]) AS b(bucket_start)
+            JOIN trades t ON t.chain_id = $1 AND t.token_address = $2
+              AND t.timestamp >= b.bucket_start AND t.timestamp < b.bucket_start + $4
+            JOIN venues v ON v.id = t.venue_id AND v.official = true
+            ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), bucketStarts, intervalSeconds]);
+        const rows = result.rows as Row[];
+        const mapped: Trade[] = rows.map((row) => ({ chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
+          venueId: string(row.venue_id), blockNumber: BigInt(string(row.block_number)), blockHash: string(row.block_hash) as Hash,
+          txHash: string(row.tx_hash) as Hash, logIndex: number(row.log_index), timestamp: number(row.timestamp),
+          side: string(row.side) as Trade['side'], tokenAmountRaw: BigInt(string(row.token_amount_raw)),
+          quoteAmountRaw: BigInt(string(row.quote_amount_raw)), quoteAssetAddress: string(row.quote_asset_address) as Address,
+          sourceEvent: string(row.source_event), activityKind: string(row.activity_kind) as Trade['activityKind'],
+          priceNumeratorRaw: row.price_numerator_raw === null ? null : BigInt(string(row.price_numerator_raw)),
+          priceDenominatorRaw: row.price_denominator_raw === null ? null : BigInt(string(row.price_denominator_raw)),
+          traderAddress: string(row.trader_address) as Address,
+        }));
+        const items = buildOfficialCandles(mapped, intervalSeconds, { chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
+          quoteAssetAddress: string(launch.quote_asset_address) as Address,
+          venueIds: new Set(rows.map((row) => string(row.venue_id))), complete: true })
+          .map((candle) => ({ intervalSeconds, bucketStart: candle.bucketStart,
+            open: candle.open, high: candle.high, low: candle.low, close: candle.close,
+            quoteVolume: formatUnits(candle.quoteVolumeRaw, number(launch.quote_asset_decimals)) }));
+        return { items, allPriced: !rows.some((row) => row.price_numerator_raw === null || row.price_denominator_raw === null) };
+      };
       // The pre-aggregated cache has no venue dimension, so a venue-scoped request always reads trades directly.
       if (venueKind === undefined && cacheState.rows[0]?.backfill_complete === true) {
         const [cached, pending] = await Promise.all([
@@ -892,37 +1012,24 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
           [chainId, tokenAddress.toLowerCase(), start, end]),
         ]);
         const state = pending.rows[0] as Row;
+        const dirtyStarts = state.dirty ? (await pool.query(`SELECT bucket_start FROM (
+          SELECT DISTINCT (bucket_start / $3::bigint) * $3::bigint AS bucket_start
+          FROM candle_dirty_buckets WHERE chain_id = $1 AND token_address = $2
+            AND bucket_start >= $4 AND bucket_start < $5
+        ) dirty ORDER BY bucket_start DESC LIMIT 20`,
+        [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end])).rows.map((row: Row) => number(row.bucket_start)) : [];
+        const live = dirtyStarts.length > 0 ? (await directCandles(dirtyStarts)).items : [];
+        const byBucket = new Map<number, CandleResponse>();
+        for (const row of cached.rows as Row[]) byBucket.set(number(row.bucket_start), { intervalSeconds, bucketStart: number(row.bucket_start),
+          open: string(row.open), high: string(row.high), low: string(row.low), close: string(row.close),
+          quoteVolume: formatUnits(BigInt(string(row.quote_volume_raw)), number(launch.quote_asset_decimals)) });
+        for (const candle of live) byBucket.set(candle.bucketStart, candle);
         return { complete: Boolean(launch.launch_coverage_complete) && !state.dirty && !state.unpriced,
-          items: (cached.rows as Row[]).map((row) => ({ intervalSeconds, bucketStart: number(row.bucket_start),
-            open: string(row.open), high: string(row.high), low: string(row.low), close: string(row.close),
-            quoteVolume: formatUnits(BigInt(string(row.quote_volume_raw)), number(launch.quote_asset_decimals)),
-          })) };
+          items: [...byBucket.values()].sort((a, b) => b.bucketStart - a.bucketStart).slice(0, 500) };
       }
-      const result = await pool.query(`SELECT t.* FROM trades t JOIN venues v ON v.id = t.venue_id
-        WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-          AND ($5::text IS NULL OR v.kind = $5)
-          AND t.timestamp >= $3 AND t.timestamp < $4
-        ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), start, end, venueKind ?? null]);
-      const rows = result.rows as Row[];
-      const mapped: Trade[] = rows.map((row) => ({ chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
-        venueId: string(row.venue_id), blockNumber: BigInt(string(row.block_number)), blockHash: string(row.block_hash) as Hash,
-        txHash: string(row.tx_hash) as Hash, logIndex: number(row.log_index), timestamp: number(row.timestamp),
-        side: string(row.side) as Trade['side'], tokenAmountRaw: BigInt(string(row.token_amount_raw)),
-        quoteAmountRaw: BigInt(string(row.quote_amount_raw)), quoteAssetAddress: string(row.quote_asset_address) as Address,
-        sourceEvent: string(row.source_event), activityKind: string(row.activity_kind) as Trade['activityKind'],
-        priceNumeratorRaw: row.price_numerator_raw === null ? null : BigInt(string(row.price_numerator_raw)),
-        priceDenominatorRaw: row.price_denominator_raw === null ? null : BigInt(string(row.price_denominator_raw)),
-        traderAddress: string(row.trader_address) as Address,
-      }));
-      const candles = buildOfficialCandles(mapped, intervalSeconds, { chainId, tokenAddress: tokenAddress.toLowerCase() as Address,
-        quoteAssetAddress: string(launch.quote_asset_address) as Address,
-        venueIds: new Set(rows.map((row) => string(row.venue_id))), complete: true });
-      return { complete: Boolean(launch.launch_coverage_complete)
-        && !rows.some((row) => row.price_numerator_raw === null || row.price_denominator_raw === null),
-        items: candles.reverse().map((candle) => ({ intervalSeconds, bucketStart: candle.bucketStart,
-        open: candle.open, high: candle.high, low: candle.low, close: candle.close,
-        quoteVolume: formatUnits(candle.quoteVolumeRaw, number(launch.quote_asset_decimals)),
-      })) };
+      const candles = await directCandles();
+      return { complete: Boolean(launch.launch_coverage_complete) && candles.allPriced,
+        items: candles.items.reverse() };
     },
   };
   return withLaunchListCache(store, events);

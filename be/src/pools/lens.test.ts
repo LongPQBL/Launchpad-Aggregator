@@ -31,4 +31,22 @@ describe('readLensSnapshot', () => {
   it('does not answer for a custom-accounting flag without a readable permission field', async () => {
     expect(await readLensSnapshot(clientWith(answer({ hasCustomAccounting: true, hookPermissions: undefined })), key)).toBeNull();
   });
+  it('retries with a larger gas limit when a fine tick spacing makes the lens run out of gas', async () => {
+    const gasSeen: bigint[] = [];
+    const client = { getBlockNumber: async () => 100n, readContract: async (args: { gas: bigint }) => {
+      gasSeen.push(args.gas);
+      if (args.gas <= 30_000_000n) throw new Error('execution reverted');
+      return answer({});
+    } } as never;
+    expect(await readLensSnapshot(client, { ...key, tick_spacing: 1 })).toMatchObject({ coreAmount0: 2_084_981_831n });
+    expect(gasSeen).toEqual([30_000_000n, 150_000_000n]);
+  });
+  it('does not retry when the first read succeeds, and answers null when the larger read also fails', async () => {
+    let calls = 0;
+    await readLensSnapshot({ getBlockNumber: async () => 100n, readContract: async () => { calls += 1; return answer({}); } } as never, key);
+    expect(calls).toBe(1);
+    calls = 0;
+    expect(await readLensSnapshot({ getBlockNumber: async () => 100n, readContract: async () => { calls += 1; throw new Error('execution reverted'); } } as never, key)).toBeNull();
+    expect(calls).toBe(2);
+  });
 });

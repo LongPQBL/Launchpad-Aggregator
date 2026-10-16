@@ -1,7 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.js';
-import { fastLaneRows, fastLaneState, fastLaneVenueCoverage, trades } from '../db/schema.js';
-import type { LiveEntry } from '../envioSync/incrementalSync.js';
+import { fastLaneRows, fastLaneState, fastLaneVenueCoverage, poolCatalog, poolTrades, trades } from '../db/schema.js';
 import { notifyChanged } from '../envioSync/notifyChanges.js';
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import { invalidateCurveReserve } from '../market/curvePricing.js';
@@ -10,7 +9,7 @@ import type { WatchedVenue } from './watchSet.js';
 const CURVE_EVENTS = new Set(['CurveBuy', 'CurveSell', 'BuybackLocked']);
 
 /** Remembers which rows the lane wrote, with the raw row it fed in, until the parity command has compared them with Envio's. */
-export async function recordFastRows(db: Database, chainId: number, entries: readonly LiveEntry[]): Promise<void> {
+export async function recordFastRows(db: Database, chainId: number, entries: readonly { stream: string; raw: Record<string, unknown> }[]): Promise<void> {
   if (entries.length === 0) return;
   await db.insert(fastLaneRows).values(entries.map((entry) => ({
     chainId, txHash: String(entry.raw.txHash).toLowerCase(), logIndex: Number(entry.raw.logIndex), stream: entry.stream,
@@ -80,7 +79,11 @@ export async function removeLaneTrade(db: Database, chainId: number, key: { txHa
       eq(trades.chainId, chainId), eq(trades.txHash, txHash), eq(trades.logIndex, key.logIndex),
       sql`lower(${trades.blockHash}) = ${key.blockHash.toLowerCase()}`,
     )).returning({ tokenAddress: trades.tokenAddress, sourceEvent: trades.sourceEvent });
-    if (deleted.length === 0) return false;
+    const deletedPoolTrades = await tx.delete(poolTrades).where(and(
+      eq(poolTrades.chainId, chainId), eq(poolTrades.txHash, txHash), eq(poolTrades.logIndex, key.logIndex),
+      sql`lower(${poolTrades.blockHash}) = ${key.blockHash.toLowerCase()}`,
+    )).returning({ protocol: poolTrades.protocol, poolId: poolTrades.poolId });
+    if (deleted.length === 0 && deletedPoolTrades.length === 0) return false;
     await tx.delete(fastLaneRows).where(and(eq(fastLaneRows.chainId, chainId), eq(fastLaneRows.txHash, txHash), eq(fastLaneRows.logIndex, key.logIndex)));
     const launchKeys = [...new Set(deleted.map((row) => row.tokenAddress))].map((tokenAddress) => ({ chainId, tokenAddress }));
     await invalidateLaunchVolume(tx, launchKeys, new Date());
@@ -88,6 +91,12 @@ export async function removeLaneTrade(db: Database, chainId: number, key: { txHa
     const curveLaunches = [...new Set(deleted.filter((row) => CURVE_EVENTS.has(row.sourceEvent)).map((row) => row.tokenAddress))];
     await invalidateCurveReserve(tx, curveLaunches.map((tokenAddress) => ({ chainId, tokenAddress })));
     await notifyChanged(tx, launchKeys.map((launch) => ({ kind: 'launch.changed' as const, chainId, tokenAddress: launch.tokenAddress })));
+    for (const row of deletedPoolTrades) {
+      const [catalog] = await tx.select({ currency0: poolCatalog.currency0, currency1: poolCatalog.currency1 }).from(poolCatalog)
+        .where(and(eq(poolCatalog.chainId, chainId), eq(poolCatalog.protocol, row.protocol), eq(poolCatalog.poolId, row.poolId)));
+      await notifyChanged(tx, [{ kind: 'pool.changed', chainId, poolId: row.poolId,
+        poolTokens: catalog ? [catalog.currency0, catalog.currency1] : undefined, via: 'fast' }]);
+    }
     return true;
   });
 }

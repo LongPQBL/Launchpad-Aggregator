@@ -1,8 +1,9 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Pool } from 'pg';
 import { markRollupBackfilled } from '../charts/rollupState.js';
 import { insertTvlSnapshot } from '../pools/tvlSnapshots.js';
 import { readLaunchHistory } from './launchHistory.js';
+import { readPoolHistory } from '../pools/history.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -84,11 +85,48 @@ afterAll(async () => {
 });
 
 describe('readLaunchHistory over all pools', () => {
+  it('sums current pool TVL in the open bucket before the snapshot worker runs', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue((base + 2 * HOUR + 10) * 1000);
+    const e18 = 10n ** 18n;
+    const liveRpc = {
+      async getBlockNumber() { return 1000n; },
+      async readContract({ functionName, address }: { functionName: string; address: string }) {
+        if (functionName === 'decimals') return address.toLowerCase() === feed ? 8 : 18;
+        if (functionName === 'latestRoundData') return [1n, 400_000_000n, 0n, BigInt(base + 2 * HOUR), 1n];
+        if (functionName === 'getPoolTVL') return { coreAmount0: 3n * e18, coreAmount1: 2n * e18, sqrtPriceX96: 2n ** 96n, hasCustomAccounting: false };
+        if (functionName === 'slot0') return [2n ** 96n, 0];
+        if (functionName === 'balanceOf') return e18;
+        throw new Error(functionName);
+      },
+    };
+    try {
+      const result = await readLaunchHistory(pool, { ...options, rpcClient: liveRpc });
+      expect(result.items.at(-1)?.tvlUsd).toBe('28');
+    } finally { clock.mockRestore(); }
+  });
+  it('shows a V3 pool TVL snapshot on its own TVL history', async () => {
+    const history = await readPoolHistory(pool, { chainId, protocol: 'uniswap_v3', poolId: v3Pool },
+      { intervalSeconds: HOUR, buckets: 1, asOf: base + HOUR + 200, rpcClient });
+    expect(history.items[0]?.tvlUsd).toBe('50');
+  });
   it('adds the other pools to the official volume without counting the official pool twice, and nulls a bucket with an unpriced swap', async () => {
     const result = await readLaunchHistory(pool, options);
     expect(result.items.map((item) => item.volumeUsd)).toEqual(['0', '22', null]);
     expect(result.poolCount).toBe(2);
     expect(result.unvaluedPools).toBe(0);
+  });
+
+  it('replaces a stale nonofficial pool rollup with its committed dirty trade', async () => {
+    const timestamp = base + HOUR + 123;
+    await poolTrade('uniswap_v3', v3Pool, timestamp);
+    try {
+      const result = await readLaunchHistory(pool, options);
+      expect(result.items[1]?.volumeUsd).toBeNull();
+      expect(result.complete).toBe(false);
+    } finally {
+      await pool.query('DELETE FROM pool_trades WHERE chain_id=$1 AND tx_hash=$2', [chainId, tx(timestamp)]);
+      await pool.query('DELETE FROM pool_candle_dirty_buckets WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3', [chainId, 'uniswap_v3', v3Pool]);
+    }
   });
 
   it('keeps the curve-scoped answer to the curve alone', async () => {

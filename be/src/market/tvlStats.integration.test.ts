@@ -58,7 +58,7 @@ describe('readCurrentTvl', () => {
     expect(client.readContract.mock.calls.some(([params]) => params.functionName === 'realQuoteReserve')).toBe(false);
   });
 
-  it('reports a stale quote oracle as unavailable USD pricing', async () => {
+  it('reports a stale quote oracle read as a failed price read', async () => {
     const client = { getBlockNumber: async () => 77_455_470n,
       readContract: vi.fn(async ({ functionName }: { functionName: string }) => {
         if (functionName === 'decimals') return 8;
@@ -66,6 +66,6 @@ describe('readCurrentTvl', () => {
         throw new Error('venue must not be read without a current USD price');
       }) };
     expect((await readCurrentTvl(pool, client, input, () => 1_790_859_457_000)).tvlUnavailableReason)
-      .toBe('quote_price_unavailable');
+      .toBe('quote_price_read_failed');
   });
 });

@@ -71,6 +71,18 @@ export async function invalidateForCoverageChange(tx: SqlExecutor, sourceIds: re
             OR (v.kind = 'v4_pool' AND ('pons-v2-v4:' || v.ref) = ANY(${ids}))
             OR (v.kind = 'v3_pool' AND (l.source_id || '-trades') = ANY(${ids}))))`);
   const keys = toKeys(readRows<KeyRow>(affectedResult));
+  if (keys.length > 0) {
+    const chainIds = sql`ARRAY[${sql.join(keys.map((key) => sql`${key.chainId}`), sql`, `)}]::int[]`;
+    const tokenAddresses = sql`ARRAY[${sql.join(keys.map((key) => sql`${key.tokenAddress}`), sql`, `)}]::text[]`;
+    // Stats computed while a source was backfilling contain intentionally withheld prices/FDV.
+    // Once coverage changes, make them due immediately so the stats worker recomputes them on its
+    // next pass instead of leaving those nulls visible until the normal market-data TTL expires.
+    await tx.execute(sql`UPDATE launch_stats s SET refresh_requested_at = now()
+      WHERE (s.chain_id, s.token_address) IN (
+        SELECT changed.chain_id, changed.token_address
+        FROM unnest(${chainIds}, ${tokenAddresses}) AS changed(chain_id, token_address)
+      )`);
+  }
   await invalidateLaunchVolume(tx, keys, new Date());
   return keys.length;
 }

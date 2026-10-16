@@ -29,7 +29,8 @@ describe('PoolChartPanel', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Volume' }));
     expect(screen.getByTestId('price-chart').parentElement).toHaveAttribute('hidden');
     expect(screen.getByRole('img', { name: /^volume over/i })).toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'TVL' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'TVL' }));
+    expect(screen.getByRole('img', { name: /^tvl over/i })).toBeInTheDocument();
   });
 
   it('keeps the candle-size tabs under Volume and refetches the series for the chosen size', async () => {
@@ -62,7 +63,7 @@ describe('PoolChartPanel', () => {
 
   it('adds Liquidity and Depth to the same switcher for V3 and V4 pools, and not for V2', () => {
     const { unmount } = render(<PoolChartPanel {...props} />);
-    expect(screen.getAllByRole('tab').map((tab) => tab.textContent).filter((text) => ['Price', 'Volume', 'Liquidity', 'Depth', 'TVL'].includes(text ?? ''))).toEqual(['Price', 'Volume', 'Liquidity', 'Depth']);
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent).filter((text) => ['Price', 'Volume', 'Liquidity', 'Depth', 'TVL'].includes(text ?? ''))).toEqual(['Price', 'Volume', 'TVL', 'Liquidity', 'Depth']);
     unmount();
     render(<PoolChartPanel {...props} pool={{ ...(pool as object), protocol: 'uniswap_v2' } as never} />);
     expect(screen.queryByRole('tab', { name: 'Liquidity' })).not.toBeInTheDocument();

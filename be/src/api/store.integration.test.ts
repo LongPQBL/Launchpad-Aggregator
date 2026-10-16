@@ -1,10 +1,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi, beforeEach } from 'vitest';
+import { encodeAbiParameters, keccak256 } from 'viem';
 import { createDatabase } from '../db/client.js';
 import { upsertQuoteFeed } from '../market/quotePricing/feedRegistry.js';
 import { upsertPriceRounds } from '../market/quotePricing/priceRounds.js';
 import { refreshDueLaunchVolumes } from '../market/launchVolume/worker.js';
 import { markVolumeBackfillComplete, recordVolumeWorkerHeartbeat } from '../market/launchVolume/state.js';
 import { createApiStore } from './store.js';
+import { ApiEventBus } from './events.js';
 import { recomputeLaunchStats, refreshLaunchStatsOnce } from './launchStatsWorker.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
@@ -709,6 +711,133 @@ describe('new stats fields degrade per-launch, not per-page (Review Focus)', () 
     expect(detail?.change1h).toBeNull();
     expect(detail?.change1d).toBeNull();
   });
+
+  it('reports a 0 change for a fully covered launch with no trade at all, but keeps unknown when its trades are only unpriced', async () => {
+    const noFeedVenue = `4663:v3_pool:${noFeedToken}`;
+    await pool.query('DELETE FROM launch_stats');
+    await refreshLaunchStatsOnce(pool, rpcClient() as never, 100000, new Date());
+    const idle = await createApiStore(pool).getLaunch(4663, noFeedToken);
+    expect(idle?.change1h).toBe('0');
+    expect(idle?.change1d).toBe('0');
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v3_pool',$2,$3,NULL,1,true) ON CONFLICT (id) DO NOTHING`, [noFeedVenue, noFeedToken, `${statsSource}-trades`]);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,1,$3,$4,0,$5,'buy','1','1',$6,'V3Swap','user_trade',$1)`,
+    [noFeedToken, noFeedVenue, blockHash, '0x' + 'e'.repeat(64), Math.floor(Date.now() / 1000) - 100, noFeedQuote]);
+    try {
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, rpcClient() as never, 100000, new Date());
+      const pending = await createApiStore(pool).getLaunch(4663, noFeedToken);
+      expect(pending?.change1h).toBeNull();
+      expect(pending?.change1d).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM trades WHERE token_address = $1', [noFeedToken]);
+      await pool.query('DELETE FROM venues WHERE token_address = $1', [noFeedToken]);
+    }
+  });
+
+  it('prices a launch with no trade yet from its official curve reserves, and leaves the price unknown when they cannot be read', async () => {
+    const idleToken = '0x1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b';
+    const curveRef = '0x1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c';
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'Idle','IDL',18,'pons','v1',$1,$1,1003,$3,0,$4,'ETH',18,'trading') ON CONFLICT DO NOTHING`,
+    [idleToken, statsSource, '0x' + '3'.repeat(64), ETH_ADDRESS]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'curve',$3,$4,NULL,1,true) ON CONFLICT (id) DO NOTHING`, [`4663:curve:${curveRef}`, idleToken, curveRef, `${statsSource}-trades`]);
+    const client = (reservesWork: boolean) => ({
+      getBlockNumber: async () => 1500n,
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'decimals') return 8;
+        if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
+        if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
+        if (reservesWork && functionName === 'quoteReserve') return 2n * 10n ** 18n;
+        if (reservesWork && functionName === 'tokenReserve') return 1_000_000n * 10n ** 18n;
+        throw new Error(`unexpected ${functionName}`);
+      },
+    });
+    try {
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, client(true) as never, 100000, new Date());
+      const priced = await createApiStore(pool).getLaunch(4663, idleToken);
+      // 2 ETH / 1,000,000 tokens = 0.000002 ETH per token; at 2691.70 USD/ETH that is 0.00538..., FDV = price x 1,000,000 supply.
+      expect(Number(priced?.priceUsd)).toBeCloseTo(2 / 1_000_000 * 2691.70223591, 9);
+      expect(Number(priced?.fdvUsd)).toBeCloseTo(2 * 2691.70223591, 4);
+      await pool.query('DELETE FROM launch_stats');
+      const failing = client(false);
+      await refreshLaunchStatsOnce(pool, failing as never, 100000, new Date());
+      const unknown = await createApiStore(pool).getLaunch(4663, idleToken);
+      expect(unknown?.priceUsd).toBeNull();
+      expect(unknown?.fdvUsd).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM venues WHERE token_address = $1', [idleToken]);
+      await pool.query('DELETE FROM launch_stats WHERE token_address = $1', [idleToken]);
+      await pool.query('DELETE FROM launches WHERE token_address = $1', [idleToken]);
+    }
+  });
+
+  it('values a graduated launch whose fee and tick spacing are only known from its pool catalog row (the Envio path leaves them null on the launch)', async () => {
+    const gradToken = '0x1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d';
+    const hook = '0xe5e702641ea86f4ae6cc3cdaed2b886f976be044';
+    const poolId = keccak256(encodeAbiParameters(
+      [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }],
+      [ETH_ADDRESS as `0x${string}`, gradToken, 0, 200, hook]));
+    await pool.query(`INSERT INTO launches (chain_id,token_address,source_id,source_log_id,name,symbol,token_decimals,
+      platform,protocol_version,factory_address,deployer_address,launch_block,launch_tx_hash,launch_log_index,
+      quote_asset_address,quote_asset_symbol,quote_asset_decimals,lifecycle_status)
+      VALUES (4663,$1,$2,NULL,'Grad','GRD',18,'pons','v2',$1,$1,1004,$3,0,$4,'ETH',18,'graduated') ON CONFLICT DO NOTHING`,
+    [gradToken, statsSource, '0x' + '4'.repeat(64), ETH_ADDRESS]);
+    await pool.query(`INSERT INTO venues (id,chain_id,token_address,kind,ref,source_id,source_log_id,effective_from_block,official)
+      VALUES ($1,4663,$2,'v4_pool',$3,$4,NULL,1,true) ON CONFLICT (id) DO NOTHING`, [`4663:v4_pool:${poolId}`, gradToken, poolId, `${statsSource}-trades`]);
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES (4663,'uniswap_v4',$1,$2,$3,0,200,$4,99,$5,$6,0,true,'caught_up') ON CONFLICT (chain_id,protocol,pool_id) DO NOTHING`,
+    [poolId, ETH_ADDRESS, gradToken, hook, '0x' + '5'.repeat(64), '0x' + '6'.repeat(64)]);
+    const client = {
+      getBlockNumber: async () => 1500n,
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === 'decimals') return 8;
+        if (functionName === 'latestRoundData') return [1n, 269170223591n, FRESH_FEED_UPDATED_AT, FRESH_FEED_UPDATED_AT, 1n];
+        if (functionName === 'totalSupply') return 1_000_000n * 10n ** 18n;
+        if (functionName === 'getLaunchedToken') return { exists: true, phase: 2, curve: '0x' + '9'.repeat(40) };
+        if (functionName === 'getPoolTVL') return { coreAmount0: 3n * 10n ** 18n, coreAmount1: 500_000n * 10n ** 18n, sqrtPriceX96: 2n ** 96n / 1000n, hasCustomAccounting: false };
+        throw new Error(`unexpected ${functionName}`);
+      },
+    };
+    try {
+      await pool.query('DELETE FROM launch_stats');
+      await refreshLaunchStatsOnce(pool, client as never, 100000, new Date());
+      const detail = await createApiStore(pool).getLaunch(4663, gradToken);
+      expect(detail?.tvlUnavailableReason).toBeNull();
+      expect(Number(detail?.tvlUsd)).toBeGreaterThan(0);
+      expect(detail?.priceUsd).not.toBeNull();
+    } finally {
+      await pool.query('DELETE FROM launch_stats WHERE token_address = $1', [gradToken]);
+      await pool.query('DELETE FROM pool_catalog WHERE chain_id = 4663 AND pool_id = $1', [poolId]);
+      await pool.query('DELETE FROM venues WHERE token_address = $1', [gradToken]);
+      await pool.query('DELETE FROM launches WHERE token_address = $1', [gradToken]);
+    }
+  });
+
+  it('computes a 1d change from first trade when the launch itself is younger than one day', async () => {
+    const now = Math.floor(Date.now() / 1000);
+    await pool.query('UPDATE launches SET launch_timestamp=$1 WHERE token_address=$2', [now - 7_200, goodToken]);
+    await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+      side,token_amount_raw,quote_amount_raw,quote_asset_address,price_numerator_raw,price_denominator_raw,source_event,activity_kind,trader_address)
+      VALUES (4663,$1,$2,10,$3,$4,0,$5,'buy','1','1',$6,'1','1','V3Swap','user_trade',$1),
+             (4663,$1,$2,11,$3,$7,0,$8,'buy','1','1',$6,'2','1','V3Swap','user_trade',$1)`,
+    [goodToken, goodVenueId, blockHash, '0x' + 'e'.repeat(64), now - 7_200, ETH_ADDRESS, '0x' + 'f'.repeat(64), now - 50]);
+    try {
+      await refreshLaunchStatsOnce(pool, { readContract: rpcClient() } as never, 100000, new Date());
+      const detail = await createApiStore(pool, { readContract: rpcClient() } as never).getLaunch(4663, goodToken);
+      expect(detail?.change1d).toBe('100');
+    } finally {
+      await pool.query('DELETE FROM trades WHERE token_address=$1 AND block_number IN (10,11)', [goodToken]);
+      await pool.query('UPDATE launches SET launch_timestamp=NULL WHERE token_address=$1', [goodToken]);
+    }
+  });
 });
 
 describe('listLaunches sort=volume24hUsd (global ranking)', () => {
@@ -814,6 +943,13 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     expect(unscored?.officialVolume24hUsd).toBeNull();
   });
 
+  it('includes the published 24 h USD volume in the default recent launches list', async () => {
+    const page = await store.listLaunches({ limit: 50, chainId: 4663, search: 'A' });
+    const launch = page.items.find((item) => item.tokenAddress === launchA);
+    expect(launch?.officialVolume24hUsd).toBe('300');
+    expect(launch?.officialVolume24hUsdAsOf).not.toBeNull();
+  });
+
   it('gives a known zero-trade launch with complete coverage a real "0", never null', async () => {
     const page = await store.listLaunches({ limit: 50, chainId: 4663, sort: 'volume24hUsd' });
     const zero = page.items.find((item) => item.tokenAddress === launchC);
@@ -841,11 +977,12 @@ describe('listLaunches sort=volume24hUsd (global ranking)', () => {
     await expect(store.listLaunches({ limit: 1, chainId: 4663, sort: 'recent', cursor: first.nextCursor! })).rejects.toThrow();
   });
 
-  it('keeps sort=recent (default) unaffected by the new ranking fields', async () => {
+  it('includes published USD volume in the default recent list without changing recency ordering', async () => {
     const page = await store.listLaunches({ limit: 50, chainId: 4663 });
     const a = page.items.find((item) => item.tokenAddress === launchA);
-    expect(a?.officialVolume24hUsd).toBeNull();
-    expect(a?.officialVolume24hUsdApprox).toBe(false);
+    expect(a?.officialVolume24hUsd).toBe('300');
+    expect(a?.officialVolume24hUsdApprox).toBe(true);
+    expect(a?.officialVolume24hUsdAsOf).not.toBeNull();
   });
 });
 
@@ -1125,6 +1262,41 @@ describe('venue=curve scoping', () => {
       await pool.query('DELETE FROM candles WHERE token_address = $1', [scopedToken]);
       await pool.query('DELETE FROM candle_dirty_buckets WHERE token_address = $1', [scopedToken]);
       await pool.query('UPDATE candle_cache_state SET backfill_complete = $1 WHERE id = 1', [previous?.backfill_complete ?? false]);
+    }
+  });
+
+  it('shows committed trades in a dirty cached candle before the worker runs', async () => {
+    await seedTwoVenues();
+    const previous = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0] as { backfill_complete: boolean } | undefined;
+    await pool.query(`INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, true)
+      ON CONFLICT (id) DO UPDATE SET backfill_complete = true`);
+    try {
+      const page = await store.listCandles(4663, scopedToken, 3600);
+      expect(page.items.reduce((sum, candle) => sum + Number(candle.quoteVolume), 0)).toBe(7);
+    } finally {
+      await pool.query('DELETE FROM candle_dirty_buckets WHERE token_address = $1', [scopedToken]);
+      await pool.query('UPDATE candle_cache_state SET backfill_complete = $1 WHERE id = 1', [previous?.backfill_complete ?? false]);
+    }
+  });
+
+  it('invalidates cached launch history on trade.created before the stats worker runs', async () => {
+    await seedTwoVenues();
+    const bus = new ApiEventBus();
+    const liveStore = createApiStore(pool, undefined, bus);
+    const window = { intervalSeconds: 3600, buckets: 1 };
+    const first = await liveStore.listLaunchHistory!(4663, scopedToken, window);
+    const hash = `0x${'8'.repeat(64)}`;
+    try {
+      await pool.query(`INSERT INTO trades (chain_id,token_address,venue_id,block_number,block_hash,tx_hash,log_index,timestamp,
+        side,token_amount_raw,quote_amount_raw,quote_asset_address,source_event,activity_kind,trader_address,
+        price_numerator_raw,price_denominator_raw)
+        VALUES (4663,$1,$2,3,$3,$4,1,$5,'buy','1000000000000000000','1000000000000000000',$1,'Swap','user_trade',$1,'1000000000000000000','1000000000000000000')`,
+      [scopedToken, curveVenueId, blockHash, hash, Math.floor(Date.now() / 1000)]);
+      bus.publish({ type: 'trade.created', chainId: 4663, tokenAddress: scopedToken });
+      const after = await liveStore.listLaunchHistory!(4663, scopedToken, window);
+      expect(after?.items.at(-1)?.tradeCount).toBeGreaterThan(first?.items.at(-1)?.tradeCount ?? 0);
+    } finally {
+      await pool.query('DELETE FROM trades WHERE tx_hash=$1', [hash]);
     }
   });
 

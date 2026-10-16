@@ -69,7 +69,7 @@ export async function maintainRollingWindows(pool: Pool, chainId: number, now: D
   const bucketEnd = Math.floor(nowSeconds / ROLLING_WINDOW_BUCKET_SECONDS) * ROLLING_WINDOW_BUCKET_SECONDS;
   const bucketStart = bucketEnd - ROLLING_WINDOW_BUCKET_SECONDS;
   const result = await pool.query(
-    `SELECT DISTINCT feed_address FROM quote_usd_feeds WHERE chain_id = $1 AND verification_status = 'verified'`,
+    `SELECT DISTINCT feed_address FROM quote_usd_feeds WHERE chain_id = $1 AND verification_status = 'verified' AND aggregator_address IS NOT NULL`,
     [chainId],
   );
   for (const row of result.rows as { feed_address: string }[]) {

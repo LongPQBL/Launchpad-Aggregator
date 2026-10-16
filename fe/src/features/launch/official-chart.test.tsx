@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { describe, expect, it, vi } from 'vitest';
 import { OfficialChart } from './official-chart';
 import type { MouseEventParams, Time } from 'lightweight-charts';
-import { emitLaunchChanged, emitPoolChanged } from '@/hooks/live-events';
+import { emitLaunchChanged, emitPoolChanged, emitTradeCreated } from '@/hooks/live-events';
 
 const { getLaunchCandlesMock, getPoolCandlesMock } = vi.hoisted(() => ({
   getLaunchCandlesMock: vi.fn(), getPoolCandlesMock: vi.fn(),
@@ -87,6 +87,14 @@ describe('OfficialChart candle-size tabs', () => {
     expect(nav).toHaveClass('inline-flex', 'flex-wrap');
     expect(within(nav).getByText('1H')).toHaveAttribute('aria-current', 'page');
     expect(within(nav).getByText('1D')).toHaveAttribute('href', '?currency=usd&range=1d');
+  });
+
+  it('offers 1H, 1D, 1W, 1M and 1Y (a span of time) for the line chart, and marks the active one', () => {
+    render(<OfficialChart {...props} chartStyle="line" range="w1d" currency="usd" />);
+    const nav = screen.getByRole('navigation', { name: 'Time range' });
+    expect(within(nav).getAllByRole('link').map((link) => link.textContent)).toEqual(['1H', '1D', '1W', '1M', '1Y']);
+    expect(within(nav).getByText('1D')).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByText('1W')).toHaveAttribute('href', '?currency=usd&range=w1w');
   });
 
   it('does not show a separate latest token price above the chart', () => {
@@ -178,6 +186,13 @@ describe('OfficialChart candle-size tabs', () => {
 });
 
 describe('OfficialChart live candles', () => {
+  it('reloads the latest launch candle directly after a trade is committed', async () => {
+    getLaunchCandlesMock.mockReset();
+    getLaunchCandlesMock.mockResolvedValue({ items: [], complete: true });
+    render(<OfficialChart {...props} source={{ launch: { chainId: 4663, tokenAddress: '0xAbC' } }} range="4h" />);
+    await act(async () => { emitTradeCreated({ chainId: 4663, tokenAddress: '0xabc' }); });
+    expect(getLaunchCandlesMock).toHaveBeenCalledWith(4663, '0xAbC', { currency: 'quote', range: '4h', venue: undefined });
+  });
   it("reloads the candles for the range on screen when its launch's figures change, and ignores another launch", async () => {
     getLaunchCandlesMock.mockReset();
     getLaunchCandlesMock.mockResolvedValue({ items: [], complete: true });

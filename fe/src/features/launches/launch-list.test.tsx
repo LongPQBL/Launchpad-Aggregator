@@ -25,6 +25,7 @@ function launch(overrides: Partial<LaunchSummary> = {}): LaunchSummary {
     lifecycleStatus: 'trading',
     officialVolume24h: '12.5',
     coverageStatus: 'caught_up',
+    statsComputedAt: null,
     fdvUsd: null,
     marketCapUsd: null,
     priceUsd: null,

@@ -1,0 +1,1 @@
+ALTER TABLE "launch_stats" ADD COLUMN "refresh_requested_at" timestamp with time zone;

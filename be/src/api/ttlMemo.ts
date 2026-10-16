@@ -40,7 +40,11 @@ export function swrMemo<K, V, A = undefined>(
       if (!current.refreshing) {
         current.refreshing = true;
         fn(key, arg as A).then(
-          (value) => { entries.set(key, { value: Promise.resolve(value), fetchedAt: now(), refreshing: false }); },
+          (value) => {
+            // A live event may invalidate this entry while its background read is in flight.
+            // Replace it only if it is still the exact entry that started the refresh.
+            if (entries.get(key) === current) entries.set(key, { value: Promise.resolve(value), fetchedAt: now(), refreshing: false });
+          },
           () => { current.refreshing = false; },
         );
       }

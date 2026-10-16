@@ -106,12 +106,37 @@ export async function readPoolCandles(pool: Pool, key: PoolKey, displayedToken: 
   const quoteDecimals = displayedIsCurrency0 ? decimals1 : decimals0;
   if (tokenDecimals === null || quoteDecimals === null) return { items: [], complete: false };
   const bound = before ?? Math.floor(Date.now() / 1000) + 1;
-  const candles = await pool.query(`SELECT bucket_start,open_sqrt_price_x96,high_sqrt_price_x96,
-    low_sqrt_price_x96,close_sqrt_price_x96,trade_count FROM pool_candles
-    WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3 AND interval_seconds=$4 AND bucket_start < $5
-    ORDER BY bucket_start DESC LIMIT 500`, [key.chainId, key.protocol, key.poolId.toLowerCase(), intervalSeconds, bound]);
+  const candles = await pool.query(`SELECT c.bucket_start,c.open_sqrt_price_x96,c.high_sqrt_price_x96,
+    c.low_sqrt_price_x96,c.close_sqrt_price_x96,c.trade_count FROM pool_candles c
+    WHERE c.chain_id=$1 AND c.protocol=$2 AND c.pool_id=$3 AND c.interval_seconds=$4 AND c.bucket_start < $5
+      AND NOT EXISTS (SELECT 1 FROM pool_candle_dirty_buckets d WHERE d.chain_id=c.chain_id AND d.protocol=c.protocol
+        AND d.pool_id=c.pool_id AND d.bucket_start >= c.bucket_start AND d.bucket_start < c.bucket_start + c.interval_seconds)
+    ORDER BY c.bucket_start DESC LIMIT 500`, [key.chainId, key.protocol, key.poolId.toLowerCase(), intervalSeconds, bound]);
+  const dirtyStarts = (await pool.query(`SELECT bucket_start FROM (
+    SELECT DISTINCT (bucket_start / $4::bigint) * $4::bigint AS bucket_start
+    FROM pool_candle_dirty_buckets WHERE chain_id=$1 AND protocol=$2 AND pool_id=$3
+      AND bucket_start >= $5 AND bucket_start < $6
+  ) dirty ORDER BY bucket_start DESC LIMIT 20`, [key.chainId, key.protocol, key.poolId.toLowerCase(), intervalSeconds,
+    Math.max(0, bound - 500 * intervalSeconds), bound])).rows.map((row) => Number(row.bucket_start));
+  const liveTrades = dirtyStarts.length === 0 ? [] : (await pool.query(`SELECT b.bucket_start, t.sqrt_price_x96
+    FROM unnest($4::bigint[]) AS b(bucket_start)
+    JOIN pool_trades t ON t.chain_id=$1 AND t.protocol=$2 AND t.pool_id=$3
+      AND t.timestamp >= b.bucket_start AND t.timestamp < b.bucket_start + $5
+    ORDER BY b.bucket_start DESC, t.block_number, t.log_index, t.tx_hash`,
+  [key.chainId, key.protocol, key.poolId.toLowerCase(), dirtyStarts, intervalSeconds])).rows;
+  const liveByBucket = new Map<number, bigint[]>();
+  for (const row of liveTrades) {
+    const bucket = Number(row.bucket_start);
+    const prices = liveByBucket.get(bucket) ?? [];
+    prices.push(BigInt(String(row.sqrt_price_x96)));
+    liveByBucket.set(bucket, prices);
+  }
+  const rows = candles.rows;
+  for (const [bucketStart, prices] of liveByBucket) rows.push({ bucket_start: bucketStart,
+    open_sqrt_price_x96: prices[0]!.toString(), high_sqrt_price_x96: prices.reduce((a, b) => a > b ? a : b).toString(),
+    low_sqrt_price_x96: prices.reduce((a, b) => a < b ? a : b).toString(), close_sqrt_price_x96: prices.at(-1)!.toString(), trade_count: prices.length });
   const items: PoolCandleResponse[] = [];
-  for (const row of candles.rows) {
+  for (const row of rows.sort((a, b) => Number(b.bucket_start) - Number(a.bucket_start)).slice(0, 500)) {
     const price = (field: string) => poolPriceInQuote(BigInt(String(row[field])), tokenDecimals, quoteDecimals, displayedIsCurrency0);
     const open = price('open_sqrt_price_x96');
     const high = price(displayedIsCurrency0 ? 'high_sqrt_price_x96' : 'low_sqrt_price_x96');

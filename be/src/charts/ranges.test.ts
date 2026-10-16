@@ -10,14 +10,22 @@ describe('chart ranges', () => {
     expect(rangeSpec('1d')).toEqual({ windowSeconds: 31_536_000, intervalSeconds: 86_400, buckets: 365 });
   });
 
+  it('maps each line-chart tab to a span of time and the bar size that draws it', () => {
+    expect(rangeSpec('w1h')).toEqual({ windowSeconds: 3_600, intervalSeconds: 60, buckets: 60 });
+    expect(rangeSpec('w1d')).toEqual({ windowSeconds: 86_400, intervalSeconds: 300, buckets: 288 });
+    expect(rangeSpec('w1w')).toEqual({ windowSeconds: 604_800, intervalSeconds: 3_600, buckets: 168 });
+    expect(rangeSpec('w1m')).toEqual({ windowSeconds: 2_592_000, intervalSeconds: 14_400, buckets: 180 });
+    expect(rangeSpec('w1y')).toEqual({ windowSeconds: 31_536_000, intervalSeconds: 86_400, buckets: 365 });
+  });
+
   it('defaults to 1h and lists every tab', () => {
     expect(DEFAULT_RANGE).toBe('1h');
-    expect(CHART_RANGES).toEqual(['1m', '5m', '1h', '4h', '1d']);
+    expect(CHART_RANGES).toEqual(['1m', '5m', '1h', '4h', '1d', 'w1h', 'w1d', 'w1w', 'w1m', 'w1y']);
   });
 
   it('parses only exact tab ids (the old range ids are gone)', () => {
     expect(parseRange('4h')).toBe('4h');
-    for (const bad of ['1D', '', undefined, null, '1w', '1y', 'all', 7]) expect(parseRange(bad)).toBeNull();
+    for (const bad of ['1D', '', undefined, null, '1w', '1y', 'all', 7, 'w1x']) expect(parseRange(bad)).toBeNull();
   });
 
   it('trims candles to the window including the bucket it starts in, keeping order', () => {

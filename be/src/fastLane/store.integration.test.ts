@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq } from 'drizzle-orm';
 import { createDatabase } from '../db/client.js';
-import { fastLaneRows, fastLaneState, trades } from '../db/schema.js';
+import { fastLaneRows, fastLaneState, poolTrades, trades } from '../db/schema.js';
 import { advanceLaneBlock, readLaneBlock, recordFastRows, removeLaneTrade } from './store.js';
+import { applyLivePoolEntries } from './poolStore.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -12,6 +13,8 @@ const source = 'fast-lane-store-test';
 const token = '0x7b00000000000000000000000000000000000001';
 const txHash = `0x${'7b'.repeat(32)}`;
 const blockHash = `0x${'7c'.repeat(32)}`;
+const generalPoolId = `0x${'55'.repeat(32)}`;
+const quote = '0x8b00000000000000000000000000000000000001';
 
 beforeAll(async () => {
   await pool.query(`INSERT INTO sources (id, chain_id, version, factory_address, start_block, scanned_to_block, confirmed_to_block, status)
@@ -22,8 +25,14 @@ beforeAll(async () => {
   [chainId, token, source, `0x${'7b'.repeat(32)}`]);
   await pool.query(`INSERT INTO venues (id, chain_id, token_address, kind, ref, source_id, effective_from_block, official)
     VALUES ('store-venue', $1, $2, 'curve', $2, $3, 1, true) ON CONFLICT DO NOTHING`, [chainId, token, source]);
+  await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+    block_number,block_hash,tx_hash,log_index,verified)
+    VALUES ($1,'uniswap_v4',$2,$3,$4,3000,60,$3,1,$5,$6,0,true) ON CONFLICT DO NOTHING`,
+  [chainId, generalPoolId, token, quote, blockHash, txHash]);
 });
 afterAll(async () => {
+  await pool.query('DELETE FROM pool_trades WHERE chain_id=$1 AND pool_id=$2', [chainId, generalPoolId]);
+  await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, generalPoolId]);
   await db.delete(fastLaneRows).where(eq(fastLaneRows.chainId, chainId));
   await db.delete(fastLaneState).where(eq(fastLaneState.chainId, chainId));
   await db.delete(trades).where(eq(trades.chainId, chainId));
@@ -33,6 +42,19 @@ afterAll(async () => {
   await pool.query('DELETE FROM launches WHERE source_id = $1', [source]);
   await pool.query('DELETE FROM sources WHERE id = $1', [source]);
   await pool.end();
+});
+
+describe('fast pool lane', () => {
+  it('writes a general V4 pool swap once before the Envio pool worker runs', async () => {
+    const entry = { stream: 'v4-swap' as const, raw: { id: 'pool-live', poolId: generalPoolId, amount0: '-1', amount1: '2',
+      sqrtPriceX96: (2n ** 96n).toString(), sender: token, fee: 3000, txFrom: token,
+      blockNumber: '902', blockHash, txHash, logIndex: 5, timestamp: 1_700_000_000 } };
+    const first = await applyLivePoolEntries(db, chainId, [entry]);
+    const second = await applyLivePoolEntries(db, chainId, [entry]);
+    expect(first).toEqual([{ accepted: true, inserted: true }]);
+    expect(second).toEqual([{ accepted: true, inserted: false }]);
+    expect(await db.select().from(poolTrades).where(and(eq(poolTrades.chainId, chainId), eq(poolTrades.poolId, generalPoolId)))).toHaveLength(1);
+  });
 });
 
 describe('lane state', () => {

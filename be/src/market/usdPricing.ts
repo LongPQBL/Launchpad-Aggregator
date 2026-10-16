@@ -3,6 +3,8 @@ import { parseAbi } from 'viem';
 import type { Pool } from 'pg';
 import { assertClientMatchesChain } from '../chains/registry.js';
 import { resolveVerifiedFeed } from './quotePricing/feedRegistry.js';
+import { findLatestRound, findRoundAtOrBefore } from './quotePricing/priceRounds.js';
+import { STOCK_REFERENCE_SOURCE } from './quotePricing/stockReference.js';
 
 export interface UsdPriceClient {
   readContract(parameters: { address: Address; abi: readonly unknown[]; functionName: string; args?: readonly unknown[];
@@ -13,6 +15,14 @@ export interface UsdPriceClient {
 }
 
 export interface UsdPrice { priceUsd: number; updatedAt: number; source: 'chainlink' }
+
+// A stock-reference feed has no contract: its price is the newest stored round (see quotePricing/stockReference.ts), subject to the same freshness ceiling.
+function priceFromRound(round: { answerRaw: bigint; decimals: number; updatedAt: number } | null, nowMs: number): UsdPrice | null {
+  if (!round) return null;
+  const priceUsd = Number(round.answerRaw) / 10 ** round.decimals;
+  if (!Number.isFinite(priceUsd) || priceUsd <= 0 || nowMs - round.updatedAt * 1000 > MAX_PRICE_AGE_MS) return null;
+  return { priceUsd, updatedAt: round.updatedAt, source: 'chainlink' };
+}
 
 const aggregatorAbi = parseAbi([
   'function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)',
@@ -25,6 +35,8 @@ const aggregatorAbi = parseAbi([
 const MAX_PRICE_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
+// Postgres integer ceiling: "at or after every log of the block".
+const MAX_LOG_INDEX = 2_147_483_647;
 const CACHE_TTL_MS = 60_000;
 // A feed that fails (stale, RPC error, malformed answer) is remembered briefly: without this, every request
 // that needs the price repeats the failing RPC pair, so one broken feed multiplies into an RPC storm.
@@ -86,6 +98,7 @@ export async function readUsdPrice(pool: Pool, client: UsdPriceClient, chainId: 
   const key = `${chainId}:${address}`;
   const feed = await resolveVerifiedFeed(pool, chainId, address);
   if (!feed) return null;
+  if (feed.discoverySource === STOCK_REFERENCE_SOURCE) return priceFromRound(await findLatestRound(pool, chainId, feed.feedAddress), now());
   const cached = cache.get(key);
   if (cached && now() - cached.fetchedAt < CACHE_TTL_MS) return { priceUsd: cached.priceUsd, updatedAt: cached.updatedAt, source: 'chainlink' };
   const failed = failures.get(key);
@@ -115,6 +128,10 @@ export async function readUsdPriceAtBlock(pool: Pool, client: UsdPriceClient, ch
   const address = quoteAssetAddress.toLowerCase();
   const feed = await resolveVerifiedFeed(pool, chainId, address);
   if (!feed) return null;
+  if (feed.discoverySource === STOCK_REFERENCE_SOURCE) {
+    const round = await findRoundAtOrBefore(pool, chainId, feed.feedAddress, blockNumber, MAX_LOG_INDEX);
+    return priceFromRound(round, atSeconds * 1000)?.priceUsd ?? null;
+  }
   const decimals = await readFeedDecimals(client, chainId, feed.feedAddress, address);
   const roundData = await client.readContract({ address: feed.feedAddress, abi: aggregatorAbi, functionName: 'latestRoundData', blockNumber });
   if (!Array.isArray(roundData) || typeof roundData[1] !== 'bigint' || typeof roundData[3] !== 'bigint') return null;

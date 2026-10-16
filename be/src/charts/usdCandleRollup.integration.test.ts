@@ -76,6 +76,17 @@ afterAll(async () => {
 });
 
 describe('USD candle rollup', () => {
+  it('shows a priced trade before the USD candle worker rebuilds its dirty minute', async () => {
+    const liveMinute = minute + 600;
+    await addTrade(curveVenue, 599, 1, liveMinute + 5, 1n, 2n);
+    try {
+      const page = await createApiStore(pool).listUsdCandles(chainId, token, 60, liveMinute + 60);
+      expect(page.items).toContainEqual(expect.objectContaining({ bucketStart: liveMinute, open: '4.00000000000000000000', close: '4.00000000000000000000' }));
+    } finally {
+      await pool.query('DELETE FROM trades WHERE chain_id = $1 AND block_number = 599', [chainId]);
+      await pool.query('DELETE FROM candle_dirty_buckets WHERE chain_id = $1 AND bucket_start = $2', [chainId, liveMinute]);
+    }
+  });
   it('builds OHLC and volume for a priced minute, with open/close ordered across venues', async () => {
     await addTrade(v4Venue, 602, 1, minute + 30, 1n, 2n);   // $4/token, the later position
     await addTrade(curveVenue, 600, 1, minute + 5, 1n, 1n); // $2/token, the earlier position (other venue)

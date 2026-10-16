@@ -47,6 +47,25 @@ describe('swrMemo', () => {
     expect(await memo('a')).toBe('a:3');
     expect(await memo('b')).toBe('b:2'); // not matched: untouched
   });
+
+  it('does not let an in-flight background refresh restore an entry invalidated by a live event', async () => {
+    let time = 0;
+    let release!: (value: number) => void;
+    let calls = 0;
+    const memo = swrMemo(async () => {
+      calls += 1;
+      if (calls === 2) return new Promise<number>((resolve) => { release = resolve; });
+      return calls;
+    }, 10, 100, () => time);
+    expect(await memo('k')).toBe(1);
+    time = 20;
+    expect(await memo('k')).toBe(1); // starts the stale background refresh
+    memo.invalidate(() => true, 0); // a live event arrives while it is still running
+    expect(await memo('k')).toBe(3); // the next request gets new data
+    release(2);
+    await Promise.resolve(); await Promise.resolve();
+    expect(await memo('k')).toBe(3); // old refresh did not replace it
+  });
 });
 
 describe('ttlMemo invalidate', () => {

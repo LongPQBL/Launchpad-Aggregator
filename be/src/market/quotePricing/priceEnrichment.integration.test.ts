@@ -11,10 +11,12 @@ const verifiedQuote = '0xmaintainverified00000000000000000000f01';
 const verifiedFeed = '0xmaintainverifiedfeed000000000000000f02';
 const rejectedQuote = '0xmaintainrejected00000000000000000000f03';
 const rejectedFeed = '0xmaintainrejectedfeed000000000000000f04';
+const aggregator = '0xmaintainaggregator0000000000000000f05';
+const stockQuote = '0xmaintainstock0000000000000000000000f06';
 
 afterAll(async () => {
-  await pool.query('DELETE FROM price_jobs WHERE chain_id = $1 AND feed_address = ANY($2)', [chainId, [verifiedFeed, rejectedFeed]]);
-  await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = $1 AND quote_asset_address = ANY($2)', [chainId, [verifiedQuote, rejectedQuote]]);
+  await pool.query('DELETE FROM price_jobs WHERE chain_id = $1 AND feed_address = ANY($2)', [chainId, [verifiedFeed, rejectedFeed, stockQuote]]);
+  await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id = $1 AND quote_asset_address = ANY($2)', [chainId, [verifiedQuote, rejectedQuote, stockQuote]]);
   await pool.end();
 });
 
@@ -22,15 +24,19 @@ describe('maintainRollingWindows', () => {
   it('enqueues a bucketed round-backfill job per verified feed, never for a rejected one, and is idempotent within the same bucket', async () => {
     const now = new Date();
     await upsertQuoteFeed(pool, { chainId, quoteAssetAddress: verifiedQuote as never, feedAddress: verifiedFeed as never,
-      aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'verified', now });
+      aggregatorAddress: aggregator as never, discoverySource: 'test', verificationStatus: 'verified', now });
     await upsertQuoteFeed(pool, { chainId, quoteAssetAddress: rejectedQuote as never, feedAddress: rejectedFeed as never,
       aggregatorAddress: null, discoverySource: 'test', verificationStatus: 'rejected', now });
 
+    // A stock-reference feed has no aggregator contract to read rounds from, so it never gets an on-chain round-backfill job.
+    await upsertQuoteFeed(pool, { chainId, quoteAssetAddress: stockQuote as never, feedAddress: stockQuote as never,
+      aggregatorAddress: null, discoverySource: 'stock-reference', verificationStatus: 'verified', now });
+
     const enqueuedFirst = await maintainRollingWindows(pool, chainId, now);
-    expect(enqueuedFirst).toBe(1); // only the verified feed
+    expect(enqueuedFirst).toBe(1); // only the verified on-chain feed
 
     const jobs = await pool.query(`SELECT feed_address, range_start, range_end FROM price_jobs WHERE chain_id = $1 AND job_type = 'round_backfill' AND feed_address = ANY($2)`,
-      [chainId, [verifiedFeed, rejectedFeed]]);
+      [chainId, [verifiedFeed, rejectedFeed, stockQuote]]);
     expect(jobs.rows).toHaveLength(1);
     expect(jobs.rows[0].feed_address).toBe(verifiedFeed);
     expect(Number(jobs.rows[0].range_end) - Number(jobs.rows[0].range_start)).toBe(300);

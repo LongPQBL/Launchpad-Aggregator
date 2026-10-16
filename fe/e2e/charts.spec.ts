@@ -17,6 +17,10 @@ test('the token page offers candle sizes and remembers the line / candle choice'
   await expect(page).toHaveURL(/range=1d/);
   await page.getByRole('tab', { name: 'Line chart' }).click();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveAttribute('aria-selected', 'true');
+  // The line chart has its own tabs, spans of time like Uniswap's.
+  await expect(page).toHaveURL(/range=w1d/);
+  await expect(page.getByRole('link', { name: '1W' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: '4H' })).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole('tab', { name: 'Line chart' })).toHaveAttribute('aria-selected', 'true');
 });

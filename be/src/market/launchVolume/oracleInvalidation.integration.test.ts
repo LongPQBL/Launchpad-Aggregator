@@ -103,11 +103,25 @@ describe('oracle invalidation', () => {
   });
 
   it('invalidates only when a source crosses the head, not on routine progress that changes nothing', async () => {
+    await pool.query(`UPDATE sources SET status = 'backfilling', confirmed_to_block = 0 WHERE id = $1`, [sourceA]);
     await advanceSourceCoverage(db, { id: sourceA }, 1000n, 1000n);
     expect(await jobRevision(tokenA)).toBe(1);
     await advanceSourceCoverage(db, { id: sourceA }, 1000n, 1000n);
     expect(await jobRevision(tokenA)).toBe(1);
     expect(await jobRevision(tokenB)).toBeUndefined();
+  });
+
+  it('does not invalidate a source that stays caught up while the chain head keeps advancing', async () => {
+    await pool.query(`UPDATE sources SET status = 'caught_up', confirmed_to_block = 1000 WHERE id = $1`, [sourceA]);
+    // The chain head moves every few hundred ms; the sync confirms up to each new head, so the source never stops being caught up.
+    for (let head = 1010n; head <= 1050n; head += 10n) await advanceSourceCoverage(db, { id: sourceA }, head, head);
+    expect(await jobRevision(tokenA)).toBeUndefined();
+  });
+
+  it('invalidates when a caught-up source falls behind the head', async () => {
+    await pool.query(`UPDATE sources SET status = 'caught_up', confirmed_to_block = 1000 WHERE id = $1`, [sourceA]);
+    await advanceSourceCoverage(db, { id: sourceA }, 1000n, 1100n);
+    expect(await jobRevision(tokenA)).toBe(1);
   });
 
   it('invalidates the quoting launch when a round is written through upsertPriceRounds', async () => {

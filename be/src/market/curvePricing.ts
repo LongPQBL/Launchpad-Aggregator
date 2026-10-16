@@ -303,6 +303,11 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
              last_block_number = EXCLUDED.last_block_number, last_log_index = EXCLUDED.last_log_index, updated_at = EXCLUDED.updated_at`,
           [launch.chainId, launch.tokenAddress, reserves.quote.toString(), reserves.token.toString(),
             last.blockNumber.toString(), last.logIndex, now]);
+        if (updates.length > 0) {
+          await dbClient.query('SELECT pg_notify($1, $2)', ['launchpad_events', JSON.stringify({
+            type: 'launch.changed', chainId: launch.chainId, tokenAddress: launch.tokenAddress,
+          })]);
+        }
         await dbClient.query('COMMIT');
       } catch (error) {
         await dbClient.query('ROLLBACK');

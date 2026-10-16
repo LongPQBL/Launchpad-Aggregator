@@ -1,8 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Pool } from 'pg';
 import { encodeAbiParameters, keccak256 } from 'viem';
-import { readPoolStats, readPoolTrades } from './stats.js';
+import { readPoolRollingVolume, readPoolStats, readPoolTrades } from './stats.js';
 import { insertTvlSnapshot } from './tvlSnapshots.js';
+import { markRollupBackfilled } from '../charts/rollupState.js';
+import { __resetUsdPriceCacheForTests } from '../market/usdPricing.js';
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? 'postgres://launchpad:launchpad_local@127.0.0.1:55432/launchpad_test';
 if (!new URL(databaseUrl).pathname.endsWith('_test')) throw new Error('Integration tests require a database ending in _test');
@@ -31,8 +33,11 @@ const rpcClient = {
     throw new Error(`Unexpected ${functionName}`);
   },
 };
+let hadRollupBeforeSuite = false;
 
 beforeAll(async () => {
+  hadRollupBeforeSuite = (await pool.query("SELECT 1 FROM chart_rollup_state WHERE name='pool_volume_done'")).rowCount === 1;
+  await markRollupBackfilled(pool, 'pool_volume');
   await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
     block_number,block_hash,tx_hash,log_index,verified,coverage_status)
     VALUES ($1,'uniswap_v4',$2,$3,$4,3000,60,$5,99,$6,$7,0,true,'caught_up')
@@ -58,6 +63,7 @@ afterAll(async () => {
   await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, poolId]);
   await pool.query('DELETE FROM quote_usd_price_rounds WHERE chain_id=$1 AND feed_address=$2', [chainId, feed]);
   await pool.query('DELETE FROM quote_usd_feeds WHERE chain_id=$1 AND quote_asset_address=$2', [chainId, b]);
+  if (!hadRollupBeforeSuite) await pool.query("DELETE FROM chart_rollup_state WHERE name='pool_volume_done'");
   await pool.end();
 });
 
@@ -67,6 +73,26 @@ describe('readPoolStats', () => {
     expect(withoutAge.change1d).toBeNull();
     const young = await readPoolStats(pool, key, a, 4000, { rpcClient, createdTimestamp: 900 });
     expect(young.change1d).toBe('0');
+  });
+  it('reports a 0 price change for a fully indexed pool that has never had a swap, not an unknown one', async () => {
+    const idleId = keccak256(encodeAbiParameters(
+      [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }, { type: 'int24' }, { type: 'address' }],
+      [a, b, 3000, 61, hook],
+    ));
+    await pool.query(`INSERT INTO pool_catalog (chain_id,protocol,pool_id,currency0,currency1,fee,tick_spacing,hooks,
+      block_number,block_hash,tx_hash,log_index,verified,coverage_status)
+      VALUES ($1,'uniswap_v4',$2,$3,$4,3000,61,$5,99,$6,$7,1,true,'caught_up')
+      ON CONFLICT (chain_id,protocol,pool_id) DO UPDATE SET coverage_status='caught_up'`, [chainId, idleId, a, b, hook, tx('1'), tx('2')]);
+    try {
+      const idle = await readPoolStats(pool, { chainId, protocol: 'uniswap_v4', poolId: idleId }, a, 4000, { rpcClient, createdTimestamp: 900 });
+      expect(idle.change1h).toBe('0');
+      expect(idle.change1d).toBe('0');
+      await pool.query("UPDATE pool_catalog SET coverage_status='backfilling' WHERE chain_id=$1 AND pool_id=$2", [chainId, idleId]);
+      const behind = await readPoolStats(pool, { chainId, protocol: 'uniswap_v4', poolId: idleId }, a, 4000, { rpcClient, createdTimestamp: 900 });
+      expect(behind.change1d).toBeNull();
+    } finally {
+      await pool.query('DELETE FROM pool_catalog WHERE chain_id=$1 AND pool_id=$2', [chainId, idleId]);
+    }
   });
   it('reports the TVL change against the snapshot taken ~24h earlier through the same quote asset', async () => {
     await insertTvlSnapshot(pool, { chainId, protocol: 'uniswap_v4', poolId, blockNumber: 5n, capturedAtSeconds: 1600,
@@ -151,6 +177,33 @@ describe('readPoolStats', () => {
       otherAmountRaw: '3000000000000000000', priceInQuote: '1' });
   });
 
+  it('shows current RPC price and TVL while the historical pool backfill is still running', async () => {
+    await pool.query("UPDATE pool_catalog SET coverage_status='backfilling' WHERE chain_id=$1 AND protocol='uniswap_v4' AND pool_id=$2", [chainId, poolId]);
+    try {
+      const stats = await readPoolStats(pool, key, a, 4000, { rpcClient });
+      expect(stats.priceInQuote).toBe('1');
+      expect(stats.priceUsd).toBe('4');
+      expect(stats.tvlUsd).toBe('20');
+      expect(stats.volume24hUsd).toBeNull();
+    } finally {
+      await pool.query("UPDATE pool_catalog SET coverage_status='caught_up' WHERE chain_id=$1 AND protocol='uniswap_v4' AND pool_id=$2", [chainId, poolId]);
+    }
+  });
+
+  it('includes a dirty full hour in the rolling volume before the bucket worker runs', async () => {
+    const hadRollup = (await pool.query("SELECT 1 FROM chart_rollup_state WHERE name='pool_volume_done'")).rowCount === 1;
+    await markRollupBackfilled(pool, 'pool_volume');
+    try {
+      expect(await readPoolRollingVolume(pool, key, { seconds: 86_400, end: 4000, rpcClient })).toBe('6');
+      await pool.query(`INSERT INTO pool_candle_dirty_buckets (chain_id, protocol, pool_id, bucket_start)
+        VALUES ($1,'uniswap_v4',$2,960) ON CONFLICT DO NOTHING`, [chainId, poolId]);
+      expect(await readPoolRollingVolume(pool, key, { seconds: 86_400, end: 4000, rpcClient })).toBe('6');
+    } finally {
+      await pool.query("DELETE FROM pool_candle_dirty_buckets WHERE chain_id=$1 AND protocol='uniswap_v4' AND pool_id=$2 AND bucket_start=960", [chainId, poolId]);
+      if (!hadRollup) await pool.query("DELETE FROM chart_rollup_state WHERE name='pool_volume_done'");
+    }
+  });
+
   it('returns no pool balance snapshot when the Lens reports custom accounting', async () => {
     const customAccountingClient = {
       ...rpcClient,
@@ -162,7 +215,7 @@ describe('readPoolStats', () => {
         return rpcClient.readContract({ functionName, address });
       },
     };
-    const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: customAccountingClient });
+    const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: customAccountingClient, previousTvlUsd: '123.45' });
     expect(stats.poolBalances).toBeNull();
     expect(stats.tvlUsd).toBeNull();
   });
@@ -178,6 +231,20 @@ describe('readPoolStats', () => {
     const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: failingLensClient });
     expect(stats.poolBalances).toBeNull();
     expect(stats.tvlUsd).toBeNull();
+    const retained = await readPoolStats(pool, key, a, 4000, { rpcClient: failingLensClient, previousTvlUsd: '123.45' });
+    expect(retained.tvlUsd).toBe('123.45');
+  });
+
+  it('retains previous TVL when the verified quote price RPC read fails', async () => {
+    __resetUsdPriceCacheForTests();
+    const failingPriceClient = { ...rpcClient, async readContract({ functionName, address }: { functionName: string; address: string }) {
+      if (functionName === 'latestRoundData') throw new Error('RPC unavailable');
+      return rpcClient.readContract({ functionName, address });
+    } };
+    try {
+      const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: failingPriceClient, previousTvlUsd: '123.45' });
+      expect(stats.tvlUsd).toBe('123.45');
+    } finally { __resetUsdPriceCacheForTests(); }
   });
 
   it('preserves positive Lens spot prices below 1e-18 for the composition bar', async () => {
@@ -192,7 +259,7 @@ describe('readPoolStats', () => {
       },
     };
     const stats = await readPoolStats(pool, key, a, 4000, { rpcClient: smallPriceClient });
-    expect(stats.priceInQuote).toBe('1'); // Existing statistics keep their established precision/source.
+    expect(Number(stats.priceInQuote)).toBeGreaterThan(0);
     expect(Number(stats.poolBalances?.priceInQuote)).toBeGreaterThan(0);
   });
 

@@ -20,6 +20,7 @@ import { enqueueFeedResolutionJob } from '../market/quotePricing/priceJobStore.j
 import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import { launchKeysFromChanges } from '../market/launchVolume/invalidate.js';
 import { invalidateForCoverageChange } from '../market/launchVolume/oracleInvalidation.js';
+import { COVERAGE_HEAD_TOLERANCE_BLOCKS } from '../coverage/launchCoverageSql.js';
 
 export const DEFAULT_STREAM_TABLES: Record<Stream, string> = {
   'v1-launch': 'envio."RawLaunch"',
@@ -136,6 +137,7 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
   const poolAddress = str(raw.poolAddress).toLowerCase();
   const venue = await lookupVenue(tx, chainId, 'v3_pool', poolAddress);
   if (!venue) return 'unresolved';
+  if (!venue.official) return 'skipped';
   const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawSwapRow = {
@@ -365,6 +367,7 @@ async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     const settled = await upstreamConfirmedPast(tx, chainId, 'v4-initialize', num(raw.blockNumber));
     return settled ? 'skipped' : 'unresolved'; // not a Pons-graduated pool, or its v4-initialize just hasn't caught up yet
   }
+  if (!venue.official) return 'skipped';
   const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawV4SwapRow = {
@@ -610,21 +613,23 @@ export async function readConfirmedSourceBlock(pool: Pool, chainId: number, stre
 export async function advanceSourceCoverage(db: DbOrTx, idOrPrefix: { id: string } | { prefix: string }, confirmed: bigint, headBlock: bigint): Promise<void> {
   const target = 'id' in idOrPrefix ? sql`id = ${idOrPrefix.id}` : sql`id LIKE ${idOrPrefix.prefix}`;
   const head = headBlock.toString();
+  const toleratedHead = (headBlock > COVERAGE_HEAD_TOLERANCE_BLOCKS
+    ? headBlock - COVERAGE_HEAD_TOLERANCE_BLOCKS : 0n).toString();
   const confirmedText = confirmed.toString();
   await db.transaction(async (tx) => {
     const result = await tx.execute(sql`
-      WITH before AS (SELECT id, confirmed_to_block FROM sources WHERE ${target}),
+      WITH before AS (SELECT id, status FROM sources WHERE ${target}),
       updated AS (
         UPDATE sources s SET
           confirmed_to_block = GREATEST(s.confirmed_to_block, ${confirmedText}::bigint),
           scanned_to_block = GREATEST(s.scanned_to_block, ${confirmedText}::bigint),
-          status = CASE WHEN GREATEST(s.confirmed_to_block, ${confirmedText}::bigint) >= ${head}::bigint
+          status = CASE WHEN GREATEST(s.confirmed_to_block, ${confirmedText}::bigint) >= ${toleratedHead}::bigint
             THEN 'caught_up' ELSE 'backfilling' END
         FROM before WHERE s.id = before.id
-        RETURNING s.id, s.confirmed_to_block
+        RETURNING s.id, s.status
       )
       SELECT updated.id FROM updated JOIN before ON before.id = updated.id
-      WHERE (before.confirmed_to_block >= ${head}::bigint) <> (updated.confirmed_to_block >= ${head}::bigint)`);
+      WHERE before.status <> updated.status`);
     const flipped = (result as unknown as { rows: { id: string }[] }).rows.map((row) => row.id);
     await invalidateForCoverageChange(tx, flipped);
   });

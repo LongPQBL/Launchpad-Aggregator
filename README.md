@@ -133,7 +133,18 @@ nên có thể gồm tối đa 59 giây trước mốc chính xác. Cơ chế n�
 | 4H | 4 giờ | 30 ngày | 180 |
 | 1D | 1 ngày | 365 ngày | 365 |
 
-API nhận `?range=1m|5m|1h|4h|1d` (mặc định `1h`; tên tham số `range` được giữ để tương thích). Volume và TVL được tính sẵn thay vì quét giao dịch
+**Chart đường dùng tab theo khoảng thời gian (1H / 1D / 1W / 1M / 1Y, kiểu Uniswap):** khi chọn chế độ line, cả Price, Volume và TVL
+đổi sang các tab này (mỗi chế độ nhớ tab riêng); id là `w1h|w1d|w1w|w1m|w1y`, vẽ bằng cỡ cột có sẵn nên không cần rollup mới:
+
+| Tab | Khoảng | Cỡ nến/cột | Số bucket |
+|---|---|---|---|
+| 1H | 1 giờ | 1 phút | 60 |
+| 1D | 24 giờ | 5 phút | 288 |
+| 1W | 7 ngày | 1 giờ | 168 |
+| 1M | 30 ngày | 4 giờ | 180 |
+| 1Y | 365 ngày | 1 ngày | 365 |
+
+API nhận `?range=1m|5m|1h|4h|1d|w1h|w1d|w1w|w1m|w1y` (mặc định `1h`; tên tham số `range` được giữ để tương thích). Volume và TVL được tính sẵn thay vì quét giao dịch
 mỗi lần xem:
 
 - `launch_volume_buckets` / `pool_volume_buckets`: do `candles:worker` và `pools:candles:worker` cập
