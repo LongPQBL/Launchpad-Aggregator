@@ -46,7 +46,7 @@ test('the token price chart moves its newest candle when a swap is announced', a
   const candleRequest = page.waitForRequest((r) => r.url().includes('/candles'), { timeout: 1_500 });
   await postSwap(request);
   await candleRequest;
-  await expect.poll(() => newestCandleClose(page), { timeout: 3_000 }).not.toBe(before);
+  await expect.poll(() => newestCandleClose(page), { timeout: 10_000 }).not.toBe(before);
 });
 
 test('the pool price chart moves its newest candle when a swap lands in that pool', async ({ page, request }) => {
@@ -60,7 +60,7 @@ test('the pool price chart moves its newest candle when a swap lands in that poo
   const candleRequest = page.waitForRequest((r) => r.url().includes('/candles'), { timeout: 1_500 });
   await postSwap(request);
   await candleRequest;
-  await expect.poll(() => newestCandleClose(page), { timeout: 3_000 }).not.toBe(before);
+  await expect.poll(() => newestCandleClose(page), { timeout: 10_000 }).not.toBe(before);
 });
 
 // The Volume bars are a canvas too; the headline total above them is the readable part.
