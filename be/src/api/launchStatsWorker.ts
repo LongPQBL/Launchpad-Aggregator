@@ -47,9 +47,9 @@ export async function refreshLaunchStatsOnce(pool: Pool, rpcClient: UsdPriceClie
   const lane = async () => {
     while (next < due.rows.length) {
       const row = due.rows[next++];
-      if (!Boolean(row.launch_coverage_complete)) continue;
+      if (!row.launch_coverage_complete) continue;
       const startedAt = new Date();
-      const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
+      const stats = await computeStats(pool, rpcClient, row, row.launch_coverage_complete as boolean);
       await writeLaunchStats(pool, Number(row.chain_id), String(row.token_address), stats, new Date(), startedAt);
       refreshed += 1;
     }
@@ -70,8 +70,8 @@ export async function recomputeLaunchStats(pool: Pool, rpcClient: UsdPriceClient
     WHERE l.chain_id = $2 AND l.token_address = $3`, [head?.toString() ?? null, chainId, tokenAddress.toLowerCase()]);
   const row = found.rows[0];
   if (!row) return false;
-  if (!Boolean(row.launch_coverage_complete)) return true;
-  const stats = await computeStats(pool, rpcClient, row, Boolean(row.launch_coverage_complete));
+  if (!row.launch_coverage_complete) return true;
+  const stats = await computeStats(pool, rpcClient, row, row.launch_coverage_complete as boolean);
   await writeLaunchStats(pool, chainId, String(row.token_address), stats, now, startedAt);
   return true;
 }

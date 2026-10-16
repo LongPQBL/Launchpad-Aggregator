@@ -612,7 +612,6 @@ export async function readConfirmedSourceBlock(pool: Pool, chainId: number, stre
 // launch's cached volume; routine progress without a flip does not enqueue recomputation.
 export async function advanceSourceCoverage(db: DbOrTx, idOrPrefix: { id: string } | { prefix: string }, confirmed: bigint, headBlock: bigint): Promise<void> {
   const target = 'id' in idOrPrefix ? sql`id = ${idOrPrefix.id}` : sql`id LIKE ${idOrPrefix.prefix}`;
-  const head = headBlock.toString();
   const toleratedHead = (headBlock > COVERAGE_HEAD_TOLERANCE_BLOCKS
     ? headBlock - COVERAGE_HEAD_TOLERANCE_BLOCKS : 0n).toString();
   const confirmedText = confirmed.toString();
