@@ -52,7 +52,7 @@ interface TradePageRow extends TradeRow { tx_hash: string; trader_address: strin
 
 /** Exact rolling USD volume from complete hourly rollups plus directly valued trades at the window edges. */
 export async function readPoolRollingVolume(pool: Pool, key: PoolKey,
-  window: { seconds: number; end: number; rpcClient?: UsdPriceClient }): Promise<string | null> {
+  window: { seconds: number; end: number; rpcClient?: UsdPriceClient; createdTimestamp?: number | null }): Promise<string | null> {
   if (!Number.isSafeInteger(window.seconds) || window.seconds < 1 || !Number.isSafeInteger(window.end)) {
     throw new Error('Invalid pool volume window');
   }
@@ -63,7 +63,13 @@ export async function readPoolRollingVolume(pool: Pool, key: PoolKey,
   const catalog = found.rows[0] as (Pick<PoolRow, 'currency0' | 'currency1' | 'coverage_status' | 'block_number'>) | undefined;
   if (!catalog || catalog.coverage_status !== 'caught_up') return null;
   const indexedFrom = (await pool.query('SELECT indexed_from_block FROM envio_chain_progress WHERE chain_id=$1', [key.chainId])).rows[0]?.indexed_from_block;
-  if (indexedFrom !== null && indexedFrom !== undefined && BigInt(String(catalog.block_number)) < BigInt(String(indexedFrom))) return null;
+  // A pool created inside the requested window has no pre-creation volume to miss, even when its
+  // factory event predates this indexer's start block. This keeps lifetime volume visible for new
+  // pools while still withholding windows that overlap unindexed pool history.
+  const createdInsideWindow = window.createdTimestamp !== null && window.createdTimestamp !== undefined
+    && window.createdTimestamp >= start;
+  if (indexedFrom !== null && indexedFrom !== undefined && BigInt(String(catalog.block_number)) < BigInt(String(indexedFrom))
+    && !createdInsideWindow) return null;
   if (!await isRollupBackfilled(pool, 'pool_volume')) return null;
 
   const [decimals0, decimals1] = await Promise.all([
@@ -334,15 +340,16 @@ export async function readPoolStats(pool: Pool, key: PoolKey, displayedToken: st
   const tvlChange = complete && key.protocol === 'uniswap_v4'
     ? await readTvlChange(pool, key, quoteAddress, poolSnapshot.tvlUsd, asOf, { createdTimestamp: options.createdTimestamp }) : null;
 
-  const volume24hUsd = catalog.coverage_status === 'caught_up' && swapHistoryComplete
-    ? await readPoolRollingVolume(pool, key, { seconds: 86_400, end: asOf, rpcClient: options.rpcClient }) : null;
+  const volume24hUsd = catalog.coverage_status === 'caught_up'
+    ? await readPoolRollingVolume(pool, key, { seconds: 86_400, end: asOf, rpcClient: options.rpcClient,
+      createdTimestamp: options.createdTimestamp }) : null;
 
   // Previous 24h window ([asOf-48h, asOf-24h)), for the "vs 24h ago" change. Unavailable (null)
   // if it is too large to value completely or any trade in it is unpriced — never treated as zero.
   let volume24hChange: string | null = null;
   if (volume24hUsd !== null) {
     const previousVolumeUsd = await readPoolRollingVolume(pool, key, {
-      seconds: 86_400, end: asOf - 86_400, rpcClient: options.rpcClient,
+      seconds: 86_400, end: asOf - 86_400, rpcClient: options.rpcClient, createdTimestamp: options.createdTimestamp,
     });
     volume24hChange = previousVolumeUsd === null ? null : percentChange(volume24hUsd, previousVolumeUsd);
   }

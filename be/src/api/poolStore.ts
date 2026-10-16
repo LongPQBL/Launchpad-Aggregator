@@ -123,11 +123,12 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
       value === 'uniswap_v3' || value === 'uniswap_v2');
     return ['uniswap_v4', ...additional];
   }
-  const volume30d = ttlMemo(async (cacheKey: string, arg?: { key: PoolKey; createdBlock: string }): Promise<string | null> => {
+  const volume30d = ttlMemo(async (cacheKey: string, arg?: { key: PoolKey; createdBlock: string; createdTimestamp: number | null }): Promise<string | null> => {
     if (!arg) return null;
     const { key } = arg;
     try {
-      return await readPoolRollingVolume(pool, key, { seconds: 30 * 86_400, end: Math.floor(Date.now() / 1000), rpcClient });
+      return await readPoolRollingVolume(pool, key, { seconds: 30 * 86_400, end: Math.floor(Date.now() / 1000), rpcClient,
+        createdTimestamp: arg.createdTimestamp });
     } catch { return null; }
   }, 10_000);
   // Per-pool statistics cost about seven queries plus RPC reads each (a list of 50 pools: ~2.5 s), and a list or a live refresh asks for the same pools
@@ -161,11 +162,11 @@ export function createPoolApiStore(pool: Pool, rpcClient?: UsdPriceClient,
     const displayedToken = token ?? row.launch_token_address ?? row.currency0;
     const key: PoolKey = { chainId: Number(row.chain_id), protocol: row.protocol, poolId: row.pool_id };
     const createdAtPromise = createdTimestamp(String(row.block_number));
-    const [stats, volume30dUsd, createdAt, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
+    const createdAt = await createdAtPromise;
+    const [stats, volume30dUsd, currency0Metadata, currency1Metadata, currency0Decimals, currency1Decimals] = await Promise.all([
       createdAtPromise.then((created) => poolStatsMemo(`${key.chainId}:${key.protocol}:${key.poolId}:${displayedToken}`,
         { key, displayedToken, createdTimestamp: created })),
-      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}:30d`, { key, createdBlock: String(row.block_number) }),
-      createdAtPromise,
+      volume30d(`${key.chainId}:${key.protocol}:${key.poolId}:30d`, { key, createdBlock: String(row.block_number), createdTimestamp: createdAt }),
       currencyMetadata(key.chainId, row.currency0),
       currencyMetadata(key.chainId, row.currency1),
       assetDecimals(rpcClient, row.currency0),

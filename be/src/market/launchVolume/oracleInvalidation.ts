@@ -2,6 +2,7 @@ import { sql, type SQL } from 'drizzle-orm';
 import { invalidateLaunchVolume, type LaunchKey, type SqlExecutor } from './store.js';
 
 const VOLUME_WINDOW_SECONDS = 86_400;
+const PRICE_FRESHNESS_SECONDS = 86_400;
 
 export interface PriceChange {
   chainId: number;
@@ -38,6 +39,24 @@ export async function invalidateForPriceChange(tx: SqlExecutor, change: PriceCha
   const bounds: { min_updated: string | null; max_updated: string | null } | undefined = readRows<{ min_updated: string | null; max_updated: string | null }>(boundsResult)[0];
   const minUpdated = bounds?.min_updated == null ? null : Number(bounds.min_updated);
   const maxUpdated = bounds?.max_updated == null ? null : Number(bounds.max_updated);
+
+  // Historical USD candles also depend on these rounds. Rebuild every affected official-trade
+  // minute so an earlier unpriced_count does not keep 52-week high/low unavailable after the
+  // missing oracle history has been filled. The time bounds are deliberately conservative: a
+  // round can price trades until it is replaced, and at most for the freshness ceiling.
+  if (minUpdated !== null && maxUpdated !== null) {
+    await tx.execute(sql`
+      INSERT INTO candle_dirty_buckets (chain_id, token_address, bucket_start)
+      SELECT DISTINCT t.chain_id, t.token_address, floor(t.timestamp / 60.0)::int * 60
+      FROM launches l
+      JOIN venues v ON v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true
+      JOIN trades t ON t.chain_id = v.chain_id AND t.token_address = v.token_address AND t.venue_id = v.id
+      WHERE l.chain_id = ${change.chainId} AND l.quote_asset_address = ${change.quoteAssetAddress.toLowerCase()}
+        AND t.block_number >= ${change.fromBlock.toString()}::bigint
+        AND t.timestamp >= ${minUpdated}
+        AND t.timestamp <= ${maxUpdated + PRICE_FRESHNESS_SECONDS}
+      ON CONFLICT (chain_id, token_address, bucket_start) DO NOTHING`);
+  }
 
   const affectedResult = await tx.execute(sql`
     SELECT DISTINCT l.chain_id, l.token_address
