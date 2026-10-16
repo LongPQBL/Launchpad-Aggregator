@@ -375,6 +375,11 @@
                           "coverageStatus": {
                             "type": "string"
                           },
+                          "statsComputedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "nullable": true
+                          },
                           "fdvUsd": {
                             "type": "string",
                             "nullable": true
@@ -555,6 +560,11 @@
                     },
                     "coverageStatus": {
                       "type": "string"
+                    },
+                    "statsComputedAt": {
+                      "type": "string",
+                      "format": "date-time",
+                      "nullable": true
                     },
                     "fdvUsd": {
                       "type": "string",
