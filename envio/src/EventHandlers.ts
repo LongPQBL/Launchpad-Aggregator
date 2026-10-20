@@ -27,6 +27,14 @@ async function involvesLaunchToken(
   return a !== undefined || b !== undefined;
 }
 
+
+/** The factory contract is registered statically, so it also emits lifecycle events for launches that were created before this
+ * deployment's start block. Those launches (and their curves/pools) are not indexed, so a transition for one is dropped instead of
+ * being written as a row the app could never attach to a launch. */
+async function isIndexedLaunch(context: KnownLaunchTokenReader, chainId: number, token: string): Promise<boolean> {
+  return (await context.KnownLaunchToken.get(knownLaunchTokenId(chainId, token))) !== undefined;
+}
+
 indexer.onEvent(
   { contract: "PonsV1LegacyFactory", event: "TokenLaunched" },
   async ({ event, context }) => {
@@ -142,6 +150,7 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "PonsV2Factory", event: "LaunchSwept" },
   async ({ event, context }) => {
+    if (!await isIndexedLaunch(context, event.chainId, event.params.token)) return;
     context.RawLifecycleTransition.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
@@ -159,6 +168,7 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "PonsV2Factory", event: "PoolGraduated" },
   async ({ event, context }) => {
+    if (!await isIndexedLaunch(context, event.chainId, event.params.token)) return;
     context.RawLifecycleTransition.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,
@@ -176,6 +186,7 @@ indexer.onEvent(
 indexer.onEvent(
   { contract: "PonsV2Factory", event: "LaunchGraduationRescued" },
   async ({ event, context }) => {
+    if (!await isIndexedLaunch(context, event.chainId, event.params.token)) return;
     context.RawLifecycleTransition.set({
       id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
       chainId: event.chainId,

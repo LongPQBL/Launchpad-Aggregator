@@ -82,6 +82,10 @@ services:
       # when self-hosted (mandatory since 2025-11-03); sourced from envio/.env via docker compose's
       # automatic .env loading. See docs/superpowers/plans/2026-09-30-envio-indexer-migration-phase1.md Task 1 Step 3.
       ENVIO_API_TOKEN: ${ENVIO_API_TOKEN}
+      ENVIO_RH_HTTP_RPC_URL: ${ENVIO_RH_HTTP_RPC_URL}
+      ENVIO_RH_WS_RPC_URL: ${ENVIO_RH_WS_RPC_URL}
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+      NODE_EXTRA_CA_CERTS: /etc/ssl/certs/ca-certificates.crt
       ENVIO_PG_PASSWORD: ${ENVIO_PG_PASSWORD:-testing}
       ENVIO_PG_HOST: envio-postgres
       ENVIO_PG_PORT: 5432

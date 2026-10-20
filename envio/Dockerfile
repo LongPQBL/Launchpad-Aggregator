@@ -4,7 +4,7 @@ FROM node:24.3.0-slim
 # rm -rf /var/lib/apt/lists/* cleans up cached package lists to reduce image size.
 # psql is needed for dumping and restoring the initial effects cache.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends postgresql-client && \
+    apt-get install -y --no-install-recommends ca-certificates postgresql-client && \
     rm -rf /var/lib/apt/lists/*
 
 ENV PNPM_HOME="/pnpm"

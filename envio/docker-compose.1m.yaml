@@ -1,0 +1,14 @@
+services:
+  envio-postgres:
+    ports: !override
+      - "5435:5432"
+  graphql-engine:
+    ports: !override
+      - "8082:8080"
+  envio-indexer:
+    image: envio-envio-indexer:1m
+    container_name: envio-indexer-1m
+    ports: !override
+      - "127.0.0.1:19899:9898"
+    volumes:
+      - ./config.1m.yaml:/envio-indexer/config.1m.yaml:ro
