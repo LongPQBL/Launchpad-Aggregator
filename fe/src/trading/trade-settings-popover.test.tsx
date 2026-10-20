@@ -56,6 +56,20 @@ describe('TradeSettingsPopover', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
+  it('tells the user when the typed slippage is out of range and keeps the applied value', () => {
+    const onChange = vi.fn();
+    render(<TradeSettingsPopover settings={{ ...baseSettings, slippageBps: 600 }} onChange={onChange} venueKind="pool" />);
+    fireEvent.click(screen.getByRole('button', { name: /settings/i }));
+    fireEvent.change(screen.getByLabelText('Custom slippage'), { target: { value: '60' } });
+    expect(screen.getByTestId('slippage-input-error')).toHaveTextContent('Still using 6%');
+    fireEvent.change(screen.getByLabelText('Custom slippage'), { target: { value: '0.004' } });
+    expect(screen.getByTestId('slippage-input-error')).toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText('Custom slippage'), { target: { value: '0.01' } });
+    expect(onChange).toHaveBeenCalledWith({ ...baseSettings, slippageBps: 1 });
+    expect(screen.queryByTestId('slippage-input-error')).not.toBeInTheDocument();
+  });
+
   it('shows the deadline control for pool venues, which do take a deadline', () => {
     const onChange = vi.fn();
     render(<TradeSettingsPopover settings={baseSettings} onChange={onChange} venueKind="pool" />);

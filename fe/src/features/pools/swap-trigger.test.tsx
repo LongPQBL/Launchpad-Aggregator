@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 import { SwapTrigger } from './swap-trigger';
 
-vi.mock('@/trading/swap-panel', () => ({ SwapPanel: () => <div>v3 panel</div> }));
+vi.mock('@/trading/swap-panel', () => ({ SwapPanel: ({ venue }: { venue?: string }) => <div>{`swap panel ${venue}`}</div> }));
 vi.mock('@/trading/v4-swap-panel', () => ({ V4SwapPanel: () => <div>v4 panel</div> }));
 
 const props = {
@@ -32,5 +32,15 @@ describe('SwapTrigger', () => {
     act(() => openWalletDialog());
     fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
     expect(screen.getByRole('dialog', { name: 'AAA / BBB' })).toBeInTheDocument();
+  });
+
+  it('opens the same swap panel for V3 and for V2, telling it which venue it is quoting', () => {
+    const { unmount } = render(<SwapTrigger {...props} protocol="uniswap_v3" poolId="0x3333333333333333333333333333333333333333" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(screen.getByText('swap panel v3')).toBeInTheDocument();
+    unmount();
+    render(<SwapTrigger {...props} protocol="uniswap_v2" poolId="0x3333333333333333333333333333333333333333" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Swap' }));
+    expect(screen.getByText('swap panel v2')).toBeInTheDocument();
   });
 });

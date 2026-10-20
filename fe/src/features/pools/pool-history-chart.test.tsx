@@ -4,15 +4,16 @@ import type { MouseEventParams, Time } from 'lightweight-charts';
 import type { PoolDayHistory } from '@/api/client';
 import { PoolHistoryChart, formatBucketTime, latestTvl, windowLabel, windowTotal } from './pool-history-chart';
 
-const { setData, addSeries, subscribeCrosshairMove, fitContent } = vi.hoisted(() => {
+const { setData, addSeries, subscribeCrosshairMove, fitContent, setVisibleLogicalRange } = vi.hoisted(() => {
   const setData = vi.fn();
   const fitContent = vi.fn();
-  return { setData, fitContent, subscribeCrosshairMove: vi.fn(), addSeries: vi.fn((_type?: unknown, _options?: unknown) => ({ setData })) };
+  const setVisibleLogicalRange = vi.fn();
+  return { setData, fitContent, setVisibleLogicalRange, subscribeCrosshairMove: vi.fn(), addSeries: vi.fn((_type?: unknown, _options?: unknown) => ({ setData })) };
 });
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: { kind: 'histogram' }, AreaSeries: { kind: 'area' },
-  createChart: () => ({ addSeries, subscribeCrosshairMove, unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent, timeToCoordinate: (time: number) => time / 1000, width: () => 600 }) }),
+  createChart: () => ({ addSeries, subscribeCrosshairMove, unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent, setVisibleLogicalRange, timeToCoordinate: (time: number) => time / 1000, width: () => 600 }) }),
 }));
 
 const DAY = 86_400;
@@ -22,7 +23,7 @@ const items: PoolDayHistory[] = [
   { day: 12 * DAY, tradeCount: 2, volumeUsd: '500', tvlUsd: '50000' },
 ];
 
-beforeEach(() => { setData.mockClear(); addSeries.mockClear(); subscribeCrosshairMove.mockClear(); });
+beforeEach(() => { setData.mockClear(); addSeries.mockClear(); subscribeCrosshairMove.mockClear(); setVisibleLogicalRange.mockClear(); fitContent.mockClear(); });
 
 describe('history helpers', () => {
   it('sums the available buckets and counts the unavailable ones; nothing to sum is null', () => {
@@ -48,6 +49,25 @@ describe('PoolHistoryChart', () => {
     expect(points).toEqual([
       { time: 10 * DAY, value: 1500 }, { time: 11 * DAY, value: 0 }, { time: 12 * DAY, value: 500 }, { time: 13 * DAY },
     ]);
+  });
+
+  it('shows the stretch with data at readable bar width, not all 168 bars of the tab squeezed together', () => {
+    // A week of hourly bars with trades in only the last 12: the view starts 24 bars from the end (the minimum), so each bar is wide.
+    const week: PoolDayHistory[] = Array.from({ length: 168 }, (_, index) => (index >= 156
+      ? { day: index * 3600, tradeCount: 1, volumeUsd: '100', tvlUsd: null }
+      : { day: index * 3600, tradeCount: 0, volumeUsd: null, tvlUsd: null }));
+    render(<PoolHistoryChart items={week} complete metric="volume" intervalSeconds={3600} />);
+    expect(fitContent).not.toHaveBeenCalled();
+    expect(setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 168 - 24, to: 167.5 });
+  });
+
+  it('caps the view at 60 bars when the data spans more, and shows everything when there are fewer bars than that', () => {
+    const many: PoolDayHistory[] = Array.from({ length: 168 }, (_, index) => ({ day: index * 3600, tradeCount: 1, volumeUsd: '10', tvlUsd: null }));
+    render(<PoolHistoryChart items={many} complete metric="volume" intervalSeconds={3600} />);
+    expect(setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 168 - 60, to: 167.5 });
+    setVisibleLogicalRange.mockClear();
+    render(<PoolHistoryChart items={items} complete metric="volume" intervalSeconds={DAY} />);
+    expect(setVisibleLogicalRange).toHaveBeenLastCalledWith({ from: 0, to: 2.5 });
   });
 
   it('draws TVL as an area and leaves buckets without a snapshot as gaps', () => {

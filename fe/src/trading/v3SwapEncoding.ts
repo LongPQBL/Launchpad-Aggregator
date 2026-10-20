@@ -1,4 +1,5 @@
 import { encodeAbiParameters, parseAbiParameters, type Address, type Hex } from 'viem';
+import { COMMAND_V2_SWAP_EXACT_IN } from './v2SwapEncoding';
 
 // Verified against Uniswap's real universal-router source during this plan's spec research
 // (contracts/libraries/Commands.sol, contracts/base/Dispatcher.sol, fetched directly, not
@@ -56,11 +57,11 @@ export function encodeUnwrapWethInput(params: { recipient: Address; amountMinimu
   return encodeAbiParameters(parseAbiParameters('address, uint256'), [params.recipient, params.amountMinimum]);
 }
 
-export function encodeExecuteCommands(options: { needsPermit: boolean; nativeIn: boolean; nativeOut: boolean }): Hex {
+export function encodeExecuteCommands(options: { needsPermit: boolean; nativeIn: boolean; nativeOut: boolean; swap?: 'v3' | 'v2' }): Hex {
   const commands: number[] = [];
   if (options.needsPermit) commands.push(COMMAND_PERMIT2_PERMIT);
   if (options.nativeIn) commands.push(COMMAND_WRAP_ETH);
-  commands.push(COMMAND_V3_SWAP_EXACT_IN);
+  commands.push(options.swap === 'v2' ? COMMAND_V2_SWAP_EXACT_IN : COMMAND_V3_SWAP_EXACT_IN);
   if (options.nativeOut) commands.push(COMMAND_UNWRAP_WETH);
   return bytesOf(commands);
 }

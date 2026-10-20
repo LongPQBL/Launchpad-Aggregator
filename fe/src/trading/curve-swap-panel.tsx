@@ -8,6 +8,7 @@ import { openWalletDialog } from '@/wallet/open-wallet-dialog';
 import { curveTradeAbi } from './curveAbi';
 import { erc20Abi } from './erc20Abi';
 import { useCurveQuote } from './use-curve-quote';
+import { useSyntheticCurveQuote } from './use-synthetic-curve-quote';
 import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings } from './use-trade-settings';
 import { useTradeSubmission } from './use-trade-submission';
@@ -65,8 +66,6 @@ export function CurveSwapPanel({
   const tokenOut = direction === 'buy' ? launched : quoteTok;
 
   const client = usePublicClient({ chainId: robinhoodChain.id });
-  // The curve holds the token reserve, so it is the holder the fee probe moves tokens out of.
-  const tokenWarning = useTokenFeeWarning([launched, quoteTok], curveAddress);
   // No dependence on the connected account: the reverse quote simulates as a synthetic account.
   const solve = useMemo(
     () => (client
@@ -94,21 +93,35 @@ export function CurveSwapPanel({
     query: { enabled: !sellsNative && Boolean(account) },
   });
   const allowance = useTokenAllowance(sellsNative ? undefined : tokenIn.address, sellsNative ? undefined : curveAddress);
-  const quote = useCurveQuote({
+  const walletQuote = useCurveQuote({
     curveAddress,
     direction,
     amountIn,
     recipient: account,
     nativeValue: sellsNative ? amountIn : undefined,
   });
+  // No wallet: simulate as a synthetic funded account, so a visitor still sees what a trade would return.
+  const syntheticQuote = useSyntheticCurveQuote({
+    curveAddress, direction, amountIn, tokenAddress, quoteAssetAddress: quoteAsset.address, isNativeQuote, enabled: !account,
+  });
+  const quote = account ? walletQuote : syntheticQuote;
+  // The curve holds the token reserve, so the transfer probe uses the amounts for this quote.
+  const tokenWarning = useTokenFeeWarning([
+    { ...launched, amount: tokenIn.address === launched.address ? amountIn : quote.outputAmount },
+    { ...quoteTok, amount: tokenIn.address === quoteTok.address ? amountIn : quote.outputAmount },
+  ], curveAddress);
   const probeIn = probeAmount(amountIn);
-  const probeQuote = useCurveQuote({
+  const walletProbeQuote = useCurveQuote({
     curveAddress,
     direction,
     amountIn: probeIn ?? 0n,
     recipient: account,
     nativeValue: sellsNative && probeIn !== null ? probeIn : undefined,
   });
+  const syntheticProbeQuote = useSyntheticCurveQuote({
+    curveAddress, direction, amountIn: probeIn ?? 0n, tokenAddress, quoteAssetAddress: quoteAsset.address, isNativeQuote, enabled: !account,
+  });
+  const probeQuote = account ? walletProbeQuote : syntheticProbeQuote;
   // Price impact = how much worse this trade's rate is than a small (1%) probe quote's rate, which sits on the marginal price.
   const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'curve');
   const impactAck = usePriceImpactAck(amountIn, impact.level);

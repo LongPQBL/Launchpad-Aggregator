@@ -10,9 +10,8 @@ const hooks = vi.hoisted(() => ({
   simulateArgs: undefined as unknown,
 }));
 
-vi.mock('wagmi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('wagmi')>(),
-  useSimulateContract: (args: unknown) => {
+vi.mock('./use-quoter-simulation', () => ({
+  useQuoterSimulation: (args: unknown) => {
     hooks.simulateArgs = args;
     return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error };
   },
@@ -40,12 +39,12 @@ describe('useV4SwapQuote', () => {
 
   it('disables the quote for a zero amount, never quoting a zero-amount trade', () => {
     renderHook(() => useV4SwapQuote({ poolKey, zeroForOne: true, amountIn: 0n }));
-    expect((hooks.simulateArgs as { query: { enabled: boolean } }).query.enabled).toBe(false);
+    expect((hooks.simulateArgs as { enabled: boolean }).enabled).toBe(false);
   });
 
   it('disables the quote while the pool key is not yet known, rather than guessing one', () => {
     renderHook(() => useV4SwapQuote({ poolKey: undefined, zeroForOne: true, amountIn: 1_000_000n }));
-    expect((hooks.simulateArgs as { query: { enabled: boolean } }).query.enabled).toBe(false);
+    expect((hooks.simulateArgs as { enabled: boolean }).enabled).toBe(false);
   });
 
   it('passes the real pool key and direction through to the quoter call', () => {

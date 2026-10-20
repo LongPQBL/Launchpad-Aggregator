@@ -1,7 +1,7 @@
 'use client';
 
 import type { Address } from 'viem';
-import { useSimulateContract } from 'wagmi';
+import { useQuoterSimulation } from './use-quoter-simulation';
 import { v3QuoterAbi, V3_QUOTER_ADDRESS } from './v3QuoterAbi';
 import { decodeTradeError } from './decodeTradeError';
 
@@ -24,7 +24,7 @@ export interface V3SwapQuoteResult {
 // and no need for use-refetch-quote-after-approval.ts's pre-approval-revert workaround.
 export function useV3SwapQuote({ tokenIn, tokenOut, fee, amountIn }: V3SwapQuoteParams): V3SwapQuoteResult {
   const enabled = Boolean(tokenIn && tokenOut && fee !== null && amountIn > 0n);
-  const { data, isLoading, error } = useSimulateContract({
+  const { data, isLoading, error } = useQuoterSimulation<readonly [bigint, bigint, number, bigint]>({
     address: V3_QUOTER_ADDRESS,
     abi: v3QuoterAbi,
     functionName: 'quoteExactInputSingle',
@@ -35,7 +35,7 @@ export function useV3SwapQuote({ tokenIn, tokenOut, fee, amountIn }: V3SwapQuote
       fee: fee as number,
       sqrtPriceLimitX96: 0n,
     }] : undefined,
-    query: { enabled },
+    enabled,
   });
 
   return {

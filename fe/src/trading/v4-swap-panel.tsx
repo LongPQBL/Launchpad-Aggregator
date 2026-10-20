@@ -91,7 +91,10 @@ export function V4SwapPanel({ poolKey, tokenA, tokenB, explorerBase, usdPrices, 
   const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'pool');
   const impactAck = usePriceImpactAck(amountIn, impact.level);
   // The PoolManager holds every V4 pool's tokens, so it is the counterparty a swap moves them to and from.
-  const tokenWarning = useTokenFeeWarning([tokenA, tokenB], V4_POOL_MANAGER_ADDRESS);
+  const tokenWarning = useTokenFeeWarning([
+    { ...tokenA, amount: tokenIn.address === tokenA.address ? amountIn : quote.outputAmount },
+    { ...tokenB, amount: tokenIn.address === tokenB.address ? amountIn : quote.outputAmount },
+  ], V4_POOL_MANAGER_ADDRESS);
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const paymasterCapable = usePaymasterCapability();

@@ -19,7 +19,7 @@ import {
 } from 'lightweight-charts';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { getLaunchCandles, getPoolCandles, type PoolSummary } from '@/api/client';
-import { computeChartPrecision, displaySymbol, toChartValue } from '@/api/format';
+import { computeChartPrecision, displaySymbol, isPlottableValue, toChartValue } from '@/api/format';
 import { formatTimeAxisTick } from '@/features/chart/time-axis';
 import { DEFAULT_CHART_RANGE, parseChartRange, rangesForStyle, rangeShowsTime, withWhitespace, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartDimAfter, ChartLeftFade, ChartLiveDot, ChartOhlcTooltip, DOTTED_BACKGROUND_STYLE, type OhlcHover } from '@/components/chart-decor';
@@ -109,11 +109,16 @@ export function OfficialChart({ candles, graduationTime, quoteSymbol, coverageSt
 
   // be/src/api/store.ts's listCandles returns candles newest-first (it reverses an ascending
   // query); Lightweight Charts requires strictly ascending time and throws otherwise.
-  const ascendingCandles = useMemo(
-    () => [...chartCandles].sort((a, b) => a.bucketStart - b.bucketStart),
+  const plottableCandles = useMemo(
+    () => chartCandles.filter((candle) => [candle.open, candle.high, candle.low, candle.close].every(isPlottableValue)),
     [chartCandles],
   );
-  const priceFormat = useMemo(() => computeChartPrecision(chartCandles.map((candle) => candle.close)), [chartCandles]);
+  const ascendingCandles = useMemo(
+    // One candle per bucket: the chart library throws on two points with the same time, which would take the whole page down.
+    () => [...new Map([...plottableCandles].sort((a, b) => a.bucketStart - b.bucketStart).map((candle) => [candle.bucketStart, candle])).values()],
+    [plottableCandles],
+  );
+  const priceFormat = useMemo(() => computeChartPrecision(plottableCandles.map((candle) => candle.close)), [plottableCandles]);
   const formatAxisValue = useCallback(
     (value: number) => `${activeCurrency === 'usd' ? '$' : ''}${value.toFixed(priceFormat.precision)}`,
     [activeCurrency, priceFormat],

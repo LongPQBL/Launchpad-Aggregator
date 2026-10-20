@@ -40,6 +40,12 @@ function SettingLabel({ label, description, tooltipLabel = label }: { label: str
   );
 }
 
+// 1 bps is the smallest slippage the swap can encode (settings below it are discarded as invalid on reload).
+const MIN_SLIPPAGE_PERCENT = 0.01;
+const MAX_SLIPPAGE_PERCENT = 50;
+const isValidSlippagePercent = (percent: number) =>
+  Number.isFinite(percent) && percent >= MIN_SLIPPAGE_PERCENT && percent <= MAX_SLIPPAGE_PERCENT;
+
 export interface TradeSettingsPopoverProps {
   settings: TradeSettings;
   onChange: (next: TradeSettings) => void;
@@ -54,6 +60,11 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
   const displayedSlippagePercent = settings.slippageBps === 'auto' ? autoSlippagePercent : settings.slippageBps / 100;
   const [slippageDraft, setSlippageDraft] = useState(() => String(displayedSlippagePercent));
   const isEditingSlippage = useRef(false);
+  const draftPercent = Number(slippageDraft);
+  // A draft outside the accepted range is never applied, so say so while the field still shows it.
+  const slippageInputError = slippageDraft.trim() !== '' && !isValidSlippagePercent(draftPercent)
+    ? `Enter a value from ${MIN_SLIPPAGE_PERCENT}% to ${MAX_SLIPPAGE_PERCENT}%. Still using ${displayedSlippagePercent}%.`
+    : null;
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -105,16 +116,17 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
             <Input
               aria-label="Custom slippage"
               type="number"
-              min="0.1"
-              max="50"
+              min={MIN_SLIPPAGE_PERCENT}
+              max={MAX_SLIPPAGE_PERCENT}
               step="0.1"
+              aria-invalid={slippageInputError !== null}
               value={slippageDraft}
               onFocus={() => { isEditingSlippage.current = true; }}
               onChange={(event) => {
                 const rawValue = event.target.value;
                 setSlippageDraft(rawValue);
                 const percent = Number(rawValue);
-                if (!Number.isFinite(percent) || percent <= 0 || percent > 50) return;
+                if (!isValidSlippagePercent(percent)) return;
                 onChange({ ...settings, slippageBps: Math.round(percent * 100) });
               }}
               onBlur={() => {
@@ -127,6 +139,9 @@ export function TradeSettingsPopover({ settings, onChange, venueKind }: TradeSet
             <span className="pr-1 text-sm text-muted-foreground">%</span>
             </div>
           </div>
+          {slippageInputError && (
+            <p role="alert" data-testid="slippage-input-error" className="text-sm text-destructive">{slippageInputError}</p>
+          )}
           {warning && (
             <p role="alert" data-testid="slippage-warning" className={warning.level === 'high' ? 'text-sm text-destructive' : 'text-sm text-amber-500'}>
               {warning.message}

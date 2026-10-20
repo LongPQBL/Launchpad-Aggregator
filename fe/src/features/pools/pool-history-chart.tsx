@@ -11,6 +11,10 @@ import { RollingText } from '@/components/percent-change';
 export type HistoryMetric = 'volume' | 'tvl';
 
 const FALLBACK_GREEN = '#22c55e';
+// How many volume bars are in view: wide enough to see, whatever the tab's bar size (see the effect that sets the visible range).
+export const MIN_VISIBLE_VOLUME_BARS = 24;
+export const MAX_VISIBLE_VOLUME_BARS = 60;
+const RIGHT_PADDING_BARS = 0.5;
 
 /** Volume and TVL are never negative; the crosshair can sit below the baseline, where it would otherwise read "$-0.00". */
 export function formatUsdAxis(value: number): string {
@@ -154,7 +158,15 @@ export function PoolHistoryChart({ items, complete, metric, intervalSeconds, loa
       return raw === null ? { time: item.day as UTCTimestamp } : { time: item.day as UTCTimestamp, value: Number(raw) };
     });
     (series as ISeriesApi<'Histogram'>).setData(points);
-    chartRef.current?.timeScale().fitContent();
+    const timeScale = chartRef.current?.timeScale();
+    if (metric === 'volume') {
+      // A tab fixes the number of bars (168 hourly ones is a week), so fitting them all squeezes each bar to a few pixels, and most tokens have trades in only
+      // the last few of them. Show the stretch that has data, at least MIN and at most MAX bars wide enough to read; older bars are still there to scroll to.
+      const firstWithValue = points.findIndex((point) => 'value' in point);
+      const dataBars = firstWithValue === -1 ? 0 : points.length - firstWithValue;
+      const visible = Math.min(points.length, Math.min(MAX_VISIBLE_VOLUME_BARS, Math.max(MIN_VISIBLE_VOLUME_BARS, dataBars + 2)));
+      timeScale?.setVisibleLogicalRange({ from: points.length - visible, to: points.length - 1 + RIGHT_PADDING_BARS });
+    } else timeScale?.fitContent();
   }, [items, metric, step]);
 
   const label = metric === 'volume' ? 'Volume' : 'TVL';

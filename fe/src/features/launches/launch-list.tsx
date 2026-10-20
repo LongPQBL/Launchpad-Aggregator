@@ -4,7 +4,7 @@ import { launchColumnWidth } from './launch-columns';
 import { ChainFilter, ChevronIcon, SelectedCheck, SelectionIcons, toggleValue } from '@/components/chain-filter';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { chainIcon, chainName, ROADMAP_CHAIN_IDS } from '@/api/chains';
-import { formatQuote, formatUsdCompact, tvlTooltip } from '@/api/format';
+import { formatUsdCompact, tvlTooltip } from '@/api/format';
 import { getLaunches, launchHref, type LaunchPage, type LaunchQuery, type LaunchSummary, type Source } from '@/api/client';
 import { PercentChange, RollingText } from '@/components/percent-change';
 import { LAUNCH_CHANGED_EVENT } from '@/hooks/live-events';
@@ -201,6 +201,21 @@ function launchKey(launch: LaunchSummary): string {
   return `${launch.chainId}-${launch.tokenAddress}`;
 }
 
+// A transiently unpriced refresh must not replace a previously shown USD volume with its quote-unit fallback.
+function retainKnownUsdVolume(fresh: readonly LaunchSummary[], previous: readonly LaunchSummary[]): readonly LaunchSummary[] {
+  const previousByKey = new Map(previous.map((item) => [launchKey(item), item]));
+  return fresh.map((item) => {
+    const known = previousByKey.get(launchKey(item));
+    if (item.officialVolume24hUsd !== null || known?.officialVolume24hUsd == null) return item;
+    return {
+      ...item,
+      officialVolume24hUsd: known.officialVolume24hUsd,
+      officialVolume24hUsdApprox: known.officialVolume24hUsdApprox,
+      officialVolume24hUsdAsOf: known.officialVolume24hUsdAsOf,
+    };
+  });
+}
+
 export function LaunchList({ page, sources, error, rankingUnavailable = false, chainId, search, status, platform, tab, sort: initialSort, direction: initialDirection, loading = false }: LaunchListProps) {
   const [items, setItems] = useState<readonly LaunchSummary[]>(page?.items ?? []);
   const [nextCursor, setNextCursor] = useState<string | null>(page?.nextCursor ?? null);
@@ -291,7 +306,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
     const sameFilters = appliedSignatureRef.current === filterSignature;
     appliedSignatureRef.current = filterSignature;
     if (sameFilters && page) {
-      setItems((shown) => refreshRowsInPlace(page.items, shown, launchKey, (initialSort ?? defaultSort(tab)) === 'recent'));
+      setItems((shown) => refreshRowsInPlace(retainKnownUsdVolume(page.items, shown), shown, launchKey, (initialSort ?? defaultSort(tab)) === 'recent'));
       return;
     }
     setItems(page?.items ?? []);
@@ -323,7 +338,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
       const fresh = await getLaunches({ chainId: selectedChains.length ? selectedChains : undefined, platform: selectedPlatforms.length ? selectedPlatforms : undefined,
         search: appliedSearch, status: selectedStatus, sort: sortBy, ...(queryDirection(sortBy, sortDirection) ? { direction: sortDirection } : {}) });
       if (isStale() || liveRef.current.filtering) return;
-      setItems((shown) => refreshRowsInPlace(fresh.items, shown, launchKey, sortBy === 'recent'));
+      setItems((shown) => refreshRowsInPlace(retainKnownUsdVolume(fresh.items, shown), shown, launchKey, sortBy === 'recent'));
       setRankingAge(fresh.rankingAgeSeconds);
     },
     [filterKey],
@@ -471,9 +486,7 @@ export function LaunchList({ page, sources, error, rankingUnavailable = false, c
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">24H Volume</span>
-                  <span title={formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)}>
-                    <RollingText text={launch.officialVolume24hUsd !== null ? formatUsdCompact(launch.officialVolume24hUsd, 1) : formatQuote(launch.officialVolume24h, launch.quoteAsset.symbol)} value={launch.officialVolume24hUsd ?? launch.officialVolume24h} flash />
-                  </span>
+                  <span><RollingText text={formatUsdCompact(launch.officialVolume24hUsd, 1)} value={launch.officialVolume24hUsd} flash /></span>
                 </div>
                 <div role="cell" className="pointer-events-none relative z-10 md:table-cell md:p-2 md:text-right md:align-middle lg:p-4">
                   <span className="mr-1 text-xs text-muted-foreground md:hidden">Liquidity</span>

@@ -6,6 +6,8 @@ import {
 } from './erc20-state-override';
 import { isNoAnswerError } from './rpc-errors';
 import { solveInputForOutput, type QuoteFn } from './solve-input-for-output';
+import { v2PairAbi } from './v2PairAbi';
+import { v2AmountIn } from './v2-math';
 import { V3_QUOTER_ADDRESS, v3QuoterAbi } from './v3QuoterAbi';
 import { V4_QUOTER_ADDRESS, v4QuoterAbi } from './v4QuoterAbi';
 import type { V4PoolKey } from './v4SwapEncoding';
@@ -48,6 +50,24 @@ export function makeV3ReverseSolve(
   };
 }
 
+// V2: the reserves fix the price, so "what must I send to receive X" is the library's own closed form (rounded up), read fresh each time.
+export function makeV2ReverseSolve(
+  client: CallClient,
+  { pair, tokenIn }: { pair: Address; tokenIn: Address },
+): ReverseSolve {
+  return async (targetOut) => {
+    const [reservesOut, token0Out] = await Promise.all([
+      client.call({ to: pair, data: encodeFunctionData({ abi: v2PairAbi, functionName: 'getReserves' }) }),
+      client.call({ to: pair, data: encodeFunctionData({ abi: v2PairAbi, functionName: 'token0' }) }),
+    ]);
+    if (!reservesOut.data || !token0Out.data) return null;
+    const [reserve0, reserve1] = decodeFunctionResult({ abi: v2PairAbi, functionName: 'getReserves', data: reservesOut.data });
+    const token0 = decodeFunctionResult({ abi: v2PairAbi, functionName: 'token0', data: token0Out.data });
+    const inIsToken0 = token0.toLowerCase() === tokenIn.toLowerCase();
+    return v2AmountIn(targetOut, inIsToken0 ? reserve0 : reserve1, inIsToken0 ? reserve1 : reserve0);
+  };
+}
+
 const MAX_UINT128 = (1n << 128n) - 1n;
 
 // V4: the deployed quoter exposes only exact-input (quoteExactInputSingle), so invert it.
@@ -86,17 +106,42 @@ export interface CurveReverseParams {
 // so it works before the user approves and without a connected wallet. If the spent token's
 // storage slots cannot be discovered, there is no answer (null) and no trade is simulated.
 // The search starts from the exact constant-product model as a guess (see curve-guess.ts).
-export function makeCurveReverseSolve(client: CallClient, params: CurveReverseParams): ReverseSolve {
+// The state override a curve simulation needs so the synthetic account can trade: native balance for a native-quoted buy, otherwise the spent
+// token's balance and the curve allowance. null = the token's storage layout could not be found, so there is no answer.
+async function curveSimulationOverride(client: CallClient, params: CurveReverseParams): Promise<StateOverride | null> {
   const { curveAddress, direction, tokenAddress, quoteAssetAddress, isNativeQuote } = params;
-  return async (targetOut, signal) => {
+  if (direction === 'buy' && isNativeQuote) return nativeBalanceOverride(SIMULATION_ACCOUNT);
+  const spentToken = direction === 'buy' ? quoteAssetAddress : tokenAddress;
+  const layouts = await discoverErc20Layouts(client, spentToken);
+  return spendStateOverride({ layouts, token: spentToken, owner: SIMULATION_ACCOUNT, spender: curveAddress });
+}
+
+// Exact-input curve quote without a wallet: the real buy()/sell() simulated as the synthetic account (so every fee and the snipe tax are
+// included). null = no answer (revert, or no way to fund the synthetic account); a transport error rejects.
+export function makeCurveForwardQuote(client: CallClient, params: CurveReverseParams): (amountIn: bigint) => Promise<bigint | null> {
+  const { curveAddress, direction, isNativeQuote } = params;
+  let override: Promise<StateOverride | null> | null = null;
+  return async (amountIn) => {
+    override ??= curveSimulationOverride(client, params);
     let stateOverride: StateOverride | null;
-    if (direction === 'buy' && isNativeQuote) {
-      stateOverride = nativeBalanceOverride(SIMULATION_ACCOUNT);
-    } else {
-      const spentToken = direction === 'buy' ? quoteAssetAddress : tokenAddress;
-      const layouts = await discoverErc20Layouts(client, spentToken);
-      stateOverride = spendStateOverride({ layouts, token: spentToken, owner: SIMULATION_ACCOUNT, spender: curveAddress });
-    }
+    try { stateOverride = await override; } catch (error) { override = null; throw error; }
+    if (!stateOverride) return null;
+    const data = encodeFunctionData({ abi: curveTradeAbi, functionName: direction, args: [amountIn, 0n, SIMULATION_ACCOUNT] });
+    return callOrNull(async () => {
+      const { data: out } = await client.call({
+        to: curveAddress, data, account: SIMULATION_ACCOUNT,
+        value: direction === 'buy' && isNativeQuote ? amountIn : undefined, stateOverride,
+      });
+      if (!out) return null;
+      return decodeFunctionResult({ abi: curveTradeAbi, functionName: direction, data: out }) as bigint;
+    });
+  };
+}
+
+export function makeCurveReverseSolve(client: CallClient, params: CurveReverseParams): ReverseSolve {
+  const { curveAddress, direction, isNativeQuote } = params;
+  return async (targetOut, signal) => {
+    const stateOverride = await curveSimulationOverride(client, params);
     if (!stateOverride || signal.aborted) return null;
 
     const quote: QuoteFn = async (amountIn) => {

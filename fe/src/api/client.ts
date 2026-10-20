@@ -51,7 +51,11 @@ function apiBaseUrl(): string {
   }
   return process.env.BE_API_URL ?? 'http://127.0.0.1:3001';
 }
-const REQUEST_TIMEOUT_MS = 8_000;
+// A page render on the server may be the first to ask the API for something it has to read from the chain (a launch's pool state, its stats), which
+// took 8 s on a loaded machine and made the whole page an error; the browser's own interactive calls stay on the short limit.
+const BROWSER_REQUEST_TIMEOUT_MS = 8_000;
+const SERVER_REQUEST_TIMEOUT_MS = 25_000;
+const requestTimeoutMs = () => (typeof window === 'undefined' ? SERVER_REQUEST_TIMEOUT_MS : BROWSER_REQUEST_TIMEOUT_MS);
 
 async function rawFetch(path: string, searchParams?: Record<string, string | number | readonly string[] | readonly number[] | undefined>,
   signal?: AbortSignal): Promise<Response> {
@@ -61,7 +65,7 @@ async function rawFetch(path: string, searchParams?: Record<string, string | num
   }
 
   try {
-    const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const timeout = AbortSignal.timeout(requestTimeoutMs());
     return await fetch(url, { signal: signal ? AbortSignal.any([timeout, signal]) : timeout, cache: 'no-store' });
   } catch (cause) {
     throw new ApiError(`Failed to call ${path}`, cause);

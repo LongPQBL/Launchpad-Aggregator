@@ -5,6 +5,10 @@ import { emitPoolChanged } from '@/hooks/live-events';
 import { PoolList } from './pool-list';
 import { PoolDetail } from './pool-detail';
 
+vi.mock('@/trading/use-quoter-simulation', () => ({
+  useQuoterSimulation: () => (({ data: undefined, isLoading: false, error: null })),
+}));
+
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => ({ address: undefined }),

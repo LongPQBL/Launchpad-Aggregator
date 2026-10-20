@@ -78,6 +78,10 @@ const hooks = vi.hoisted(() => ({
   erc20AllowanceLoading: false,
 }));
 
+vi.mock('./use-quoter-simulation', () => ({
+  useQuoterSimulation: () => (({ data: hooks.simulateData, isLoading: false, error: null })),
+}));
+
 vi.mock('wagmi', async (importOriginal) => ({
   ...await importOriginal<typeof import('wagmi')>(),
   useAccount: () => hooks.account,

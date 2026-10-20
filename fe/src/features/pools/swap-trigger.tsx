@@ -34,7 +34,7 @@ export function SwapTrigger({ protocol, poolId, tokenA, tokenB, fee, tickSpacing
             targetChainName={targetChainName}
           />
         ) : (
-          <SwapPanel poolAddress={poolId} tokenA={tokenA} tokenB={tokenB} explorerBase={explorerBase} targetChainName={targetChainName} />
+          <SwapPanel poolAddress={poolId} venue={protocol === 'uniswap_v2' ? 'v2' : 'v3'} tokenA={tokenA} tokenB={tokenB} explorerBase={explorerBase} targetChainName={targetChainName} />
         )}
       </Dialog>
     </>

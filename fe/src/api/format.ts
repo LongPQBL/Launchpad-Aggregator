@@ -161,6 +161,14 @@ export function toChartValue(value: string): number {
   return Number(value);
 }
 
+// Lightweight Charts throws (and takes the whole page down) for a value beyond about 9e13. A pool pushed to the edge of its price range quotes a
+// price near 1e38, which no axis can show; such a point is left out of the chart rather than failing it.
+export const MAX_CHART_VALUE = 9e13;
+export function isPlottableValue(value: string): boolean {
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= MAX_CHART_VALUE;
+}
+
 const DEFAULT_CHART_PRICE_FORMAT = { precision: 2, minMove: 0.01 };
 
 // Lightweight Charts' default price format (precision 2) rounds pons-scale prices like

@@ -32,7 +32,7 @@ export default defineConfig({
       command: `npx next dev -p ${APP_PORT}`,
       url: BASE_URL,
       reuseExistingServer: !process.env.CI,
-      env: { BE_API_URL: BE_URL, NEXT_PUBLIC_BE_API_URL: BE_URL },
+      env: { BE_API_URL: BE_URL, NEXT_PUBLIC_BE_API_URL: BE_URL, NEXT_DIST_DIR: '.next-e2e' },
     },
   ],
 });

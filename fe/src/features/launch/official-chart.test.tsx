@@ -17,13 +17,14 @@ vi.mock('@/api/client', async (importOriginal) => ({
 // `chartStub` doubles as both the chart and the series returned from `addSeries` (the `apply`
 // trap always returns the same object) so a test can use it as the exact Map key `seriesData`
 // is keyed by, and `subscribeCrosshairMoveMock` lets a test fire a simulated hover.
-const { subscribeCrosshairMoveMock, chartStub } = vi.hoisted(() => {
+const { subscribeCrosshairMoveMock, setDataMock, chartStub } = vi.hoisted(() => {
   const subscribeCrosshairMoveMock = vi.fn();
+  const setDataMock = vi.fn();
   const chartStub: unknown = new Proxy(() => chartStub, {
-    get: (_target, prop) => (prop === 'subscribeCrosshairMove' ? subscribeCrosshairMoveMock : chartStub),
+    get: (_target, prop) => (prop === 'subscribeCrosshairMove' ? subscribeCrosshairMoveMock : prop === 'setData' ? setDataMock : chartStub),
     apply: () => chartStub,
   });
-  return { subscribeCrosshairMoveMock, chartStub };
+  return { subscribeCrosshairMoveMock, setDataMock, chartStub };
 });
 
 vi.mock('lightweight-charts', () => ({
@@ -35,6 +36,23 @@ vi.mock('lightweight-charts', () => ({
 const props = { candles: [], graduationTime: null, quoteSymbol: 'ETH', coverageStatus: 'caught_up' };
 
 describe('OfficialChart candle-size tabs', () => {
+  it('draws one candle per bucket even when the data has two with the same time', () => {
+    setDataMock.mockClear();
+    const candle = { bucketStart: 1_700_000_000, open: '1', high: '2', low: '1', close: '2' };
+    render(<OfficialChart {...props} candles={[candle, { ...candle, close: '3' }]} range="1h" />);
+    const times = (setDataMock.mock.calls.at(-1)![0] as Array<{ time: number }>).map((point) => point.time);
+    expect(new Set(times).size).toBe(times.length);
+  });
+
+  it('leaves out a candle whose price is beyond what the chart can draw (a pool pushed to the edge of its range) instead of failing the page', () => {
+    setDataMock.mockClear();
+    const good = { bucketStart: 1_700_000_000, open: '0.5', high: '0.6', low: '0.4', close: '0.5' };
+    const edge = { bucketStart: 1_700_003_600, open: '0.5', high: '340256786540325220000000000000000000000', low: '0.5', close: '0.5' };
+    render(<OfficialChart {...props} candles={[good, edge]} range="1h" />);
+    const times = (setDataMock.mock.calls.at(-1)![0] as Array<{ time: number; high?: number }>).filter((point) => point.high !== undefined).map((point) => point.time);
+    expect(times).toEqual([1_700_000_000]);
+  });
+
   it('loads a new range client-side and updates only the chart data', async () => {
     getLaunchCandlesMock.mockResolvedValueOnce({ items: [{
       intervalSeconds: 3600, bucketStart: 1_700_000_300, open: '0.0005', high: '0.0006', low: '0.0004', close: '0.0005', quoteVolume: '1',

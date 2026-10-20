@@ -13,6 +13,15 @@ vi.mock('./reverse-quote', () => ({
   makeCurveReverseSolve: (...args: unknown[]) => { reverse.makeCurve(...args); return reverse.solve; },
 }));
 
+// The wallet-free quote runs a real query; its own hook is tested separately, so here it is a stub the test can steer.
+const synthetic = vi.hoisted(() => ({
+  result: { outputAmount: null as bigint | null, isLoading: false, errorMessage: null as string | null, refetch: vi.fn() },
+  calls: [] as { enabled: boolean }[],
+}));
+vi.mock('./use-synthetic-curve-quote', () => ({
+  useSyntheticCurveQuote: (params: { enabled: boolean }) => { synthetic.calls.push(params); return synthetic.result; },
+}));
+
 const curve = '0x4444444444444444444444444444444444444444' as const;
 const token = '0x2222222222222222222222222222222222222222' as const;
 const nativeQuote = { address: '0x0000000000000000000000000000000000000000' as const, symbol: 'ETH', decimals: 18 };
@@ -116,6 +125,8 @@ beforeEach(() => {
   reverse.solve.mockReset();
   reverse.solve.mockResolvedValue(1_000_000_000_000_000_000n);
   reverse.makeCurve.mockClear();
+  synthetic.result = { outputAmount: null, isLoading: false, errorMessage: null, refetch: vi.fn() };
+  synthetic.calls = [];
 });
 
 type Quote = { address: `0x${string}`; symbol: string; decimals: number };
@@ -584,6 +595,26 @@ describe('CurveSwapPanel - sell direction (after flip)', () => {
 });
 
 describe('button states', () => {
+  it('without a wallet the output comes from the wallet-free quote, and with one it comes from the wallet\'s own simulation', () => {
+    hooks.account.isConnected = false;
+    hooks.account.address = undefined;
+    synthetic.result = { outputAmount: 2_500_000_000_000_000_000n, isLoading: false, errorMessage: null, refetch: vi.fn() };
+    const { unmount } = render(panel(nativeQuote));
+    typeSell('1');
+    expect(synthetic.calls.some((call) => call.enabled)).toBe(true);
+    expect(screen.getByLabelText('Buy amount')).toHaveValue('2.5');
+    unmount();
+
+    hooks.account.isConnected = true;
+    hooks.account.address = '0x1111111111111111111111111111111111111111';
+    hooks.simulateData = { result: 7_000_000_000_000_000_000n };
+    synthetic.calls = [];
+    render(panel(nativeQuote));
+    typeSell('1');
+    expect(synthetic.calls.every((call) => !call.enabled)).toBe(true);
+    expect(screen.getByLabelText('Buy amount')).toHaveValue('7');
+  });
+
   it('Connect when no wallet is connected; clicking it asks the header to open the wallet dialog', () => {
     hooks.account.isConnected = false;
     hooks.account.address = undefined;

@@ -10,7 +10,7 @@ vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<ty
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: {}, AreaSeries: {},
-  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
+  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn(), setVisibleLogicalRange: vi.fn() }) }),
 }));
 vi.mock('./pool-chart', () => ({ PoolChart: ({ trailing }: { trailing?: React.ReactNode }) => <div data-testid="price-chart">{trailing}</div> }));
 
@@ -20,7 +20,7 @@ const pool = { chainId: 4663, protocol: 'uniswap_v4', poolId: '0xpool', displaye
 const props = { pool, candles: { items: [], complete: true }, history, coverageStatus: 'complete', quoteSymbol: 'ETH', tokenSymbol: 'TKN' };
 
 describe('PoolChartPanel', () => {
-  beforeEach(() => { vi.mocked(getPoolHistory).mockReset(); });
+  beforeEach(() => { vi.mocked(getPoolHistory).mockReset(); vi.mocked(getPoolLiquidity).mockReset(); vi.unstubAllEnvs(); });
 
   it('starts on Price and switches the chart type with the Price / Volume tabs', () => {
     render(<PoolChartPanel {...props} />);
@@ -61,7 +61,15 @@ describe('PoolChartPanel', () => {
     expect(screen.queryByRole('tablist', { name: 'Chart type' })).not.toBeInTheDocument();
   });
 
-  it('adds Liquidity and Depth to the same switcher for V3 and V4 pools, and not for V2', () => {
+  it('leaves Liquidity and Depth out by default and never fetches them', () => {
+    render(<PoolChartPanel {...props} />);
+    expect(screen.queryByRole('tab', { name: 'Liquidity' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Depth' })).not.toBeInTheDocument();
+    expect(getPoolLiquidity).not.toHaveBeenCalled();
+  });
+
+  it('adds Liquidity and Depth to the same switcher for V3 and V4 pools, and not for V2, when switched on', () => {
+    vi.stubEnv('NEXT_PUBLIC_SHOW_DEPTH_CHARTS', 'true');
     const { unmount } = render(<PoolChartPanel {...props} />);
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent).filter((text) => ['Price', 'Volume', 'Liquidity', 'Depth', 'TVL'].includes(text ?? ''))).toEqual(['Price', 'Volume', 'TVL', 'Liquidity', 'Depth']);
     unmount();
@@ -71,6 +79,7 @@ describe('PoolChartPanel', () => {
   });
 
   it('hides the range tabs and the line / candle switch on Liquidity and Depth, leaving only the tab switcher', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SHOW_DEPTH_CHARTS', 'true');
     vi.mocked(getPoolLiquidity).mockResolvedValue({ blockNumber: '1', tickSpacing: 60, feePips: 500, currentTick: 0, price: 1, priceInverse: 1,
       token0: { address: '0xa', decimals: 18 }, token1: { address: '0xb', decimals: 18 }, ranges: [{ tickLower: -600, tickUpper: 600, priceLower: 0.9, priceUpper: 1.1, liquidity: '5', active: true }],
       depth: { asks: [{ price: 1.01, amount0: 1, total1: 1, cumulative1: 1 }], bids: [{ price: 0.99, amount0: 1, total1: 1, cumulative1: 1 }], spreadPercent: 0.1 }, complete: true, unavailableReason: null } as never);

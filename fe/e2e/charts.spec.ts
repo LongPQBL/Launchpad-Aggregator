@@ -35,7 +35,8 @@ test('Volume and TVL on the token page hide the line / candle switch and keep th
   await expect(page.getByTestId('history-chart-container')).toBeVisible();
 });
 
-test('a V3/V4 pool page has Liquidity and Depth tabs that show neither range tabs nor the line / candle switch', async ({ page }) => {
+// Liquidity and Depth are hidden for now (set NEXT_PUBLIC_SHOW_DEPTH_CHARTS=true and drop the skip to run this).
+test.skip('a V3/V4 pool page has Liquidity and Depth tabs that show neither range tabs nor the line / candle switch', async ({ page }) => {
   await openMockPool(page);
   await expect(page.getByRole('tab', { name: 'Liquidity' })).toBeVisible();
   await page.getByRole('tab', { name: 'Liquidity' }).click();
@@ -55,7 +56,8 @@ test('a V3/V4 pool page has Liquidity and Depth tabs that show neither range tab
   await expect(page.getByRole('tab', { name: 'Line chart' })).toBeVisible();
 });
 
-test('the Depth chart zooms in and out', async ({ page }) => {
+// Liquidity and Depth are hidden for now (set NEXT_PUBLIC_SHOW_DEPTH_CHARTS=true and drop the skip to run this).
+test.skip('the Depth chart zooms in and out', async ({ page }) => {
   await openMockPool(page);
   await page.getByRole('tab', { name: 'Depth' }).click();
   const asks = page.getByTestId('depth-asks');
@@ -66,7 +68,8 @@ test('the Depth chart zooms in and out', async ({ page }) => {
   await expect(asks).toHaveAttribute('data-rows', '40');
 });
 
-test('the bonding-curve page has a Depth tab without TVL or Liquidity', async ({ page }) => {
+// Liquidity and Depth are hidden for now (set NEXT_PUBLIC_SHOW_DEPTH_CHARTS=true and drop the skip to run this).
+test.skip('the bonding-curve page has a Depth tab without TVL or Liquidity', async ({ page }) => {
   await page.goto(`${tokenUrl}/curve`);
   await expect(page.getByRole('tab', { name: 'Depth' })).toBeVisible();
   await expect(page.getByRole('tab', { name: 'TVL' })).toHaveCount(0);
@@ -77,7 +80,7 @@ test('the bonding-curve page has a Depth tab without TVL or Liquidity', async ({
 
 test('no chart tab leaves the page wider than the screen', async ({ page }) => {
   await openMockPool(page);
-  for (const tab of ['Volume', 'Liquidity', 'Depth', 'Price']) {
+  for (const tab of ['Volume', 'Price']) {
     await page.getByRole('tab', { name: tab }).click();
     await page.waitForTimeout(300);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

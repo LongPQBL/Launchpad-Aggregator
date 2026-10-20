@@ -229,18 +229,20 @@ export function PoolList({ page, error = false, tokenAddress, chainId, displayed
     return () => observer.disconnect();
   }, [loadError, loadMore, nextCursor]);
 
+  const hideHighFeeControl = page && (highFeeCount > 0 || hideHighFee) ? (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <button type="button" role="switch" aria-checked={hideHighFee} aria-label="Hide high-fee pools" onClick={() => void applyHideHighFee(!hideHighFee)}
+        className={cn('relative h-5 w-9 cursor-pointer rounded-full border border-border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', hideHighFee ? 'bg-brand' : 'bg-muted')}>
+        <span aria-hidden="true" className={cn('absolute top-0.5 h-3.5 w-3.5 rounded-full bg-foreground transition-all', hideHighFee ? 'left-[1.15rem]' : 'left-0.5')} />
+      </button>
+      <span>Hide high-fee pools</span>
+    </div>
+  ) : null;
+
   return <section aria-label={tokenAddress ? 'Other pools for this token' : 'Pools'} className="space-y-4">
     {(error || !page) && <p role="alert">Could not load pools.</p>}
-    {!tokenAddress && page && <PageHeading title="Pools" />}
-    {page && (highFeeCount > 0 || hideHighFee) && (
-      <div className="flex items-center justify-end gap-2 text-sm text-muted-foreground">
-        <button type="button" role="switch" aria-checked={hideHighFee} aria-label="Hide high-fee pools" onClick={() => void applyHideHighFee(!hideHighFee)}
-          className={cn('relative h-5 w-9 cursor-pointer rounded-full border border-border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring', hideHighFee ? 'bg-brand' : 'bg-muted')}>
-          <span aria-hidden="true" className={cn('absolute top-0.5 h-3.5 w-3.5 rounded-full bg-foreground transition-all', hideHighFee ? 'left-[1.15rem]' : 'left-0.5')} />
-        </button>
-        <span>Hide high-fee pools <span className="text-xs">(fee 10% or more{hideHighFee ? '' : `, ${highFeeCount} shown`})</span></span>
-      </div>
-    )}
+    {!tokenAddress && page && <PageHeading title="Pools">{hideHighFeeControl}</PageHeading>}
+    {tokenAddress && hideHighFeeControl && <div className="flex justify-end">{hideHighFeeControl}</div>}
     {items.length === 0 && !primaryVenue && page && <p>No other verified indexed pools found.</p>}
     {page ? <div role="table" aria-label={tokenAddress ? 'Pools for this token' : 'Pools'} className="w-full overflow-hidden rounded-lg md:table md:table-fixed md:border-separate md:border-spacing-0">
       <div role="rowgroup" className="hidden md:table-header-group">

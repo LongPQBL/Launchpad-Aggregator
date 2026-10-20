@@ -1,6 +1,6 @@
 'use client';
 
-import { useSimulateContract } from 'wagmi';
+import { useQuoterSimulation } from './use-quoter-simulation';
 import { v4QuoterAbi, V4_QUOTER_ADDRESS } from './v4QuoterAbi';
 import { decodeTradeError } from './decodeTradeError';
 import type { V4PoolKey } from './v4SwapEncoding';
@@ -20,12 +20,12 @@ export interface V4SwapQuoteResult {
 export function useV4SwapQuote({ poolKey, zeroForOne, amountIn }: V4SwapQuoteParams): V4SwapQuoteResult {
   // exactAmount is a uint128; a larger typed amount has no quote (and would fail to encode).
   const enabled = Boolean(poolKey && amountIn > 0n && amountIn < 1n << 128n);
-  const { data, isLoading, error } = useSimulateContract({
+  const { data, isLoading, error } = useQuoterSimulation<readonly [bigint, bigint]>({
     address: V4_QUOTER_ADDRESS,
     abi: v4QuoterAbi,
     functionName: 'quoteExactInputSingle',
     args: enabled ? [{ poolKey: poolKey as V4PoolKey, zeroForOne, exactAmount: amountIn, hookData: '0x' }] : undefined,
-    query: { enabled },
+    enabled,
   });
 
   return {

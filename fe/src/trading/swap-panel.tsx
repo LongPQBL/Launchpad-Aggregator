@@ -9,6 +9,8 @@ import { universalRouterAbi, UNIVERSAL_ROUTER_ADDRESS } from './universalRouterA
 import { PERMIT2_ADDRESS } from './permit2Abi';
 import { usePoolFee } from './use-pool-fee';
 import { useV3SwapQuote } from './use-v3-swap-quote';
+import { useV2SwapQuote } from './use-v2-swap-quote';
+import { encodeV2SwapInput } from './v2SwapEncoding';
 import { usePermit2Permit } from './use-permit2-permit';
 import { useTokenAllowance } from './use-token-allowance';
 import { useTradeSettings } from './use-trade-settings';
@@ -21,7 +23,7 @@ import { useCanBatchCalls } from './use-can-batch-calls';
 import { usePaymasterCapability } from './use-paymaster-capability';
 import { PAYMASTER_SERVICE_URL } from './paymasterConfig';
 import { applySlippage } from './amount';
-import { makeV3ReverseSolve } from './reverse-quote';
+import { makeV2ReverseSolve, makeV3ReverseSolve } from './reverse-quote';
 import { useSwapAmounts } from './use-swap-amounts';
 import { TradeCard } from './trade-card';
 import { SwapShell } from './swap-shell';
@@ -47,6 +49,8 @@ export interface SwapToken {
 
 export interface SwapPanelProps {
   poolAddress: Address;
+  // 'v2' routes through a Uniswap V2 pair (quoted from its reserves); the default is a V3 pool.
+  venue?: 'v3' | 'v2';
   tokenA: SwapToken;
   tokenB: SwapToken;
   explorerBase: string | null;
@@ -58,7 +62,8 @@ function isWeth(token: SwapToken): boolean {
   return token.address.toLowerCase() === WETH_ADDRESS.toLowerCase();
 }
 
-export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices, targetChainName }: SwapPanelProps) {
+export function SwapPanel({ poolAddress, venue = 'v3', tokenA, tokenB, explorerBase, usdPrices, targetChainName }: SwapPanelProps) {
+  const isV2 = venue === 'v2';
   const [direction, setDirection] = useState<'aToB' | 'bToA'>('aToB');
   // Governs the ETH/WETH choice on whichever side currently holds the WETH leg (if any) — a
   // single boolean, not per-direction, since flipping direction only changes whether that leg
@@ -68,22 +73,22 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
   const { address: account, chainId, isConnected } = useAccount();
   const { settings, update } = useTradeSettings();
   const isWrongChain = chainId !== robinhoodChain.id;
-  const { fee } = usePoolFee(poolAddress);
+  const { fee } = usePoolFee(isV2 ? undefined : poolAddress);
 
   const tokenIn = direction === 'aToB' ? tokenA : tokenB;
   const tokenOut = direction === 'aToB' ? tokenB : tokenA;
   const client = usePublicClient({ chainId: robinhoodChain.id });
   const solve = useMemo(
-    () => (client && fee !== null
-      ? makeV3ReverseSolve(client, { tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee })
-      : null),
-    [client, fee, tokenIn.address, tokenOut.address],
+    () => (client && isV2 ? makeV2ReverseSolve(client, { pair: poolAddress, tokenIn: tokenIn.address })
+      : client && fee !== null ? makeV3ReverseSolve(client, { tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee })
+        : null),
+    [client, isV2, poolAddress, fee, tokenIn.address, tokenOut.address],
   );
   const amounts = useSwapAmounts({
     tokenInDecimals: tokenIn.decimals,
     tokenOutDecimals: tokenOut.decimals,
     solve,
-    solveKey: `v3:${poolAddress}:${tokenIn.address}:${tokenOut.address}:${fee}`,
+    solveKey: `${venue}:${poolAddress}:${tokenIn.address}:${tokenOut.address}:${fee}`,
   });
   const amountIn = amounts.amountIn;
 
@@ -100,13 +105,20 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
   const nativeBalance = useBalance({ address: account, query: { enabled: nativeIn && Boolean(account) } });
   const erc20Allowance = useTokenAllowance(nativeIn ? undefined : tokenIn.address, PERMIT2_ADDRESS);
   const permit2 = usePermit2Permit(nativeIn ? undefined : tokenIn.address, UNIVERSAL_ROUTER_ADDRESS, amountIn);
-  const quote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn });
+  const v3Quote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee: isV2 ? null : fee, amountIn });
+  const v2Quote = useV2SwapQuote({ pair: isV2 ? poolAddress : undefined, tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn });
+  const quote = isV2 ? v2Quote : v3Quote;
   const probeIn = probeAmount(amountIn);
-  const probeQuote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee, amountIn: probeIn ?? 0n });
+  const v3ProbeQuote = useV3SwapQuote({ tokenIn: tokenIn.address, tokenOut: tokenOut.address, fee: isV2 ? null : fee, amountIn: probeIn ?? 0n });
+  const v2ProbeQuote = useV2SwapQuote({ pair: isV2 ? poolAddress : undefined, tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn: probeIn ?? 0n });
+  const probeQuote = isV2 ? v2ProbeQuote : v3ProbeQuote;
   // Price impact = how much worse this trade's rate is than a small (1%) probe quote's rate, which sits on the marginal price.
   const impact = describePriceImpact(priceImpactBps({ amountIn, output: quote.outputAmount, probeIn, probeOut: probeQuote.outputAmount }), 'pool');
   const impactAck = usePriceImpactAck(amountIn, impact.level);
-  const tokenWarning = useTokenFeeWarning([tokenA, tokenB], poolAddress);
+  const tokenWarning = useTokenFeeWarning([
+    { ...tokenA, amount: tokenIn.address === tokenA.address ? amountIn : quote.outputAmount },
+    { ...tokenB, amount: tokenIn.address === tokenB.address ? amountIn : quote.outputAmount },
+  ], poolAddress);
   const submission = useTradeSubmission();
   const canBatch = useCanBatchCalls(settings.oneClickTradeOptIn);
   const paymasterCapable = usePaymasterCapability();
@@ -139,7 +151,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
     // Clear any stale signature-rejection error from a previous attempt as soon as a new submit
     // begins, regardless of outcome — same reasoning as v4-swap-panel.tsx's identical guard.
     permit2.resetSignError();
-    if (amountIn === 0n || !account || quote.outputAmount === null || fee === null) return;
+    if (amountIn === 0n || !account || quote.outputAmount === null || (!isV2 && fee === null)) return;
     const amountOutMinimum = applySlippage(quote.outputAmount, settings.slippageBps, 'pool');
 
     let permitInput: Hex | null = null;
@@ -157,19 +169,24 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
       permitInput = encodePermit2PermitInput(signed.permitSingle, signed.signature);
     }
 
-    const swapInput = encodeV3SwapInput({
-      tokenIn: tokenIn.address,
-      tokenOut: tokenOut.address,
-      fee,
-      amountIn,
-      amountOutMinimum,
-      payerIsUser: !nativeIn,
-      recipient: nativeOut ? ADDRESS_THIS : MSG_SENDER,
-    });
+    const swapInput = isV2
+      ? encodeV2SwapInput({
+        tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn, amountOutMinimum,
+        payerIsUser: !nativeIn, recipient: nativeOut ? ADDRESS_THIS : MSG_SENDER,
+      })
+      : encodeV3SwapInput({
+        tokenIn: tokenIn.address,
+        tokenOut: tokenOut.address,
+        fee: fee as number,
+        amountIn,
+        amountOutMinimum,
+        payerIsUser: !nativeIn,
+        recipient: nativeOut ? ADDRESS_THIS : MSG_SENDER,
+      });
     const wrapInput = nativeIn ? encodeWrapEthInput({ recipient: ADDRESS_THIS, amountMinimum: amountIn }) : null;
     const unwrapInput = nativeOut ? encodeUnwrapWethInput({ recipient: MSG_SENDER, amountMinimum: amountOutMinimum }) : null;
 
-    const commands = encodeExecuteCommands({ needsPermit: permitInput !== null, nativeIn, nativeOut });
+    const commands = encodeExecuteCommands({ needsPermit: permitInput !== null, nativeIn, nativeOut, swap: isV2 ? 'v2' : 'v3' });
     const inputs = [
       ...(permitInput ? [permitInput] : []),
       ...(wrapInput ? [wrapInput] : []),
@@ -231,7 +248,7 @@ export function SwapPanel({ poolAddress, tokenA, tokenB, explorerBase, usdPrices
   const quoteState = deriveQuoteState({ source: amounts.source, reverseStatus: amounts.reverseStatus, amountIn, outputAmount: quote.outputAmount, errorMessage: quote.errorMessage });
 
   return (
-    <SwapShell venueLabel="Uniswap V3 pool" venueKind="pool" settings={settings} onSettingsChange={update}>
+    <SwapShell venueLabel={isV2 ? 'Uniswap V2 pool' : 'Uniswap V3 pool'} venueKind="pool" settings={settings} onSettingsChange={update}>
       <TradeCard
         sell={{
           value: amounts.sellText, onChange: amounts.onSellChange, ariaLabel: 'Sell amount',

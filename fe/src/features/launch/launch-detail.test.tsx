@@ -23,7 +23,7 @@ const createChartMock = vi.fn((..._args: unknown[]) => ({
   remove: removeMock,
   applyOptions: vi.fn(),
   removeSeries: vi.fn(),
-  timeScale: () => ({ fitContent: vi.fn() }),
+  timeScale: () => ({ fitContent: vi.fn(), setVisibleLogicalRange: vi.fn() }),
   subscribeCrosshairMove: subscribeCrosshairMoveMock,
   unsubscribeCrosshairMove: unsubscribeCrosshairMoveMock,
 }));
@@ -37,6 +37,15 @@ vi.mock('lightweight-charts', () => ({
   createSeriesMarkers: (...args: unknown[]) => createSeriesMarkersMock(...args),
   CandlestickSeries: 'CandlestickSeries',
   AreaSeries: 'AreaSeries',
+}));
+
+vi.mock('@/trading/use-quoter-simulation', () => ({
+  useQuoterSimulation: () => (({ data: undefined, isLoading: false, error: null })),
+}));
+
+// The wallet-free curve quote runs a query; it has its own tests, and no wallet-free quote is needed to check this page.
+vi.mock('@/trading/use-synthetic-curve-quote', () => ({
+  useSyntheticCurveQuote: () => ({ outputAmount: null, isLoading: false, errorMessage: null, refetch: () => {} }),
 }));
 
 vi.mock('wagmi', async (importOriginal) => ({

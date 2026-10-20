@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // Playwright builds into its own directory so it can run next to a dev server that already holds the lock on `.next`.
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   // Playwright/manual local checks load the dev server via 127.0.0.1; without this, Next blocks
   // its own HMR dev-resource requests from that origin (cosmetic in prod, noisy in dev logs).
   allowedDevOrigins: ['127.0.0.1'],

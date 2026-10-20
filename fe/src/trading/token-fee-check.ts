@@ -39,15 +39,16 @@ const balanceData = (who: Address) => encodeFunctionData({ abi: erc20Abi, functi
  *   2 transfer wallet -> fresh address        3 fresh address balance
  *   4 holder balance before                   5 transfer wallet -> holder (a sell)      6 holder balance after
  */
-export function buildFeeProbe(token: Address, holder: Address): SimCall[] {
+export function buildFeeProbe(token: Address, holder: Address, probeAmount = PROBE_AMOUNT): SimCall[] {
+  const legAmount = probeAmount === PROBE_AMOUNT ? LEG_AMOUNT : probeAmount / 4n;
   const balance = (who: Address): SimCall => ({ to: token, data: balanceData(who) });
   return [
-    { from: holder, to: token, data: transferData(SIMULATION_ACCOUNT, PROBE_AMOUNT) },
+    { from: holder, to: token, data: transferData(SIMULATION_ACCOUNT, probeAmount) },
     balance(SIMULATION_ACCOUNT),
-    { from: SIMULATION_ACCOUNT, to: token, data: transferData(RECEIVER, LEG_AMOUNT) },
+    { from: SIMULATION_ACCOUNT, to: token, data: transferData(RECEIVER, legAmount) },
     balance(RECEIVER),
     balance(holder),
-    { from: SIMULATION_ACCOUNT, to: token, data: transferData(holder, LEG_AMOUNT) },
+    { from: SIMULATION_ACCOUNT, to: token, data: transferData(holder, legAmount) },
     balance(holder),
   ];
 }
@@ -106,11 +107,11 @@ export interface FeeCheckOptions {
 }
 
 /** Measures what a token actually delivers. Never throws: a failure to measure is `unchecked`, not "no fee". */
-export async function checkTokenFee(client: SimulateClient, token: Address, holder: Address, options: FeeCheckOptions = {}): Promise<TokenFeeCheck> {
+export async function checkTokenFee(client: SimulateClient, token: Address, holder: Address, options: FeeCheckOptions & { amount?: bigint } = {}): Promise<TokenFeeCheck> {
   try {
     const response = await client.request({
       method: 'eth_simulateV1',
-      params: [{ blockStateCalls: [{ ...(options.extraOverrides ? { stateOverrides: options.extraOverrides } : {}), calls: buildFeeProbe(token, holder) }], validation: false }, 'latest'],
+      params: [{ blockStateCalls: [{ ...(options.extraOverrides ? { stateOverrides: options.extraOverrides } : {}), calls: buildFeeProbe(token, holder, options.amount) }], validation: false }, 'latest'],
     }) as { calls?: SimCallResult[] }[];
     const results = response?.[0]?.calls;
     if (!results || results.length !== 7) return { status: 'unchecked', reason: 'unexpected simulation response' };

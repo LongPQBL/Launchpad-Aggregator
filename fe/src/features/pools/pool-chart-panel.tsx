@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { getPoolHistory, type PoolCandlePage, type PoolHistory, type PoolSummary } from '@/api/client';
-import { CHART_KINDS, type ChartKind } from '@/features/chart/chart-kinds';
+import { CHART_KINDS, isChartKindHidden, type ChartKind } from '@/features/chart/chart-kinds';
 import { DEFAULT_CHART_RANGE, defaultRangeFor, rangeIsForStyle, type ChartRangeId } from '@/features/chart/ranges';
 import { ChartRangeTabs, type PriceChartStyle } from '@/features/launch/official-chart';
 import { POOL_CHANGED_EVENT } from '@/hooks/live-events';
@@ -86,7 +86,8 @@ export function ChartTypePanel({ loadHistory, history, price, headerClassName, s
   live?: { eventName: string | readonly string[]; matches: (payload: SseEventPayload) => boolean; key: string };
 }) {
   const kinds: ChartKind[] = [...(price ? ['price' as const] : []), ...(history ? ['volume' as const, ...(showTvl ? ['tvl' as const] : [])] : []),
-    ...(extra?.liquidity ? ['liquidity' as const] : []), ...(extra?.curve ? ['curve' as const] : []), ...(extra?.depth ? ['depth' as const] : [])];
+    ...(extra?.liquidity ? ['liquidity' as const] : []), ...(extra?.curve ? ['curve' as const] : []), ...(extra?.depth ? ['depth' as const] : [])]
+    .filter((kind) => !isChartKindHidden(kind));
   const [selected, setSelected] = useState<ChartKind>(kinds[0] ?? 'price');
   const [chartStyle, setChartStyle] = usePriceChartStyle();
   const [activeRange, setActiveRange] = useState(initialRange);

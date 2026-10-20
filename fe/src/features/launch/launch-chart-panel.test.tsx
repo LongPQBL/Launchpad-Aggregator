@@ -9,7 +9,7 @@ vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<ty
 vi.mock('lightweight-charts', () => ({
   LineType: { Simple: 0, WithSteps: 1, Curved: 2 },
   HistogramSeries: {}, AreaSeries: {},
-  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn() }) }),
+  createChart: () => ({ addSeries: () => ({ setData: vi.fn() }), subscribeCrosshairMove: vi.fn(), unsubscribeCrosshairMove: vi.fn(), remove: vi.fn(), timeScale: () => ({ fitContent: vi.fn(), setVisibleLogicalRange: vi.fn() }) }),
 }));
 vi.mock('./official-price-chart', () => ({ OfficialPriceChart: ({ trailing, chartStyle }: { trailing?: React.ReactNode; chartStyle?: string }) => <div data-testid="launch-price-chart" data-style={chartStyle}>{trailing}</div> }));
 

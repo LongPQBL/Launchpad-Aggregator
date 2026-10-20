@@ -9,9 +9,8 @@ const hooks = vi.hoisted(() => ({
   simulateArgs: undefined as unknown,
 }));
 
-vi.mock('wagmi', async (importOriginal) => ({
-  ...await importOriginal<typeof import('wagmi')>(),
-  useSimulateContract: (args: unknown) => {
+vi.mock('./use-quoter-simulation', () => ({
+  useQuoterSimulation: (args: unknown) => {
     hooks.simulateArgs = args;
     return { data: hooks.data, isLoading: hooks.isLoading, error: hooks.error };
   },
@@ -35,12 +34,12 @@ describe('useV3SwapQuote', () => {
 
   it('disables the quote for a zero amount, never quoting a zero-amount trade', () => {
     renderHook(() => useV3SwapQuote({ tokenIn, tokenOut, fee: 10000, amountIn: 0n }));
-    expect((hooks.simulateArgs as { query: { enabled: boolean } }).query.enabled).toBe(false);
+    expect((hooks.simulateArgs as { enabled: boolean }).enabled).toBe(false);
   });
 
   it('disables the quote while the pool fee is not yet known, never guessing a fee tier', () => {
     renderHook(() => useV3SwapQuote({ tokenIn, tokenOut, fee: null, amountIn: 1_000_000n }));
-    expect((hooks.simulateArgs as { query: { enabled: boolean } }).query.enabled).toBe(false);
+    expect((hooks.simulateArgs as { enabled: boolean }).enabled).toBe(false);
   });
 
   it('passes the real tokenIn, tokenOut, amountIn, and fee through, with no sqrtPriceLimitX96 restriction', () => {

@@ -11,3 +11,10 @@ export const CHART_KINDS: Record<ChartKind, ChartKindSpec> = {
   curve: { label: 'Curve', usesRange: false, usesChartStyle: false },
   depth: { label: 'Depth', usesRange: false, usesChartStyle: false },
 };
+
+// Liquidity and Depth are switched off for now (their code and endpoints stay). A hidden kind gets no tab and its chart is never mounted, so
+// nothing is fetched or drawn for it. Set NEXT_PUBLIC_SHOW_DEPTH_CHARTS=true to bring both back.
+const DEPTH_KINDS: readonly ChartKind[] = ['liquidity', 'depth'];
+export function isChartKindHidden(kind: ChartKind): boolean {
+  return DEPTH_KINDS.includes(kind) && process.env.NEXT_PUBLIC_SHOW_DEPTH_CHARTS !== 'true';
+}
