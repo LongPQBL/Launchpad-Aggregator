@@ -435,6 +435,13 @@
       "when": 1792113246016,
       "tag": "0061_bitter_leopardon",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1792404691856,
+      "tag": "0062_minor_lethal_legion",
+      "breakpoints": true
     }
   ]
 }

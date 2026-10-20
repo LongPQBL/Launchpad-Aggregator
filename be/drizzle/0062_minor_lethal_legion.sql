@@ -1,0 +1,1 @@
+CREATE INDEX "trades_quote_timestamp_idx" ON "trades" USING btree ("chain_id","quote_asset_address","timestamp");

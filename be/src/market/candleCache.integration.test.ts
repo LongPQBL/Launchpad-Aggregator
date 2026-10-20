@@ -102,6 +102,20 @@ describe('precomputed official candles', () => {
     expect((await pool.query('SELECT count(*)::int AS n FROM candle_dirty_buckets WHERE token_address = $1', [token])).rows[0].n).toBe(0); // the bucket is consumed
   });
 
+  it('lets two rebuilders hold different minutes of the same larger bucket without a primary-key failure', async () => {
+    await pool.query('INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, false) ON CONFLICT (id) DO NOTHING');
+    await pool.query('DELETE FROM candles WHERE token_address = $1', [token]);
+    await pool.query('DELETE FROM trades WHERE token_address = $1', [token]);
+    await pool.query('DELETE FROM candle_dirty_buckets WHERE token_address = $1', [token]);
+    const start = Math.floor(base / 3600) * 3600 + 7200; // two minutes of one hour
+    await addTrade('c1', start + 5, 900, 1, '2');
+    await addTrade('c2', start + 65, 901, 1, '4');
+    const results = await Promise.allSettled([refreshDirtyCandles(pool, 1), refreshDirtyCandles(pool, 1)]);
+    expect(results.map((result) => result.status)).toEqual(['fulfilled', 'fulfilled']);
+    const hour = (await pool.query('SELECT open, close FROM candles WHERE token_address = $1 AND interval_seconds = 3600', [token])).rows;
+    expect(hour).toHaveLength(1);
+  });
+
   it('omits a bucket with an unpriced trade', async () => {
     await pool.query('INSERT INTO candle_cache_state (id, backfill_complete) VALUES (1, false) ON CONFLICT (id) DO NOTHING');
     await addTrade('3', base + 120, 12, 0, null);

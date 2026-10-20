@@ -83,11 +83,7 @@ export async function readRawPage(envioPool: Pool, input: ReadRawPageInput): Pro
     `SELECT * FROM ${input.table}
      WHERE "chainId" = $1
        AND "blockNumber" <= $2
-       AND (
-         "blockNumber" > $3
-         OR ("blockNumber" = $3 AND "logIndex" > $4)
-         OR ("blockNumber" = $3 AND "logIndex" = $4 AND id > $5)
-       )
+       AND ("blockNumber", "logIndex", id) > ($3, $4, $5)
      ORDER BY "blockNumber" ASC, "logIndex" ASC, id ASC
      LIMIT $6`,
     [input.chainId, input.fence.toString(), input.after.blockNumber.toString(), input.after.logIndex, input.after.rawId, input.limit],

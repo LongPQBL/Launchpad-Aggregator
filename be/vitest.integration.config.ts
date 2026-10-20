@@ -2,6 +2,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
+    // The tests build coverage out of block numbers near zero; the production tolerance for a lagging factory source (50,000 blocks) would make
+    // every one of those launches complete, so the tests run with the plain rule.
+    env: { COVERAGE_FACTORY_TOLERANCE_BLOCKS: '0' },
     include: ['src/**/*.integration.test.ts'],
     // Repository integration tests truncate shared real tables; API and migration tests
     // insert into those same tables. Running files concurrently races their setup/cleanup.

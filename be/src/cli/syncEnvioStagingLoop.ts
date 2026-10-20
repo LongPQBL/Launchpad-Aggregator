@@ -4,6 +4,9 @@ import { createRobinhoodPublicClient } from '../chains/robinhood.js';
 import { resolveSyncTablesFromEnv, runAllSyncsOnce, runIncrementalCycle, runRepairCycle,
   runPoolCatalogCycle, runPoolCatalogRepairCycle, runAdditionalPoolCatalogCycle,
   runAdditionalPoolCatalogRepairCycle, additionalPoolRawTablesReady } from '../envioSync/syncAll.js';
+import { ensurePonsSources } from '../envioSync/ensureSources.js';
+import { ensureEnvioReadIndexes, envioTablesPresent } from '../envioSync/ensureEnvioIndexes.js';
+import { indexedFromBlockFromEnv } from '../envioSync/envioDb.js';
 import { enrichMetadataSafely, resolveMetadataBatchLimit, startMetadataEnrichmentLoop } from '../launchpads/pons/metadataEnrichment.js';
 import { enrichPricesOnce, maintainRollingWindows, startPriceEnrichmentLoop } from '../market/quotePricing/priceEnrichment.js';
 import { quoteFeedRegistry } from '../market/quoteFeedRegistry.js';
@@ -88,8 +91,14 @@ if (syncTarget === 'staging') {
   // offline full-table reconciliation command — it is not called from this live loop for 'real'.
   // No RPC client is needed for ingestion itself (metadataClient still drives the separate extended/
   // core-metadata enrichment loops started above).
+  await ensurePonsSources(db, 4663, indexedFromBlockFromEnv());
+  // A fresh window starts the sync next to Envio's container, before Envio has created its tables: wait for them instead of failing every cycle.
+  if (!(await envioTablesPresent(envioPool).catch(() => false))) {
+    console.log('Waiting for Envio to create its tables...');
+    while (!stopping && !(await envioTablesPresent(envioPool).catch(() => false))) await interruptibleSleep(5_000);
+  }
   const tailIntervalMs = Number(process.env.ENVIO_TAIL_PASS_INTERVAL_MS ?? 250);
-  const limit = Number(process.env.ENVIO_INCREMENTAL_PAGE_LIMIT ?? 500);
+  const limit = Number(process.env.ENVIO_INCREMENTAL_PAGE_LIMIT ?? 5000);
   // Reorg repair compares a whole ~500-block window per stream — materially heavier than one bounded
   // tail page, so it runs far less often than every tick, not on every pass.
   const repairEveryTicks = Number(process.env.ENVIO_REPAIR_EVERY_TICKS ?? 30);
@@ -98,9 +107,14 @@ if (syncTarget === 'staging') {
   let failureStreak = 0;
   let tick = 0;
   let additionalPoolSourcesReady = false;
+  // Envio creates a raw table with its first event and does not build its declared indexes while catching up; see ensureEnvioIndexes.ts.
+  const ensureIndexes = () => ensureEnvioReadIndexes(envioPool)
+    .then((result) => { if (result.created.length) console.log('Envio read indexes created:', result.created); })
+    .catch((error) => console.error('Creating Envio read indexes failed (will retry):', error instanceof Error ? error.message : error));
   let lastIdleProgressAt = Date.now();
   while (!stopping) {
     const startedAt = new Date().toISOString();
+    if (tick % 20 === 0) await ensureIndexes();
     try {
       const { tail, history } = await runIncrementalCycle(envioPool, db, 4663, { limit, progressTable: tables.v1.progressTable });
       if (additionalPoolSourcesAllowed && tick % 30 === 0) {

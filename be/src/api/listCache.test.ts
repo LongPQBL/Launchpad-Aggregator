@@ -64,4 +64,18 @@ describe('withLaunchListCache', () => {
     await data.listLaunches({ limit: 50 });
     expect(listLaunches).toHaveBeenCalledTimes(2);
   });
+
+  it('shares a token\'s first page of transactions for two seconds, but never a paged request', async () => {
+    let time = 0;
+    const listTransactions = vi.fn(async () => ({ items: [], nextCursor: null }));
+    const cached = withLaunchListCache({ listTransactions } as never, new ApiEventBus(), 1_000, () => time);
+    const token = '0xAbC0000000000000000000000000000000000001';
+    await Promise.all([cached.listTransactions(4663, token, { limit: 50 }), cached.listTransactions(4663, token.toLowerCase(), { limit: 50 })]);
+    expect(listTransactions).toHaveBeenCalledTimes(1);
+    await cached.listTransactions(4663, token, { limit: 50, cursor: 'next' });
+    expect(listTransactions).toHaveBeenCalledTimes(2);
+    time += 2_500;
+    await cached.listTransactions(4663, token, { limit: 50 });
+    expect(listTransactions).toHaveBeenCalledTimes(3);
+  });
 });

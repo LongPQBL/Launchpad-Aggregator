@@ -4,9 +4,9 @@ import type { UsdPriceClient } from './usdPricing.js';
 
 const erc20Abi = parseAbi(['function totalSupply() view returns (uint256)']);
 
-export async function readTotalSupply(client: UsdPriceClient, tokenAddress: Address): Promise<bigint | null> {
+export async function readTotalSupply(client: UsdPriceClient, tokenAddress: Address, blockNumber?: bigint): Promise<bigint | null> {
   try {
-    const result = await client.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'totalSupply' });
+    const result = await client.readContract({ address: tokenAddress, abi: erc20Abi, functionName: 'totalSupply', ...(blockNumber === undefined ? {} : { blockNumber }) });
     return typeof result === 'bigint' ? result : null;
   } catch {
     return null;

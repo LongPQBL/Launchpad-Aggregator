@@ -1,3 +1,4 @@
+import { mapWithConcurrency } from '../indexer/concurrency.js';
 import type { Pool } from 'pg';
 import { parseAbi, type Address } from 'viem';
 import { and, eq } from 'drizzle-orm';
@@ -162,19 +163,34 @@ async function readDueTrades(pool: Pool, chainId: number, tokenAddress: string,
 
 // Fee and tax of a curve buy/sell come from Envio's raw row. A trade the WebSocket fast lane wrote has no such row until Envio reaches its
 // block, but the lane recorded the same event (fee and tax included) in fast_lane_rows, so it is priced at once instead of waiting.
-async function readFeeTax(pool: Pool, envioPool: Pool, table: string, chainId: number, txHash: string, logIndex: number):
-Promise<{ feeRaw: bigint; taxRaw: bigint } | null> {
-  const result = await envioPool.query(
-    `SELECT "feeRaw", "taxRaw" FROM ${table} WHERE "chainId" = $1 AND "txHash" = $2 AND "logIndex" = $3`,
-    [chainId, txHash, logIndex]);
-  const row = result.rows[0] as Record<string, unknown> | undefined;
-  if (row) return { feeRaw: BigInt(String(row.feeRaw)), taxRaw: BigInt(String(row.taxRaw)) };
+/**
+ * Fee and tax of many curve trades in one round trip per database (Envio's raw rows, then the fast lane's copy for any Envio does not have yet).
+ * Keys are `txHash:logIndex`, lowercase. A trade missing from both is simply absent from the map.
+ */
+async function readFeeTaxBatch(pool: Pool, envioPool: Pool, table: string, chainId: number,
+  trades: readonly { txHash: string; logIndex: number }[]): Promise<Map<string, { feeRaw: bigint; taxRaw: bigint }>> {
+  const found = new Map<string, { feeRaw: bigint; taxRaw: bigint }>();
+  if (trades.length === 0) return found;
+  const hashes = trades.map((trade) => trade.txHash);
+  const indexes = trades.map((trade) => trade.logIndex);
+  const envio = await envioPool.query(
+    `SELECT "txHash", "logIndex", "feeRaw", "taxRaw" FROM ${table}
+     WHERE "chainId" = $1 AND ("txHash", "logIndex") IN (SELECT * FROM unnest($2::text[], $3::int[]))`,
+    [chainId, hashes, indexes]);
+  for (const row of envio.rows as Record<string, unknown>[]) {
+    found.set(`${String(row.txHash).toLowerCase()}:${Number(row.logIndex)}`, { feeRaw: BigInt(String(row.feeRaw)), taxRaw: BigInt(String(row.taxRaw)) });
+  }
+  const missing = trades.filter((trade) => !found.has(`${trade.txHash.toLowerCase()}:${trade.logIndex}`));
+  if (missing.length === 0) return found;
   const lane = await pool.query(
-    `SELECT raw->>'feeRaw' AS fee, raw->>'taxRaw' AS tax FROM fast_lane_rows WHERE chain_id = $1 AND tx_hash = $2 AND log_index = $3`,
-    [chainId, txHash.toLowerCase(), logIndex]);
-  const laneRow = lane.rows[0] as { fee: string | null; tax: string | null } | undefined;
-  if (!laneRow || laneRow.fee === null || laneRow.tax === null) return null;
-  return { feeRaw: BigInt(laneRow.fee), taxRaw: BigInt(laneRow.tax) };
+    `SELECT tx_hash, log_index, raw->>'feeRaw' AS fee, raw->>'taxRaw' AS tax FROM fast_lane_rows
+     WHERE chain_id = $1 AND (tx_hash, log_index) IN (SELECT * FROM unnest($2::text[], $3::int[]))`,
+    [chainId, missing.map((trade) => trade.txHash.toLowerCase()), missing.map((trade) => trade.logIndex)]);
+  for (const row of lane.rows as { tx_hash: string; log_index: number; fee: string | null; tax: string | null }[]) {
+    if (row.fee === null || row.tax === null) continue;
+    found.set(`${row.tx_hash.toLowerCase()}:${Number(row.log_index)}`, { feeRaw: BigInt(row.fee), taxRaw: BigInt(row.tax) });
+  }
+  return found;
 }
 
 const curveStateAbi = parseAbi(['function quoteReserve() view returns (uint256)', 'function tokenReserve() view returns (uint256)',
@@ -224,6 +240,13 @@ async function assertReplayMatchesChain(client: UsdPriceClient, launch: DueLaunc
   }
 }
 
+async function readSweepBlock(pool: Pool, chainId: number, tokenAddress: string): Promise<bigint | null> {
+  const result = await pool.query(
+    `SELECT min(block_number) AS block FROM lifecycle_transitions WHERE chain_id = $1 AND token_address = $2 AND phase = 1`, [chainId, tokenAddress]);
+  const block = result.rows[0]?.block;
+  return block === null || block === undefined ? null : BigInt(String(block));
+}
+
 function priceFromReserves(reserves: CurveReserves, tokenDecimals: number, quoteAssetDecimals: number):
 { priceNumeratorRaw: string; priceDenominatorRaw: string } {
   return {
@@ -237,11 +260,12 @@ function priceFromReserves(reserves: CurveReserves, tokenDecimals: number, quote
 // checkpoint doesn't exist yet, because every V2 curve starts with the full supply and 0 quote
 // (verified live against an active and a graduated launch; see the 2026-10-06 plan).
 export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client: UsdPriceClient, limit: number,
-  now: Date, tables: CurvePricingTables = DEFAULT_TABLES): Promise<{ processed: number; pricedTrades: number; failed: number }> {
+  now: Date, tables: CurvePricingTables = DEFAULT_TABLES, concurrency = 1): Promise<{ processed: number; pricedTrades: number; failed: number }> {
   const due = await findDueLaunches(pool, limit, backedOffKeys(now.getTime()));
   let pricedTrades = 0;
   let failed = 0;
-  for (const launch of due) {
+  // Launches are independent (own trades, own checkpoint) and each one waits on several archive RPC reads, so they run side by side.
+  await mapWithConcurrency(due, Math.max(1, concurrency), async (launch) => {
     try {
       const checkpoint = await readCheckpoint(pool, launch.chainId, launch.tokenAddress);
       let reserves: CurveReserves;
@@ -251,19 +275,31 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
       if (checkpoint) {
         reserves = checkpoint.reserves; afterBlock = checkpoint.lastBlockNumber; afterLogIndex = checkpoint.lastLogIndex;
       } else {
-        const totalSupply = await readTotalSupply(client, launch.tokenAddress as `0x${string}`);
+        // The curve starts with the supply minted at launch. Reading the supply now would miss every token burned since (checked on 3 curves: the
+        // gap was exactly the burned 123,000 / 1,066,006 / 19,200,000 tokens), and the replay would never match the chain.
+        const totalSupply = await readTotalSupply(client, launch.tokenAddress as `0x${string}`, launch.launchBlock);
         if (totalSupply === null) throw new Error('totalSupply() unavailable');
         reserves = { quote: await readVirtualQuote(client, launch), token: totalSupply }; afterBlock = 0n; afterLogIndex = -1;
         fromScratch = true;
       }
       const dueTrades = await readDueTrades(pool, launch.chainId, launch.tokenAddress, afterBlock, afterLogIndex);
-      if (dueTrades.length === 0) continue;
+      if (dueTrades.length === 0) return;
       const updates: { txHash: string; logIndex: number; priceNumeratorRaw: string; priceDenominatorRaw: string }[] = [];
+      const feeTaxByTrade = await readFeeTaxBatch(pool, envioPool, tables.rawCurveTradeTable, launch.chainId,
+        dueTrades.filter((trade) => trade.sourceEvent !== 'BuybackLocked'));
+      // A sweep empties the curve in the block it happens, which can be the block of its last trade: the end-of-block state then no longer
+      // matches a replay of trades. Keep the reserves as they stood before that block and check the chain at the block before it instead.
+      const sweepBlock = fromScratch ? await readSweepBlock(pool, launch.chainId, launch.tokenAddress) : null;
+      let beforeSweep: CurveReserves | null = null;
+      let beforeSweepCaptured = false;
       for (const trade of dueTrades) {
+        if (sweepBlock !== null && !beforeSweepCaptured && trade.blockNumber >= sweepBlock) {
+          beforeSweep = reserves; beforeSweepCaptured = true;
+        }
         if (trade.sourceEvent === 'BuybackLocked') {
           reserves = replayCurveBuyback(reserves, { quoteSpentRaw: trade.quoteAmountRaw, tokensLockedRaw: trade.tokenAmountRaw });
         } else {
-          const feeTax = await readFeeTax(pool, envioPool, tables.rawCurveTradeTable, launch.chainId, trade.txHash, trade.logIndex);
+          const feeTax = feeTaxByTrade.get(`${trade.txHash.toLowerCase()}:${trade.logIndex}`);
           if (!feeTax) throw new Error(`Missing raw curve trade row for ${trade.txHash}:${trade.logIndex}`);
           reserves = replayCurveEvent(reserves, { side: trade.side as 'buy' | 'sell',
             quoteAmountRaw: trade.quoteAmountRaw, tokenAmountRaw: trade.tokenAmountRaw, ...feeTax });
@@ -272,16 +308,24 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
           ...priceFromReserves(reserves, launch.tokenDecimals, launch.quoteAssetDecimals) });
       }
       const last = dueTrades[dueTrades.length - 1]!;
-      if (fromScratch) await assertReplayMatchesChain(client, launch, reserves, last.blockNumber);
+      if (fromScratch) {
+        if (sweepBlock !== null && last.blockNumber >= sweepBlock) {
+          // Nothing to compare when the sweep is in the launch block itself (no earlier state exists).
+          if (sweepBlock - 1n >= launch.launchBlock) await assertReplayMatchesChain(client, launch, beforeSweep ?? reserves, sweepBlock - 1n);
+        } else {
+          await assertReplayMatchesChain(client, launch, reserves, last.blockNumber);
+        }
+      }
       const dbClient = await pool.connect();
       try {
         await dbClient.query('BEGIN');
-        for (const update of updates) {
-          await dbClient.query(
-            `UPDATE trades SET price_numerator_raw = $1, price_denominator_raw = $2
-             WHERE chain_id = $3 AND tx_hash = $4 AND log_index = $5`,
-            [update.priceNumeratorRaw, update.priceDenominatorRaw, launch.chainId, update.txHash, update.logIndex]);
-        }
+        // One statement for every price of the replay (it used to be one round trip per trade).
+        await dbClient.query(
+          `UPDATE trades t SET price_numerator_raw = u.numerator, price_denominator_raw = u.denominator
+           FROM unnest($2::text[], $3::int[], $4::text[], $5::text[]) AS u(tx_hash, log_index, numerator, denominator)
+           WHERE t.chain_id = $1 AND t.tx_hash = u.tx_hash AND t.log_index = u.log_index`,
+          [launch.chainId, updates.map((update) => update.txHash), updates.map((update) => update.logIndex),
+            updates.map((update) => update.priceNumeratorRaw), updates.map((update) => update.priceDenominatorRaw)]);
         // A trade inserted below the replay's last one while it ran (the lane can write a later trade before an earlier one exists) has no
         // price here: the reserves just computed are then wrong, so keep no checkpoint and let the next tick replay from the start.
         const missed = await dbClient.query(
@@ -293,7 +337,7 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
         if (missed.rows.length > 0) {
           await dbClient.query(`DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2`, [launch.chainId, launch.tokenAddress]);
           await dbClient.query('COMMIT');
-          continue;
+          return;
         }
         await dbClient.query(
           `INSERT INTO launch_curve_reserves (chain_id, token_address, quote_reserve_raw, token_reserve_raw, last_block_number, last_log_index, updated_at)
@@ -324,6 +368,6 @@ export async function applyCurvePricingOnce(pool: Pool, envioPool: Pool, client:
       recordFailure(launchKeyOf(launch.chainId, launch.tokenAddress), now.getTime());
       console.error(`Curve pricing failed for ${launch.chainId}:${launch.tokenAddress}:`, error instanceof Error ? error.message : error);
     }
-  }
+  });
   return { processed: due.length, pricedTrades, failed };
 }

@@ -4,9 +4,9 @@ import { refreshLaunchStatsOnce } from '../api/launchStatsWorker.js';
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
-const batchLimit = Number(process.env.LAUNCH_STATS_BATCH_LIMIT ?? 25);
-const tickMs = Number(process.env.LAUNCH_STATS_TICK_MS ?? 30_000);
-const concurrency = Number(process.env.LAUNCH_STATS_CONCURRENCY ?? 1);
+const batchLimit = Number(process.env.LAUNCH_STATS_BATCH_LIMIT ?? 400);
+const tickMs = Number(process.env.LAUNCH_STATS_TICK_MS ?? 10_000);
+const concurrency = Number(process.env.LAUNCH_STATS_CONCURRENCY ?? 8);
 const pool = new Pool({ connectionString: databaseUrl, max: concurrency + 1 });
 const client = createRobinhoodPublicClient(process.env.RH_HTTP_RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com');
 let stopping = false;

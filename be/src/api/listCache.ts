@@ -5,6 +5,7 @@ type Data = ApiDeps['data'];
 
 const MAX_ENTRIES = 64;
 const MIN_RECOMPUTE_MS = 500;
+const TRANSACTIONS_TTL_MS = 2_000;
 
 /**
  * Many browsers refetch the same first page of the launch list right after one announced change. Sharing one computation among them
@@ -22,8 +23,22 @@ export function withLaunchListCache(data: Data, events?: ApiEventBus, ttlMs = 1_
     if (event.type !== 'launch.changed' && event.type !== 'coverage.changed') return;
     for (const [key, entry] of entries) if (now() - entry.at >= MIN_RECOMPUTE_MS) entries.delete(key);
   });
+  // A token's page shows its newest transactions and every open browser refetches them on each trade; the busiest tokens take seconds to compute (their
+  // pools' swaps are merged in), so the first page is shared for a couple of seconds. Paged requests are not cached.
+  const transactionEntries = new Map<string, { at: number; value: ReturnType<Data['listTransactions']> }>();
   return {
     ...data,
+    listTransactions(chainId, tokenAddress, query) {
+      if (query.cursor) return data.listTransactions(chainId, tokenAddress, query);
+      const key = JSON.stringify([chainId, tokenAddress.toLowerCase(), query]);
+      const hit = transactionEntries.get(key);
+      if (hit && now() - hit.at < TRANSACTIONS_TTL_MS) return hit.value;
+      const value = data.listTransactions(chainId, tokenAddress, query);
+      if (transactionEntries.size >= MAX_ENTRIES) transactionEntries.delete(transactionEntries.keys().next().value as string);
+      transactionEntries.set(key, { at: now(), value });
+      value.catch(() => { if (transactionEntries.get(key)?.value === value) transactionEntries.delete(key); });
+      return value;
+    },
     listLaunches(query) {
       if (query.cursor || query.search) return data.listLaunches(query);
       const key = JSON.stringify(query);

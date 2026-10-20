@@ -578,6 +578,8 @@ export const trades = pgTable('trades', {
   primaryKey({ columns: [table.chainId, table.txHash, table.logIndex] }),
   index('trades_token_block_idx').on(table.chainId, table.tokenAddress, table.blockNumber),
   index('trades_token_timestamp_idx').on(table.chainId, table.tokenAddress, table.timestamp),
+  // The first trade of a quote asset (stock-reference pricing asks for it per feed) used to scan every trade of the chain.
+  index('trades_quote_timestamp_idx').on(table.chainId, table.quoteAssetAddress, table.timestamp),
   index('trades_trader_idx').on(table.chainId, table.traderAddress),
   // Serves the global latest-trades feed (GET /v1/transactions): without it that page is a full
   // sort of the whole table (measured ~23s on 3.5M rows).

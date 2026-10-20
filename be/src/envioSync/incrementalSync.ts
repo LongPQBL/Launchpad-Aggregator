@@ -21,6 +21,7 @@ import { invalidateLaunchVolume } from '../market/launchVolume/store.js';
 import { launchKeysFromChanges } from '../market/launchVolume/invalidate.js';
 import { invalidateForCoverageChange } from '../market/launchVolume/oracleInvalidation.js';
 import { COVERAGE_HEAD_TOLERANCE_BLOCKS } from '../coverage/launchCoverageSql.js';
+import { indexedFromBlockFromEnv } from './envioDb.js';
 
 export const DEFAULT_STREAM_TABLES: Record<Stream, string> = {
   'v1-launch': 'envio."RawLaunch"',
@@ -82,6 +83,33 @@ async function lookupVenue(db: DbOrTx, chainId: number, kind: VenueKind, ref: st
   const [row] = await db.select().from(venues).where(and(eq(venues.chainId, chainId), eq(venues.kind, kind), eq(venues.ref, ref.toLowerCase())));
   return row ? toVenueFromRow(row) : null;
 }
+// A page of trades looks up the same few curves/pools and launches thousands of times, and every lookup is a network round trip to the
+// database (the dominant cost of a catch-up). Trade rows never change venues or launches, so inside a transaction that opened a scope
+// (applyEnvioPage / applyLiveRows) a hit is remembered; a miss is asked again, and outside a scope nothing is cached.
+interface PendingTrade { values: typeof trades.$inferInsert; dropsCheckpoint: boolean }
+interface TradeScope { venues: Map<string, Venue>; launches: Map<string, Launch>; pending: PendingTrade[] }
+const tradeScopes = new WeakMap<object, TradeScope>();
+function openTradeScope(tx: DbOrTx): void {
+  tradeScopes.set(tx, { venues: new Map(), launches: new Map(), pending: [] });
+}
+async function lookupTradeVenue(tx: DbOrTx, chainId: number, kind: VenueKind, ref: string): Promise<Venue | null> {
+  const scope = tradeScopes.get(tx);
+  const key = `${chainId}:${kind}:${ref.toLowerCase()}`;
+  const hit = scope?.venues.get(key);
+  if (hit) return hit;
+  const venue = await lookupVenue(tx, chainId, kind, ref);
+  if (venue && scope) scope.venues.set(key, venue);
+  return venue;
+}
+async function lookupTradeLaunch(tx: DbOrTx, chainId: number, tokenAddress: string): Promise<Launch | null> {
+  const scope = tradeScopes.get(tx);
+  const key = `${chainId}:${tokenAddress.toLowerCase()}`;
+  const hit = scope?.launches.get(key);
+  if (hit) return hit;
+  const launch = await lookupLaunch(tx, chainId, tokenAddress);
+  if (launch && scope) scope.launches.set(key, launch);
+  return launch;
+}
 async function lookupVenueByToken(db: DbOrTx, chainId: number, tokenAddress: string, kind: VenueKind): Promise<Venue | null> {
   const [row] = await db.select().from(venues)
     .where(and(eq(venues.chainId, chainId), eq(venues.tokenAddress, tokenAddress.toLowerCase()), eq(venues.kind, kind)));
@@ -135,10 +163,10 @@ async function applyV1Launch(
 // ---- v1-swap ----
 async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const poolAddress = str(raw.poolAddress).toLowerCase();
-  const venue = await lookupVenue(tx, chainId, 'v3_pool', poolAddress);
+  const venue = await lookupTradeVenue(tx, chainId, 'v3_pool', poolAddress);
   if (!venue) return 'unresolved';
   if (!venue.official) return 'skipped';
-  const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
+  const launch = await lookupTradeLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawSwapRow = {
     poolAddress: str(raw.poolAddress), amount0: num(raw.amount0), amount1: num(raw.amount1), sqrtPriceX96: num(raw.sqrtPriceX96),
@@ -155,15 +183,14 @@ async function applyV1Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
   // Only notify when the insert actually added a new row — the history lane keeps re-reading
   // ranges the tail lane (or an earlier cycle) already applied, so an unconditional push here would
   // fire a duplicate notification on every no-op replay (final review, Minor 11).
-  const inserted = await tx.insert(trades).values({
+  await insertTrade(tx, {
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(),
     activityKind: trade.activityKind, quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent,
     sourceLogId: null, priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null,
     priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
+  }, false, changes);
   return 'applied';
 }
 
@@ -217,12 +244,54 @@ async function dropCurveCheckpointPassedBy(tx: DbOrTx, trade: { chainId: number;
     sql`(${launchCurveReserves.lastBlockNumber}, ${launchCurveReserves.lastLogIndex}) > (${trade.blockNumber.toString()}::bigint, ${trade.logIndex})`));
 }
 
+/**
+ * Writes a trade, or — inside a page/live-batch scope — queues it for `flushPendingTrades`, which inserts the whole page in a few statements
+ * instead of one round trip per row. Either way a new row announces `trade.created`, and (curve/buyback) drops a checkpoint it passed.
+ */
+async function insertTrade(tx: DbOrTx, values: typeof trades.$inferInsert, dropsCheckpoint: boolean, changes: ChangeNotification[]): Promise<void> {
+  const scope = tradeScopes.get(tx);
+  if (scope) { scope.pending.push({ values, dropsCheckpoint }); return; }
+  const inserted = await tx.insert(trades).values(values).onConflictDoNothing().returning({ txHash: trades.txHash });
+  if (inserted.length === 0) return;
+  if (dropsCheckpoint) await dropCurveCheckpointPassedBy(tx, { chainId: values.chainId, tokenAddress: values.tokenAddress,
+    blockNumber: BigInt(String(values.blockNumber)), logIndex: values.logIndex });
+  changes.push({ kind: 'trade.created', chainId: values.chainId, tokenAddress: values.tokenAddress, blockTimestamp: values.timestamp });
+}
+
+const TRADE_INSERT_CHUNK = 1500; // 17 columns each, far under PostgreSQL's 65,535 bind parameters
+
+async function flushPendingTrades(tx: DbOrTx, changes: ChangeNotification[]): Promise<void> {
+  const scope = tradeScopes.get(tx);
+  if (!scope || scope.pending.length === 0) return;
+  const pending = scope.pending.splice(0);
+  const keyOf = (v: { chainId: number; txHash: string; logIndex: number }) => `${v.chainId}:${v.txHash}:${v.logIndex}`;
+  const insertedKeys = new Set<string>();
+  for (let start = 0; start < pending.length; start += TRADE_INSERT_CHUNK) {
+    const chunk = pending.slice(start, start + TRADE_INSERT_CHUNK);
+    const rows = await tx.insert(trades).values(chunk.map((entry) => entry.values)).onConflictDoNothing()
+      .returning({ chainId: trades.chainId, txHash: trades.txHash, logIndex: trades.logIndex });
+    for (const row of rows) insertedKeys.add(keyOf(row));
+  }
+  // Rows keep the order they were applied in, so announcements and the lowest passed position per token match the one-by-one path.
+  const lowest = new Map<string, { chainId: number; tokenAddress: string; blockNumber: bigint; logIndex: number }>();
+  for (const { values, dropsCheckpoint } of pending) {
+    if (!insertedKeys.has(keyOf(values))) continue;
+    changes.push({ kind: 'trade.created', chainId: values.chainId, tokenAddress: values.tokenAddress, blockTimestamp: values.timestamp });
+    if (!dropsCheckpoint) continue;
+    const position = { chainId: values.chainId, tokenAddress: values.tokenAddress, blockNumber: BigInt(String(values.blockNumber)), logIndex: values.logIndex };
+    const key = `${position.chainId}:${position.tokenAddress}`;
+    const known = lowest.get(key);
+    if (!known || position.blockNumber < known.blockNumber || (position.blockNumber === known.blockNumber && position.logIndex < known.logIndex)) lowest.set(key, position);
+  }
+  for (const position of lowest.values()) await dropCurveCheckpointPassedBy(tx, position);
+}
+
 // ---- v2-curve / v2-buyback ----
 async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const curveAddress = str(raw.curveAddress).toLowerCase();
-  const venue = await lookupVenue(tx, chainId, 'curve', curveAddress);
+  const venue = await lookupTradeVenue(tx, chainId, 'curve', curveAddress);
   if (!venue) return 'unresolved';
-  const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
+  const launch = await lookupTradeLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawCurveTradeRow = {
     curveAddress: str(raw.curveAddress), side: str(raw.side) as 'buy' | 'sell', tokenAmountRaw: num(raw.tokenAmountRaw),
@@ -231,22 +300,20 @@ async function applyV2Curve(tx: DbOrTx, chainId: number, raw: Record<string, unk
     timestamp: int(raw.timestamp),
   };
   const trade = hydrateCurveTradeFromDecoded(row, venue, launch);
-  const inserted = await tx.insert(trades).values({
+  await insertTrade(tx, {
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) await dropCurveCheckpointPassedBy(tx, trade);
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
+  }, true, changes);
   return 'applied';
 }
 async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const curveAddress = str(raw.curveAddress).toLowerCase();
-  const venue = await lookupVenue(tx, chainId, 'curve', curveAddress);
+  const venue = await lookupTradeVenue(tx, chainId, 'curve', curveAddress);
   if (!venue) return 'unresolved';
-  const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
+  const launch = await lookupTradeLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawCurveBuybackRow = {
     curveAddress: str(raw.curveAddress), quoteSpentRaw: num(raw.quoteSpentRaw), tokensLockedRaw: num(raw.tokensLockedRaw),
@@ -254,15 +321,13 @@ async function applyV2Buyback(tx: DbOrTx, chainId: number, raw: Record<string, u
     logIndex: int(raw.logIndex), timestamp: int(raw.timestamp),
   };
   const trade = hydrateCurveBuybackFromDecoded(row, venue, launch);
-  const inserted = await tx.insert(trades).values({
+  await insertTrade(tx, {
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: null, priceDenominatorRaw: null, traderAddress: trade.traderAddress,
-  }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) await dropCurveCheckpointPassedBy(tx, trade);
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
+  }, true, changes);
   return 'applied';
 }
 
@@ -362,13 +427,13 @@ async function applyV4Initialize(tx: DbOrTx, chainId: number, raw: Record<string
 // ---- v4-swap ----
 async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unknown>, changes: ChangeNotification[]): Promise<ApplyOutcome> {
   const poolId = str(raw.poolId).toLowerCase();
-  const venue = await lookupVenue(tx, chainId, 'v4_pool', poolId);
+  const venue = await lookupTradeVenue(tx, chainId, 'v4_pool', poolId);
   if (!venue) {
     const settled = await upstreamConfirmedPast(tx, chainId, 'v4-initialize', num(raw.blockNumber));
     return settled ? 'skipped' : 'unresolved'; // not a Pons-graduated pool, or its v4-initialize just hasn't caught up yet
   }
   if (!venue.official) return 'skipped';
-  const launch = await lookupLaunch(tx, chainId, venue.tokenAddress);
+  const launch = await lookupTradeLaunch(tx, chainId, venue.tokenAddress);
   if (!launch) return 'unresolved';
   const row: EnvioRawV4SwapRow = {
     poolId: str(raw.poolId), sender: str(raw.sender), txFrom: str(raw.txFrom), amount0: num(raw.amount0), amount1: num(raw.amount1),
@@ -382,15 +447,14 @@ async function applyV4Swap(tx: DbOrTx, chainId: number, raw: Record<string, unkn
     throw new Error(`Failed to apply V4 swap at tx ${row.txHash} log ${row.logIndex}: ${(error as Error).message}`, { cause: error });
   }
   if (!trade) return 'applied';
-  const inserted = await tx.insert(trades).values({
+  await insertTrade(tx, {
     chainId: trade.chainId, tokenAddress: trade.tokenAddress, venueId: trade.venueId, blockNumber: trade.blockNumber,
     blockHash: trade.blockHash, txHash: trade.txHash, logIndex: trade.logIndex, timestamp: trade.timestamp, side: trade.side,
     tokenAmountRaw: trade.tokenAmountRaw.toString(), quoteAmountRaw: trade.quoteAmountRaw.toString(), activityKind: trade.activityKind,
     quoteAssetAddress: trade.quoteAssetAddress, sourceEvent: trade.sourceEvent, sourceLogId: null,
     priceNumeratorRaw: trade.priceNumeratorRaw?.toString() ?? null, priceDenominatorRaw: trade.priceDenominatorRaw?.toString() ?? null,
     traderAddress: trade.traderAddress,
-  }).onConflictDoNothing().returning({ txHash: trades.txHash });
-  if (inserted.length > 0) changes.push({ kind: 'trade.created', chainId, tokenAddress: trade.tokenAddress, blockTimestamp: trade.timestamp });
+  }, false, changes);
   return 'applied';
 }
 
@@ -432,6 +496,7 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
   let applied = 0;
   let unresolved = 0;
   await appDb.transaction(async (tx) => {
+    openTradeScope(tx);
     for (const raw of page.rows) {
       const outcome = await applyRow(tx, input.chainId, input.stream, raw, newQuoteAssets, changes);
       if (outcome === 'applied') applied += 1;
@@ -451,6 +516,7 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
     const confirmedBlock = pageFull && page.lastPosition
       ? (page.lastPosition.blockNumber > 0n ? page.lastPosition.blockNumber - 1n : 0n)
       : input.fence;
+    await flushPendingTrades(tx, changes);
     await advanceSyncCursor(tx, key, page.lastPosition ?? effectiveAfter, confirmedBlock);
     await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), new Date());
     // Inside the same transaction so delivery to a LISTEN-ing session only happens after commit.
@@ -464,10 +530,17 @@ export async function applyEnvioPage(envioPool: Pool, appDb: Database, input: Ap
   return { applied, unresolved, cursor: next };
 }
 
+export function isBeforeIndexedWindow(blockNumber: unknown, indexedFrom: bigint | null = indexedFromBlockFromEnv()): boolean {
+  return indexedFrom !== null && BigInt(String(blockNumber)) < indexedFrom;
+}
+
 async function applyRow(
   tx: DbOrTx, chainId: number, stream: Stream, raw: Record<string, unknown>,
   newQuoteAssets: QuoteAssetToEnqueue[], changes: ChangeNotification[],
 ): Promise<ApplyOutcome> {
+  // Only launches created from the indexed window's first block on belong in this database. Envio's handlers already withhold the rest;
+  // this keeps the rule true when the app is pointed at an Envio database that holds older rows.
+  if ((stream === 'v1-launch' || stream === 'v2-launch') && isBeforeIndexedWindow(raw.blockNumber)) return 'skipped';
   switch (stream) {
     case 'v1-launch': return applyV1Launch(tx, chainId, raw, newQuoteAssets, changes);
     case 'v1-swap': return applyV1Swap(tx, chainId, raw, changes);
@@ -495,7 +568,9 @@ export async function applyLiveRows(appDb: Database, chainId: number, entries: r
   const newQuoteAssets: QuoteAssetToEnqueue[] = [];
   const outcomes: ApplyOutcome[] = [];
   await appDb.transaction(async (tx) => {
+    openTradeScope(tx);
     for (const entry of entries) outcomes.push(await applyRow(tx, chainId, entry.stream, entry.raw, newQuoteAssets, changes));
+    await flushPendingTrades(tx, changes);
     await invalidateLaunchVolume(tx, launchKeysFromChanges(changes), new Date());
     await notifyChanged(tx, changes.map((change) => ({ ...change, via: 'fast' as const })));
   });

@@ -5,7 +5,7 @@ import { getPonsFactorySources } from '../launchpads/pons/sourceRegistry.js';
 import { readLaunchParityCoverage } from '../coverage/repairRanges.js';
 import { launchCoverageSql, SAFE_HEAD_SQL } from '../coverage/launchCoverageSql.js';
 import { formatRational } from '../market/price.js';
-import { buildOfficialCandles, compute52WeekHighLow, computePriceChange } from '../market/aggregate.js';
+import { buildOfficialCandles, computePriceChange } from '../market/aggregate.js';
 import { read52WeekHighLowFromCandles, read52WeekHighLowUsd } from '../market/candleStats.js';
 import { readUsdPrice, type UsdPriceClient } from '../market/usdPricing.js';
 import { resolveVerifiedFeed } from '../market/quotePricing/feedRegistry.js';
@@ -212,49 +212,43 @@ export async function computeStats(pool: Pool, rpcClient: UsdPriceClient | undef
     const cacheReady = (await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1')).rows[0]?.backfill_complete === true;
     let high: string | null;
     let low: string | null;
-    let pricedTrades: { timestamp: number; price: string }[];
+    // A price change needs four prices, not the day's trades (26,000 rows for the busiest token, read on every recompute): the latest, the latest at or before an
+    // hour ago, the last one before the day began (the baseline of the 1D change) and the first one inside the day (what a venue younger than the window is
+    // measured from). computePriceChange picks among them exactly as it did from the whole list.
+    const since1d = nowSeconds - 86_400;
+    const floor52w = nowSeconds - 52 * 7 * 86_400;
+    const pricedPoint = (condition: string, order: 'ASC' | 'DESC', args: unknown[]) => pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
+        FROM trades t JOIN venues v ON v.id = t.venue_id
+        WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND ${condition}
+          AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
+        ORDER BY t.timestamp ${order}, t.block_number ${order}, t.log_index ${order} LIMIT 1`,
+    [number(row.chain_id), string(row.token_address), ...args]);
+    const [baseline, firstInDay, atHourAgo, latestPriced] = await Promise.all([
+      pricedPoint('t.timestamp < $3 AND t.timestamp >= $4', 'DESC', [since1d, floor52w]),
+      pricedPoint('t.timestamp >= $3 AND t.timestamp <= $4', 'ASC', [since1d, nowSeconds]),
+      pricedPoint('t.timestamp <= $3 AND t.timestamp >= $4', 'DESC', [nowSeconds - 3_600, floor52w]),
+      pricedPoint('t.timestamp <= $3 AND t.timestamp >= $4', 'DESC', [nowSeconds, floor52w]),
+    ]);
+    const formatTradePrice = (r: Row) => formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18);
+    const pricedTrades = [...new Map([...baseline.rows, ...firstInDay.rows, ...atHourAgo.rows, ...latestPriced.rows]
+      .map((r: Row) => ({ timestamp: number(r.timestamp), price: formatTradePrice(r) }))
+      .map((point) => [`${point.timestamp}:${point.price}`, point] as const)).values()];
     if (cacheReady) {
       const extrema = await read52WeekHighLowFromCandles(pool, number(row.chain_id), string(row.token_address), nowSeconds);
       high = extrema.complete ? extrema.high : null;
       low = extrema.complete ? extrema.low : null;
-      // Price changes need only the past day plus the last priced trade before its boundary.
-      // This keeps a 52-week trade scan out of the cached path.
-      const since1d = nowSeconds - 86_400;
-      const [baseline, recent] = await Promise.all([
-        pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
-          FROM trades t JOIN venues v ON v.id = t.venue_id
-          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-            AND t.timestamp < $3 AND t.timestamp >= $4
-            AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
-          ORDER BY t.block_number DESC, t.log_index DESC LIMIT 1`,
-        [number(row.chain_id), string(row.token_address), since1d, nowSeconds - 52 * 7 * 86_400]),
-        pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
-          FROM trades t JOIN venues v ON v.id = t.venue_id
-          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-            AND t.timestamp >= $3 AND t.timestamp <= $4
-            AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
-          ORDER BY t.block_number, t.log_index`,
-        [number(row.chain_id), string(row.token_address), since1d, nowSeconds]),
-      ]);
-      pricedTrades = [...baseline.rows, ...recent.rows].map((r: Row) => ({
-        timestamp: number(r.timestamp),
-        price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
-      }));
     } else {
-      // Until the historical candle backfill finishes, preserve the existing trade-based result.
-      const since = nowSeconds - 52 * 7 * 86_400;
-      const highLowResult = await pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw, t.timestamp
+      // Until the historical candle backfill has run (a fresh database never runs it: it costs hours), the extremes are the single highest and lowest
+      // priced trade of the 52 weeks, found by the database; reading every trade of a busy launch into memory took 8 s per launch.
+      const extremeTrade = (direction: 'DESC' | 'ASC') => pool.query(`SELECT t.price_numerator_raw, t.price_denominator_raw
         FROM trades t JOIN venues v ON v.id = t.venue_id
         WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true AND t.timestamp >= $3
           AND t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL
-        ORDER BY t.block_number, t.log_index`, [number(row.chain_id), string(row.token_address), since]);
-      // Format once and reuse for both high/low and 1h/1d change — this branch used to format
-      // every row twice (once into `prices`, once into `pricedTrades`).
-      pricedTrades = (highLowResult.rows as Row[]).map((r) => ({
-        timestamp: number(r.timestamp),
-        price: formatRational(BigInt(string(r.price_numerator_raw)), BigInt(string(r.price_denominator_raw)), 18),
-      }));
-      ({ high, low } = compute52WeekHighLow(pricedTrades.map((t) => ({ high: t.price, low: t.price }))));
+        ORDER BY t.price_numerator_raw::float8 / NULLIF(t.price_denominator_raw::float8, 0) ${direction} NULLS LAST LIMIT 1`,
+      [number(row.chain_id), string(row.token_address), nowSeconds - 52 * 7 * 86_400]);
+      const [highRow, lowRow] = await Promise.all([extremeTrade('DESC'), extremeTrade('ASC')]);
+      high = highRow.rows[0] ? formatTradePrice(highRow.rows[0] as Row) : null;
+      low = lowRow.rows[0] ? formatTradePrice(lowRow.rows[0] as Row) : null;
     }
     const launchTimestamp = nullableNumber(row.launch_timestamp);
     let change1h = computePriceChange(pricedTrades, nowSeconds, 3600, launchTimestamp);
@@ -288,7 +282,10 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
   const launchHistoryMemo = intervalTtlMemo(
     async (_key: string, arg: { chainId: number; tokenAddress: string; window: { intervalSeconds: number; buckets: number; venueKind?: string } }) => {
       const head = await safeHead();
-      const launch = (await pool.query(`SELECT ${launchCoverageSql(3)} AS launch_coverage_complete
+      // A volume/TVL chart is a record of trades: it needs the official venues' trade streams covered (Envio up to the point the fast lane took over,
+      // then the lane), not the factory or lifecycle source. Those two only matter for a launch that graduated inside Envio's lag, and waiting on them
+      // left every trade-free bucket "unavailable" for as long as Envio trailed the head. Other pools' own coverage is still checked per pool.
+      const launch = (await pool.query(`SELECT ${launchCoverageSql(3, { tradesOnly: true })} AS launch_coverage_complete
         FROM launches l WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
       [arg.chainId, arg.tokenAddress.toLowerCase(), head?.toString() ?? null])).rows[0] as Row | undefined;
       if (!launch) return null;
@@ -465,9 +462,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
           l.v4_pool_fee, l.v4_tick_spacing, l.logo_uri, l.website_url, l.twitter_url, l.launch_timestamp,
           s.status AS source_status, l.launch_block AS block_number,
           l.launch_tx_hash AS tx_hash, l.launch_log_index AS log_index,
-          (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
-           WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
-             AND t.timestamp >= $6) AS official_volume_raw,
+          (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t
+           WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND t.timestamp >= $6
+             AND t.venue_id IN (SELECT v.id FROM venues v WHERE v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true)) AS official_volume_raw,
           vr.volume_usd::text AS launch_volume_usd, vr.rank_category AS launch_volume_rank_category,
           vr.window_end AS launch_volume_window_end,
           ${launchCoverageSql(9)} AS launch_coverage_complete
@@ -508,9 +505,9 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       const head = await safeHead();
       const since = Math.floor(Date.now() / 1000) - 86_400;
       const result = await pool.query(`SELECT l.*, s.status AS source_status,
-        (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t JOIN venues v ON v.id = t.venue_id
-         WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND v.official = true
-           AND t.timestamp >= $3) AS official_volume_raw,
+        (SELECT COALESCE(sum(t.quote_amount_raw), 0)::text FROM trades t
+         WHERE t.chain_id = l.chain_id AND t.token_address = l.token_address AND t.timestamp >= $3
+           AND t.venue_id IN (SELECT v.id FROM venues v WHERE v.chain_id = l.chain_id AND v.token_address = l.token_address AND v.official = true)) AS official_volume_raw,
         ${launchCoverageSql(4)} AS launch_coverage_complete
         FROM launches l JOIN sources s ON s.id = l.source_id
         WHERE l.chain_id = $1 AND l.token_address = $2 LIMIT 1`,
@@ -634,20 +631,28 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         -- a token at the same address on another chain could pull that chain's pool swaps into
         -- this launch's feed (final-review Important 1).
         pool_page AS (
+          -- Per pool, only its newest $6 swaps are read (an index walk from its latest block), then the pools are merged: a token held by 167 pools used to
+          -- read and sort every swap of all of them (25,000 rows) to return one page.
           SELECT 'pool' AS source, NULL::text AS venue_id, pt.protocol, pt.pool_id,
             pc.currency0, pc.currency1,
             pt.tx_hash, pt.log_index, pt.block_number, pt.timestamp, NULL::text AS side, NULL::text AS activity_kind,
             pt.amount0_raw AS amount_a_raw, pt.amount1_raw AS amount_b_raw, pt.trader_address,
             NULL::text AS quote_asset_address, NULL::integer AS quote_asset_decimals
-          FROM pool_trades pt
-          JOIN pool_catalog pc ON pc.chain_id = pt.chain_id AND pc.protocol = pt.protocol AND pc.pool_id = pt.pool_id
-          WHERE pt.chain_id = $1 AND pc.verified = true
+          FROM pool_catalog pc
+          CROSS JOIN LATERAL (
+            SELECT p.* FROM pool_trades p
+            WHERE p.chain_id = pc.chain_id AND p.protocol = pc.protocol AND p.pool_id = pc.pool_id
+              AND ($3::bigint IS NULL OR (p.block_number, p.tx_hash, p.log_index) < ($3::bigint, $4::text, $5::integer))
+            ORDER BY p.block_number DESC, p.tx_hash DESC, p.log_index DESC
+            LIMIT $6
+          ) pt
+          -- pc.chain_id = $1 is required (a token at the same address on another chain must not pull that chain's pool swaps into this feed).
+          WHERE pc.chain_id = $1 AND pc.verified = true
             AND $7::text IS NULL
             AND EXISTS (SELECT 1 FROM pool_members m WHERE m.chain_id = pc.chain_id AND m.protocol = pc.protocol
               AND m.pool_id = pc.pool_id AND m.token_address = $2)
             AND NOT EXISTS (SELECT 1 FROM venues ov WHERE ov.chain_id = pc.chain_id
               AND ov.kind IN ('v4_pool','v3_pool') AND ov.ref = pc.pool_id AND ov.official = true)
-            AND ($3::bigint IS NULL OR (pt.block_number, pt.tx_hash, pt.log_index) < ($3::bigint, $4::text, $5::integer))
           ORDER BY pt.block_number DESC, pt.tx_hash DESC, pt.log_index DESC
           LIMIT $6
         )
@@ -962,14 +967,40 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
       const end = before ?? Math.floor(Date.now() / 1000) + 1;
       const start = Math.floor((end - 1) / intervalSeconds) * intervalSeconds - 499 * intervalSeconds;
       const cacheState = await pool.query('SELECT backfill_complete FROM candle_cache_state WHERE id = 1');
-      const directCandles = async (bucketStarts?: readonly number[]): Promise<{ items: CandleResponse[]; allPriced: boolean }> => {
-        const result = bucketStarts === undefined
-          ? await pool.query(`SELECT t.* FROM trades t JOIN venues v ON v.id = t.venue_id
-            WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
-              AND ($5::text IS NULL OR v.kind = $5)
-              AND t.timestamp >= $3 AND t.timestamp < $4
-            ORDER BY t.block_number, t.log_index`, [chainId, tokenAddress.toLowerCase(), start, end, venueKind ?? null])
-          : await pool.query(`SELECT t.* FROM unnest($3::bigint[]) AS b(bucket_start)
+      // The whole window, aggregated by the database: one row per candle instead of every trade of the window (a token with 90,000 trades took 49 s to
+      // load its 1D candles by reading each one into memory). Same rules as buildOfficialCandles: a bucket holding any unpriced trade is left out, open and
+      // close are the first and last trade by (block, log), high and low the highest and lowest price (the earliest trade wins a tie; prices are ordered as
+      // doubles, which halves the cost and cannot change a price shown to 18 decimals).
+      const aggregatedCandles = async (): Promise<{ items: CandleResponse[]; allPriced: boolean }> => {
+        const result = await pool.query(`SELECT (t.timestamp / $3::bigint) * $3::bigint AS bucket_start,
+            bool_or(t.price_numerator_raw IS NULL OR t.price_denominator_raw IS NULL) AS any_unpriced,
+            (array_agg(t.price_numerator_raw || '/' || t.price_denominator_raw ORDER BY t.block_number, t.log_index)
+              FILTER (WHERE t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL))[1] AS open_price,
+            (array_agg(t.price_numerator_raw || '/' || t.price_denominator_raw ORDER BY t.block_number DESC, t.log_index DESC)
+              FILTER (WHERE t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL))[1] AS close_price,
+            (array_agg(t.price_numerator_raw || '/' || t.price_denominator_raw
+              ORDER BY t.price_numerator_raw::float8 / NULLIF(t.price_denominator_raw::float8, 0) DESC NULLS LAST, t.block_number, t.log_index)
+              FILTER (WHERE t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL))[1] AS high_price,
+            (array_agg(t.price_numerator_raw || '/' || t.price_denominator_raw
+              ORDER BY t.price_numerator_raw::float8 / NULLIF(t.price_denominator_raw::float8, 0) ASC NULLS LAST, t.block_number, t.log_index)
+              FILTER (WHERE t.price_numerator_raw IS NOT NULL AND t.price_denominator_raw IS NOT NULL))[1] AS low_price,
+            sum(t.quote_amount_raw::numeric)::text AS quote_volume_raw
+          FROM trades t JOIN venues v ON v.id = t.venue_id
+          WHERE t.chain_id = $1 AND t.token_address = $2 AND v.official = true
+            AND ($6::text IS NULL OR v.kind = $6)
+            AND t.timestamp >= $4 AND t.timestamp < $5
+          GROUP BY 1 ORDER BY 1`, [chainId, tokenAddress.toLowerCase(), intervalSeconds, start, end, venueKind ?? null]);
+        const rational = (value: string) => { const [numerator, denominator] = value.split('/'); return formatRational(BigInt(numerator!), BigInt(denominator!), 18); };
+        const rows = result.rows as Row[];
+        const items = rows.filter((row) => !row.any_unpriced).map((row) => ({
+          intervalSeconds, bucketStart: number(row.bucket_start),
+          open: rational(string(row.open_price)), high: rational(string(row.high_price)), low: rational(string(row.low_price)), close: rational(string(row.close_price)),
+          quoteVolume: formatUnits(BigInt(string(row.quote_volume_raw)), number(launch.quote_asset_decimals)),
+        }));
+        return { items, allPriced: !rows.some((row) => row.any_unpriced) };
+      };
+      const directCandles = async (bucketStarts: readonly number[]): Promise<{ items: CandleResponse[]; allPriced: boolean }> => {
+        const result = await pool.query(`SELECT t.* FROM unnest($3::bigint[]) AS b(bucket_start)
             JOIN trades t ON t.chain_id = $1 AND t.token_address = $2
               AND t.timestamp >= b.bucket_start AND t.timestamp < b.bucket_start + $4
             JOIN venues v ON v.id = t.venue_id AND v.official = true
@@ -1027,7 +1058,7 @@ export function createApiStore(pool: Pool, rpcClient?: UsdPriceClient, events?: 
         return { complete: Boolean(launch.launch_coverage_complete) && !state.dirty && !state.unpriced,
           items: [...byBucket.values()].sort((a, b) => b.bucketStart - a.bucketStart).slice(0, 500) };
       }
-      const candles = await directCandles();
+      const candles = await aggregatedCandles();
       return { complete: Boolean(launch.launch_coverage_complete) && candles.allPriced,
         items: candles.items.reverse() };
     },

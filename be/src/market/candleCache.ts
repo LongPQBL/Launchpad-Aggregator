@@ -113,8 +113,12 @@ async function rebuildInterval(client: PoolClient, dirty: readonly DirtyBucket[]
       candle.open, candle.high, candle.low, candle.close, candle.quoteVolumeRaw.toString());
     return `(${Array.from({ length: 9 }, (_, i) => `$${start + i + 1}`).join(',')})`;
   }).join(',');
+  // Two rebuilders (the candle worker and a backfill) can each hold a different minute of the same 5m/1h/1d bucket; both rebuild that bucket from
+  // its trades, so whichever writes last simply replaces the row instead of failing on the primary key.
   await client.query(`INSERT INTO candles (chain_id, token_address, interval_seconds, bucket_start,
-    open, high, low, close, quote_volume_raw) VALUES ${insertValues}`, insertParams);
+    open, high, low, close, quote_volume_raw) VALUES ${insertValues}
+    ON CONFLICT (chain_id, token_address, interval_seconds, bucket_start) DO UPDATE SET
+      open = EXCLUDED.open, high = EXCLUDED.high, low = EXCLUDED.low, close = EXCLUDED.close, quote_volume_raw = EXCLUDED.quote_volume_raw`, insertParams);
 }
 
 /** Rebuild at most `limit` distinct minute buckets atomically; safe to retry after any crash. */

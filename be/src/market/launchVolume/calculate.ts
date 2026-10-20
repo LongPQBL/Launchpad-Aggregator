@@ -17,6 +17,16 @@ export async function calculateLaunchVolume(pool: Pool, key: LaunchKey, windowEn
   const launch = launchResult.rows[0];
   if (!launch) throw new Error(`launch ${key.chainId}:${key.tokenAddress} not found`);
 
+  // An incomplete launch is never published, so the worker discards this score: skip reading its day of trades and joining each to an
+  // oracle round (the heaviest query of the worker, repeated every 30 s for every launch while the sync is still catching up).
+  if (launch.complete !== true) {
+    return {
+      volumeUsd: null, rankCategory: 'null', computedAt: new Date(), windowEnd, nextExpiryAt: null,
+      completenessReason: 'incomplete_coverage', launchBlock: BigInt(launch.launch_block),
+      launchTxHash: launch.launch_tx_hash, launchLogIndex: launch.launch_log_index,
+    };
+  }
+
   const tradesResult = await pool.query(`
     SELECT l.quote_asset_decimals, t.quote_amount_raw, t.timestamp, f.feed_address,
       r.answer_raw, r.decimals AS price_decimals, r.updated_at AS price_updated_at

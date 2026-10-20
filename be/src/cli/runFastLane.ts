@@ -26,9 +26,11 @@ installFatalErrorHandlers(process);
 
 const RECONCILE_EVERY_MS = 60_000;
 const WATCHDOG_EVERY_MS = 60_000;
+// Envio's metrics page takes 1-2 s to render while the indexer is busy (about 4,000 watched pool addresses); 3 s timed out on most samples.
+const ENVIO_METRICS_TIMEOUT_MS = Number(process.env.FAST_LANE_METRICS_TIMEOUT_MS ?? 8_000);
 const stamp = () => new Date().toISOString();
 async function readEnvioRealtimeBufferBlock(metricsUrl: string, chainId: number): Promise<bigint | null> {
-  const response = await fetch(metricsUrl, { signal: AbortSignal.timeout(3_000) });
+  const response = await fetch(metricsUrl, { signal: AbortSignal.timeout(ENVIO_METRICS_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Envio metrics returned HTTP ${response.status}`);
   const metrics = await response.text();
   const escapedChainId = String(chainId).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -100,6 +102,7 @@ try {
     const sampleMs = Number(process.env.FAST_LANE_AFTER_CATCHUP_SAMPLE_MS ?? 10_000);
     const envioMetricsUrl = process.env.ENVIO_METRICS_URL ?? 'http://127.0.0.1:9898/metrics';
     let sampling = false;
+    let lastSampleWarningAt = 0;
     timers.push(setInterval(() => {
       if (running || sampling) return;
       sampling = true;
@@ -117,7 +120,11 @@ try {
             await startLane();
           }
         } catch (error) {
-          console.error(stamp(), `fast lane catch-up sample failed: ${redactError(error)}`);
+          // Envio's metrics port is closed for the first minutes of a fresh window and slow while it catches up: say so once a minute, not every sample.
+          if (Date.now() - lastSampleWarningAt >= 60_000) {
+            lastSampleWarningAt = Date.now();
+            console.error(stamp(), `fast lane catch-up sample failed (retrying every ${sampleMs / 1000}s): ${redactError(error)}`);
+          }
         } finally {
           sampling = false;
         }

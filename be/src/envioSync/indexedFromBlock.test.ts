@@ -13,3 +13,12 @@ describe('indexedFromBlockFromEnv', () => {
     expect(() => indexedFromBlockFromEnv({ ENVIO_INDEXED_FROM_BLOCK: '8.8e7' })).toThrow('block number');
   });
 });
+
+describe('isBeforeIndexedWindow', () => {
+  it('drops only launches older than the window start', async () => {
+    const { isBeforeIndexedWindow } = await import('./incrementalSync.js');
+    expect(isBeforeIndexedWindow('91502999', 91_503_000n)).toBe(true);
+    expect(isBeforeIndexedWindow('91503000', 91_503_000n)).toBe(false);
+    expect(isBeforeIndexedWindow('1', null)).toBe(false);
+  });
+});

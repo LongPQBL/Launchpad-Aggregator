@@ -1,3 +1,4 @@
+import { mapWithConcurrency } from '../indexer/concurrency.js';
 import type { Pool } from 'pg';
 import { HISTORY_INTERVALS, MAX_HISTORY_BUCKETS, type PoolDayHistory, type PoolHistoryResult } from '../pools/history.js';
 import { isRollupBackfilled } from '../charts/rollupState.js';
@@ -24,6 +25,11 @@ interface HoldingPool {
   /** Earliest sign the pool existed (first swap or first TVL snapshot), unix seconds; null when neither is known. */
   since: number | null;
 }
+
+// How many pools' queries run at once while building a token's history.
+const POOL_READ_CONCURRENCY = 8;
+// The latest bucket's TVL is read from the chain, one pool per read; 4 at a time made 167 pools take ~40 rounds.
+const CURRENT_TVL_BATCH = 16;
 
 async function loadSince(pool: Pool, chainId: number, protocol: string, poolId: string): Promise<number | null> {
   const result = await pool.query(`SELECT
@@ -141,20 +147,22 @@ export async function readLaunchHistory(pool: Pool, options: {
     const holding = await loadHoldingPools(pool, options.chainId, token);
     const valued: Array<HoldingPool & { side: { decimals: number; side: 0 | 1 } | null }> = [];
     let unvalued = 0;
-    for (const holder of holding) {
-      // An official pool's volume is already in the launch rollup, so it needs no priced side.
-      if (holder.official) { valued.push({ ...holder, side: null }); continue; }
-      const side = await pickPricedSide(pool, options.chainId, holder, options.rpcClient);
+    // One pool after another made a token held by 167 pools take 12 s; the lookups are independent, so they run side by side.
+    // An official pool's volume is already in the launch rollup, so it needs no priced side.
+    const sides = await mapWithConcurrency(holding, POOL_READ_CONCURRENCY, (holder) =>
+      holder.official ? Promise.resolve(null) : pickPricedSide(pool, options.chainId, holder, options.rpcClient));
+    holding.forEach((holder, index) => {
+      if (holder.official) { valued.push({ ...holder, side: null }); return; }
+      const side = sides[index];
       if (side) valued.push({ ...holder, side }); else unvalued += 1;
-    }
+    });
     allPools = { poolCount: holding.length, unvaluedPools: unvalued };
     if (unvalued > 0) complete = false;
 
     // Volume of the pools that are not official venues (the official ones are already in the launch rollup).
     const others = valued.flatMap((holder) => (holder.side && !holder.official ? [{ ...holder, side: holder.side }] : []));
     if (others.length > 0 && !(await isRollupBackfilled(pool, 'pool_volume'))) complete = false;
-    for (const holder of others) {
-      if (!holder.caughtUp) complete = false;
+    const volumeReads = await mapWithConcurrency(others, POOL_READ_CONCURRENCY, async (holder) => {
       const perPool = new Map<number, { tradeCount: number; usd: number | null }>();
       const rows = await pool.query(`SELECT bucket_start::bigint AS bucket, trade_count, unpriced${holder.side.side} AS unpriced,
           (usd_scaled${holder.side.side} / power(10::numeric, $6::int))::text AS volume_usd
@@ -174,7 +182,6 @@ export async function readLaunchHistory(pool: Pool, options: {
           AND bucket_start >= $5 AND bucket_start < $6
       ) dirty ORDER BY bucket_start DESC LIMIT 501`, [options.chainId, holder.protocol, holder.poolId, step, first, last + step]))
         .rows.map((row) => Number(row.bucket_start));
-      if (dirtyStarts.length > 0) complete = false;
       for (const bucket of dirtyStarts) perPool.set(bucket, { tradeCount: 0, usd: null });
       const liveStarts = dirtyStarts.slice(0, 20);
       if (liveStarts.length > 0) {
@@ -199,18 +206,23 @@ export async function readLaunchHistory(pool: Pool, options: {
           perPool.set(bucket, { tradeCount: 0, usd: 0 });
         }
       }
+      return { perPool, dirty: dirtyStarts.length > 0 };
+    });
+    others.forEach((holder, index) => {
+      if (!holder.caughtUp) complete = false;
+      const { perPool, dirty } = volumeReads[index]!;
+      if (dirty) complete = false;
       for (const [bucket, value] of perPool) {
         const total = otherVolume.get(bucket) ?? { tradeCount: 0, usd: 0 };
         total.tradeCount += value.tradeCount;
         total.usd = total.usd === null || value.usd === null ? null : total.usd + value.usd;
         otherVolume.set(bucket, total);
       }
-    }
+    });
 
     // TVL: each valued pool's last snapshot per bucket.
     const fromBuckets = (TVL_BUCKET_INTERVALS as readonly number[]).includes(step);
-    const perPool: Array<{ since: number | null; values: Map<number, number> }> = [];
-    for (const holder of valued) {
+    const tvlReads = await mapWithConcurrency(valued, POOL_READ_CONCURRENCY, async (holder) => {
       const rows = fromBuckets
         ? await pool.query(`SELECT bucket_start::bigint AS bucket, tvl_usd::text AS tvl_usd FROM pool_tvl_buckets
             WHERE chain_id = $1 AND protocol = $2 AND pool_id = $3 AND interval_seconds = $4 AND bucket_start >= $5 AND bucket_start < $6`,
@@ -219,8 +231,11 @@ export async function readLaunchHistory(pool: Pool, options: {
             SELECT (floor(extract(epoch FROM captured_at))::bigint / $4) * $4 AS bucket, tvl_usd, captured_at FROM pool_tvl_snapshots
             WHERE chain_id = $1 AND protocol = $2 AND pool_id = $3 AND captured_at >= to_timestamp($5) AND captured_at < to_timestamp($6)
           ) x ORDER BY bucket, captured_at DESC`, [options.chainId, holder.protocol, holder.poolId, step, first, last + step]);
-      perPool.push({ since: holder.since, values: new Map(rows.rows.map((row) => [Number(row.bucket), Number(row.tvl_usd)])) });
-    }
+      return rows;
+    });
+    const perPool: Array<{ since: number | null; values: Map<number, number> }> = valued.map((holder, index) => ({
+      since: holder.since, values: new Map(tvlReads[index]!.rows.map((row) => [Number(row.bucket), Number(row.tvl_usd)])),
+    }));
     for (let bucket = first; bucket <= last; bucket += step) {
       // A pool counts from the bucket in which it first shows signs of life; earlier buckets are not nulled by it.
       const counted = perPool.filter((entry) => entry.since !== null && entry.since < bucket + step);
@@ -230,8 +245,8 @@ export async function readLaunchHistory(pool: Pool, options: {
     if (options.rpcClient && Math.abs(Math.floor(Date.now() / 1000) - options.asOf) <= 5 && holding.length > 0) {
       let total = 0;
       let available = unvalued === 0;
-      for (let index = 0; index < valued.length; index += 4) {
-        const current = await Promise.all(valued.slice(index, index + 4).map((holder) =>
+      for (let index = 0; index < valued.length; index += CURRENT_TVL_BATCH) {
+        const current = await Promise.all(valued.slice(index, index + CURRENT_TVL_BATCH).map((holder) =>
           holder.fee === null || holder.tickSpacing === null || holder.hooks === null ? Promise.resolve(null)
             : readCurrentPoolTvl(pool, options.rpcClient!, {
               chain_id: options.chainId, protocol: holder.protocol as 'uniswap_v4' | 'uniswap_v3' | 'uniswap_v2',

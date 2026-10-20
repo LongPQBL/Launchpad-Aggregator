@@ -41,7 +41,7 @@ afterAll(async () => {
 });
 
 async function coverage(): Promise<boolean> {
-  const result = await pool.query(`SELECT ${launchCoverageSql(1)} AS complete FROM launches l
+  const result = await pool.query(`SELECT ${launchCoverageSql(1, { factoryToleranceBlocks: 0 })} AS complete FROM launches l
     WHERE l.chain_id = $2 AND l.token_address = $3`, [head.toString(), chainId, token]);
   return result.rows[0]?.complete === true;
 }
@@ -61,6 +61,35 @@ describe('launchCoverageSql source alternatives', () => {
     await pool.query('UPDATE sources SET confirmed_to_block = 999 WHERE id = $1', [factorySource]);
     expect(await coverage()).toBe(false);
     await pool.query('UPDATE sources SET confirmed_to_block = $1 WHERE id = $2', [head.toString(), factorySource]);
+  });
+
+  it('a trades-only coverage ignores a factory source that is behind but still needs the venue trade stream and its bridge', async () => {
+    const tradesOnly = async () => (await pool.query(
+      `SELECT ${launchCoverageSql(1, { tradesOnly: true, factoryToleranceBlocks: 0 })} AS complete FROM launches l WHERE l.chain_id = $2 AND l.token_address = $3`,
+      [head.toString(), chainId, token])).rows[0].complete as boolean;
+    await pool.query('UPDATE sources SET confirmed_to_block = 10 WHERE id = $1', [factorySource]);
+    expect(await coverage()).toBe(false); // the full rule waits for the factory
+    expect(await tradesOnly()).toBe(true); // the chart of that venue's trades does not
+    await pool.query('UPDATE fast_lane_venue_coverage SET envio_bridge_block = 99999 WHERE venue_id = $1', [venueId]);
+    await pool.query('UPDATE sources SET confirmed_to_block = 950 WHERE id = $1', [tradeSource]);
+    expect(await tradesOnly()).toBe(false); // an unbridged trade stream is still a gap
+    await pool.query('UPDATE fast_lane_venue_coverage SET envio_bridge_block = 900 WHERE venue_id = $1', [venueId]);
+    await pool.query('UPDATE sources SET confirmed_to_block = $1 WHERE id = ANY($2)', [head.toString(), [factorySource, tradeSource]]);
+  });
+
+  it('lets the factory source trail the head by its own tolerance, but not by more, and never a trade stream', async () => {
+    const withTolerance = async (tolerance: number) => (await pool.query(
+      `SELECT ${launchCoverageSql(1, { factoryToleranceBlocks: tolerance })} AS complete FROM launches l WHERE l.chain_id = $2 AND l.token_address = $3`,
+      [head.toString(), chainId, token])).rows[0].complete as boolean;
+    await pool.query('UPDATE sources SET confirmed_to_block = 900 WHERE id = $1', [factorySource]); // 100 behind the head
+    expect(await withTolerance(0)).toBe(false);
+    expect(await withTolerance(99)).toBe(false);
+    expect(await withTolerance(100)).toBe(true);
+    await pool.query('UPDATE sources SET confirmed_to_block = 800 WHERE id = $1', [tradeSource]); // the trade stream is held to the plain rule
+    await pool.query('UPDATE fast_lane_venue_coverage SET envio_bridge_block = 99999 WHERE venue_id = $1', [venueId]);
+    expect(await withTolerance(100000)).toBe(false);
+    await pool.query('UPDATE fast_lane_venue_coverage SET envio_bridge_block = 900 WHERE venue_id = $1', [venueId]);
+    await pool.query('UPDATE sources SET confirmed_to_block = $1 WHERE id = ANY($2)', [head.toString(), [factorySource, tradeSource]]);
   });
 
   it('does not use lane coverage before Envio reaches the venue bridge', async () => {

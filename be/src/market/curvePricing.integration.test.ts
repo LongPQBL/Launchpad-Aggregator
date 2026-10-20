@@ -79,6 +79,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   __resetCurvePricingBackoffForTests();
   await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query('DELETE FROM lifecycle_transitions WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM fast_lane_rows WHERE chain_id = $1', [chainId]);
   await envioPool.query(`DELETE FROM ${tables.rawCurveTradeTable} WHERE "chainId" = $1`, [chainId]);
@@ -86,6 +87,7 @@ beforeEach(async () => {
 
 afterAll(async () => {
   await pool.query('DELETE FROM launch_curve_reserves WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
+  await pool.query('DELETE FROM lifecycle_transitions WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM trades WHERE chain_id = $1 AND token_address = $2', [chainId, token]);
   await pool.query('DELETE FROM fast_lane_rows WHERE chain_id = $1', [chainId]);
   await pool.query('DELETE FROM venues WHERE id = $1', [venueId]);
@@ -232,5 +234,35 @@ describe('applyCurvePricingOnce', () => {
       throw new Error('missing trie node');
     } };
     expect(await applyCurvePricingOnce(pool, envioPool, broken as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 0, failed: 1 });
+  });
+  it('starts from the supply minted at the launch block, not today\'s supply (tokens burned since must not shift every reserve)', async () => {
+    await addTrade(hash('s1'), 1, 965, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    const client = { readContract: async ({ functionName, blockNumber }: { functionName: string; blockNumber?: bigint }) => {
+      if (functionName === 'totalSupply') return blockNumber === 1n ? 1000n : 900n; // 100 burned after the launch
+      if (functionName === 'quoteReserve') return 98n;
+      if (functionName === 'tokenReserve') return 910n; // the chain: 1000 - 90
+      throw new AbsentFunction(functionName);
+    } };
+    expect(await applyCurvePricingOnce(pool, envioPool, client as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 1, failed: 0 });
+  });
+
+  it('checks a curve swept in the block of its last trade against the block before the sweep, not the emptied end of that block', async () => {
+    await addTrade(hash('w1'), 1, 960, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    await addTrade(hash('w2'), 1, 970, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n); // the buy that fills the curve; swept in the same block
+    await pool.query(`INSERT INTO lifecycle_transitions (chain_id, token_address, source_id, source_log_id, phase, kind, block_number, block_hash, tx_hash, log_index)
+      VALUES ($1,$2,$3,NULL,1,'swept',970,$4,$5,9)`, [chainId, token, source, hash('b'), hash('w2')]);
+    const client = clientWith({ quoteReserve: (b) => (b >= 970n ? 0n : 98n), tokenReserve: (b) => (b >= 970n ? 0n : 910n) });
+    expect(await applyCurvePricingOnce(pool, envioPool, client as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 2, failed: 0 });
+    const prices = (await pool.query('SELECT tx_hash, price_numerator_raw, price_denominator_raw FROM trades WHERE chain_id = $1 AND token_address = $2 ORDER BY block_number', [chainId, token])).rows;
+    expect(prices.map((row) => [row.price_numerator_raw, row.price_denominator_raw])).toEqual([['98', '910'], ['196', '820']]);
+  });
+
+  it('still refuses a sweep-block curve whose earlier history does not match the chain', async () => {
+    await addTrade(hash('x1'), 1, 960, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    await addTrade(hash('x2'), 1, 970, 'CurveBuy', 'buy', 90n, 100n, 1n, 1n);
+    await pool.query(`INSERT INTO lifecycle_transitions (chain_id, token_address, source_id, source_log_id, phase, kind, block_number, block_hash, tx_hash, log_index)
+      VALUES ($1,$2,$3,NULL,1,'swept',970,$4,$5,9)`, [chainId, token, source, hash('b'), hash('x2')]);
+    const client = clientWith({ quoteReserve: (b) => (b >= 970n ? 0n : 5_000n), tokenReserve: (b) => (b >= 970n ? 0n : 910n) });
+    expect(await applyCurvePricingOnce(pool, envioPool, client as never, 10, new Date(), tables)).toMatchObject({ pricedTrades: 0, failed: 1 });
   });
 });
