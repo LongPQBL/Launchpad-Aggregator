@@ -21,7 +21,8 @@ compose=(docker compose -p "envio-${label}" -f "$root/envio/docker-compose.yaml"
 if [ "$purge" = "--purge" ]; then
   export CONFIG_FILE="window-${label}.config.yaml"
   [ -f "$root/envio/window-${label}.compose.yaml" ] && "${compose[@]}" down -v 2>&1 | tail -3
-  app_container="$(docker ps --format '{{.Names}}' | grep -E 'launchpad-aggregator-postgres' | head -1)"
+  app_container="${APP_PG_CONTAINER:-$(docker ps --filter publish=55432 --format '{{.Names}}' | head -1)}"
+[ -n "$app_container" ] || app_container="$(docker ps --format '{{.Names}}' | grep -E 'postgres' | grep -v envio | head -1)"
   [ -n "$app_container" ] && docker exec "$app_container" psql -U launchpad -d postgres -c "DROP DATABASE IF EXISTS launchpad_${label}" 2>&1 | tail -1
   rm -f "$root/envio/window-${label}.config.yaml" "$root/envio/window-${label}.compose.yaml"
   rm -rf "$state"

@@ -36,12 +36,18 @@ docker info >/dev/null 2>&1 || die "docker is not running"
 [ -f "$root/envio/.env" ] && [ -f "$root/be/.env" ] || die "envio/.env and be/.env are required"
 [ -n "$(env_value "$root/envio/.env" ENVIO_API_TOKEN)" ] || die "ENVIO_API_TOKEN is empty in envio/.env"
 [ -n "$(env_value "$root/be/.env" RH_HTTP_RPC_URL)" ] || die "RH_HTTP_RPC_URL is empty in be/.env"
+[ -n "$(env_value "$root/be/.env" DATABASE_URL)" ] || die "DATABASE_URL is empty in be/.env (copy be/.env.example)"
+[ -n "$(env_value "$root/be/.env" VOLUME_CURSOR_SECRET)" ] || die "VOLUME_CURSOR_SECRET is empty in be/.env: the API refuses to start without it (openssl rand -hex 32)"
+[ -n "$(env_value "$root/envio/.env" ENVIO_RH_HTTP_RPC_URL)" ] || die "ENVIO_RH_HTTP_RPC_URL is empty in envio/.env: the Envio config reads its fallback RPC from it"
+[ -n "$(env_value "$root/be/.env" RH_WS_RPC_URL)" ] || echo "window-up: RH_WS_RPC_URL is empty in be/.env, so the WebSocket fast lane cannot start (the rest works)" >&2
 for pair in "PG_PORT:$pg_port" "HASURA_PORT:$hasura_port" "METRICS_PORT:$metrics_port" "API_PORT:$api_port"; do
   port_busy "${pair#*:}" && die "port ${pair#*:} (${pair%%:*}) is already in use; pick another with ${pair%%:*}=..."
 done
 [ "$with_fe" = "1" ] && port_busy "$fe_port" && die "port $fe_port (FE_PORT) is already in use; set WITH_FE=0 or FE_PORT=..."
-app_container="$(docker ps --format '{{.Names}}' | grep -E 'launchpad-aggregator-postgres' | head -1 || true)"
-[ -n "$app_container" ] || die "the app Postgres container (launchpad-aggregator-postgres-*) is not running"
+# The compose project is named after the checkout's directory, so find the container by the port compose.yaml publishes (55432).
+app_container="${APP_PG_CONTAINER:-$(docker ps --filter publish=55432 --format '{{.Names}}' | head -1)}"
+[ -n "$app_container" ] || app_container="$(docker ps --format '{{.Names}}' | grep -E 'postgres' | grep -v envio | head -1 || true)"
+[ -n "$app_container" ] || die "the app Postgres container is not running: docker compose up -d postgres (or set APP_PG_CONTAINER)"
 [ -z "$(psql_app postgres "SELECT 1 FROM pg_database WHERE datname='$app_db'")" ] || die "database $app_db already exists; pick another LABEL or drop it"
 docker ps -a --format '{{.Names}}' | grep -qx "envio-indexer-${label}" && die "container envio-indexer-${label} already exists"
 
@@ -94,6 +100,7 @@ ENVIO_METRICS_URL=http://127.0.0.1:${metrics_port}/metrics
 API_PORT=${api_port}
 FE_ORIGIN=http://localhost:${fe_port}
 FAST_LANE_MODE=after-catchup
+ENVIO_SYNC_TARGET=real
 ENVIO_METADATA_BATCH_LIMIT=50
 METADATA_ENRICHMENT_TICK_MS=5000
 METADATA_ENRICHMENT_PASS_INTERVAL_MS=5000

@@ -10,6 +10,52 @@
 - Buyback khớp lệnh trên curve hoặc V4 là giao dịch tính vào volume chính thức, nhưng gắn `activityKind` riêng; phí chuyển khoản, refund và khóa vault không tạo giao dịch/volume thứ hai. Xem [thiết kế Pons](docs/superpowers/specs/2026-09-28-pons-readonly-design.md).
 - Audit có giới hạn ngày 29/09/2026 đã so sánh receipt RPC với fixture của token `0xc9e9ab90654f82893d7fd18b62f694992e8cef29`: launch `(27823666, 0xd7b79e93…45ab6, 30)`, curve buy `(27823668, 0x8147b8c0…cc28, 19)`, sweep `(27823772, 0xcdf59f4c…f3f, 52)`, `Initialize` `(27828161, 0x98dfda11…d6a3, 16)`, graduation `(27828161, cùng tx, 36)` và V4 swap `(27828165, 0x9f9e6779…0977, 108)`: cả 6 log khớp address/topic/data/block hash; swap có quote amount thô `5620497268881825819`, giá sau swap `0.000000152480063034` NVDA/token. Đây là đối chiếu **một token**, không chứng minh mọi launch đã được thu thập.
 
+## Chạy cả hệ thống trên máy mới (clone về và chạy một lệnh)
+
+`scripts/window-up.sh` dựng một "cửa sổ index" trọn gói: Postgres của Envio, Envio, database ứng dụng, mọi worker, fast lane, API và Next.js. Thực hiện theo thứ tự:
+
+1. **Cài sẵn:** Docker Desktop, Node.js 24 (`nvm use` đọc `.nvmrc`), git, curl, python3, openssl. Docker cần **tối thiểu 4 GB RAM** cho máy ảo (khuyên 6–8 GB); máy chỉ 8 GB RAM tổng sẽ phải swap nặng và chạy rất chậm (xem phần Hiệu năng bên dưới).
+2. **Clone và cài thư viện:**
+   ```sh
+   git clone https://github.com/LongPQBL/Launchpad-Aggregator.git && cd Launchpad-Aggregator
+   nvm use && npm ci
+   ```
+3. **Tạo 3 file môi trường** (đều nằm trong `.gitignore`, không commit):
+   ```sh
+   cp be/.env.example be/.env
+   cp envio/.env.example envio/.env
+   cp fe/.env.example fe/.env.local
+   ```
+4. **Điền giá trị** (cần 1 URL RPC của Robinhood Chain mainnet, loại HTTP và WebSocket — ví dụ Validation Cloud — và 1 token HyperSync tại https://envio.dev/app/api-tokens). Không đặt dấu ngoặc kép quanh giá trị:
+   | File | Biến | Giá trị |
+   |---|---|---|
+   | `be/.env` | `RH_HTTP_RPC_URL` | URL RPC `https://…` |
+   | `be/.env` | `RH_WS_RPC_URL` | cùng URL nhưng `wss://…` (fast lane; thiếu thì fast lane không chạy, phần còn lại vẫn chạy) |
+   | `be/.env` | `VOLUME_CURSOR_SECRET` | chuỗi ngẫu nhiên: `openssl rand -hex 32` (bắt buộc, thiếu thì API không khởi động) |
+   | `envio/.env` | `ENVIO_API_TOKEN` | token HyperSync |
+   | `envio/.env` | `ENVIO_RH_HTTP_RPC_URL` | cùng URL RPC `https://…` |
+   | `fe/.env.local` | `RH_HTTP_RPC_URL` | cùng URL RPC `https://…` (trình duyệt đọc chuỗi qua máy chủ Next.js; RPC công cộng hay bị chặn) |
+5. **Bật Postgres của ứng dụng:** `docker compose up -d postgres` (cổng 55432; chờ trạng thái healthy).
+6. **Chọn block bắt đầu** rồi dựng cửa sổ:
+   ```sh
+   HEAD=$(curl -s -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' "$(grep ^RH_HTTP_RPC_URL= be/.env | cut -d= -f2-)" | python3 -c "import sys,json;print(int(json.load(sys.stdin)['result'],16))")
+   scripts/window-up.sh $((HEAD - 20000)) w1      # cửa sổ ngắn, bắt kịp head trong vài phút
+   # scripts/window-up.sh 90000000 w90            # cửa sổ dài từ block 90M (xem lưu ý HyperSync)
+   ```
+   Ứng dụng ở http://localhost:3000, API ở http://127.0.0.1:3001. Script tự kiểm tra cổng trống, token/RPC đã điền, bộ nhớ Docker, rồi mới tạo gì đó; nếu lỗi nửa chừng, `scripts/window-down.sh w1 --purge` dọn sạch.
+7. **Theo dõi:** `scripts/window-status.sh w1` (đọc-không-ghi): tiến độ Envio so với head, lỗi HyperSync 401/403/429, con trỏ sync và số launch/pool/giao dịch, worker còn sống không, fast lane, và độ trễ API. Log từng tiến trình ở `.superpowers/window/w1/logs/`.
+8. **Dừng:** `scripts/window-down.sh w1` (giữ dữ liệu) hoặc `scripts/window-down.sh w1 --purge` (xoá cả stack Envio, database `launchpad_w1` và file sinh ra).
+
+Tùy chọn (biến môi trường khi chạy `window-up.sh`): `WITH_FE=0` (không chạy Next.js), `ENVIO_WATCHDOG=0` (không tự khởi động lại Envio khi kẹt), `FORCE=1` (cho phép 2 stack Envio khi Docker dưới 8 GB), `PG_PORT`/`HASURA_PORT`/`METRICS_PORT`/`API_PORT`/`FE_PORT` (đổi cổng để chạy cửa sổ thứ hai), `APP_PG_CONTAINER` (tên container Postgres nếu khác mặc định).
+
+**Điều cần biết**
+
+- **Giới hạn HyperSync quyết định tốc độ.** Token thường bị giới hạn khoảng 15 truy vấn mỗi phút (mỗi truy vấn 1,000 điểm, ngân sách 15,000 điểm mỗi 60 giây). Khi Envio có hàng chục partition, chúng cùng thử lại một lúc và làm cạn ngân sách nên đứng hẳn; `scripts/window-envio-watchdog.sh` (tự chạy cùng `window-up.sh`) dừng Envio đủ lâu cho ngân sách đầy lại rồi khởi động lại, đủ để tiến chậm (đo được khoảng 40–85 block/s trên cửa sổ từ block 90M). Quét 2–3 triệu block cần nhiều giờ; muốn nhanh cần gói HyperSync trả phí. Cửa sổ ngắn (vài chục nghìn block) bắt kịp head nhanh và là cách thử đủ đường đi, kể cả fast lane.
+- **Cửa sổ chỉ chứa launch và pool tạo từ block bắt đầu trở đi**, cùng giao dịch của chúng. Muốn đổi block bắt đầu thì dựng cửa sổ mới (Envio không cho đổi một số cấu hình trên dữ liệu đã có).
+- **Giá, volume, FDV, stats chỉ hiện khi Envio tới gần head** (coverage chưa đủ thì API trả `null`, không đoán). Pool V3/V2 chỉ hiện khi cổng kiểm tra `pool_source_audits` hoàn tất sát head. Fast lane (`FAST_LANE_MODE=after-catchup`) tự bật khi Envio cách head dưới 50 block.
+- **Tốc độ lấy metadata** (tên, ký hiệu, decimals) được đặt 50 launch mỗi 5 giây; mặc định cũ (10 mỗi phút) làm định giá curve, stats và danh sách launch đứng chờ.
+- **Hiệu năng:** Postgres, Envio và các worker dùng nhiều RAM và CPU. Nếu máy báo swap gần đầy, đóng ứng dụng nặng khác hoặc tăng RAM cho Docker.
+
 ## Chạy local
 
 Cần Node.js 24, npm và PostgreSQL 16+; Docker Compose là tùy chọn cho PostgreSQL.
@@ -223,7 +269,7 @@ ENVIO_SYNC_TARGET=real npm run -w be sync:envio-staging:loop
 Các biến điều khiển vòng lặp mới (đều optional, có default hợp lý cho dev):
 
 - `ENVIO_TAIL_PASS_INTERVAL_MS` (mặc định `250`): khoảng nghỉ giữa hai lượt tail+history. Đo 2026-10-12: 1000ms → độ trễ raw→trades p50 0,83s; 250ms → 0,41s, CPU của sync loop ~6%.
-- `ENVIO_INCREMENTAL_PAGE_LIMIT` (mặc định `500`): số dòng raw tối đa đọc mỗi stream mỗi lượt.
+- `ENVIO_INCREMENTAL_PAGE_LIMIT` (mặc định `5000`): số dòng raw tối đa đọc mỗi stream mỗi lượt.
 - `ENVIO_REPAIR_EVERY_TICKS` (mặc định `30`): sau bao nhiêu lượt tail thì chạy một lượt repair reorg
   (so khớp key canonical trong 500 block cuối, xoá dòng đã lỗi thời, lùi cursor để lượt sau áp lại
   đúng dữ liệu) — repair nặng hơn một lượt tail bình thường nên không chạy mỗi tick.

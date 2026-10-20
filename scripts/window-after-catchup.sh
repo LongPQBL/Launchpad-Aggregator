@@ -15,7 +15,8 @@ head_block() {
   curl -s -m 10 -X POST -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' "$RH_HTTP_RPC_URL" \
     | python3 -c "import sys,json;print(int(json.load(sys.stdin)['result'],16))" 2>/dev/null
 }
-app_container="$(docker ps --format '{{.Names}}' | grep -E 'launchpad-aggregator-postgres' | head -1)"
+app_container="${APP_PG_CONTAINER:-$(docker ps --filter publish=55432 --format '{{.Names}}' | head -1)}"
+[ -n "$app_container" ] || app_container="$(docker ps --format '{{.Names}}' | grep -E 'postgres' | grep -v envio | head -1)"
 db="${DATABASE_URL##*/}"
 
 # The slowest official-trade stream, either lane, decides: a stream that is behind still has trades to write.
