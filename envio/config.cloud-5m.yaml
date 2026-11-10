@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
-name: pons-envio-cloud-5m
+name: pons-envio-cloud-seeded-5m
 field_selection:
   transaction_fields:
     - hash
@@ -61,7 +61,8 @@ chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    start_block: 106016792
+    start_block: 105987094
+    end_block: 110987093
     contracts:
       - name: PonsV1LegacyFactory
         address:
