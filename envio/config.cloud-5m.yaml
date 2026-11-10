@@ -68,7 +68,7 @@ chains:
         address:
           - "0x0c37a24F5D23A486FA692d1500881d698B1F77a4"
       - name: PonsV1ActiveFactory
-        start_block: 8991118
+        start_block: 105987094
         address:
           - "0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB"
       - name: PonsV3Pool
