@@ -1,4 +1,7 @@
 import { indexer } from "envio";
+import { seededV2Pairs, seededUniswapV3Pools, seededV4PoolIds } from "./pons-history-seed.generated";
+
+const useSeededPoolSet = process.env.ENVIO_POOL_SEED_MODE === "seeded";
 
 function knownLaunchTokenId(chainId: number, tokenAddress: string): string {
   return `${chainId}-${tokenAddress.toLowerCase()}`;
@@ -204,6 +207,8 @@ indexer.onEvent(
 indexer.contractRegister(
   { contract: "PonsV2Factory", event: "TokenLaunchedV2" },
   async ({ event, context }) => {
+    // This address comes directly from a Pons launch, so it is always relevant even in seeded
+    // historical mode. The seed only restricts unrelated Uniswap pools.
     context.chain.PonsV2Curve.add(event.params.curve);
   },
 );
@@ -306,7 +311,13 @@ indexer.onEvent(
 );
 
 indexer.onEvent(
-  { contract: "UniswapV4PoolManager", event: "V4Swap" },
+  {
+    contract: "UniswapV4PoolManager",
+    event: "V4Swap",
+    where: useSeededPoolSet
+      ? { params: seededV4PoolIds.map((id) => ({ id })) }
+      : undefined,
+  },
   async ({ event, context }) => {
     // V4Swap carries only `id`/`sender`, never currency0/currency1 (see RelevantV4Pool's schema
     // comment) — relevance was already decided at Initialize time and recorded under this poolId.
@@ -336,10 +347,9 @@ indexer.onEvent(
   },
 );
 
-// V3/V2 pool/pair contracts are still registered for every pool from the canonical Uniswap
-// factories, Pons-related or not — contractRegister has no entity-store access (see
-// RelevantPool's schema comment), so relevance can't gate registration itself, only what gets
-// written once a pool's Swap/Sync events arrive.
+// For the normal rolling indexer, all factory pools are registered because contractRegister
+// cannot read KnownLaunchToken from the entity store. The bounded benchmark uses a HyperSync seed
+// of matching pool addresses and IDs, so it can avoid fetching unrelated pool history.
 indexer.onEvent({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {
   if (!(await involvesLaunchToken(context, event.chainId, event.params.token0, event.params.token1))) return;
   context.RelevantPool.set({
@@ -357,6 +367,7 @@ indexer.onEvent({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({
   });
 });
 indexer.contractRegister({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {
+  if (useSeededPoolSet && !seededUniswapV3Pools.includes(event.params.pool.toLowerCase() as (typeof seededUniswapV3Pools)[number])) return;
   context.chain.UniswapV3Pool.add(event.params.pool);
 });
 indexer.onEvent({ contract: "UniswapV3Pool", event: "V3Swap" }, async ({ event, context }) => {
@@ -389,6 +400,7 @@ indexer.onEvent({ contract: "UniswapV2Factory", event: "PairCreated" }, async ({
   });
 });
 indexer.contractRegister({ contract: "UniswapV2Factory", event: "PairCreated" }, async ({ event, context }) => {
+  if (useSeededPoolSet && !seededV2Pairs.includes(event.params.pair.toLowerCase() as (typeof seededV2Pairs)[number])) return;
   context.chain.UniswapV2Pair.add(event.params.pair);
 });
 indexer.onEvent({ contract: "UniswapV2Pair", event: "V2Swap" }, async ({ event, context }) => {

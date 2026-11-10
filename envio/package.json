@@ -16,10 +16,10 @@
     "vitest": "^3.2.4"
   },
   "dependencies": {
-    "envio": "3.6.1"
+    "envio": "3.14.1"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.15.0"
   },
   "type": "module"
 }
