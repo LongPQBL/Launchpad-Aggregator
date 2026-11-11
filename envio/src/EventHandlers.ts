@@ -3,6 +3,33 @@ import { seededV2Pairs, seededUniswapV3Pools, seededV4PoolIds } from "./pons-his
 
 const useSeededPoolSet = process.env.ENVIO_POOL_SEED_MODE === "seeded";
 
+indexer.onEvent(
+  { contract: "ChainlinkAggregator", event: "AnswerUpdated" },
+  async ({ event, context }) => {
+    context.RawChainlinkAnswerUpdated.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      aggregatorAddress: event.srcAddress.toLowerCase(),
+      roundId: event.params.roundId,
+      answerRaw: event.params.current,
+      updatedAt: Number(event.params.updatedAt),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
+  },
+);
+
+// Track aggregator rotations so AnswerUpdated events from a newly confirmed aggregator are
+// indexed without having to hard-code future Chainlink implementation addresses.
+indexer.contractRegister(
+  { contract: "ChainlinkFeedProxy", event: "AggregatorConfirmed" },
+  async ({ event, context }) => {
+    context.chain.ChainlinkAggregator.add(event.params.latest);
+  },
+);
+
 function knownLaunchTokenId(chainId: number, tokenAddress: string): string {
   return `${chainId}-${tokenAddress.toLowerCase()}`;
 }

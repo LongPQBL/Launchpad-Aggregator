@@ -241,3 +241,18 @@ type RawV2Sync @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "
   txHash: String!
   logIndex: Int!
 }
+
+# Raw Chainlink aggregator answer updates. `aggregatorAddress` is the underlying aggregator that
+# emits AnswerUpdated (not the feed proxy); the app maps it back to a verified proxy/feed address.
+type RawChainlinkAnswerUpdated @index(fields: ["chainId", ["blockNumber", "ASC"], ["logIndex", "ASC"]]) {
+  id: ID!
+  chainId: Int!
+  aggregatorAddress: String!
+  roundId: BigInt!
+  answerRaw: BigInt!
+  updatedAt: Int!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
+}

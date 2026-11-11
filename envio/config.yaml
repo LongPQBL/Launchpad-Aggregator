@@ -57,6 +57,14 @@ contracts:
         name: V2Swap
       - event: "Sync(uint112 reserve0, uint112 reserve1)"
         name: V2Sync
+  - name: ChainlinkAggregator
+    handler: src/EventHandlers.ts
+    events:
+      - event: "AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)"
+  - name: ChainlinkFeedProxy
+    handler: src/EventHandlers.ts
+    events:
+      - event: "AggregatorConfirmed(address indexed previous, address indexed latest)"
 chains:
   - id: 4663
     hypersync_config:
@@ -86,3 +94,13 @@ chains:
         address:
           - "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f"
       - name: UniswapV2Pair
+      - name: ChainlinkAggregator
+        address:
+          - "0x6091E64eb7138EEF066a80FD3A0d7427B91f2721"
+          - "0x8beee3503f6860d5dac4ce26b5eee92982951c2e"
+          - "0xc9d16e4f2569b9e3ea0468fd85844953713dc2a2"
+      - name: ChainlinkFeedProxy
+        address:
+          - "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9"
+          - "0x61b7e5650328764b076a108eff5fa7282a1b9ad2"
+          - "0x379ec4f7c378f34a1b47e4f3cbebcbac3e8e9f15"
