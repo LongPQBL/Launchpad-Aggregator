@@ -12,6 +12,24 @@ interface TokenReader {
   SeedLaunchToken: { get(id: string): Promise<unknown> };
 }
 
+interface SeedContext extends TokenReader {
+  SeededPool: { set(value: {
+    id: string; chainId: number; kind: string; poolAddress: string; sourceAddress: string;
+    currency0: string; currency1: string; fee: number; tickSpacing: number; hooks: string;
+    blockNumber: bigint; blockHash: string; txHash: string; logIndex: number;
+  }): void };
+  SeedLaunchToken: TokenReader['SeedLaunchToken'] & {
+    set(value: { id: string; chainId: number; tokenAddress: string }): void;
+  };
+}
+
+interface SeedPoolEvent {
+  chainId: number;
+  block: { number: number; hash: string };
+  transaction: { hash: string };
+  logIndex: number;
+}
+
 async function isPonsToken(context: TokenReader, chainId: number, a: string, b: string): Promise<boolean> {
   const [tokenA, tokenB] = await Promise.all([
     context.SeedLaunchToken.get(tokenId(chainId, a)),
@@ -20,8 +38,8 @@ async function isPonsToken(context: TokenReader, chainId: number, a: string, b: 
   return tokenA !== undefined || tokenB !== undefined;
 }
 
-function savePool(context: any, chainId: number, kind: string, address: string, sourceAddress: string, event: any,
-  poolKey?: { currency0: string; currency1: string; fee: number; tickSpacing: number; hooks: string }): void {
+function savePool(context: SeedContext, chainId: number, kind: string, address: string, sourceAddress: string,
+  event: SeedPoolEvent, poolKey: { currency0: string; currency1: string; fee: number; tickSpacing: number; hooks: string }): void {
   const normalized = address.toLowerCase();
   context.SeededPool.set({
     id: poolId(chainId, kind, normalized),
@@ -29,11 +47,11 @@ function savePool(context: any, chainId: number, kind: string, address: string, 
     kind,
     poolAddress: normalized,
     sourceAddress: sourceAddress.toLowerCase(),
-    currency0: poolKey?.currency0.toLowerCase() ?? null,
-    currency1: poolKey?.currency1.toLowerCase() ?? null,
-    fee: poolKey?.fee ?? null,
-    tickSpacing: poolKey?.tickSpacing ?? null,
-    hooks: poolKey?.hooks.toLowerCase() ?? null,
+    currency0: poolKey.currency0.toLowerCase(),
+    currency1: poolKey.currency1.toLowerCase(),
+    fee: poolKey.fee,
+    tickSpacing: poolKey.tickSpacing,
+    hooks: poolKey.hooks.toLowerCase(),
     blockNumber: BigInt(event.block.number),
     blockHash: event.block.hash,
     txHash: event.transaction.hash,
@@ -41,7 +59,7 @@ function savePool(context: any, chainId: number, kind: string, address: string, 
   });
 }
 
-function saveLaunchToken(context: any, chainId: number, token: string): void {
+function saveLaunchToken(context: SeedContext, chainId: number, token: string): void {
   const normalized = token.toLowerCase();
   context.SeedLaunchToken.set({
     id: tokenId(chainId, normalized),

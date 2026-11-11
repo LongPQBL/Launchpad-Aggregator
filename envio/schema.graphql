@@ -22,15 +22,15 @@ type SeededPool {
   kind: String! # pons_v1, uniswap_v2, uniswap_v3, or uniswap_v4
   poolAddress: String! # V4 stores its poolId here
   sourceAddress: String!
-  currency0: String
-  currency1: String
-  fee: Int
-  tickSpacing: Int
-  hooks: String
-  blockNumber: BigInt
-  blockHash: String
-  txHash: String
-  logIndex: Int
+  currency0: String!
+  currency1: String!
+  fee: Int!
+  tickSpacing: Int!
+  hooks: String!
+  blockNumber: BigInt!
+  blockHash: String!
+  txHash: String!
+  logIndex: Int!
 }
 
 type SeedLaunchToken {
