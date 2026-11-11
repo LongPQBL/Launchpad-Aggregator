@@ -14,8 +14,8 @@
     "skipLibCheck": true,
     "module": "CommonJS"
   },
-  "include": ["envio-env.d.ts", 
-    "src",
-    "test"
+  "include": [
+    "envio-env.d.ts",
+    "src/EventHandlersRealtime.ts"
   ]
 }
