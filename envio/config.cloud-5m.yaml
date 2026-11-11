@@ -61,9 +61,9 @@ chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    # Bounded historical snapshot for the Envio Cloud trial; H is the chain head at deployment setup.
+    # First bounded historical slice: exactly 10,000,000 blocks, inclusive.
     start_block: 8600612
-    end_block: 111403568
+    end_block: 18600611
     contracts:
       - name: PonsV1LegacyFactory
         address:
