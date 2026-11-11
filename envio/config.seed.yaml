@@ -2,6 +2,9 @@
 # The app imports SeededPool from this deployment's GraphQL endpoint after it catches up.
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: pons-pool-seed
+field_selection:
+  transaction_fields:
+    - hash
 contracts:
   - name: PonsV1LegacyFactory
     handler: src/EventHandlersSeed.ts
