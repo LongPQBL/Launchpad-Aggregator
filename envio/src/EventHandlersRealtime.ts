@@ -324,9 +324,8 @@ indexer.onEvent(
 
 indexer.onEvent(
   {
-    // This handler is also used by the legacy handoff config, where the same ABI is named
-    // UniswapV4PoolManagerRealtime. The default full-history config uses the canonical name.
-    contract: "UniswapV4PoolManagerRealtime" as "UniswapV4PoolManager",
+    // This alias has its own start block so Initialize can replay history while Swap starts at H.
+    contract: "UniswapV4PoolManagerRealtime",
     event: "V4Swap",
   },
   async ({ event, context }) => {
