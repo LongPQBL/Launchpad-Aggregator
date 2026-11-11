@@ -61,8 +61,9 @@ chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
-    # Earliest registered Pons factory deployment; continue indexing past the backfill to chain head.
+    # Bounded historical snapshot for the Envio Cloud trial; H is the chain head at deployment setup.
     start_block: 8600612
+    end_block: 111403568
     contracts:
       - name: PonsV1LegacyFactory
         address:
