@@ -7,8 +7,9 @@ import { verifyV4Initialize } from './identity.js';
 
 const CHAIN_ID = 4663;
 const PAGE_SIZE = 1000;
-const WINDOW_BLOCKS = 100_000n;
+const WINDOW_BLOCKS = 5_000_000n;
 const WRITE_BATCH_SIZE = 1000;
+const WINDOW_CONCURRENCY = 4;
 const FINALITY_DEPTH = 64n;
 const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951';
 const SEED_QUERY_FIELDS = 'id chainId kind poolAddress sourceAddress currency0 currency1 fee tickSpacing hooks blockNumber blockHash txHash logIndex';
@@ -44,13 +45,32 @@ export interface SeedImportResult {
 interface SeedMeta { chainId: number; progressBlock: string | number; isReady: boolean }
 
 async function graphql<T>(endpoint: string, bearerToken: string | undefined, query: string): Promise<T> {
-  const response = await fetch(endpoint, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}) },
-    body: JSON.stringify({ query }),
-  });
-  if (!response.ok) throw new Error(`Seed GraphQL returned HTTP ${response.status}`);
-  const body = await response.json() as { data?: T; errors?: { message?: string }[] };
+  const bodyText = JSON.stringify({ query });
+  let body: { data?: T; errors?: { message?: string }[] } | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(bearerToken ? { authorization: `Bearer ${bearerToken}` } : {}) },
+        body: bodyText,
+      });
+      if (!response.ok) {
+        if (response.status !== 429 && response.status < 500) throw new Error(`Seed GraphQL returned HTTP ${response.status}`);
+        const retryAfter = Number(response.headers.get('retry-after'));
+        const delay = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 60_000) : 500 * (2 ** attempt);
+        if (attempt === 4) throw new Error(`Seed GraphQL returned HTTP ${response.status} after retries`);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      body = await response.json() as { data?: T; errors?: { message?: string }[] };
+      break;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Seed GraphQL returned HTTP 4')) throw error;
+      if (attempt === 4) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 500 * (2 ** attempt)));
+    }
+  }
+  if (!body) throw new Error('Seed GraphQL request returned no response');
   if (body.errors?.length) throw new Error(`Seed GraphQL error: ${body.errors.map((error) => error.message ?? 'unknown').join('; ')}`);
   if (!body.data) throw new Error('Seed GraphQL response did not contain data');
   return body.data;
@@ -207,16 +227,32 @@ export async function importEnvioPoolSeed(db: Database, appPool: Pool, endpoint:
     windows: 0, nextBlock, progressBlock, complete: false };
 
   while (nextBlock <= options.endBlock && nextBlock <= fence) {
-    const windowEnd = [nextBlock + WINDOW_BLOCKS - 1n, fence, options.endBlock].reduce((a, b) => a < b ? a : b);
-    const rows = await fetchWindow(endpoint, options.bearerToken, nextBlock, windowEnd);
-    for (let offset = 0; offset < rows.length; offset += WRITE_BATCH_SIZE) {
-      const counts = await importBatch(db, rows.slice(offset, offset + WRITE_BATCH_SIZE));
-      result.imported += counts.imported;
-      result.skippedPonsV1 += counts.skipped;
+    const windows: { from: bigint; to: bigint }[] = [];
+    let windowStart = nextBlock;
+    while (windows.length < WINDOW_CONCURRENCY && windowStart <= fence && windowStart <= options.endBlock) {
+      const windowEnd = [windowStart + WINDOW_BLOCKS - 1n, fence, options.endBlock].reduce((a, b) => a < b ? a : b);
+      windows.push({ from: windowStart, to: windowEnd });
+      windowStart = windowEnd + 1n;
     }
-    result.fetched += rows.length;
-    result.windows += 1;
-    nextBlock = windowEnd + 1n;
+    // Fetch independent block windows concurrently, then bulk-write them concurrently. The
+    // checkpoint advances only after every window in this contiguous batch commits.
+    const rowsByWindow = await Promise.all(windows.map(({ from, to }) =>
+      fetchWindow(endpoint, options.bearerToken, from, to)));
+    const countsByWindow = await Promise.all(rowsByWindow.map(async (rows) => {
+      let imported = 0;
+      let skipped = 0;
+      for (let offset = 0; offset < rows.length; offset += WRITE_BATCH_SIZE) {
+        const counts = await importBatch(db, rows.slice(offset, offset + WRITE_BATCH_SIZE));
+        imported += counts.imported;
+        skipped += counts.skipped;
+      }
+      return { rows: rows.length, imported, skipped };
+    }));
+    result.fetched += countsByWindow.reduce((sum, counts) => sum + counts.rows, 0);
+    result.imported += countsByWindow.reduce((sum, counts) => sum + counts.imported, 0);
+    result.skippedPonsV1 += countsByWindow.reduce((sum, counts) => sum + counts.skipped, 0);
+    result.windows += windows.length;
+    nextBlock = windows.at(-1)!.to + 1n;
     await saveCursor(appPool, deploymentKey, nextBlock);
     result.nextBlock = nextBlock;
     options.onProgress?.({ ...result });
