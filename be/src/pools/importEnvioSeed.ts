@@ -250,4 +250,4 @@ export async function importEnvioPoolSeed(db: Database, appPool: Pool, endpoint:
   return result;
 }
 
-export const ENVIO_POOL_SEED_RANGE = { startBlock: 8_600_612n, endBlock: 111_584_773n } as const;
+export const ENVIO_POOL_SEED_RANGE = { startBlock: 8_600_612n, endBlock: 111_688_686n } as const;

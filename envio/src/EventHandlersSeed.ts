@@ -13,6 +13,14 @@ interface TokenReader {
 }
 
 interface SeedContext extends TokenReader {
+  RawLaunch: { set(value: {
+    id: string; chainId: number; tokenAddress: string; deployerAddress: string; pairTokenAddress: string;
+    poolAddress: string; factoryAddress: string; blockNumber: bigint; blockHash: string; txHash: string; logIndex: number;
+  }): void };
+  RawLaunchV2: { set(value: {
+    id: string; chainId: number; tokenAddress: string; curveAddress: string; deployerAddress: string;
+    pairTokenAddress: string; blockNumber: bigint; blockHash: string; txHash: string; logIndex: number;
+  }): void };
   SeededPool: { set(value: {
     id: string; chainId: number; kind: string; poolAddress: string; sourceAddress: string;
     currency0: string; currency1: string; fee: number; tickSpacing: number; hooks: string;
@@ -71,6 +79,19 @@ function saveLaunchToken(context: SeedContext, chainId: number, token: string): 
 for (const contract of ["PonsV1LegacyFactory", "PonsV1ActiveFactory"] as const) {
   indexer.onEvent({ contract, event: "TokenLaunched" }, async ({ event, context }) => {
     saveLaunchToken(context, event.chainId, event.params.token);
+    context.RawLaunch.set({
+      id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+      chainId: event.chainId,
+      tokenAddress: event.params.token.toLowerCase(),
+      deployerAddress: event.params.deployer.toLowerCase(),
+      pairTokenAddress: event.params.pairToken.toLowerCase(),
+      poolAddress: event.params.pool.toLowerCase(),
+      factoryAddress: event.srcAddress.toLowerCase(),
+      blockNumber: BigInt(event.block.number),
+      blockHash: event.block.hash,
+      txHash: event.transaction.hash,
+      logIndex: event.logIndex,
+    });
     savePool(context, event.chainId, "pons_v1", event.params.pool, event.srcAddress, event, {
       currency0: event.params.token, currency1: event.params.pairToken,
       fee: 0, tickSpacing: 0, hooks: "0x0000000000000000000000000000000000000000",
@@ -80,6 +101,18 @@ for (const contract of ["PonsV1LegacyFactory", "PonsV1ActiveFactory"] as const) 
 
 indexer.onEvent({ contract: "PonsV2Factory", event: "TokenLaunchedV2" }, async ({ event, context }) => {
   saveLaunchToken(context, event.chainId, event.params.token);
+  context.RawLaunchV2.set({
+    id: `${event.chainId}-${event.block.hash}-${event.transaction.hash}-${event.logIndex}`,
+    chainId: event.chainId,
+    tokenAddress: event.params.token.toLowerCase(),
+    curveAddress: event.params.curve.toLowerCase(),
+    deployerAddress: event.params.deployer.toLowerCase(),
+    pairTokenAddress: event.params.pairToken.toLowerCase(),
+    blockNumber: BigInt(event.block.number),
+    blockHash: event.block.hash,
+    txHash: event.transaction.hash,
+    logIndex: event.logIndex,
+  });
 });
 
 indexer.onEvent({ contract: "UniswapV3Factory", event: "PoolCreated" }, async ({ event, context }) => {

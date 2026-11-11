@@ -1,5 +1,5 @@
-# One-off Envio Cloud deployment that discovers Pons launches and their related pools.
-# The app imports SeededPool from this deployment's GraphQL endpoint after it catches up.
+# One-off Envio Cloud deployment that records full Pons V1/V2 launch events and related pools.
+# The app imports SeededPool and RawLaunch/RawLaunchV2 from this endpoint after it catches up.
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
 name: pons-pool-seed
 field_selection:
@@ -36,8 +36,8 @@ chains:
     hypersync_config:
       url: https://robinhood.hypersync.xyz
     start_block: 8600612
-    # Robinhood Chain head observed via eth_blockNumber on 2026-11-11.
-    end_block: 111584773
+    # Current RPC head minus a 64-block finality buffer; refresh this before a new seed deployment.
+    end_block: 111688686
     contracts:
       - name: PonsV1LegacyFactory
         address: ["0x0c37a24F5D23A486FA692d1500881d698B1F77a4"]
