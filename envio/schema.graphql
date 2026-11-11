@@ -14,6 +14,31 @@ type KnownLaunchToken {
   tokenAddress: String!
 }
 
+# Compact pool catalog populated by the seed indexer. The app imports it incrementally
+# from this deployment's GraphQL endpoint while the seed is still indexing.
+type SeededPool {
+  id: ID! # `${chainId}-${kind}-${address}`, lowercase
+  chainId: Int!
+  kind: String! # pons_v1, uniswap_v2, uniswap_v3, or uniswap_v4
+  poolAddress: String! # V4 stores its poolId here
+  sourceAddress: String!
+  currency0: String
+  currency1: String
+  fee: Int
+  tickSpacing: Int
+  hooks: String
+  blockNumber: BigInt
+  blockHash: String
+  txHash: String
+  logIndex: Int
+}
+
+type SeedLaunchToken {
+  id: ID! # `${chainId}-${tokenAddress}`, lowercase
+  chainId: Int!
+  tokenAddress: String!
+}
+
 # V4 has no per-pool contract to selectively watch (all pools share one PoolManager address), and
 # its Swap event carries only `id`/`sender`, not currency0/currency1 — so there is no way to decide
 # "is this swap worth keeping" from the Swap event alone. This entity records, at Initialize time

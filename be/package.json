@@ -40,7 +40,8 @@
     "prices:worker": "tsx --env-file-if-exists=.env src/cli/runPriceWorker.ts",
     "pools:tvl-snapshots:worker": "tsx --env-file-if-exists=.env src/cli/runPoolTvlSnapshotWorker.ts",
     "pools:tvl-backfill": "tsx --env-file-if-exists=.env src/cli/backfillPoolTvl.ts",
-    "pools:parity": "tsx --env-file-if-exists=.env src/cli/probePoolSources.ts"
+    "pools:parity": "tsx --env-file-if-exists=.env src/cli/probePoolSources.ts",
+    "pools:import-envio-seed": "tsx --env-file-if-exists=.env src/cli/importEnvioPoolSeed.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
