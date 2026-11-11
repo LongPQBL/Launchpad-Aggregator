@@ -11,6 +11,7 @@ const WRITE_BATCH_SIZE = 1000;
 const FINALITY_DEPTH = 64n;
 const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951';
 const SEED_QUERY_FIELDS = 'id chainId kind poolAddress sourceAddress currency0 currency1 fee tickSpacing hooks blockNumber blockHash txHash logIndex';
+const APP_POOL_KINDS = '["uniswap_v2","uniswap_v3","uniswap_v4"]';
 const CURSOR_TABLE = 'public.pool_seed_import_state';
 
 export interface SeededPoolRow {
@@ -112,7 +113,7 @@ async function fetchBlock(endpoint: string, bearerToken: string | undefined, blo
   while (true) {
     const idFilter = afterId ? `,id:{_gt:${JSON.stringify(afterId)}}` : '';
     const data = await graphql<{ SeededPool: SeededPoolRow[] }>(endpoint, bearerToken,
-      `query SeedBlock { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},blockNumber:{_eq:"${block}"}${idFilter}},order_by:{id:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
+      `query SeedBlock { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},kind:{_in:${APP_POOL_KINDS}},blockNumber:{_eq:"${block}"}${idFilter}},order_by:{id:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
     const page = data.SeededPool;
     rows.push(...page);
     if (page.length < PAGE_SIZE) return rows;
@@ -126,7 +127,7 @@ async function fetchBlock(endpoint: string, bearerToken: string | undefined, blo
 async function fetchPage(endpoint: string, bearerToken: string | undefined, fromBlock: bigint,
   toBlock: bigint): Promise<{ rows: SeededPoolRow[]; nextBlock: bigint }> {
   const data = await graphql<{ SeededPool: SeededPoolRow[] }>(endpoint, bearerToken,
-    `query SeedPage { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},blockNumber:{_gte:"${fromBlock}",_lte:"${toBlock}"}},order_by:{blockNumber:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
+    `query SeedPage { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},kind:{_in:${APP_POOL_KINDS}},blockNumber:{_gte:"${fromBlock}",_lte:"${toBlock}"}},order_by:{blockNumber:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
   const page = data.SeededPool;
   if (page.length === 0) return { rows: [], nextBlock: toBlock + 1n };
   if (page.length < PAGE_SIZE) return { rows: page, nextBlock: toBlock + 1n };
