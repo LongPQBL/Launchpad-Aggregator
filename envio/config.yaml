@@ -1,24 +1,25 @@
 # yaml-language-server: $schema=./node_modules/envio/evm.schema.json
-name: pons-envio-indexer
+# No seed: replay factory history to rebuild Pons relevance, then write relevant launch/pool activity from current block onward.
+name: pons-envio-pons-realtime-no-seed
 field_selection:
   transaction_fields:
     - hash
     - from
 contracts:
   - name: PonsV1LegacyFactory
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)"
   - name: PonsV1ActiveFactory
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)"
   - name: PonsV3Pool
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
   - name: PonsV2Factory
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "TokenLaunched(address indexed token, address indexed curve, address indexed deployer, address pairToken, uint256 launchConfigId, uint256 graduationThreshold)"
         name: TokenLaunchedV2
@@ -26,49 +27,45 @@ contracts:
       - event: "PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)"
       - event: "LaunchGraduationRescued(address indexed token, address indexed recipient, uint256 quoteAmount, uint256 tokenAmount)"
   - name: PonsV2Curve
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut, uint256 fee, uint256 tax)"
       - event: "CurveSell(address indexed seller, address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256 tax)"
       - event: "BuybackLocked(uint256 quoteSpent, uint256 tokensLocked)"
   - name: UniswapV4PoolManager
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing, address hooks, uint160 sqrtPriceX96, int24 tick)"
+  - name: UniswapV4PoolManagerRealtime
+    handler: src/EventHandlersRealtime.ts
+    events:
       - event: "Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick, uint24 fee)"
         name: V4Swap
   - name: UniswapV3Factory
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)"
   - name: UniswapV3Pool
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128 liquidity, int24 tick)"
         name: V3Swap
   - name: UniswapV2Factory
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "PairCreated(address indexed token0, address indexed token1, address pair, uint256)"
   - name: UniswapV2Pair
-    handler: src/EventHandlers.ts
+    handler: src/EventHandlersRealtime.ts
     events:
       - event: "Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address indexed to)"
         name: V2Swap
       - event: "Sync(uint112 reserve0, uint112 reserve1)"
         name: V2Sync
-  - name: ChainlinkAggregator
-    handler: src/EventHandlers.ts
-    events:
-      - event: "AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)"
-  - name: ChainlinkFeedProxy
-    handler: src/EventHandlers.ts
-    events:
-      - event: "AggregatorConfirmed(address indexed previous, address indexed latest)"
 chains:
   - id: 4663
     hypersync_config:
       url: https://robinhood.hypersync.xyz
+    # Replay launch/pool discovery history; realtime activity streams start inclusively at block 111,794,110.
     start_block: 8600612
     contracts:
       - name: PonsV1LegacyFactory
@@ -79,28 +76,27 @@ chains:
         address:
           - "0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB"
       - name: PonsV3Pool
+        start_block: 111794110
       - name: PonsV2Factory
+        start_block: 26841846
         address:
           - "0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e"
       - name: PonsV2Curve
+        start_block: 111794110
       - name: UniswapV4PoolManager
+        address:
+          - "0x8366a39cC670b4001a1121b8f6A443A643E40951"
+      - name: UniswapV4PoolManagerRealtime
+        start_block: 111794110
         address:
           - "0x8366a39cC670b4001a1121b8f6A443A643E40951"
       - name: UniswapV3Factory
         address:
           - "0x1f7d7550b1b028f7571e69a784071f0205fd2efa"
       - name: UniswapV3Pool
+        start_block: 111794110
       - name: UniswapV2Factory
         address:
           - "0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f"
       - name: UniswapV2Pair
-      - name: ChainlinkAggregator
-        address:
-          - "0x6091E64eb7138EEF066a80FD3A0d7427B91f2721"
-          - "0x8beee3503f6860d5dac4ce26b5eee92982951c2e"
-          - "0xc9d16e4f2569b9e3ea0468fd85844953713dc2a2"
-      - name: ChainlinkFeedProxy
-        address:
-          - "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9"
-          - "0x61b7e5650328764b076a108eff5fa7282a1b9ad2"
-          - "0x379ec4f7c378f34a1b47e4f3cbebcbac3e8e9f15"
+        start_block: 111794110
