@@ -7,9 +7,7 @@ import { verifyV4Initialize } from './identity.js';
 
 const CHAIN_ID = 4663;
 const PAGE_SIZE = 1000;
-const WINDOW_BLOCKS = 5_000_000n;
 const WRITE_BATCH_SIZE = 1000;
-const WINDOW_CONCURRENCY = 4;
 const FINALITY_DEPTH = 64n;
 const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951';
 const SEED_QUERY_FIELDS = 'id chainId kind poolAddress sourceAddress currency0 currency1 fee tickSpacing hooks blockNumber blockHash txHash logIndex';
@@ -36,7 +34,7 @@ export interface SeedImportResult {
   fetched: number;
   imported: number;
   skippedPonsV1: number;
-  windows: number;
+  pages: number;
   nextBlock: bigint;
   progressBlock: bigint;
   complete: boolean;
@@ -124,19 +122,21 @@ async function fetchBlock(endpoint: string, bearerToken: string | undefined, blo
   }
 }
 
-/** Split dense block windows until each GraphQL query is guaranteed to have returned all rows. */
-async function fetchWindow(endpoint: string, bearerToken: string | undefined, fromBlock: bigint,
-  toBlock: bigint): Promise<SeededPoolRow[]> {
+/** Read the next chronological GraphQL page without scanning empty block windows. */
+async function fetchPage(endpoint: string, bearerToken: string | undefined, fromBlock: bigint,
+  toBlock: bigint): Promise<{ rows: SeededPoolRow[]; nextBlock: bigint }> {
   const data = await graphql<{ SeededPool: SeededPoolRow[] }>(endpoint, bearerToken,
-    `query SeedWindow { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},blockNumber:{_gte:"${fromBlock}",_lte:"${toBlock}"}},order_by:{blockNumber:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
-  if (data.SeededPool.length < PAGE_SIZE) return data.SeededPool;
-  if (fromBlock === toBlock) return fetchBlock(endpoint, bearerToken, fromBlock);
-  const middle = (fromBlock + toBlock) / 2n;
-  const [left, right] = await Promise.all([
-    fetchWindow(endpoint, bearerToken, fromBlock, middle),
-    fetchWindow(endpoint, bearerToken, middle + 1n, toBlock),
-  ]);
-  return [...left, ...right];
+    `query SeedPage { SeededPool(where:{chainId:{_eq:${CHAIN_ID}},blockNumber:{_gte:"${fromBlock}",_lte:"${toBlock}"}},order_by:{blockNumber:asc},limit:${PAGE_SIZE}) { ${SEED_QUERY_FIELDS} } }`);
+  const page = data.SeededPool;
+  if (page.length === 0) return { rows: [], nextBlock: toBlock + 1n };
+  if (page.length < PAGE_SIZE) return { rows: page, nextBlock: toBlock + 1n };
+
+  // A full page can stop partway through its last block. Save all earlier blocks, then fetch that
+  // whole boundary block by ID so same-block events cannot get skipped by the next block cursor.
+  const boundaryBlock = BigInt(required(page.at(-1)!.blockNumber, 'blockNumber', page.at(-1)!));
+  const earlierRows = page.filter((row) => BigInt(required(row.blockNumber, 'blockNumber', row)) < boundaryBlock);
+  const boundaryRows = await fetchBlock(endpoint, bearerToken, boundaryBlock);
+  return { rows: [...earlierRows, ...boundaryRows], nextBlock: boundaryBlock + 1n };
 }
 
 function required<T>(value: T | null | undefined, field: string, row: SeededPoolRow): T {
@@ -224,35 +224,22 @@ export async function importEnvioPoolSeed(db: Database, appPool: Pool, endpoint:
     ? options.endBlock
     : progressBlock > FINALITY_DEPTH ? progressBlock - FINALITY_DEPTH : 0n;
   const result: SeedImportResult = { fetched: 0, imported: 0, skippedPonsV1: 0,
-    windows: 0, nextBlock, progressBlock, complete: false };
+    pages: 0, nextBlock, progressBlock, complete: false };
 
   while (nextBlock <= options.endBlock && nextBlock <= fence) {
-    const windows: { from: bigint; to: bigint }[] = [];
-    let windowStart = nextBlock;
-    while (windows.length < WINDOW_CONCURRENCY && windowStart <= fence && windowStart <= options.endBlock) {
-      const windowEnd = [windowStart + WINDOW_BLOCKS - 1n, fence, options.endBlock].reduce((a, b) => a < b ? a : b);
-      windows.push({ from: windowStart, to: windowEnd });
-      windowStart = windowEnd + 1n;
+    const page = await fetchPage(endpoint, options.bearerToken, nextBlock, fence);
+    let imported = 0;
+    let skipped = 0;
+    for (let offset = 0; offset < page.rows.length; offset += WRITE_BATCH_SIZE) {
+      const counts = await importBatch(db, page.rows.slice(offset, offset + WRITE_BATCH_SIZE));
+      imported += counts.imported;
+      skipped += counts.skipped;
     }
-    // Fetch independent block windows concurrently, then bulk-write them concurrently. The
-    // checkpoint advances only after every window in this contiguous batch commits.
-    const rowsByWindow = await Promise.all(windows.map(({ from, to }) =>
-      fetchWindow(endpoint, options.bearerToken, from, to)));
-    const countsByWindow = await Promise.all(rowsByWindow.map(async (rows) => {
-      let imported = 0;
-      let skipped = 0;
-      for (let offset = 0; offset < rows.length; offset += WRITE_BATCH_SIZE) {
-        const counts = await importBatch(db, rows.slice(offset, offset + WRITE_BATCH_SIZE));
-        imported += counts.imported;
-        skipped += counts.skipped;
-      }
-      return { rows: rows.length, imported, skipped };
-    }));
-    result.fetched += countsByWindow.reduce((sum, counts) => sum + counts.rows, 0);
-    result.imported += countsByWindow.reduce((sum, counts) => sum + counts.imported, 0);
-    result.skippedPonsV1 += countsByWindow.reduce((sum, counts) => sum + counts.skipped, 0);
-    result.windows += windows.length;
-    nextBlock = windows.at(-1)!.to + 1n;
+    result.fetched += page.rows.length;
+    result.imported += imported;
+    result.skippedPonsV1 += skipped;
+    result.pages += 1;
+    nextBlock = page.nextBlock;
     await saveCursor(appPool, deploymentKey, nextBlock);
     result.nextBlock = nextBlock;
     options.onProgress?.({ ...result });
