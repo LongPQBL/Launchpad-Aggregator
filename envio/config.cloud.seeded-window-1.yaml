@@ -1,0 +1,180 @@
+name: pons-envio-cloud-seeded-window-1
+field_selection:
+  transaction_fields:
+  - hash
+  - from
+contracts:
+- name: PonsV1LegacyFactory
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address
+      pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)
+- name: PonsV1ActiveFactory
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: TokenLaunched(address indexed token, address indexed deployer, address indexed dexFactory, address pairToken, address
+      pool, uint256 dexId, uint256 launchConfigId, uint256 positionId, uint256 restrictionsEndBlock, uint256 initialBuyAmount)
+- name: PonsV3Pool
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128
+      liquidity, int24 tick)
+- name: PonsV2Factory
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: TokenLaunched(address indexed token, address indexed curve, address indexed deployer, address pairToken, uint256
+      launchConfigId, uint256 graduationThreshold)
+    name: TokenLaunchedV2
+  - event: LaunchSwept(address indexed token, uint256 quoteOut, uint256 tokenOut)
+  - event: PoolGraduated(address indexed token, uint256 positionId, uint256 tokenAmount, uint256 pairTokenAmount)
+  - event: LaunchGraduationRescued(address indexed token, address indexed recipient, uint256 quoteAmount, uint256 tokenAmount)
+- name: PonsV2Curve
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: CurveBuy(address indexed buyer, address indexed recipient, uint256 quoteIn, uint256 tokensOut, uint256 fee, uint256
+      tax)
+  - event: CurveSell(address indexed seller, address indexed recipient, uint256 tokensIn, uint256 quoteOut, uint256 fee, uint256
+      tax)
+  - event: BuybackLocked(uint256 quoteSpent, uint256 tokensLocked)
+- name: UniswapV4PoolManager
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: Initialize(bytes32 indexed id, address indexed currency0, address indexed currency1, uint24 fee, int24 tickSpacing,
+      address hooks, uint160 sqrtPriceX96, int24 tick)
+  - event: Swap(bytes32 indexed id, address indexed sender, int128 amount0, int128 amount1, uint160 sqrtPriceX96, uint128
+      liquidity, int24 tick, uint24 fee)
+    name: V4Swap
+- name: UniswapV3Factory
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: PoolCreated(address indexed token0, address indexed token1, uint24 indexed fee, int24 tickSpacing, address pool)
+- name: UniswapV3Pool
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 sqrtPriceX96, uint128
+      liquidity, int24 tick)
+    name: V3Swap
+- name: UniswapV2Factory
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: PairCreated(address indexed token0, address indexed token1, address pair, uint256)
+- name: UniswapV2Pair
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: Swap(address indexed sender, uint256 amount0In, uint256 amount1In, uint256 amount0Out, uint256 amount1Out, address
+      indexed to)
+    name: V2Swap
+  - event: Sync(uint112 reserve0, uint112 reserve1)
+    name: V2Sync
+- name: ChainlinkAggregator
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)
+- name: ChainlinkFeedProxy
+  handler: src/EventHandlersSeededWindow1.ts
+  events:
+  - event: AggregatorConfirmed(address indexed previous, address indexed latest)
+chains:
+- id: 4663
+  hypersync_config:
+    url: https://robinhood.hypersync.xyz
+  start_block: 8600612
+  contracts:
+  - name: PonsV1LegacyFactory
+    address:
+    - '0x0c37a24F5D23A486FA692d1500881d698B1F77a4'
+    start_block: 8600612
+  - name: PonsV1ActiveFactory
+    start_block: 8991118
+    address:
+    - '0xA5aAb3F0c6EeadF30Ef1D3Eb997108E976351feB'
+  - name: PonsV3Pool
+    start_block: 8600612
+  - name: PonsV2Factory
+    address:
+    - '0x7eD598BcEf8bd9Edd8C97A195C6d13f40801EC7e'
+    start_block: 18600611
+  - name: PonsV2Curve
+    start_block: 8600612
+  - name: UniswapV4PoolManager
+    address:
+    - '0x8366a39cC670b4001a1121b8f6A443A643E40951'
+    start_block: 8600612
+  - name: UniswapV3Factory
+    address:
+    - '0x1f7d7550b1b028f7571e69a784071f0205fd2efa'
+    start_block: 8600612
+  - name: UniswapV3Pool
+    address:
+    - '0x05d3998a0cd0428beef55c0f310f5291e1e8bf1d'
+    - '0x0f5f5bcc08cae61d19c9a2d2594c252f1baddae6'
+    - '0x1d466e7e59aeaa8123ca6b4443c21a67a8308cb0'
+    - '0x1e8d55e411c205f6fbebc81dcee6680fea5f3a02'
+    - '0x206aa3b7422a9441a42bc5552a0914fc28c2930d'
+    - '0x232c5fc5aade9f007cbf66957b319a00baa90792'
+    - '0x2567290ebeb040e66c0a06ac0fc5e2296c9ec630'
+    - '0x341185500a1f8fdb4094b8429d7f154423eea0b8'
+    - '0x3736fe0700fdbba3953dbe43e81a6f0c11553e21'
+    - '0x3d2b0576d5a6da6ba62531a493a7febed7cd5d30'
+    - '0x455592b29f82d98d1f6cc23835d081736d5bff71'
+    - '0x5fa25ec5a873f7310617be0f61653a6359ff7e57'
+    - '0x61b901ca4e613ae1e766e35ddc1bac58503a9e23'
+    - '0x62a9e7cf94049dded854c26ff6204079a1c8caed'
+    - '0x695c745aa97d2daf0627d8af79f04009ef421c19'
+    - '0x746660f5229c3c209421aea9b9a210bb47739884'
+    - '0x753c2ea9390592a8b80aa80cfeaabfb7b2fb3f72'
+    - '0x7a192e71564ec66ee0763e328a3ac274942de4e1'
+    - '0x7c2934d906f1e7ffde71ee84dcccb2a4b3c25cc6'
+    - '0x7c9c9c14d1f6b4190e3e74459d9256fde11f13a2'
+    - '0x81fd119e146ef63b9bed44d2597193ef924c99ae'
+    - '0x861fdd3f8565cac88061d8587720894c6b8e9af3'
+    - '0xa2f93766eb3847e4dd43a9fb30dfe5f994657be5'
+    - '0xa688cd4a45078c4ba26cba34d28802c6bc36696f'
+    - '0xb411cec0088634d3f663d8974b4f5907a2d7a303'
+    - '0xb7579f11b5aab9cb68ba49bb136e28d5577015b5'
+    - '0xc3bcdc5c48c351546784e0dcc9b7e6100d17f31b'
+    - '0xc8d8b896f62510a7f7a8b37d0d49f2710e64f094'
+    - '0xc97646da8e1b435c1ff53b5f34d59bd7d9dd4010'
+    - '0xd53cc9fb4e73ed216046f827a8a32f2fa31d5eff'
+    - '0xd556163edd5d44797bfc767fd85ac17819c5310d'
+    - '0xd82c9986b70edf587d7a3be370beb797d252a989'
+    - '0xe8d7658517e8a3a1861dfe9609409489abbdea8c'
+    - '0xeb1bb09e2906773f1227c920a622afcd9e068c29'
+    - '0xed50bdeea8adc232f159486192a4157281d722ff'
+    start_block: 8600612
+  - name: UniswapV2Factory
+    address:
+    - '0x8bceaa40b9acdfaedf85adf4ff01f5ad6517937f'
+    start_block: 8600612
+  - name: UniswapV2Pair
+    address:
+    - '0x031e679afc4fe74ba041f5cfe9a78c581ba4c9ff'
+    - '0x196332173fee92240aba3bc23e8316bcdfadde95'
+    - '0x33e3accd8851a574f1585046df6b6d3aa4dd039c'
+    - '0x5a02da6411cd749b4202b3d6d9c34bd47a619fc4'
+    - '0x8018ee3ad3c0321be0e69536733cd28e29564dd4'
+    - '0x85420bef7d53353c63f28f8abc0d02179c9951ba'
+    - '0x9e58d67df640a8e99bbd08e6e34f1437dd7bea05'
+    - '0xa91218990beae54800561a4a8ce5d1dfc7adc7af'
+    - '0xaa241a27c911027b0f3236ec89d4db21269064da'
+    - '0xc7c65ee1c7a3f6f4d8ae6742ad7f515d9cce484c'
+    - '0xcbfa0f80173d9d2af8b6436c18b9e8023be1be41'
+    - '0xe20d7de8aebd8a3714daef9ae3eb7ee2e5ce96c5'
+    - '0xe5b82b3172ca1db0865773599a162fd61f2bc562'
+    - '0xeb0d1db895bfce50dbfd3a1e3a313255a7dcc69d'
+    - '0xf983af35d9c4650dfac34452fab56a8db719d89b'
+    - '0xfec61035b3ece093b92076f83ec48b072bdd39bf'
+    start_block: 8600612
+  - name: ChainlinkAggregator
+    address:
+    - '0x6091E64eb7138EEF066a80FD3A0d7427B91f2721'
+    - '0x8beee3503f6860d5dac4ce26b5eee92982951c2e'
+    - '0xc9d16e4f2569b9e3ea0468fd85844953713dc2a2'
+    start_block: 8600612
+  - name: ChainlinkFeedProxy
+    address:
+    - '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9'
+    - '0x61b7e5650328764b076a108eff5fa7282a1b9ad2'
+    - '0x379ec4f7c378f34a1b47e4f3cbebcbac3e8e9f15'
+    start_block: 8600612
+  end_block: 18600611
